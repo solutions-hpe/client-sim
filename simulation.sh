@@ -265,13 +265,15 @@ if [ $kill_switch == "off" ]; then
 						dig @$dns_latency_2 $r &
 						dig @$dns_latency_3 $r &
 						wait
-				done
-		done
-	fi
-	#End DNS Fail Simulation
+					done
+			done
+		fi
+		#End DNS Fail Simulation
+		#------------------------------------------------------------
+		echo End of simulation sleeping for 5 seconds
+		sleep 5
+	#End of 100 Loop Count
 	#------------------------------------------------------------
-	echo End of simulation sleeping for 5 seconds
-	sleep 5
 	done
 else
 	#------------------------------------------------------------
