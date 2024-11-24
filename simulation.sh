@@ -201,7 +201,7 @@ if [ $kill_switch == "off" ]; then
 	#End Ping Simulation
 	#------------------------------------------------------------
 
-	#------------------------------------------------------------
+ 	#------------------------------------------------------------
 	#Running download simulation
 	if [ $download == "on" ]; then
 			echo Running download simulation | tee -a /usr/local/scripts/sim.log
