@@ -13,5 +13,12 @@ echo [Desktop Entry] | sudo tee /etc/xdg/scripts/startup.desktop
 echo Type=Application | sudo tee -a /etc/xdg/scripts/startup.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/scripts/startup.desktop
 echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/scripts/startup.desktop
-echo Exec=bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/scripts/startup.desktop
+echo Exec=bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/scripts/startup.deckop
 #End Create Startup
+#Create Log Viewer 
+echo [Desktop Entry] | sudo tee /etc/xdg/scripts/logview.desktop
+echo Type=Application | sudo tee -a /etc/xdg/scripts/logview.desktop
+echo Name=StartUpm| sudo tee -a /etc/xdg/scripts/logview.desktop
+echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/scripts/logview.desktop
+echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/scripts/logview.desktop
+#End Log Viewer
