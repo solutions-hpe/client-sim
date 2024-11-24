@@ -5,16 +5,16 @@
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/simulation/simulation.conf'
 #------------------------------------------------------------
-echo "Display Config"
+echo "Display Config Echo"
 display_config
 #------------------------------------------------------------
-echo "Display Section 2"
+echo "Display Section 2 Echo"
 display_config_by_section 'section2'
 #------------------------------------------------------------
-echo "Display Section 1 - Value 1 (get_value lookup)"
+echo "Display Section 1 - Value 1 (get_value lookup) Echo"
 value=$(get_value 'section1' 'value1')
 echo "${value}"
-echo "Display Section 1 - Value 1 (Named variable)"
+echo "Display Section 1 - Value 1 (Named variable) Echo"
 if [[ "${default_to_uppercase}" = false ]]; then
     echo "${section1_value1}"
 else
@@ -22,7 +22,7 @@ else
 fi
 #------------------------------------------------------------
 echo
-echo "Display Section, Key and Value Traversals"
+echo "Display Section, Key and Value Traversals echo"
 
 echo "${sections[@]}"
 
