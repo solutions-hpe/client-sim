@@ -1,19 +1,9 @@
 #!/bin/bash
-#SCRIPTPATH="$( dirname "$( cd "$(dirname "$0")" >/dev/null 2>&1 || exit ; pwd -P )" || true)"
-# shellcheck disable=SC1090,SC1091
-#source "${SCRIPTPATH}"ini-parser.sh
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
-
-echo "Parsing Config File"
-
-wsite=$(get_value 'simulation' 'wsite')
-echo $wsite
-ssidpw=$(get_value 'simulation' 'ssidpw')
-echo $ssidpw
 #------------------------------------------------------------
-
-#Global Simulation enable/disable
+#Global Simulation defaults enable/disable
+#------------------------------------------------------------
 sim=generic
 kill_switch=off
 sim_load=100
@@ -25,33 +15,36 @@ ping_test=on
 download=off
 www_traffic=on
 #------------------------------------------------------------
-#Edit these for valid DNS servers you want to send a bad dns lookup to
-#Will trigger a bad dns lookup alert
-dns_bad_record_1=172.31.201.1
-dns_bad_record_2=172.31.202.2
-dns_bad_record_3=100.100.0.1
-#------------------------------------------------------------
-#Edit these for servers that do not exist
-#Will trigger a failed DNS server alert
-dns_bad_ip_1=10.0.0.1 #Dead Server
-dns_bad_ip_2=172.16.0.1 #Dead Server
-dns_bad_ip_3=192.168.0.1 #Dead Server
-#------------------------------------------------------------
-#Edit these for servers that do not exist
-#Will trigger a slow DNS server alert
-dns_latency_1=13.239.88.95 #Australia
-dns_latency_2=27.110.152.250 #Philippines
-dns_latency_3=165.246.10.2 #S. Korea
-#------------------------------------------------------------
-#Address that will attempt to ping
-#------------------------------------------------------------
-ping_address=172.31.201.3
-#------------------------------------------------------------
-#SMB Share to get scripts from
-#smb_location='//100.127.1.254/Public'
-#------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
-
+#------------------------------------------------------------
+echo "Parsing Config File"
+#Settings read from the local config file
+#Simulation specific
+wsite=$(get_value 'simulation' 'wsite')
+ssidpw=$(get_value 'simulation' 'ssidpw')
+kill_switch=$(get_value 'simulation' 'kill_switch')
+dhcp_fail=$(get_value 'simulation' 'dhcp_fail')
+dns_fail=$(get_value 'simulation' 'dns_fail')
+assoc_fail=$(get_value 'simulation' 'assoc_fail')
+port_flap=$(get_value 'simulation' 'port_flap')
+ping_test=$(get_value 'simulation' 'ping_test')
+download=$(get_value 'simulation' 'download')
+www_traffic=$(get_value 'simulation' 'www_traffic')
+#------------------------------------------------------------
+#Simlation IP
+#------------------------------------------------------------
+smb_address=$(get_value 'address' 'smb_address')
+ping_address=$(get_value 'address' 'ping_address')
+dns_latency_1=$(get_value 'address' 'dns_latency_1')
+dns_latency_2=$(get_value 'address' 'dns_latency_2')
+dns_latency_3=$(get_value 'address' 'dns_latency_3')
+dns_bad_ip_1=$(get_value 'address' 'dns_bad_ip_1')
+dns_bad_ip_2=$(get_value 'address' 'dns_bad_ip_2')
+dns_bad_ip_3=$(get_value 'address' 'dns_bad_ip_3')
+dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
+dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
+dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
+#------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
