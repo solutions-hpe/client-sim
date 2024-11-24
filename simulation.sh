@@ -60,8 +60,8 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
-if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down
-if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down
+#if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down
+#if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
