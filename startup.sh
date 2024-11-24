@@ -1,7 +1,7 @@
 #!/bin/bash
 version=.02
-echo --------------------------| tee -a /usr/local/scripts/sim.log
-echo Startup Script Version $version | tee /usr/local/scripts/sim.log
+echo --------------------------| tee /usr/local/scripts/sim.log
+echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo date | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #Calling config parser script
