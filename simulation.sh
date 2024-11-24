@@ -1,4 +1,37 @@
 #!/bin/bash
+SCRIPTPATH="$( dirname "$( cd "$(dirname "$0")" >/dev/null 2>&1 || exit ; pwd -P )" || true)"
+# shellcheck disable=SC1090,SC1091
+source "${SCRIPTPATH}"ini-parser.sh
+process_ini_file 'simulation.conf'
+#------------------------------------------------------------
+echo "Display Config"
+display_config
+#------------------------------------------------------------
+echo "Display Section 2"
+display_config_by_section 'section2'
+#------------------------------------------------------------
+echo "Display Section 1 - Value 1 (get_value lookup)"
+value=$(get_value 'section1' 'value1')
+echo "${value}"
+echo "Display Section 1 - Value 1 (Named variable)"
+if [[ "${default_to_uppercase}" = false ]]; then
+    echo "${section1_value1}"
+else
+    echo "${SECTION1_VALUE1}"
+fi
+#------------------------------------------------------------
+echo
+echo "Display Section, Key and Value Traversals"
+
+echo "${sections[@]}"
+
+if [[ "${default_to_uppercase}" = false ]]; then
+    echo "${section1_keys[@]}"
+    echo "${section1_values[@]}"
+else
+    echo "${SECTION1_keys[@]}"
+    echo "${SECTION1_values[@]}"
+fi
 #------------------------------------------------------------
 #Global Simulation enable/disable
 sim=generic
