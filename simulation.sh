@@ -17,11 +17,11 @@ echo $wsite
 ssidpw=$(get_value 'SIMULATION' 'ssidpw')
 echo $ssidpw
 #echo "Display Section 1 - Value 1 (Named variable) Echo"
-#if [[ "${default_to_uppercase}" = false ]]; then
-#    echo "${section1_value1}"
-#else
-#    echo "${SECTION1_VALUE1}"
-#fi
+if [[ "${default_to_uppercase}" = false ]]; then
+    echo "${simulation_wsite}"
+else
+    echo "${SIMULATION_WSITE}"
+fi
 #------------------------------------------------------------
 #echo
 #echo "Display Section, Key and Value Traversals echo"
