@@ -13,7 +13,7 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websit
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
-cd /usr/local/scripts/ && chmod +x *.sh
+cd /usr/local/scripts/ && sudo chmod +x *.sh
 echo Scheduling Reboot | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 /sbin/shutdown -r 480
