@@ -77,6 +77,7 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
+echo Simulation Phy is $sim_phy | tee -a /usr/local/scripts/sim.log
 #if [ $sim_phy == "ethernet" ]; then echo ethernet
 if [ $sim_phy == "wireless" ]; then echo wireless
 #------------------------------------------------------------
