@@ -13,7 +13,7 @@ vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
 #------------------------------------------------------------
 #Making sure eth0 and wlan0 are online
-echo Bringins all interfaces online | tee -a /usr/local/scripts/sim.log
+echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig eth0 up
 sudo ifconfig wlan0 up
 #------------------------------------------------------------
