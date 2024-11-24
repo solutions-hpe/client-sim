@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.12
+version=.13
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -28,9 +28,10 @@ vh_server=off
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
-#Simulation specific
+#Simulation settings
 wsite=$(get_value 'simulation' 'wsite')
 sim_phy=$(get_value 'simulation' 'sim_phy')
+ssid=$(get_value 'simulation' 'ssid')
 ssidpw=$(get_value 'simulation' 'ssidpw')
 kill_switch=$(get_value 'simulation' 'kill_switch')
 dhcp_fail=$(get_value 'simulation' 'dhcp_fail')
@@ -58,26 +59,11 @@ dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 #------------------------------------------------------------
-#Simlation Hosts
-#------------------------------------------------------------
-#smb_address=$(get_value $HOSTNAME 'smb_address')
-#ping_address=$(get_value $HOSTNAME 'ping_address')
-#dns_latency_1=$(get_value $HOSTNAME 'dns_latency_1')
-#dns_latency_2=$(get_value $HOSTNAME 'dns_latency_2')
-#dns_latency_3=$(get_value $HOSTNAME 'dns_latency_3')
-#dns_bad_ip_1=$(get_value $HOSTNAME 'dns_bad_ip_1')
-#dns_bad_ip_2=$(get_value $HOSTNAME 'dns_bad_ip_2')
-#dns_bad_ip_3=$(get_value $HOSTNAME 'dns_bad_ip_3')
-#dns_bad_record_1=$(get_value $HOSTNAME 'dns_bad_record_1')
-#dns_bad_record_2=$(get_value $HOSTNAME 'dns_bad_record_2')
-#dns_bad_record_3=$(get_value $HOSTNAME 'dns_bad_record_3')
-#vh_server_address=$(get_value $HOSTNAME 'vh_server_addr')
 #------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
-echo Simulation Phy is $sim_phy | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down; fi
 if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down; fi
 #------------------------------------------------------------
@@ -134,13 +120,6 @@ fi
 #Checking for kill switch to stop simulation
 if [ $kill_switch == "off" ]; then
 	for z in {1..100}; do
-		#------------------------------------------------------------
-		#Setting up Client Simulations
-		if [[ $HOSTNAME == "SIM-LNX-200"* ]]; then wsite=MIA && sim=DNS; fi
- 		if [[ $HOSTNAME == "SIM-RPI-"* ]]; then wsite=MIA && sim=DNS; fi
-		#End Setting up Client Simulations
-		#------------------------------------------------------------	
-	
 		#------------------------------------------------------------ 
 		#Logging Simulation
 		echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -162,9 +141,11 @@ if [ $kill_switch == "off" ]; then
 
 		#------------------------------------------------------------
 		#Connecting to Network
-		nmcli dev wifi connect $wsite-PSK password $ssidpw | tee -a /usr/local/scripts/sim.log
-		echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-		sleep 30 | tee -a /usr/local/scripts/sim.log
+  		if [ $sim_phy == "wireless" ]; then
+			nmcli dev wifi connect $ssid password $ssidpw | tee -a /usr/local/scripts/sim.log
+			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+			sleep 30 | tee -a /usr/local/scripts/sim.log
+  		fi
 		#End Connecting to Network
 		#------------------------------------------------------------
 
