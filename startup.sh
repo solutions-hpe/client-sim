@@ -1,9 +1,10 @@
 #!/bin/bash
+echo Startup Script Version .01 | tee /usr/local/scripts/sim.log
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
-echo Parsing Config File | tee /usr/local/scripts/sim.log
+echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
