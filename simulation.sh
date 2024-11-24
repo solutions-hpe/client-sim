@@ -56,11 +56,11 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
-if [$sim_phy == "ethernet"]; then sudo ifconfig wlan0 down
-if [$sim_phy == "wireless"]; then sudo ifconfig eth0 down
+if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down
+if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
-if [$vh_server == "on"]; then
+if [ $vh_server == "on" ]; then
 	if [[ -e "/usr/local/scripts/vhcached.txt" ]]; then
 		#Setting Virtual Here to run as a Daemon
  		sudo /usr/local/virtualhere/vhuit64 -n
