@@ -54,7 +54,11 @@ rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 if [[ -e "/usr/local/scripts/vhcached.txt" ]] && [$vh_server == "on"]; then
-	#Setting value to cached adapter
+	#Setting Virtual Here to run as a Daemon
+ 	sudo /usr/local/virtualhere/vhuit64 -n
+ 	echo Waiting for VH startup | tee /usr/local/scripts/sim.log
+	sleep 30
+ 	#Setting value to cached adapter
 	#This way the client is always using the same adapter
 	#Otherwise connectivity for clients will have gaps when the adapter changes in Central
 	vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
