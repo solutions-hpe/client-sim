@@ -8,8 +8,8 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 echo "Display Config Echo"
 display_config
 #------------------------------------------------------------
-echo "Display Section 2 Echo"
-display_config_by_section 'section-lance'
+#echo "Display Section 2 Echo"
+#display_config_by_section 'section-lance'
 #------------------------------------------------------------
 echo "Display Section 1 - Value 1 (get_value lookup) Echo"
 value=$(get_value 'section1' 'value1')
