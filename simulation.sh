@@ -281,7 +281,7 @@ if [ $kill_switch == "off" ]; then
 						dig @$dns_latency_1 $r &
 						dig @$dns_latency_2 $r &
 						dig @$dns_latency_3 $r &
-						wait
+						sleep 5
 					done
 			done
 		fi
