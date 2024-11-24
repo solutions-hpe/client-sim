@@ -1,8 +1,9 @@
 #!/bin/bash
 SCRIPTPATH="$( dirname "$( cd "$(dirname "$0")" >/dev/null 2>&1 || exit ; pwd -P )" || true)"
 # shellcheck disable=SC1090,SC1091
-source "${SCRIPTPATH}"ini-parser.sh
-process_ini_file 'simulation.conf'
+#source "${SCRIPTPATH}"ini-parser.sh
+source "/usr/local/scripts/ini-parser.sh"
+process_ini_file '/usr/local/simulation/simulation.conf'
 #------------------------------------------------------------
 echo "Display Config"
 display_config
