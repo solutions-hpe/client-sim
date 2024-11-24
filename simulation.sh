@@ -278,8 +278,8 @@ if [ $kill_switch == "off" ]; then
 		fi
 		#End DNS Fail Simulation
 		#------------------------------------------------------------
-		echo End of simulation sleeping for 5 seconds
-		sleep 5
+	echo End of simulation sleeping for 5 seconds
+	sleep 5
 	#End of 100 Loop Count
 	#------------------------------------------------------------
 	done
