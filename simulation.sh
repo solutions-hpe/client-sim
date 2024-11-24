@@ -4,38 +4,15 @@
 #source "${SCRIPTPATH}"ini-parser.sh
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
-#------------------------------------------------------------
-#echo "Display Config Echo"
-#display_config
-#------------------------------------------------------------
-#echo "Display Section 2 Echo"
-#display_config_by_section 'section-lance'
-#------------------------------------------------------------
-echo "Display Section 1 - Value 1 (get_value lookup) Echo"
-wsite=$(get_value 'SIMULATION' 'wsite')
+
+echo "Parsing Config File"
+
+wsite=$(get_value 'simulation' 'wsite')
 echo $wsite
-ssidpw=$(get_value 'SIMULATION' 'ssidpw')
+ssidpw=$(get_value 'simulation' 'ssidpw')
 echo $ssidpw
-#echo "Display Section 1 - Value 1 (Named variable) Echo"
-if [[ "${default_to_uppercase}" = false ]]; then
-    echo "${simulation_wsite}"
-else
-    echo "${SIMULATION_WSITE}"
-fi
 #------------------------------------------------------------
-#echo
-#echo "Display Section, Key and Value Traversals echo"
 
-#echo "${sections[@]}"
-
-#if [[ "${default_to_uppercase}" = false ]]; then
-#    echo "${section1_keys[@]}"
-#    echo "${section1_values[@]}"
-#else
-#    echo "${SECTION1_keys[@]}"
-#    echo "${SECTION1_values[@]}"
-#fi
-#------------------------------------------------------------
 #Global Simulation enable/disable
 sim=generic
 kill_switch=off
