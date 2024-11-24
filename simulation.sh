@@ -87,6 +87,7 @@ if [ $kill_switch == "off" ]; then
 	#------------------------------------------------------------
 	#Setting up Client Simulations
 	if [[ $HOSTNAME == "SIM-LNX-200"* ]]; then wsite=MIA && sim=DNS; fi
+ 	if [[ $HOSTNAME == "SIM-RPI-"* ]]; then wsite=MIA && sim=DNS; fi
 	#End Setting up Client Simulations
 	#------------------------------------------------------------
 
