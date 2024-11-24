@@ -14,7 +14,7 @@ sudo ifconfig eth0 up
 sudo ifconfig wlan0 up
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
-if [$vh_server == "on"]; then
+if [ $vh_server == "on" ]; then
   echo Waiting for VH startup | tee /usr/local/scripts/sim.log
   sudo /usr/local/virtualhere/vhuit64 -n
 fi
@@ -22,7 +22,7 @@ fi
 echo Waiting for startup | tee /usr/local/scripts/sim.log
 sleep 30
 #------------------------------------------------------------
-if [$public_repo == "on"]; then
+if [ $public_repo == "on" ]; then
   echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
   #Downloading latest scripts from GitHub
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
