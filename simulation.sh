@@ -26,6 +26,7 @@ echo Parsing Config File | tee /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Simulation specific
 wsite=$(get_value 'simulation' 'wsite')
+simphy=$(get_value 'simulation' 'simphy')
 ssidpw=$(get_value 'simulation' 'ssidpw')
 kill_switch=$(get_value 'simulation' 'kill_switch')
 dhcp_fail=$(get_value 'simulation' 'dhcp_fail')
@@ -54,6 +55,9 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 #------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
+#------------------------------------------------------------
+if [$sim_phy == "ethernet"]; then sudo ifconfig wlan0 down
+if [$sim_phy == "wireless"]; then sudo ifconfig eth0 down
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 if [$vh_server == "on"]; then
