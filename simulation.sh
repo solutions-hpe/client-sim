@@ -104,7 +104,7 @@ echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 /usr/local/virtualhere/vhuit64 -t USE,$vhserver_device | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
-sleep 30 | tee -a /usr/local/scripts/sim.log
+sleep 30
 #------------------------------------------------------------
 #Checking for kill switch to stop simulation
 if [ $kill_switch == "off" ]; then
@@ -175,7 +175,7 @@ if [ $kill_switch == "off" ]; then
 						www_traffic=off
 					fi
 				done
-			fi
+		fi
 		#End WWW Traffic Simulation
 		#------------------------------------------------------------	
 	 
@@ -191,7 +191,7 @@ if [ $kill_switch == "off" ]; then
 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
  		else
   			#Local repo defined in the conf file
-  			smbclient $smb_location -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+  			#smbclient $smb_location -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
   		fi
 		#------------------------------------------------------------
 		#End Updating Scripts
