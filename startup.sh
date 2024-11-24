@@ -8,6 +8,11 @@ echo Parsing Config File | tee /usr/local/scripts/sim.log
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 smb_address=$(get_value 'address' 'smb_address')
+#------------------------------------------------------------
+#Making sure eth0 and wlan0 are online
+sudo ifconfig eth0 up
+sudo ifconfig wlan0 up
+#------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 if [$vh_server == "on"]; then
   echo Waiting for VH startup | tee /usr/local/scripts/sim.log
