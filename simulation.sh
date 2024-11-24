@@ -56,6 +56,21 @@ dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 #------------------------------------------------------------
+#Simlation Hosts
+#------------------------------------------------------------
+#smb_address=$(get_value $HOSTNAME 'smb_address')
+#ping_address=$(get_value $HOSTNAME 'ping_address')
+#dns_latency_1=$(get_value $HOSTNAME 'dns_latency_1')
+#dns_latency_2=$(get_value $HOSTNAME 'dns_latency_2')
+#dns_latency_3=$(get_value $HOSTNAME 'dns_latency_3')
+#dns_bad_ip_1=$(get_value $HOSTNAME 'dns_bad_ip_1')
+#dns_bad_ip_2=$(get_value $HOSTNAME 'dns_bad_ip_2')
+#dns_bad_ip_3=$(get_value $HOSTNAME 'dns_bad_ip_3')
+#dns_bad_record_1=$(get_value $HOSTNAME 'dns_bad_record_1')
+#dns_bad_record_2=$(get_value $HOSTNAME 'dns_bad_record_2')
+#dns_bad_record_3=$(get_value $HOSTNAME 'dns_bad_record_3')
+#vh_server_address=$(get_value $HOSTNAME 'vh_server_addr')
+#------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
