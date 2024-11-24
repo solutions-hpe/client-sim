@@ -57,7 +57,7 @@ else
 		done
 		echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
 		#Generating random number to connect to a random adapter
-		rn_vhactive=$((1 + RANDOM% $r_count))
+		rn_vhactive=$((1 + RANDOM % $r_count))
 		#Resetting record counter for next loop
 		r_count=0
 		#Looping through records to find an available adapter
