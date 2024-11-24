@@ -31,6 +31,7 @@ port_flap=$(get_value 'simulation' 'port_flap')
 ping_test=$(get_value 'simulation' 'ping_test')
 download=$(get_value 'simulation' 'download')
 www_traffic=$(get_value 'simulation' 'www_traffic')
+public_repo=$(get_value 'simulation' 'public_repo')
 #------------------------------------------------------------
 #Simlation IP
 #------------------------------------------------------------
