@@ -1,5 +1,8 @@
 #!/bin/bash
+echo Reading Simulation Config File | tee /usr/local/scripts/sim.log
+#Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
+#Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 #Global Simulation defaults enable/disable
@@ -19,7 +22,7 @@ vh_server=off
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
-echo "Parsing Config File"
+echo Parsing Config File | tee /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Simulation specific
 wsite=$(get_value 'simulation' 'wsite')
@@ -53,36 +56,38 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
-if [[ -e "/usr/local/scripts/vhcached.txt" ]] && [$vh_server == "on"]; then
-	#Setting Virtual Here to run as a Daemon
- 	sudo /usr/local/virtualhere/vhuit64 -n
- 	echo Waiting for VH startup | tee /usr/local/scripts/sim.log
-	sleep 30
- 	#Setting value to cached adapter
-	#This way the client is always using the same adapter
-	#Otherwise connectivity for clients will have gaps when the adapter changes in Central
-	vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
-	echo Cached $vhserver_device | tee -a /usr/local/scripts/sim.log
-else
-	#Counting & searching records in /tmp/vhactive.txt
-	vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{print $2}')
-		for r in $vhactive; do
-			r_count=$((r_count+1))
-		done
-		echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
-		#Generating random number to connect to a random adapter
-		rn_vhactive=$((1 + RANDOM % $r_count))
-		#Resetting record counter for next loop
-		r_count=0
-		#Looping through records to find an available adapter
-		for r in $vhactive; do
-			r_count=$((r_count+1))
-			if [[ $r_count == $rn_vhactive ]]; then
-				vhserver_device=$r
-				echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
-				echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
-			fi
-		done
+if [$vh_server == "on"]; then
+	if [[ -e "/usr/local/scripts/vhcached.txt" ]]; then
+		#Setting Virtual Here to run as a Daemon
+ 		sudo /usr/local/virtualhere/vhuit64 -n
+	 	echo Waiting for VH startup | tee /usr/local/scripts/sim.log
+		sleep 30
+ 		#Setting value to cached adapter
+		#This way the client is always using the same adapter
+		#Otherwise connectivity for clients will have gaps when the adapter changes in Central
+		vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
+		echo Cached $vhserver_device | tee -a /usr/local/scripts/sim.log
+	else
+		#Counting & searching records in /tmp/vhactive.txt
+		vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{print $2}')
+			for r in $vhactive; do
+				r_count=$((r_count+1))
+			done
+			echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
+			#Generating random number to connect to a random adapter
+			rn_vhactive=$((1 + RANDOM % $r_count))
+			#Resetting record counter for next loop
+			r_count=0
+			#Looping through records to find an available adapter
+			for r in $vhactive; do
+				r_count=$((r_count+1))
+				if [[ $r_count == $rn_vhactive ]]; then
+					vhserver_device=$r
+					echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
+					echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
+				fi
+			done
+	fi
 fi
 #------------------------------------------------------------
 
