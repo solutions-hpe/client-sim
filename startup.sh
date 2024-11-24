@@ -8,6 +8,9 @@ sleep 30 | tee -a /usr/local/scripts/sim.log
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 #smbclient '//100.127.1.254/Public' -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
+sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
+sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
+sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && chmod +x *.sh
