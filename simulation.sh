@@ -26,7 +26,7 @@ echo Parsing Config File | tee /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Simulation specific
 wsite=$(get_value 'simulation' 'wsite')
-simphy=$(get_value 'simulation' 'simphy')
+sim_phy=$(get_value 'simulation' 'sim_phy')
 ssidpw=$(get_value 'simulation' 'ssidpw')
 kill_switch=$(get_value 'simulation' 'kill_switch')
 dhcp_fail=$(get_value 'simulation' 'dhcp_fail')
