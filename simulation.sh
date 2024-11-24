@@ -93,7 +93,6 @@ if [ $vh_server == "on" ]; then
 					echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
 				fi
 			done
-	fi
 fi
 #------------------------------------------------------------
 
