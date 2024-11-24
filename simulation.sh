@@ -1,5 +1,6 @@
 #!/bin/bash
-echo Simulation Script Version .02 | tee -a /usr/local/scripts/sim.log
+version=.03
+echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
