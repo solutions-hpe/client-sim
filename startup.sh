@@ -7,7 +7,7 @@ echo Parsing Config File | tee /usr/local/scripts/sim.log
 #Settings read from the local config file
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
-vh_server=$(get_value 'address' 'vh_server')
+vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
 #------------------------------------------------------------
 #Making sure eth0 and wlan0 are online
