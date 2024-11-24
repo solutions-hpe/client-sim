@@ -20,6 +20,9 @@ smb_address=$(get_value 'address' 'smb_address')
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig eth0 up
 sudo ifconfig wlan0 up
+#Sleeping for 30 seconds to bring up network interaces
+sleep 30
+echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
