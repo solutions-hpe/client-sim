@@ -5,8 +5,8 @@
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
-echo "Display Config Echo"
-display_config
+#echo "Display Config Echo"
+#display_config
 #------------------------------------------------------------
 #echo "Display Section 2 Echo"
 #display_config_by_section 'section-lance'
