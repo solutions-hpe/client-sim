@@ -1,6 +1,9 @@
+echo enabling no password for sudo for current user
 echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
+echo making scripts directory
 mkdir /usr/local/scripts
 #------------------------------------------------------------
+echo Downloading scripts from source on GitHub
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
@@ -9,6 +12,7 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fa
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
 #------------------------------------------------------------
 #Creating Startup
+echo Creating auto Start files
 echo [Desktop Entry] | sudo tee /etc/xdg/scripts/startup.desktop
 echo Type=Application | sudo tee -a /etc/xdg/scripts/startup.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/scripts/startup.desktop
