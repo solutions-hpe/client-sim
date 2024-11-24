@@ -3,7 +3,7 @@
 # shellcheck disable=SC1090,SC1091
 #source "${SCRIPTPATH}"ini-parser.sh
 source '/usr/local/scripts/ini-parser.sh'
-process_ini_file '/usr/local/simulation/simulation.conf'
+process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 echo "Display Config Echo"
 display_config
