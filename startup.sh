@@ -1,10 +1,13 @@
 #!/bin/bash
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Startup Script Version .01 | tee /usr/local/scripts/sim.log
 echo date | tee -a /usr/local/scripts/sim.log
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 public_repo=$(get_value 'simulation' 'public_repo')
@@ -16,6 +19,7 @@ smb_address=$(get_value 'address' 'smb_address')
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig eth0 up
 sudo ifconfig wlan0 up
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 if [ $vh_server == "on" ]; then
@@ -26,6 +30,7 @@ fi
 #------------------------------------------------------------
 if [ $public_repo == "on" ]; then
   echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
+  echo --------------------------| tee -a /usr/local/scripts/sim.log
   #Downloading latest scripts from GitHub
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
@@ -34,13 +39,16 @@ if [ $public_repo == "on" ]; then
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 else
   echo Updating Scripts - SMB | tee -a /usr/local/scripts/sim.log
+  echo --------------------------| tee -a /usr/local/scripts/sim.log
   #Using local network repsotory if defined
   #smbclient $smb_address -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
 echo Scheduling Reboot | tee -a /usr/local/scripts/sim.log
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 /sbin/shutdown -r 480
 #------------------------------------------------------------
