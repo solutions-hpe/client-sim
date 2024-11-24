@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.03
+version=.04
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -49,9 +49,10 @@ echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
 echo Scheduling Reboot | tee -a /usr/local/scripts/sim.log
+/sbin/shutdown -r 480
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
-/sbin/shutdown -r 480
+
 #------------------------------------------------------------
 #Dumping Current Device List
 /usr/local/virtualhere/vhuit64 -t LIST -r /tmp/vhactive.txt
