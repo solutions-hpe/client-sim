@@ -1,5 +1,6 @@
 #!/bin/bash
 echo Startup Script Version .01 | tee /usr/local/scripts/sim.log
+echo date | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
