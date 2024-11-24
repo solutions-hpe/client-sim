@@ -12,8 +12,9 @@ dns_fail=on
 assoc_fail=off
 port_flap=off
 ping_test=on
-download=off
+download=on
 www_traffic=on
+public_repo=on
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
@@ -86,7 +87,6 @@ echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
 sleep 30 | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
-
 #Checking for kill switch to stop simulation
 if [ $kill_switch == "off" ]; then
 	for z in {1..100}; do
@@ -159,20 +159,25 @@ if [ $kill_switch == "off" ]; then
 		fi
 	#End WWW Traffic Simulation
 	#------------------------------------------------------------	
-
+ 
 	#------------------------------------------------------------
 	#Updating Scripts
 	echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-	sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
-	sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
-	sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
- 	sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
-	sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
+ 	if [ $public_repo == "on" ]; then
+  		#Using remote GitHub repo
+		sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
+		sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
+		sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
+ 		sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
+		sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
+ 	else
+  		#Local repo defined in the conf file
+  		smbclient $smb_location -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+  	fi
 	#------------------------------------------------------------
- 	#smbclient $smb_location -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
 	#End Updating Scripts
 	#------------------------------------------------------------
-
+ 
 	#------------------------------------------------------------
 	#Running ping simulation
 	if [ $ping_test == "on" ]; then
