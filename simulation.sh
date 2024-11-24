@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.11
+version=.12
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -78,8 +78,8 @@ rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 echo Simulation Phy is $sim_phy | tee -a /usr/local/scripts/sim.log
-if [ $sim_phy == "ethernet" ]; then echo 1
-if [ $sim_phy == "wireless" ]; then echo 2
+if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down; fi
+if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down; fi
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
@@ -149,6 +149,7 @@ if [ $kill_switch == "off" ]; then
   		echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 		echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 		echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 		echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
@@ -190,7 +191,8 @@ if [ $kill_switch == "off" ]; then
       						echo --------------------------| tee -a /usr/local/scripts/sim.log
       						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+						echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
+      						echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
@@ -236,7 +238,8 @@ if [ $kill_switch == "off" ]; then
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-			echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
+	  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log		
+   			echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Sim: $ping_test | tee -a /usr/local/scripts/sim.log
@@ -278,7 +281,8 @@ if [ $kill_switch == "off" ]; then
 						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
+		  				echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+   						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 						echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
