@@ -1,3 +1,6 @@
+#!/bin/bash
+version=.02
+echo Installer Version $version
 echo enabling no password for sudo for current user
 echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 echo making scripts directory
