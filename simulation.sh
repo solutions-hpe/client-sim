@@ -278,6 +278,7 @@ if [ $kill_switch == "off" ]; then
 		echo Kill switch enabled - sleeping for 5 minutes
 		sleep 300
 	fi
-	#------------------------------------------------------------
-	#Looping Script
-	source /usr/local/scripts/simulation.sh
+ fi
+#------------------------------------------------------------
+#Looping Script
+source /usr/local/scripts/simulation.sh
