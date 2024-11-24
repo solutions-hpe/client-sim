@@ -45,7 +45,7 @@ else
   echo Updating Scripts - SMB | tee -a /usr/local/scripts/sim.log
   echo --------------------------| tee -a /usr/local/scripts/sim.log
   #Using local network repsotory if defined
-  #smbclient $smb_address -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+  smbclient $smb_address -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
