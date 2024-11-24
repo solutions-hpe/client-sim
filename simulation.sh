@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.03
+version=.04
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
@@ -113,6 +113,7 @@ echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
 sleep 30
+
 #------------------------------------------------------------
 #Checking for kill switch to stop simulation
 if [ $kill_switch == "off" ]; then
@@ -288,6 +289,9 @@ else
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
 fi
+#End Kill switch Check 
+#------------------------------------------------------------
+
 #------------------------------------------------------------
 #Looping Script
 source /usr/local/scripts/simulation.sh
