@@ -76,7 +76,8 @@ if [ $vh_server == "on" ]; then
 		#Otherwise connectivity for clients will have gaps when the adapter changes in Central
 		vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
 		echo Cached $vhserver_device | tee -a /usr/local/scripts/sim.log
-	else
+  	#If VirtualHere cached value does not exist
+   	else
 		#Counting & searching records in /tmp/vhactive.txt
 		vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{print $2}')
 		for r in $vhactive; do
@@ -96,14 +97,19 @@ if [ $vh_server == "on" ]; then
 				echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
 			fi
 		done
-   	fi
+   	#End if VirtualHere cached value check
+    	fi
+#End if VirtualHere Server is enabled
 fi
+#End Checking to see if there is a cache device to connect to
 #------------------------------------------------------------
 
 #------------------------------------------------------------
+#Connecting to VirtualHere Server
 echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 #Connecting to Adapter
 /usr/local/virtualhere/vhuit64 -t USE,$vhserver_device | tee -a /usr/local/scripts/sim.log
+#End Connecting to VirtualHere Server
 #------------------------------------------------------------
 echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
 sleep 30
