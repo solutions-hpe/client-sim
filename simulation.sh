@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.07
+version=.08
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
