@@ -1,17 +1,34 @@
 #!/bin/bash
-#Setting Virtual Here to run as a Daemon
-sudo /usr/local/virtualhere/vhuit64 -n
-#Waiting for System & VirtualHere to start
+#Calling config parser script
+source '/usr/local/scripts/ini-parser.sh'
+#Setting config file location
+process_ini_file '/usr/local/scripts/simulation.conf'
+echo Parsing Config File | tee /usr/local/scripts/sim.log
+#Settings read from the local config file
+public_repo=$(get_value 'simulation' 'public_repo')
+vh_server_address=$(get_value 'address' 'vh_server_addr')
+smb_address=$(get_value 'address' 'smb_address')
+#Setting VirtualHere Server as a Daemon
+if [$vh_server == "on"]; then
+  echo Waiting for VH startup | tee /usr/local/scripts/sim.log
+  sudo /usr/local/virtualhere/vhuit64 -n
+fi
+#Waiting for System to start
 echo Waiting for startup | tee /usr/local/scripts/sim.log
-sleep 30 | tee -a /usr/local/scripts/sim.log
+sleep 30
 #------------------------------------------------------------
-echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-#smbclient '//100.127.1.254/Public' -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
+if [$public_repo == "on"]; then
+  echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
+  #smbclient '//100.127.1.254/Public' -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
+else
+  echo Updating Scripts - SMB | tee -a /usr/local/scripts/sim.log
+  smbclient $smb_address -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
