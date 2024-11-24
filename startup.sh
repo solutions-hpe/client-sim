@@ -11,12 +11,13 @@ vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
 #------------------------------------------------------------
 #Making sure eth0 and wlan0 are online
+echo Bringins all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig eth0 up
 sudo ifconfig wlan0 up
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 if [ $vh_server == "on" ]; then
-  echo Waiting for VH startup | tee /usr/local/scripts/sim.log
+  echo Waiting for VH startup | tee -a /usr/local/scripts/sim.log
   sudo /usr/local/virtualhere/vhuit64 -n
 fi
 #Waiting for System to start
