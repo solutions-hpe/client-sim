@@ -236,49 +236,48 @@ if [ $kill_switch == "off" ]; then
 		#------------------------------------------------------------
 		#Running DNS Fail simulation
 		if [ $dns_fail == "on" ]; then
-				dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
-				for i in {1..100}; do
-					for r in $dnsfile
-						do
-							echo --------------------------| tee -a /usr/local/scripts/sim.log
-							echo --------------------------| tee -a /usr/local/scripts/sim.log
-							echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-							echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-							echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-							echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
-							echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-							echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-							echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-							echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
-							echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
-							echo $r | tee -a /usr/local/scripts/sim.log
-							echo --------------------------| tee -a /usr/local/scripts/sim.log
-							echo --------------------------| tee -a /usr/local/scripts/sim.log
-							dig @$dns_bad_record_1 $r &
-							dig @$dns_bad_record_2 $r &
-							dig @$dns_bad_record_3 $r &
-							dig @$dns_bad_ip_1 $r &
-							dig @$dns_bad_ip_2 $r &
-							dig @$dns_bad_ip_3 $r &
-							dig @$dns_latency_1 $r &
-							dig @$dns_latency_2 $r &
-							dig @$dns_latency_3 $r &
-							wait
-						done
+			dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
+			for i in {1..100}; do
+				for r in $dnsfile
+					do
+						echo --------------------------| tee -a /usr/local/scripts/sim.log
+						echo --------------------------| tee -a /usr/local/scripts/sim.log
+						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
+						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+						echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
+						echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
+						echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
+						echo $r | tee -a /usr/local/scripts/sim.log
+						echo --------------------------| tee -a /usr/local/scripts/sim.log
+						echo --------------------------| tee -a /usr/local/scripts/sim.log
+						dig @$dns_bad_record_1 $r &
+						dig @$dns_bad_record_2 $r &
+						dig @$dns_bad_record_3 $r &
+						dig @$dns_bad_ip_1 $r &
+						dig @$dns_bad_ip_2 $r &
+						dig @$dns_bad_ip_3 $r &
+						dig @$dns_latency_1 $r &
+						dig @$dns_latency_2 $r &
+						dig @$dns_latency_3 $r &
+						wait
 				done
-			fi
-		#End DNS Fail Simulation
-		#------------------------------------------------------------
-		echo End of simulation sleeping for 5 seconds
-		sleep 5
-	done
-	else
-		#------------------------------------------------------------
-		#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
-		echo Kill switch enabled - sleeping for 5 minutes
-		sleep 300
+		done
 	fi
- fi
+	#End DNS Fail Simulation
+	#------------------------------------------------------------
+	echo End of simulation sleeping for 5 seconds
+	sleep 5
+	done
+else
+	#------------------------------------------------------------
+	#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
+	echo Kill switch enabled - sleeping for 5 minutes
+	sleep 300
+fi
 #------------------------------------------------------------
 #Looping Script
 source /usr/local/scripts/simulation.sh
