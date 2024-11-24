@@ -57,7 +57,7 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
-echo Disabling unused interface | tee /usr/local/scripts/sim.log
+echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down
 if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down
 #------------------------------------------------------------
