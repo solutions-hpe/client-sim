@@ -1,5 +1,6 @@
 #!/bin/bash
-version=.08
+version=.09
+echo date | tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
@@ -141,7 +142,8 @@ if [ $kill_switch == "off" ]; then
 		#------------------------------------------------------------ 
 		#Logging Simulation
 		echo --------------------------| tee -a /usr/local/scripts/sim.log
-		echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+		echo date | tee -a /usr/local/scripts/sim.log
+  		echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 		echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
@@ -181,7 +183,8 @@ if [ $kill_switch == "off" ]; then
 						sleep 1
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+						echo date | tee -a /usr/local/scripts/sim.log
+      						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
@@ -224,6 +227,7 @@ if [ $kill_switch == "off" ]; then
 		if [ $ping_test == "on" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
+   			echo date | tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
@@ -264,7 +268,8 @@ if [ $kill_switch == "off" ]; then
 					do
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+						echo date | tee -a /usr/local/scripts/sim.log
+      						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
