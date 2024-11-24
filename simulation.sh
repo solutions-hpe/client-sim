@@ -1,5 +1,6 @@
 #!/bin/bash
-echo Reading Simulation Config File | tee /usr/local/scripts/sim.log
+echo simulation Script Version .01 | tee -a /usr/local/scripts/sim.log
+echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
