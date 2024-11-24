@@ -131,7 +131,7 @@ if [ $kill_switch == "off" ]; then
 
 	#------------------------------------------------------------
 	#Connecting to Network
-	nmcli dev wifi connect $wsite-PSK password Aruba123! | tee -a /usr/local/scripts/sim.log
+	nmcli dev wifi connect $wsite-PSK password $ssidpw | tee -a /usr/local/scripts/sim.log
 	echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 	sleep 30 | tee -a /usr/local/scripts/sim.log
 	#End Connecting to Network
