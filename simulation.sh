@@ -22,7 +22,7 @@ vh_server=off
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
-echo Parsing Config File | tee /usr/local/scripts/sim.log
+echo Parsing Config File | -a tee /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Simulation specific
 wsite=$(get_value 'simulation' 'wsite')
