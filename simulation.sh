@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.10
+version=.11
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -185,7 +185,7 @@ if [ $kill_switch == "off" ]; then
 						sleep 1
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo date | tee -a /usr/local/scripts/sim.log
+						echo $(date) | tee -a /usr/local/scripts/sim.log
       						echo --------------------------| tee -a /usr/local/scripts/sim.log
       						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
