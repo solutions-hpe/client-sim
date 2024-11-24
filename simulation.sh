@@ -319,7 +319,12 @@ else
 fi
 #End Kill switch Check 
 #------------------------------------------------------------
-
+#Bringing all interfaces back up to call home/update scripts
+echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
+sudo ifconfig eth0 up
+sudo ifconfig wlan0 up
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
 source /usr/local/scripts/simulation.sh
