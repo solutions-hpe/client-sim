@@ -8,3 +8,10 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websit
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
 #------------------------------------------------------------
+#Creating Startup
+echo [Desktop Entry] | sudo tee /etc/xdg/scripts/startup.desktop
+echo Type=Application | sudo tee -a /etc/xdg/scripts/startup.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/scripts/startup.desktop
+echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/scripts/startup.desktop
+echo Exec=bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/scripts/startup.desktop
+#End Create Startup
