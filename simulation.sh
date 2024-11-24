@@ -5,16 +5,16 @@
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
-echo "Display Config Echo"
-display_config
+#echo "Display Config Echo"
+#display_config
 #------------------------------------------------------------
 #echo "Display Section 2 Echo"
 #display_config_by_section 'section-lance'
 #------------------------------------------------------------
-#echo "Display Section 1 - Value 1 (get_value lookup) Echo"
-#value=$(get_value 'section1' 'value1')
-#echo "${value}"
-#echo "Display Section 1 - Value 1 (Named variable) Echo"
+echo "Display Section 1 - Value 1 (get_value lookup) Echo"
+value=$(get_value 'section1' 'value1')
+echo "${value}"
+echo "Display Section 1 - Value 1 (Named variable) Echo"
 if [[ "${default_to_uppercase}" = false ]]; then
     echo "${section1_value1}"
 else
