@@ -19,10 +19,8 @@ sudo ifconfig wlan0 up
 if [ $vh_server == "on" ]; then
   echo Waiting for VH startup | tee -a /usr/local/scripts/sim.log
   sudo /usr/local/virtualhere/vhuit64 -n
+  sleep 30
 fi
-#Waiting for System to start
-echo Waiting for startup | tee /usr/local/scripts/sim.log
-sleep 30
 #------------------------------------------------------------
 if [ $public_repo == "on" ]; then
   echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
