@@ -19,7 +19,7 @@ sleep 30
 #------------------------------------------------------------
 if [$public_repo == "on"]; then
   echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
-  #smbclient '//100.127.1.254/Public' -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
+  #Downloading latest scripts from GitHub
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
@@ -27,6 +27,7 @@ if [$public_repo == "on"]; then
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 else
   echo Updating Scripts - SMB | tee -a /usr/local/scripts/sim.log
+  #Using local network repsotory if defined
   smbclient $smb_address -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' -N
 fi
 #------------------------------------------------------------
