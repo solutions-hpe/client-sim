@@ -52,6 +52,7 @@ dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
 dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
+vh_server=$(get_value 'address' 'vh_server')
 #------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 rn=$((1 + RANDOM % 60))
