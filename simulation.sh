@@ -12,8 +12,10 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #display_config_by_section 'section-lance'
 #------------------------------------------------------------
 echo "Display Section 1 - Value 1 (get_value lookup) Echo"
-value=$(get_value 'SIMULATION' 'wsite')
-echo "${value}"
+wsite=$(get_value 'SIMULATION' 'wsite')
+echo $wsite
+ssidpw=$(get_value 'SIMULATION' 'ssidpw')
+echo $ssidpw
 echo "Display Section 1 - Value 1 (Named variable) Echo"
 if [[ "${default_to_uppercase}" = false ]]; then
     echo "${section1_value1}"
