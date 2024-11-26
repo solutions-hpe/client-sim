@@ -6,7 +6,7 @@ echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 echo making scripts directory
 sudo mkdir /usr/local/scripts
 sudo chmod -R 777 /usr/local/scripts
-sudo raspi-config nonint do_local en_US.UTF-8
+sudo raspi-config nonint do_change_locale en_US.UTF-8
 sudo raspi-config nonint do_wifi_country US
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub
