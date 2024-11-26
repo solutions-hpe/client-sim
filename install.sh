@@ -4,7 +4,7 @@ echo Installer Version $version
 echo enabling no password for sudo for current user
 echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 echo making scripts directory
-mkdir /usr/local/scripts
+sudo mkdir /usr/local/scripts
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
