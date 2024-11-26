@@ -24,7 +24,7 @@ echo [Desktop Entry] | sudo tee /etc/xdg/autostart/startup.desktop
 echo Type=Application | sudo tee -a /etc/xdg/autostart/startup.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/autostart/startup.desktop
 echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Exec=bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.destkop
+echo Exec=bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #Create Log Viewer 
 echo [Desktop Entry] | sudo tee /etc/xdg/autostart/logview.desktop
