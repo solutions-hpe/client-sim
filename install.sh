@@ -21,6 +21,7 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simula
 #Installing SMBClient to sync with local CIFS repo
 sudo apt update
 sudo apt install smbclient -y
+sudo apt install dnsutils -y
 #Creating Startup
 echo Creating auto Start files
 echo [Desktop Entry] | sudo tee /etc/xdg/autostart/startup.desktop
