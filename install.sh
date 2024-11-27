@@ -20,6 +20,7 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simula
 #------------------------------------------------------------
 #Installing SMBClient to sync with local CIFS repo
 sudo apt update
+sudo apt upgrade -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 #Creating Startup
