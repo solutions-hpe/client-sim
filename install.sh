@@ -8,6 +8,7 @@ sudo mkdir /usr/local/scripts
 sudo chmod -R 777 /usr/local/scripts
 sudo raspi-config nonint do_change_locale en_US.UTF-8
 sudo raspi-config nonint do_wifi_country US
+sudo apt install dkms -y
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
