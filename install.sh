@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.03
+version=.04
 echo Installer Version $version
 echo enabling no password for sudo for current user
 echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
@@ -17,6 +17,28 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websit
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
 #------------------------------------------------------------
+echo Getting Network Adapter Drivers from GitHub
+git clone https://github.com/morrownr/8821au-20210708.git
+git clone https://github.com/morrownr/8821cu-20210916.git
+git clone https://github.com/morrownr/8814au.git
+git clone https://github.com/morrownr/8812au-20210820.git
+git clone https://github.com/morrownr/88x2bu-20210702.git
+#------------------------------------------------------------
+echo Installing Network Adapter Drivers
+cd 8821au-20210708
+sudo ./install.sh
+cd ..
+cd 8821cu-20210916
+sudo ./install.sh
+cd ..
+cd 8814
+sudo ./install.sh
+cd ..
+cd 8812au-20210820
+sudo ./install.sh
+cd ..
+cd 88x2bu-20210702
+sudo ./install.sh
 #------------------------------------------------------------
 #Installing SMBClient to sync with local CIFS repo
 sudo apt update
