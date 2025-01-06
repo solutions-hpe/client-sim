@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.10
+version=.11
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
@@ -10,6 +10,8 @@ else
 fi
 echo making scripts directory
 sudo mkdir /usr/local/scripts
+echo disable Wayland so gnome-terminal windows can be pinned
+sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
