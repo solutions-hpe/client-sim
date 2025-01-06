@@ -90,7 +90,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/journalc
 #rasberrypi uses lxterminal
 echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=95x15+1400+477 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+echo Exec=gnome-terminal --geometry=85x15+1400+477 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
 sudo chmod -R 777 /usr/local/scripts
 echo Please reboot - install is complete
