@@ -14,6 +14,7 @@ sudo raspi-config nonint do_wifi_country US
 #------------------------------------------------------------
 sudo apt update
 sudo apt upgrade -y
+sudo apt install git -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
