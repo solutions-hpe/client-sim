@@ -304,8 +304,10 @@ fi
 #Bringing all interfaces back up to call home/update scripts
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-sudo ifconfig eth0 up
-sudo ifconfig wlan0 up
+wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
+eadapter=ifconfig -a | grep "enp\|eno" | cut -d ':' -f 1
+sudo ifconfig $eadapter up
+sudo ifconfig $wladapter up
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
