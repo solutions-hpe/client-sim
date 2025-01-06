@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.07
+version=.08
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
@@ -73,7 +73,7 @@ echo Type=Application | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Exec=gnome-terminal -t SIM-LOG-VIEWER --geometry=15x15+0+477 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Exec=gnome-terminal --geometry=15x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 
 #End Log Viewer
 #------------------------------------------------------------
