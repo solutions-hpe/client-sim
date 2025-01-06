@@ -64,7 +64,7 @@ echo Type=Application | sudo tee -a /etc/xdg/autostart/startup.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/autostart/startup.desktop
 echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.desktop
 echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Exec=gnome-terminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=155x22+0+0 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
@@ -73,7 +73,7 @@ echo Type=Application | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Name=StartUp | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.desktop
 echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Exec=gnome-terminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Exec=gnome-terminal -t SIM-LOG-VIEWER --geometry=15x15+0+477 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 
 #End Log Viewer
 #------------------------------------------------------------
