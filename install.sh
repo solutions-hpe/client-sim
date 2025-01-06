@@ -92,4 +92,5 @@ echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/sc
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal --geometry=85x15+1400+477 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
+sudo chmod -R 777 /usr/local/scripts
 echo Please reboot - install is complete
