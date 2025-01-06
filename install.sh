@@ -9,8 +9,8 @@ else
   echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 fi
 echo making scripts directory
-mkdir /usr/local/scripts
-chmod -R 777 /usr/local/scripts
+sudo mkdir /usr/local/scripts
+sudo chmod -R 777 /usr/local/scripts
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
