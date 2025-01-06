@@ -16,7 +16,7 @@ sudo chmod -R 777 /usr/local/scripts
 sudo raspi-config nonint do_change_locale en_US.UTF-8
 sudo raspi-config nonint do_wifi_country US
 #Installing SMBClient to sync with local CIFS repo
-#Installing DKMS and DNSUtils
+#Installing DKMS, DNSUtils, QEMU Agent, GIT, Net Tools
 #------------------------------------------------------------
 sudo apt update
 sudo apt upgrade -y
