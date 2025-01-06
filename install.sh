@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.05
+version=.06
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
@@ -11,6 +11,8 @@ fi
 echo making scripts directory
 sudo mkdir /usr/local/scripts
 sudo chmod -R 777 /usr/local/scripts
+#On raspberrypi changing WLAN local to US
+#Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
 sudo raspi-config nonint do_wifi_country US
 #Installing SMBClient to sync with local CIFS repo
