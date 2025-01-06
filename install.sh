@@ -2,8 +2,12 @@
 version=.04
 #------------------------------------------------------------
 echo Installer Version $version
-echo enabling no password for sudo for current user
-echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
+if grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
+  echo User is already setup in sudoers
+else
+  echo enabling no password for sudo for current user
+  echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
+fi
 echo making scripts directory
 sudo mkdir /usr/local/scripts
 sudo chmod -R 777 /usr/local/scripts
