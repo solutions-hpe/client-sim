@@ -2,7 +2,7 @@
 version=.04
 #------------------------------------------------------------
 echo Installer Version $version
-if grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
+if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
   echo User is already setup in sudoers
 else
   echo enabling no password for sudo for current user
