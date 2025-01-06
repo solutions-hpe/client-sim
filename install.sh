@@ -36,19 +36,19 @@ git clone https://github.com/morrownr/88x2bu-20210702.git
 #------------------------------------------------------------
 echo Installing Network Adapter Drivers
 cd 8821au-20210708
-sudo ./install.sh NoPrompt
+sudo ./install-driver.sh NoPrompt
 cd ..
 cd 8821cu-20210916
-sudo ./install.sh NoPrompt
+sudo ./install-driver.sh NoPrompt
 cd ..
 cd 8814au
-sudo ./install.sh NoPrompt
+sudo ./install-driver.sh NoPrompt
 cd ..
 cd 8812au-20210820
-sudo ./install.sh NoPrompt
+sudo ./install-driver.sh NoPrompt
 cd ..
 cd 88x2bu-20210702
-sudo ./install.sh NoPrompt
+sudo ./install-driver.sh NoPrompt
 cd ..
 #------------------------------------------------------------
 #Creating Startup
