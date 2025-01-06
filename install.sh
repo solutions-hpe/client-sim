@@ -34,6 +34,7 @@ sudo chmod -R 777 /usr/local/scripts
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
+touch /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Getting Network Adapter Drivers from GitHub
 git clone https://github.com/morrownr/8821au-20210708.git
