@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.09
+version=.10
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
@@ -9,8 +9,8 @@ else
   echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 fi
 echo making scripts directory
-sudo mkdir /usr/local/scripts
-sudo chmod -R 777 /usr/local/scripts
+mkdir /usr/local/scripts
+chmod -R 777 /usr/local/scripts
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
@@ -92,5 +92,4 @@ echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/sc
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal --geometry=85x15+1400+477 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
-sudo chmod -R 777 /usr/local/scripts
 echo Please reboot - install is complete
