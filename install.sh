@@ -22,6 +22,7 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install git -y
 sudo apt install qemu-guest-agent -y
+sudo apt install net-tools -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
