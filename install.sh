@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.04
+version=.05
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
