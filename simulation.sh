@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.16
+version=.17
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -8,6 +8,9 @@ echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
+#Finding adapter names and setting usable variables for interfaces
+wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
+eadapter=ifconfig -a | grep "enp\|eno" | cut -d ':' -f 1
 #------------------------------------------------------------
 #Global Simulation defaults enable/disable
 #------------------------------------------------------------
@@ -64,8 +67,8 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
-if [ $sim_phy == "ethernet" ]; then sudo ifconfig wlan0 down; fi
-if [ $sim_phy == "wireless" ]; then sudo ifconfig eth0 down; fi
+if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
+if [ $sim_phy == "wireless" ]; then sudo ifconfig $eadapter down; fi
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
@@ -304,8 +307,6 @@ fi
 #Bringing all interfaces back up to call home/update scripts
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
-eadapter=ifconfig -a | grep "enp\|eno" | cut -d ':' -f 1
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
 echo --------------------------| tee -a /usr/local/scripts/sim.log
