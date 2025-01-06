@@ -49,6 +49,7 @@ sudo ./install.sh NoPrompt
 cd ..
 cd 88x2bu-20210702
 sudo ./install.sh NoPrompt
+cd ..
 #------------------------------------------------------------
 #Creating Startup
 echo Creating auto Start files
