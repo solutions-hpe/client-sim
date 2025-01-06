@@ -41,7 +41,7 @@ cd ..
 cd 8821cu-20210916
 sudo ./install.sh NoPrompt
 cd ..
-cd 8814
+cd 8814au
 sudo ./install.sh NoPrompt
 cd ..
 cd 8812au-20210820
