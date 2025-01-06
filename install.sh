@@ -21,6 +21,7 @@ sudo raspi-config nonint do_wifi_country US
 sudo apt update
 sudo apt upgrade -y
 sudo apt install git -y
+sudo apt install qemu-guest-agent -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
@@ -66,7 +67,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.
 #rasberrypi uses lxterminal
 echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=155x22+0+0 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=125x15+0+0 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
