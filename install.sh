@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.08
+version=.09
 #------------------------------------------------------------
 echo Installer Version $version
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
@@ -81,3 +81,4 @@ echo Exec=gnome-terminal --geometry=15x15+0+477 -- tail -f /usr/local/scripts/si
 echo Exec=gnome-terminal --geometry=95x15+1400+477 -- journalctrl -f | sudo tee -a /etc/xdg/autostart/logview.desktop
 #End Log Viewer
 #------------------------------------------------------------
+echo Please reboot - install is complete
