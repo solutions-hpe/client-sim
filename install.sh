@@ -71,7 +71,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.
 #rasberrypi uses lxterminal
 echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=125x15+0+0 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=85x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
@@ -93,6 +93,6 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/journalc
 #rasberrypi uses lxterminal
 echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=85x15+1400+477 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+echo Exec=gnome-terminal --geometry=125x15+0+0 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
 echo Please reboot - install is complete
