@@ -12,8 +12,10 @@ else
 fi
 echo making scripts directory | tee -a /usr/local/scripts/sim.log
 sudo mkdir /usr/local/scripts
+#Without this - the logging screens at boot will not be pinned to the right x,y coordinates
 echo disable Wayland so gnome-terminal windows can be pinned | tee -a /tmp/client-sim.log
 sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
+#By default screen will blank and need to log back in after 5 minutes - disabling this as the client is running scripts
 echo disabling screen blanking | tee -a /tmp/client-sim.log
 sudo gsettings set org.gnome.desktop.session idle-blank-time 0
 #On raspberrypi changing WLAN local to US
@@ -34,6 +36,10 @@ sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
 #------------------------------------------------------------
+#VirtualHere is coded into the client simulation
+#VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
+#No license is required for the client - only the server needs to be licensed
+#Installing so the client is ready to connect to a server if configured
 echo downloading & installing VirtualHere client | tee -a /tmp/client-sim.log
 wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
