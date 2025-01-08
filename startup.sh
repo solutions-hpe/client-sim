@@ -22,9 +22,9 @@ echo Scheduling reboot $reboot_schedule minutes | tee -a /usr/local/scripts/sim.
 shutdown -r $reboot_schedule
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
-wladapter="ifconfig | grep "wlx\|wlan" | cut -d ':' -f 1"
+wladapter='ifconfig | grep "wlx\|wlan" | cut -d ':' -f 1'
 echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-eadapter="ifconfig | grep "enp\|eno" | cut -d ':' -f 1"
+eadapter='ifconfig | grep "enp\|eno" | cut -d ':' -f 1'
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
