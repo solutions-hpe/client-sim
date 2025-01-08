@@ -10,7 +10,9 @@ source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #Finding adapter names and setting usable variables for interfaces
 wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
+echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=ifconfig -a | grep "enp\|eno" | cut -d ':' -f 1
+echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Global Simulation defaults enable/disable
 #------------------------------------------------------------
