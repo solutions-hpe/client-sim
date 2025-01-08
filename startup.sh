@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.07
+version=.08
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -16,10 +16,13 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
 #------------------------------------------------------------
+#Finding adapter names and setting usable variables for interfaces
+wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
+eadapter=ifconfig -a | grep "enp\|eno" | cut -d ':' -f 1
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
-sudo ifconfig eth0 up
-sudo ifconfig wlan0 up
+sudo ifconfig $eadapter up
+sudo ifconfig $wladapter up
 #Sleeping for 30 seconds to bring up network interaces
 sleep 30
 echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
