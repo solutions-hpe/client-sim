@@ -69,18 +69,23 @@ git clone https://github.com/morrownr/8812au-20210820.git
 git clone https://github.com/morrownr/88x2bu-20210702.git
 #------------------------------------------------------------
 echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
+echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
 cd 8821au-20210708
 sudo ./install-driver.sh NoPrompt
 cd ..
+echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
 cd 8821cu-20210916
 sudo ./install-driver.sh NoPrompt
 cd ..
+echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
 cd 8814au
 sudo ./install-driver.sh NoPrompt
 cd ..
+echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
 cd 8812au-20210820
 sudo ./install-driver.sh NoPrompt
 cd ..
+echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
 cd 88x2bu-20210702
 sudo ./install-driver.sh NoPrompt
 cd ..
