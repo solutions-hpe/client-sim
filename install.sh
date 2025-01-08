@@ -41,10 +41,11 @@ sudo apt install dkms -y
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
 #No license is required for the client - only the server needs to be licensed
 #Installing so the client is ready to connect to a server if configured
-echo Downloading & installing VirtualHere client | tee -a /tmp/client-sim.log
+echo Downloading VirtualHere client | tee -a /tmp/client-sim.log
 wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 chmod +x ./vhclientx86_64
+echo Installing VirtualHere client | tee -a /tmp/client-sim.log
 sudo mv ./vhclientx86_64 /usr/sbin
 sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
 sudo systemctl daemon-reload
