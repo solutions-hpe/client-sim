@@ -1,20 +1,20 @@
 #!/bin/bash
-version=.15
+version=.16
 touch /tmp/client-sim.log
 gnome-terminal --geometry=15x15+0+477 -- tail -f /tmp/client-sim.log
 #------------------------------------------------------------
-echo Installer Version $version | tee /usr/local/scripts/sim.log
+echo Installer Version $version | tee /tmp/client-sim.log
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
-  echo User is already setup in sudoers | tee -a /usr/local/scripts/sim.log
+  echo User is already setup in sudoers | tee -a /tmp/client-sim.log
 else
-  echo enabling no password for sudo for current user | tee -a /usr/local/scripts/sim.log
+  echo enabling no password for sudo for current user | tee -a /tmp/client-sim.log
   echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
 fi
 echo making scripts directory | tee -a /usr/local/scripts/sim.log
 sudo mkdir /usr/local/scripts
-echo disable Wayland so gnome-terminal windows can be pinned | tee -a /usr/local/scripts/sim.log
+echo disable Wayland so gnome-terminal windows can be pinned | tee -a /tmp/client-sim.log
 sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
-echo disabling screen blanking | tee -a /usr/local/scripts/sim.log
+echo disabling screen blanking | tee -a /tmp/client-sim.log
 sudo gsettings set org.gnome.desktop.session idle-blank-time 0
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
@@ -23,7 +23,7 @@ sudo raspi-config nonint do_wifi_country US
 #Installing SMBClient to sync with local CIFS repo
 #Installing DKMS, DNSUtils, QEMU Agent, GIT, Net Tools
 #------------------------------------------------------------
-echo Running system updates | tee -a /usr/local/scripts/sim.log
+echo Running system updates | tee -a /tmp/client-sim.log
 sudo apt update
 sudo apt upgrade -y
 sudo apt install git -y
@@ -34,7 +34,7 @@ sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
 #------------------------------------------------------------
-echo downloading & installing VirtualHere client | tee -a /usr/local/scripts/sim.log
+echo downloading & installing VirtualHere client | tee -a /tmp/client-sim.log
 wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 chmod +x ./vhclientx86_64
@@ -44,7 +44,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable virtualhereclient.service
 sudo systemctl start virtualhereclient.service
 #------------------------------------------------------------
-echo Downloading scripts from source on GitHub | tee -a /usr/local/scripts/sim.log
+echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
@@ -54,14 +54,14 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fa
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
 touch /usr/local/scripts/sim.log
 #------------------------------------------------------------
-echo Getting Network Adapter Drivers from GitHub | tee -a /usr/local/scripts/sim.log
+echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
 git clone https://github.com/morrownr/8821au-20210708.git
 git clone https://github.com/morrownr/8821cu-20210916.git
 git clone https://github.com/morrownr/8814au.git
 git clone https://github.com/morrownr/8812au-20210820.git
 git clone https://github.com/morrownr/88x2bu-20210702.git
 #------------------------------------------------------------
-echo Installing Network Adapter Drivers | tee -a /usr/local/scripts/sim.log
+echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
 cd 8821au-20210708
 sudo ./install-driver.sh NoPrompt
 cd ..
@@ -78,7 +78,7 @@ cd 88x2bu-20210702
 sudo ./install-driver.sh NoPrompt
 cd ..
 #------------------------------------------------------------
-echo Creating auto Start files | tee -a /usr/local/scripts/sim.log
+echo Creating auto Start files | tee -a /tmp/client-sim.log
 #Creating Startup
 echo [Desktop Entry] | sudo tee /etc/xdg/autostart/startup.desktop
 echo Type=Application | sudo tee -a /etc/xdg/autostart/startup.desktop
@@ -111,4 +111,4 @@ echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/sc
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal --geometry=125x15+0+0 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
-echo Please reboot - install is complete | tee -a /usr/local/scripts/sim.log
+echo Please reboot - install is complete | tee -a /tmp/client-sim.log
