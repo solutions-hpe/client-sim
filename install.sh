@@ -22,11 +22,22 @@ sudo raspi-config nonint do_wifi_country US
 sudo apt update
 sudo apt upgrade -y
 sudo apt install git -y
+sudo apt install wget -y
 sudo apt install qemu-guest-agent -y
 sudo apt install net-tools -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
+#------------------------------------------------------------
+echo downloading & installing VirtualHere client
+wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
+wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
+chmod +x ./vhclientx86_64
+sudo mv ./vhclientx86_64 /usr/sbin
+sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
+systemctl daemon-reload
+systemctl enable virtualhereclient.service
+systemctl start virtualhereclient.service
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
