@@ -161,7 +161,7 @@ if [ $kill_switch == "off" ]; then
 			echo Running WWW Traffic simulation
 			wwwfile=$(cat /usr/local/scripts/websites.txt)
 				for r in $wwwfile; do
-					r_count=$((r_count+1))
+					r_count=$(( r_count+1 ))
 				done
 				rn_www=$((1 + RANDOM % $r_count))
 				r_count=0
