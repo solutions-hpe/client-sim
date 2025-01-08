@@ -4,6 +4,7 @@ touch /tmp/client-sim.log
 gnome-terminal --geometry=30x15+0+477 -- tail -f /tmp/client-sim.log
 #------------------------------------------------------------
 echo Installer Version $version | tee /tmp/client-sim.log
+echo Adding user $USER to sudoers for script simlulations | tee -a /tmp/client-sim.log
 if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
   echo User is already setup in sudoers | tee -a /tmp/client-sim.log
 else
