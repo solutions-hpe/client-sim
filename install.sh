@@ -22,6 +22,9 @@ sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
 #By default screen will blank and need to log back in after 5 minutes - disabling this as the client is running scripts
 echo Disabling screen blanking | tee -a /tmp/client-sim.log
 sudo gsettings set org.gnome.desktop.session idle-blank-time 0
+xset s noblank
+xset -dpms
+xset s off
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
