@@ -35,9 +35,9 @@ wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 chmod +x ./vhclientx86_64
 sudo mv ./vhclientx86_64 /usr/sbin
 sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
-systemctl daemon-reload
-systemctl enable virtualhereclient.service
-systemctl start virtualhereclient.service
+sudo systemctl daemon-reload
+sudo systemctl enable virtualhereclient.service
+sudo systemctl start virtualhereclient.service
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
