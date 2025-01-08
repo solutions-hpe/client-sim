@@ -12,6 +12,8 @@ echo making scripts directory
 sudo mkdir /usr/local/scripts
 echo disable Wayland so gnome-terminal windows can be pinned
 sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
+echo disabling screen blanking
+sudo gsettings set org.gnome.desktop.session idle-blank-time 0
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
