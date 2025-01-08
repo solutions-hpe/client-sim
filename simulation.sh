@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.18
+version=.19
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -161,7 +161,7 @@ if [ $kill_switch == "off" ]; then
 			echo Running WWW Traffic simulation
 			wwwfile=$(cat /usr/local/scripts/websites.txt)
 				for r in $wwwfile; do
-					r_count=$(( r_count+1 ))
+					r_count=$((r_count+1))
 				done
 				rn_www=$((1 + RANDOM % $r_count))
 				r_count=0
@@ -204,7 +204,7 @@ if [ $kill_switch == "off" ]; then
 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
- 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websits.txt
+ 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websites.txt
 			sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
  		else
   			#Local repo defined in the conf file
