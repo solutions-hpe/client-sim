@@ -34,6 +34,7 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install git -y
 sudo apt install wget -y
+sudo apt install gnome-terminal -y
 sudo apt install qemu-guest-agent -y
 sudo apt install net-tools -y
 sudo apt install smbclient -y
