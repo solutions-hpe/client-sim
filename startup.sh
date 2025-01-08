@@ -15,6 +15,11 @@ public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
+reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
+#------------------------------------------------------------
+#Scheduling Reboot
+echo Scheduling reboot $reboot_schedule minutes | tee -a /usr/local/scripts/sim.log
+shutdown -r $reboot_schedule
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 wladapter=ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f 1
