@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.08
+version=.09
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
