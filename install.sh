@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.16
+version=.17
 touch /tmp/client-sim.log
 gnome-terminal --geometry=30x15+0+477 -- tail -f /tmp/client-sim.log
 #------------------------------------------------------------
