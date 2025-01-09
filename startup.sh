@@ -4,6 +4,17 @@ echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
+#Verify key settings changed - since this script is ran at startup
+#this is where you should put system changes you want to make sure 
+#are applied. Some of these may be set during the installer but the 
+#installer is only ran one time.
+echo Disabling screen blanking | tee -a /usr/local/scripts/sim.log
+gsettings set org.gnome.desktop.session idle-delay 0
+xset s noblank
+xset -dpms
+xset s off
+#------------------------------------------------------------
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
