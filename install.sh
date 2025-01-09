@@ -133,4 +133,14 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/journalc
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal --geometry=120x15+0+0 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
 #End Log Viewer#------------------------------------------------------------
+#Create journalctl Viewer 
+echo [Desktop Entry] | sudo tee /etc/xdg/autostart/sim_update.desktop
+echo Type=Application | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+echo Comment=Simulation Update | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+#rasberrypi uses lxterminal
+#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+#Ubuntu/Debian with gnome
+echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+#End Log Viewer#------------------------------------------------------------
 echo Please reboot - install is complete | tee -a /tmp/client-sim.log
