@@ -14,6 +14,7 @@ gsettings set org.gnome.desktop.session idle-delay 0
 xset s noblank
 xset -dpms
 xset s off
+sudo rfkill unblock wifi; sudo rfkill unblock all
 #------------------------------------------------------------
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
