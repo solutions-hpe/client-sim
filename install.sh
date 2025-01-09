@@ -3,7 +3,7 @@ version=.19
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
-lxterminal -t Install Log Viewer --geometry=80x15 -e tail -f /tmp/client-sim.log
+lxterminal -t "Install Log Viewer" --geometry=80x15 -e tail -f /tmp/client-sim.log
 #------------------------------------------------------------
 #Checking OS
 os=$(uname -n)
