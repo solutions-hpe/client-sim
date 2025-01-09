@@ -73,8 +73,6 @@ fi
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
-echo Scheduling Reboot | tee -a /usr/local/scripts/sim.log
-/sbin/shutdown -r 480
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 
