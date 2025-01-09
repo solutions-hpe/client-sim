@@ -68,7 +68,12 @@ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-pa
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sim-update.sh -O /usr/local/scripts/sim-update.sh
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websites.txt
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
+if [[ -e "/usr/local/scripts/simulation.conf" ]]; then
+  echo Local simulation config exists | tee -a /tmp/client-sim.log
+else
+  echo Downloading simulation config | tee -a /tmp/client-sim.log
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
+fi
 touch /usr/local/scripts/sim.log
 sudo chmod -R 777 /usr/local/scripts
 #------------------------------------------------------------
