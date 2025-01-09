@@ -188,8 +188,8 @@ if [ $kill_switch == "off" ]; then
 						echo Website: $r | tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						firefox --headless --newtab $r &
-						#firefox --new-tab $r &
+						#firefox --headless --newtab $r &
+						firefox --new-tab $r &
 						www_traffic=off
 					fi
 				done
