@@ -22,7 +22,7 @@ echo Disabling Wayland so gnome-terminal windows can be pinned | tee -a /tmp/cli
 sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
 #By default screen will blank and need to log back in after 5 minutes - disabling this as the client is running scripts
 echo Disabling screen blanking | tee -a /tmp/client-sim.log
-sudo gsettings set org.gnome.desktop.session idle-blank-time 0
+sudo gsettings set org.gnome.desktop.session idle-delay 0
 xset s noblank
 xset -dpms
 xset s off
