@@ -58,7 +58,7 @@ fi
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "on" ]; then
-	if [[ -e "/usr/local/scripts/vhcached.txt" ]]; then
+	if [ -e "/usr/local/scripts/vhcached.txt" ]; then
  		#Setting value to cached adapter
 		#This way the client is always using the same adapter
 		#Otherwise connectivity for clients will have gaps when the adapter changes in Central
