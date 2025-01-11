@@ -53,6 +53,9 @@ if [ $vh_server == "on" ]; then
   echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -n
   sleep 30
+  #Dumping Current Device List
+  echo Getting VH device list | tee -a /usr/local/scripts/sim.log
+  sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 fi
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
@@ -130,11 +133,6 @@ echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
 echo --------------------------| tee -a /usr/local/scripts/sim.log
-#------------------------------------------------------------
-
-#------------------------------------------------------------
-#Dumping Current Device List
-sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 #------------------------------------------------------------
 echo Launching Simulation Script | tee -a /usr/local/scripts/sim.log
 #Looping Script
