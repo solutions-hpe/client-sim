@@ -76,10 +76,6 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $ea
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "on" ]; then
 	if [[ -e "/usr/local/scripts/vhcached.txt" ]]; then
-		#Setting Virtual Here to run as a Daemon
- 		sudo /usr/sbin/vhclientx86_64 -n
-	 	echo Waiting for VH startup | tee -a /usr/local/scripts/sim.log
-		sleep 30
  		#Setting value to cached adapter
 		#This way the client is always using the same adapter
 		#Otherwise connectivity for clients will have gaps when the adapter changes in Central
