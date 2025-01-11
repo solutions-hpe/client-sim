@@ -101,7 +101,8 @@ if [ $vh_server == "on" ]; then
 #End if VirtualHere Server is enabled
 fi
 #------------------------------------------------------------
-if [ $public_repo == "on" ]; then
+$github=raw.githubusercontent.com
+if [ $public_repo == "on" ] && [ ping -c1 $github 1>/dev/null 2>/dev/null ]; then
   echo Updating Scripts - GitHub | tee -a /usr/local/scripts/sim.log
   echo --------------------------| tee -a /usr/local/scripts/sim.log
   #Downloading latest scripts from GitHub
