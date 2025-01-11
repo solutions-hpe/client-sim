@@ -1,7 +1,7 @@
 #!/bin/bash
-version=.01
+vversion=.01
 echo --------------------------| tee /usr/local/scripts/sim.log
-echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
+echo VHConnect Script Version $vversion | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
