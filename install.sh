@@ -1,5 +1,5 @@
 e#!/bin/bash
-version=.20
+version=.21
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
