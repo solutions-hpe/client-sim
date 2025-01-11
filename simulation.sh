@@ -154,7 +154,7 @@ if [ $kill_switch == "off" ]; then
 		#Updating Scripts
 		echo Updating Scripts | tee -a /usr/local/scripts/sim.log
   		echo Checking connectivity to GitHub | tee -a /usr/local/scripts/sim.log
-    		$github=raw.githubusercontent.com
+    		github=raw.githubusercontent.com
  		if [ $public_repo == "on" ] && [ ping -c1 $github 1>/dev/null 2>/dev/null ]; then
   			#Using remote GitHub repo
 			sudo wget -4 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
