@@ -49,7 +49,8 @@ echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 if [ $vh_server == "on" ]; then
-  echo Waiting for VH startup | tee -a /usr/local/scripts/sim.log
+  echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
+  echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -n
   sleep 30
 fi
