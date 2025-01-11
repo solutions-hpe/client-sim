@@ -74,7 +74,6 @@ if [ $sim_phy == "wireless" ]; then sudo ifconfig $eadapter down; fi
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
-/usr/sbin/vhclientx86_64 -t LIST | tee /tmp/vhactive.tst
 if [ $vh_server == "on" ]; then
 	if [[ -e "/usr/local/scripts/vhcached.txt" ]]; then
 		#Setting Virtual Here to run as a Daemon
