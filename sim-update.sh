@@ -1,7 +1,7 @@
 #!/bin/bash
-version=.02
+version=.03
 github=raw.githubusercontent.com
-if [ ping -c1 $github 1>/dev/null 2>/dev/null ]; then
+if [ ping -c1 $github &>/dev/null ]; then
   sudo wget -4 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
   sudo wget -4 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
   sudo wget -4 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
