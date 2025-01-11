@@ -64,21 +64,21 @@ dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 #------------------------------------------------------------
-#------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
+#------------------------------------------------------------
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
 #------------------------------------------------------------
-
-#------------------------------------------------------------
 #Checking for kill switch to stop simulation
+#------------------------------------------------------------
 if [ $kill_switch == "off" ]; then
 	for z in {1..100}; do
 		#------------------------------------------------------------ 
 		#Logging Simulation
+  		#------------------------------------------------------------ 
 		echo --------------------------| tee -a /usr/local/scripts/sim.log
 		echo $(date) | tee -a /usr/local/scripts/sim.log
   		echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -94,10 +94,9 @@ if [ $kill_switch == "off" ]; then
 		echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
 		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
 		echo --------------------------| tee -a /usr/local/scripts/sim.log
-		#------------------------------------------------------------ 
-
 		#------------------------------------------------------------
 		#Connecting to Network
+  		#------------------------------------------------------------
   		if [ $sim_phy == "wireless" ]; then
     			sudo rfkill unblock wifi; sudo rfkill unblock all
 			nmcli dev wifi connect $ssid password $ssidpw 
@@ -105,11 +104,11 @@ if [ $kill_switch == "off" ]; then
 			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 			sleep 30 | tee -a /usr/local/scripts/sim.log
   		fi
+    		#------------------------------------------------------------
 		#End Connecting to Network
 		#------------------------------------------------------------
-
-		#------------------------------------------------------------
 		#Running WWW Traffic Simulation
+  		#------------------------------------------------------------
 		if [ $www_traffic == "on" ]; then
 			r_count=0
 			echo Running WWW Traffic simulation
@@ -147,11 +146,11 @@ if [ $kill_switch == "off" ]; then
 					fi
 				done
 		fi
-		#End WWW Traffic Simulation
-	       #------------------------------------------------------------
-	 
+  		#------------------------------------------------------------
+		#End WWW Traffic Simulation	 
 		#------------------------------------------------------------
 		#Running ping simulation
+  		#------------------------------------------------------------
 		if [ $ping_test == "on" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -173,10 +172,11 @@ if [ $kill_switch == "off" ]; then
 			echo Pinging Default Gateway
 			ping -c $rn $ping_address
 		fi
+  		#------------------------------------------------------------
 		#End Ping Simulation
-		#------------------------------------------------------------
  		#------------------------------------------------------------
 		#Running download simulation
+  		#------------------------------------------------------------
 		if [ $download == "on" ]; then
 				echo Running download simulation | tee -a /usr/local/scripts/sim.log
 				curl -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
@@ -187,11 +187,12 @@ if [ $kill_switch == "off" ]; then
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
 		sudo apt update 
-		sudo apt upgrade -y 
+		sudo apt upgrade -y
+  		#------------------------------------------------------------
 		#End Download Simulation
 		#------------------------------------------------------------
-		#------------------------------------------------------------
 		#Running DNS Fail simulation
+  		#------------------------------------------------------------
 		if [ $dns_fail == "on" ]; then
 			dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
 			for i in {1..100}; do
@@ -227,10 +228,12 @@ if [ $kill_switch == "off" ]; then
 					done
 			done
 		fi
+  		#------------------------------------------------------------
 		#End DNS Fail Simulation
 		#------------------------------------------------------------
 	echo End of simulation sleeping for 5 seconds
 	sleep 5
+ 	#------------------------------------------------------------
 	#End of 100 Loop Count
 	#------------------------------------------------------------
 	done
@@ -240,6 +243,7 @@ else
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
 fi
+#------------------------------------------------------------
 #End Kill switch Check 
 #------------------------------------------------------------
 #Bringing all interfaces back up to call home/update scripts
@@ -250,4 +254,5 @@ sudo ifconfig $wladapter up
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
+#------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
