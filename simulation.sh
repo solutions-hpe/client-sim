@@ -110,7 +110,7 @@ if [ $vh_server == "on" ]; then
 	#Connecting to VirtualHere Server
 	echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 	#Connecting to Adapter
-	/usr/sbin/vhclientx86_64 -t USE,$vhserver_device | tee -a /usr/local/scripts/sim.log
+	/usr/sbin/vhclientx86_64 -t AUTO USE,$vhserver_device | tee -a /usr/local/scripts/sim.log
 	#End Connecting to VirtualHere Server
 	#------------------------------------------------------------
 	echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
