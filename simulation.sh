@@ -70,7 +70,7 @@ rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vhserver == "off" ]; then sudo ifconfig $eadapter down; fi
+if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
 #------------------------------------------------------------
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
