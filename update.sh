@@ -2,6 +2,7 @@
 version=.01
 #------------------------------------------------------------
 #Updating Scripts
+#------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 echo Checking connectivity to GitHub | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
@@ -25,3 +26,4 @@ smbclient $smb_location -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
 fi
 #------------------------------------------------------------
 #End Updating Scripts
+#------------------------------------------------------------
