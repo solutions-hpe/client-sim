@@ -53,6 +53,8 @@ if [ $vh_server == "on" ]; then
   echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -n
   sleep 30
+  #Clearing Previous Connections
+  sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
   #Dumping Current Device List
   echo Getting VH device list | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
