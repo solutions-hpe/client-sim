@@ -50,7 +50,7 @@ echo --------------------------| tee -a /usr/local/scripts/sim.log
 #Setting VirtualHere Server as a Daemon
 if [ $vh_server == "on" ]; then
   echo Waiting for VH startup | tee -a /usr/local/scripts/sim.log
-  sudo /usr/local/virtualhere/vhuit64 -n
+  sudo /usr/sbin/vhclientx86_64 -n
   sleep 30
 fi
 #------------------------------------------------------------
@@ -78,7 +78,7 @@ echo --------------------------| tee -a /usr/local/scripts/sim.log
 
 #------------------------------------------------------------
 #Dumping Current Device List
-/usr/local/virtualhere/vhuit64 -t LIST -r /tmp/vhactive.txt
+sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 #------------------------------------------------------------
 echo Launching Simulation Script | tee -a /usr/local/scripts/sim.log
 #Looping Script
