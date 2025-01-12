@@ -49,6 +49,10 @@ dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 #------------------------------------------------------------
+#Checking global kill switch config
+#------------------------------------------------------------
+gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
+#------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 #------------------------------------------------------------
 rn=$((1 + RANDOM % 60))
