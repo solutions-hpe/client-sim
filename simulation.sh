@@ -14,21 +14,6 @@ echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
-#Global Simulation defaults enable/disable
-#------------------------------------------------------------
-sim=generic
-kill_switch=off
-sim_load=100
-dhcp_fail=off
-dns_fail=on
-assoc_fail=off
-port_flap=off
-ping_test=on
-download=on
-www_traffic=on
-public_repo=on
-vh_server=off
-#------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
