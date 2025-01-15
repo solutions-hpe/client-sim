@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.24
+version=.25
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -92,6 +92,7 @@ git clone https://github.com/morrownr/88x2bu-20210702.git
 git clone https://github.com/lwfinger/rtl8852au.git
 git clone https://github.com/lwfinger/rtl8188eu.git
 git clone https://github.com/lwfinger/rtw89.git
+git clone https://github.com/lwfinger/rtl8723au.git
 #------------------------------------------------------------
 echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
 echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
@@ -114,20 +115,26 @@ echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
 cd 88x2bu-20210702
 sudo ./install-driver.sh NoPrompt
 cd ..
-Echo Installing rtl8188eu | tee -a /tmp/client-sim.log
+echo Installing rtl8188eu | tee -a /tmp/client-sim.log
 cd rtl8188eu
 make all
 sudo make install
 cd ..
-Echo Installing rtl8188eu | tee -a /tmp/client-sim.log
+echo Installing rtl8188eu | tee -a /tmp/client-sim.log
 cd rtl8852au
 make
 sudo make install
 cd ..
-Echo Installing rtw89 | tee -a /tmp/client-sim.log
+echo Installing rtw89 | tee -a /tmp/client-sim.log
 cd rtw89
 make
 sudo make install
+cd ..
+echo Installing rtl8723au | tee -a /tmp/client-sim.log
+cd rtl8723au
+make
+sudo make install
+sudo modprobe 8723au
 #------------------------------------------------------------
 echo Creating auto Start files | tee -a /tmp/client-sim.log
 #Creating Startup
