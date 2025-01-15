@@ -115,22 +115,22 @@ echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
 cd 88x2bu-20210702
 sudo ./install-driver.sh NoPrompt
 cd ..
-echo Installing rtl8188eu | tee -a /tmp/client-sim.log
+echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
 cd rtl8188eu
 make all
 sudo make install
 cd ..
-echo Installing rtl8188eu | tee -a /tmp/client-sim.log
+echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
 cd rtl8852au
 make
 sudo make install
 cd ..
-echo Installing rtw89 | tee -a /tmp/client-sim.log
+echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
 cd rtw89
 make
 sudo make install
 cd ..
-echo Installing rtl8723au | tee -a /tmp/client-sim.log
+echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
 cd rtl8723au
 make
 sudo make install
