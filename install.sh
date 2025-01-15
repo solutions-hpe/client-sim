@@ -1,5 +1,5 @@
-e#!/bin/bash
-version=.21
+#!/bin/bash
+version=.22
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -60,6 +60,7 @@ sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
 sudo systemctl daemon-reload
 sudo systemctl enable virtualhereclient.service
 sudo systemctl start virtualhereclient.service
+vhclientx86_64 -t "AUTO USE CLEAR ALL"
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
