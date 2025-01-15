@@ -60,6 +60,7 @@ sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
 sudo systemctl daemon-reload
 sudo systemctl enable virtualhereclient.service
 sudo systemctl start virtualhereclient.service
+rm /usr/local/scripts/vhcached.txt
 vhclientx86_64 -t "AUTO USE CLEAR ALL"
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
