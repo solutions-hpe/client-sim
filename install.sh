@@ -89,6 +89,7 @@ git clone https://github.com/morrownr/8821cu-20210916.git
 git clone https://github.com/morrownr/8814au.git
 git clone https://github.com/morrownr/8812au-20210820.git
 git clone https://github.com/morrownr/88x2bu-20210702.git
+git clone https://github.com/s-2/RTL8852AU_WiFi_linux_v1.15.0.1-0-g487ee886.20210714.git
 #------------------------------------------------------------
 echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
 echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
