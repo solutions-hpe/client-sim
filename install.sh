@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.25
+version=.26
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -179,4 +179,6 @@ echo Comment=Simulation Update | sudo tee -a /etc/xdg/autostart/sim_update.deskt
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /etc/xdg/autostart/sim_update.desktop
 #End Log Viewer#------------------------------------------------------------
-echo Please reboot - install is complete | tee -a /tmp/client-sim.log
+echo install is complete shutdown now | tee -a /tmp/client-sim.log
+sleep 5
+sudo shutdown now
