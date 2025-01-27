@@ -180,5 +180,3 @@ echo Comment=Simulation Update | sudo tee -a /etc/xdg/autostart/sim_update.deskt
 echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /etc/xdg/autostart/sim_update.desktop
 #End Log Viewer#------------------------------------------------------------
 echo install is complete shutdown now | tee -a /tmp/client-sim.log
-sleep 15
-sudo shutdown now
