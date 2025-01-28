@@ -25,7 +25,7 @@ if [ $public_repo == "on" ]; then
   fi
  else
   #Local repo defined in the conf file
-smbclient $smb_location -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
+ smbclient $smb_location -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
 fi
 #------------------------------------------------------------
 #End Updating Scripts
