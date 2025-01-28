@@ -77,6 +77,7 @@ if [ -e "/usr/local/scripts/simulation.conf" ]; then
   echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
   echo Downloading simulation config | tee -a /tmp/client-sim.log
+  smbclient //nas/scripts -N -c 'lcd /usr/local/scripts/; cd /SIM/CONFIG/; prompt off; mget *.conf'
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
 fi
 touch /usr/local/scripts/sim.log
