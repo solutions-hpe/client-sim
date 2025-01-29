@@ -94,6 +94,7 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
   		if [ $sim_phy == "wireless" ]; then
     		sudo rfkill unblock wifi; sudo rfkill unblock all
+			echo Connecting to SSID - $ssid with Password - $ssidpw
 			nmcli dev wifi connect $ssid password $ssidpw 
    			echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
 			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
