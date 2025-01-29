@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.04
+version=.05
 github=raw.githubusercontent.com
 ping -c1 $github
  if [ $? -eq 0 ]; then
