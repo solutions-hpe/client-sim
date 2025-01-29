@@ -144,8 +144,8 @@ if [ $kill_switch == "off" ]; then
 				for r in $wwwfile; do
 					r_count=$((r_count+1))
 					if [[ $r_count == $rn_www ]]; then
-						echo Closing Chromium | tee -a /usr/local/scripts/sim.log
-						pkill -f chromium
+						echo Closing Firefox | tee -a /usr/local/scripts/sim.log
+						pkill -f firefox
 						sleep 1
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -163,8 +163,7 @@ if [ $kill_switch == "off" ]; then
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						#firefox --headless --newtab $r &
-						#firefox --new-tab $r &
-						chromium --newtab $r
+						firefox --new-tab $r &
 						www_traffic=off
 					fi
 				done
