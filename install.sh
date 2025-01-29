@@ -63,6 +63,7 @@ sudo systemctl start virtualhereclient.service
 rm /usr/local/scripts/vhcached.txt
 smbclient //nas/scripts -N -c 'lcd /usr/local/scripts/; cd /SIM/CONFIG/; prompt off; mget *.conf'
 /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
