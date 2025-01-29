@@ -82,7 +82,6 @@ if [ $kill_switch == "off" ]; then
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
   		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-		echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 		echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 		echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 		echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
@@ -220,7 +219,6 @@ if [ $kill_switch == "off" ]; then
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 		  				echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-   						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
 						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 						echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
