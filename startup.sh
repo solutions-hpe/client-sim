@@ -58,8 +58,6 @@ if [ $vh_server == "on" ]; then
   sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 fi
 #------------------------------------------------------------
-#End Updating Scripts
-#------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
