@@ -45,6 +45,7 @@ sudo apt install net-tools -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
+sudo apt install firefox-esr -y
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
