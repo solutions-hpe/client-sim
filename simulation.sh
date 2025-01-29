@@ -142,12 +142,11 @@ if [ $kill_switch == "off" ]; then
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo $(date) | tee -a /usr/local/scripts/sim.log
-      						echo --------------------------| tee -a /usr/local/scripts/sim.log
-      						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+      					echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
-      						echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-						echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
+      					echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 						echo WWW Sim: $www_traffic | tee -a /usr/local/scripts/sim.log
@@ -170,13 +169,12 @@ if [ $kill_switch == "off" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
    			echo $(date) | tee -a /usr/local/scripts/sim.log
-      			echo --------------------------| tee -a /usr/local/scripts/sim.log
+     		echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 	  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log		
-   			echo Simulation: $sim | tee -a /usr/local/scripts/sim.log
-			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+   			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Sim: $ping_test | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
@@ -197,7 +195,7 @@ if [ $kill_switch == "off" ]; then
 				curl -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
 				curl -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
 				curl -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
-    				curl -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
+    			curl -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
@@ -216,7 +214,7 @@ if [ $kill_switch == "off" ]; then
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo $(date) | tee -a /usr/local/scripts/sim.log
-      						echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
