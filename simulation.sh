@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.21
+version=.22
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
