@@ -19,9 +19,15 @@ if [ $vh_server == "on" ]; then
 		for r in $vhactive; do
 			r_count=$((r_count+1))
 		done
+		vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v you | awk -F'[()]' '{print $2}')
+		for r in $vhactive; do
+			y_count=$((y_count+1))
+		done
 		echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
 		#Generating random number to connect to a random adapter
 		rn_vhactive=$((1 + RANDOM % $r_count))
+		#If Client is connected to more than 1 device - disconnecting
+		if [[ $y_count -gt 1 ]]; then /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL" | tee -a /usr/local/scripts/sim.log
 		#Resetting record counter for next loop
 		r_count=0
 		#Looping through records to find an available adapter
