@@ -58,10 +58,6 @@ if [ $vh_server == "on" ]; then
   sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 fi
 #------------------------------------------------------------
-#Updating Scripts
-echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-source '/usr/local/scripts/ini-parser.sh'
-#------------------------------------------------------------
 #End Updating Scripts
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
