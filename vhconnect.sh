@@ -18,8 +18,7 @@ vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{
  for r in $vhactive; do
 	r_count=$((r_count+1))
 done
-echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
-echo VH In-Use $y_count | tee -a /usr/local/scripts/sim.log
+echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "on" ]; then
 	if [ -e "/usr/local/scripts/vhcached.txt" ]; then
  		#Setting value to cached adapter
