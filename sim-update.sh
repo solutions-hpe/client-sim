@@ -12,7 +12,7 @@ ping -c1 $github
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websites.txt
   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
-  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/public_kill_switch.txt -O /usr/local/scripts/public_kill_switch.txt
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt -O /usr/local/scripts/kill_switch.txt
   sudo chmod -R 777 /usr/local/scripts
 else
  echo Network connection failed to GitHub - skipping script updates
