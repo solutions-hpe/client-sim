@@ -6,6 +6,8 @@ echo $(date) | tee -a /usr/local/scripts/sim.log
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
 #Counting & searching records in /tmp/vhactive.txt
+r_count=0
+y_count=0
 vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{print $2}')
  for r in $vhactive; do
 	r_count=$((r_count+1))
@@ -32,6 +34,7 @@ if [ $vh_server == "on" ]; then
   	#If VirtualHere cached value does not exist
    	else
 		#Generating random number to connect to a random adapter
+		echo No Cached VH Device found - finding avaiable adapter
 		rn_vhactive=$((1 + RANDOM % $r_count))
 		#If Client is connected to more than 1 device - disconnecting
 		if [[ $y_count -gt 1 ]]; then
