@@ -47,6 +47,7 @@ if [ $vh_server == "on" ]; then
 		#Looping through records to find an available adapter
 		for r in $vhactive; do
 			r_count=$((r_count+1))
+			echo $r_count
 			if [[ $r_count == $rn_vhactive ]]; then
 				vhserver_device=$r
 				echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
