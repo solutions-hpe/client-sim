@@ -10,7 +10,7 @@ vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{
  for r in $vhactive; do
 	r_count=$((r_count+1))
 done
-vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v you | awk -F'[()]' '{print $2}')
+vhactive=$(cat /tmp/vhactive.txt | grep you | awk -F'[()]' '{print $2}')
 for r in $vhactive; do
 	y_count=$((y_count+1))
 done
