@@ -104,7 +104,7 @@ if [ $kill_switch == "off" ]; then
 		if [ $? -eq 0 ]; then
 		 echo Successful network connection | tee -a /usr/local/scripts/sim.log
    		 #Running update to either the cloud repo or local SMB repo
-   		 source '/usr/local/scripts/sim-update.sh'
+   		 source '/usr/local/scripts/update.sh'
 		else
   			echo Network connection failed | tee -a /usr/local/scripts/sim.log
      		echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
