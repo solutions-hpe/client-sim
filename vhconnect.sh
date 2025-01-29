@@ -24,9 +24,11 @@ if [ $vh_server == "on" ]; then
 			y_count=$((y_count+1))
 		done
 		echo VH Record Count $r_count | tee -a /usr/local/scripts/sim.log
+		echo VH In-Use $y_count | tee -a /usr/local/scripts/sim.log
 		#Generating random number to connect to a random adapter
 		rn_vhactive=$((1 + RANDOM % $r_count))
 		#If Client is connected to more than 1 device - disconnecting
+		echo Clearing out all devices in-use - found multiple devices in-use | tee -a /usr/local/scripts/sim.log
 		if [[ $y_count -gt 1 ]]; then /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL" | tee -a /usr/local/scripts/sim.log
 		#Resetting record counter for next loop
 		r_count=0
