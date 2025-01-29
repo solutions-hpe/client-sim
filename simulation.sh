@@ -110,7 +110,8 @@ if [ $kill_switch == "off" ]; then
      		echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
 			#Running API to VHClient to disconnect all clients this device is connecting to
    			#When a device ID changes on VH the client can think it should connect to multiple devices
-   			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL" | tee -a /usr/local/scripts/sim.log
+   			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+			/usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
       		 #VHCached.txt will hold the server and device ID from VH so we use the same device every time
 		 	#In the case when a device ID Changes, puring this setting will make sure a new device is captured
    		 	#Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
