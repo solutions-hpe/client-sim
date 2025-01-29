@@ -104,20 +104,20 @@ if [ $kill_switch == "off" ]; then
 		if [ $? -eq 0 ]; then
 		 echo Successful network connection | tee -a /usr/local/scripts/sim.log
    		 #Running update to either the cloud repo or local SMB repo
-   		 source '/usr/local/scripts/update.sh'
+   		 source '/usr/local/scripts/sim-update.sh'
 		else
-  		 echo Network connection failed | tee -a /usr/local/scripts/sim.log
-     		 echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
-		 #Running API to VHClient to disconnect all clients this device is connecting to
-   		 #When a device ID changes on VH the client can think it should connect to multiple devices
-   		 /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL" | tee -a /usr/local/scripts/sim.log
+  			echo Network connection failed | tee -a /usr/local/scripts/sim.log
+     		echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
+			#Running API to VHClient to disconnect all clients this device is connecting to
+   			#When a device ID changes on VH the client can think it should connect to multiple devices
+   			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL" | tee -a /usr/local/scripts/sim.log
       		 #VHCached.txt will hold the server and device ID from VH so we use the same device every time
-		 #In the case when a device ID Changes, puring this setting will make sure a new device is captured
-   		 #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-      		 #changes occur in the environment. This is a workaround just for when the IDs change.
-		 rm /usr/local/scripts/vhcached.txt
+		 	#In the case when a device ID Changes, puring this setting will make sure a new device is captured
+   		 	#Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
+      		#changes occur in the environment. This is a workaround just for when the IDs change.
+		 	rm /usr/local/scripts/vhcached.txt
 		fi
-    		#------------------------------------------------------------
+    	#------------------------------------------------------------
 		#End Connecting to Network
 		#------------------------------------------------------------
 		#Running WWW Traffic Simulation
