@@ -58,6 +58,7 @@ gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
 #------------------------------------------------------------
 rn=$((1 + RANDOM % 60))
 #------------------------------------------------------------
+#Dumping Current Device List
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
