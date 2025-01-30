@@ -162,8 +162,8 @@ if [ $kill_switch == "off" ]; then
 						echo Website: $r | tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
 						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						#firefox --headless --newtab $r &
-						firefox --new-tab $r &
+						firefox --headless --newtab $r &
+						#firefox --new-tab $r &
 						www_traffic=off
 					fi
 				done
@@ -200,10 +200,10 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
 		if [ $download == "on" ]; then
 				echo Running download simulation | tee -a /usr/local/scripts/sim.log
-				curl -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
-				curl -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
-				curl -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
-    			curl -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
+				wget -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
+				wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
+				wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
+    			wget -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
