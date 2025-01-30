@@ -3,6 +3,9 @@ vversion=.03
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo VHConnect Script Version $vversion | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
+#Dumping Current Device List
+echo Getting VH device list | tee -a /usr/local/scripts/sim.log
+sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 #Checking to see if there is a cache device to connect to
 echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
 #Counting & searching records in /tmp/vhactive.txt
