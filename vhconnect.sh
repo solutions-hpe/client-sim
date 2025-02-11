@@ -1,5 +1,5 @@
 #!/bin/bash
-vversion=.06
+vversion=.07
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo VHConnect Script Version $vversion | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -34,6 +34,7 @@ if [ $vh_server == "on" ]; then
 			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
    			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
 			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+   			sleep 5
 			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
    			sleep 5
 		fi
@@ -47,6 +48,7 @@ if [ $vh_server == "on" ]; then
   			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
 			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
 			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+   			sleep 5
 			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
    			sleep 5
 		fi
