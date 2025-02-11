@@ -1,5 +1,5 @@
 #!/bin/bash
-vversion=.03
+vversion=.04
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo VHConnect Script Version $vversion | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -12,7 +12,7 @@ echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
 r_count=0
 y_count=0
 #Checking for the number of devices that are currently attached
-vhactive=$(cat /tmp/vhactive.txt | grep you | awk -F'[()]' '{print $2}')
+vhactive=$(cat /tmp/vhactive.txt | grep "*" | awk -F'[()]' '{print $2}')
 for r in $vhactive; do
 	y_count=$((y_count+1))
 done
