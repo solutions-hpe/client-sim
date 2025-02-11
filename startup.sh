@@ -57,10 +57,6 @@ if [ $vh_server == "on" ]; then
   echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
   echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -n
-  sleep 30
-  #Dumping Current Device List
-  echo Getting VH device list | tee -a /usr/local/scripts/sim.log
-  sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
