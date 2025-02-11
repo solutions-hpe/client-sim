@@ -1,9 +1,14 @@
 #!/bin/bash
-version=.15
+version=.16
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
+#Running Cleanup from old simulations
+rm /usr/local/scripts/Contents*
+rm /usr/local/scripts/main.cvd*
+rm /usr/local/scripts/manifest*
 #------------------------------------------------------------
 #Verify key settings changed - since this script is ran at startup
 #this is where you should put system changes you want to make sure 
