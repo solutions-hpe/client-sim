@@ -33,8 +33,8 @@ if [ $vh_server == "on" ]; then
 		if [[ $y_count -gt 1 ]]; then
 			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
    			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
-			vhclientx86_64 -t "AUTO USE CLEAR ALL"
-			vhclientx86_64 -t "STOP USING ALL LOCAL"
+			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 		fi
   	#If VirtualHere cached value does not exist
    	else
@@ -45,8 +45,8 @@ if [ $vh_server == "on" ]; then
 		if [[ $y_count -gt 1 ]]; then
   			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
 			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
-			vhclientx86_64 -t "AUTO USE CLEAR ALL"
-			vhclientx86_64 -t "STOP USING ALL LOCAL"
+			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 		fi
 		#Resetting record counter for next loop
 		r_count=0
