@@ -26,12 +26,12 @@ sudo ifconfig wlp6s16 down
      sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
      sleep 2
      #Bringing all Interfaces down
-     echo "Shutting down interface " vwlan$h 
-     sudo ifconfig vwlan$h down
-     sleep 2
-     echo "Shutting down interface " vwlan1$h 
-     sudo ifconfig vwlan1$h down
-     sleep 2
+     #echo "Shutting down interface " vwlan$h 
+     #sudo ifconfig vwlan$h down
+     #sleep 2
+     #echo "Shutting down interface " vwlan1$h 
+     #sudo ifconfig vwlan1$h down
+     #sleep 2
     done
    sudo ifconfig enp6s18 down
    active=$((RANDOM%19+1))
@@ -96,6 +96,21 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 01061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 01060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
+   echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
+   for (( h = 1; h <= 9; h++ ))
+    do
+     #Bringing up all interfaces after a random interface was selected to pass traffic (First Interface Online)
+     echo "Changing route metric on interface " vwlan$h 
+     sudo ifmetric vwlan$h 1000+$h
+     sleep 2
+     echo "Changing route metric on interface " vwlan1$h 
+     sudo ifmetric vwlan$h 1010+$h
+     sleep 2
+    done
+    echo "Setting Primary Interface to " vwlan1$h
+    echo "Changing route metric on interface " vwlan1$h
+    sudo ifmetric vwlan$active 10
+#--------------------------------------------------------------------------------------------------------  
   sudo ifconfig enp6s18 down 
   echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
   #Loop to run tests
@@ -218,9 +233,8 @@ sudo ifconfig wlp6s16 down
    sudo chmod 777 /usr/scripts/wireless.sh
    sudo ifconfig enp6s18 down
    echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
-   sleep 1800
   done
-  sudo dhcpcd -k
+  #sudo dhcpcd -k
   sudo ifconfig enp6s18 down
 done
 sudo reboot now
