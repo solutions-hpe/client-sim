@@ -86,7 +86,7 @@ sudo ifconfig wlp6s16 down
     done
    echo "Setting Primary Interface to " vwlan1$h
    echo "Changing route metric on interface " vwlan1$h
-   sudo ifmetric vwlan$active 10
+   sudo ifmetric vwlan$active 20
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down 
    echo "Step 4 - Running Simulations" | tee -a /usr/scripts/wireless.log
