@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .05" | tee /usr/scripts/wireless.log
+echo "Script Version .06" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
