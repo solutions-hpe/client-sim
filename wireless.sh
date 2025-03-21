@@ -56,7 +56,7 @@ sudo ifconfig wlp6s16 down
    #  sleep 2
    # done
 #--------------------------------------------------------------------------------------------------------   
-   echo "Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
+   echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan1 -c 60,str,"MercurySD" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan2 -c 60,str,"LiftMaster" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan3 -c 60,str,"RingDevice" -l 01061c
@@ -92,7 +92,7 @@ sudo ifconfig wlp6s16 down
    sudo ifmetric vwlan$active 10
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down 
-   echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
+   echo "Step 4 - Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
    case "$active" in
     1)
