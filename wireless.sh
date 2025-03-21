@@ -203,7 +203,12 @@ sudo ifconfig wlp6s16 down
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
    #Traffic for stats in central - ICMP and random file downloads
-   ping -c 10 10.0.0.10 
+   ping -c 10 10.0.0.10
+   echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
+   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
+   #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
+   find /tmp -type -f size 0 | xargs -r -o rm -v
+   mv /tmp/wireless.sh /usr/scripts/wireless.sh
    echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
    sleep 1800
   done
