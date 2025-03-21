@@ -107,106 +107,106 @@ sudo ifconfig wlp6s16 down
      sudo ifmetric vwlan1$h 1010
      sleep 2
     done
-    echo "Setting Primary Interface to " vwlan1$h
-    echo "Changing route metric on interface " vwlan1$h
-    sudo ifmetric vwlan$active 10
+   echo "Setting Primary Interface to " vwlan1$h
+   echo "Changing route metric on interface " vwlan1$h
+   sudo ifmetric vwlan$active 10
 #--------------------------------------------------------------------------------------------------------  
-  sudo ifconfig enp6s18 down 
-  echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
-  #Loop to run tests
-  case "$active" in
-   1)
-     echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
+   sudo ifconfig enp6s18 down 
+   echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
+   #Loop to run tests
+   case "$active" in
+    1)
+      echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   2)
-     echo "Running LiftMaster Simulations" | tee -a /usr/scripts/wireless.log
-     dig connect-ca.myqdevice.com
-     curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
-     curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
+    2)
+      echo "Running LiftMaster Simulations" | tee -a /usr/scripts/wireless.log
+      dig connect-ca.myqdevice.com
+      curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
+      curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
      ;;
-   3)
-     echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
-     sleep 5
-     dig ec2-3-235-249-68.prd.rings.solutions
-     dig api.prod.signalling.ring.devices.a2z.com
-     dig alexa.na.gateway.devices.a2z.com
-     dig spectrum.s3.amazonaws.com
-     dig api.amazon.com
-     dig amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
-     dig stickupcammini.devices.prod.rss.ring.amazon.dev
-     dig fw-eventstream.ring.com
-     curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
-     curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
-     curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
-     curl -o /tmp/ring.file https://api.amazon.comonaws.com
-     curl -o /tmp/ring.file https://api.amazon.com
-     curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
-     curl -o /tmp/ring.file https://fw-eventstream.ring.com
-     ping -c 600 10.0.0.10
+    3)
+      echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
+      sleep 5
+      dig ec2-3-235-249-68.prd.rings.solutions
+      dig api.prod.signalling.ring.devices.a2z.com
+      dig alexa.na.gateway.devices.a2z.com
+      dig spectrum.s3.amazonaws.com
+      dig api.amazon.com
+      dig amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
+      dig stickupcammini.devices.prod.rss.ring.amazon.dev
+      dig fw-eventstream.ring.com
+      curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
+      curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
+      curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
+      curl -o /tmp/ring.file https://api.amazon.comonaws.com
+      curl -o /tmp/ring.file https://api.amazon.com
+      curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
+      curl -o /tmp/ring.file https://fw-eventstream.ring.com
+      ping -c 600 10.0.0.10
      ;;
-   4)
-     echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
+    4)
+      echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   5)
-     echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
+    5)
+      echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   6)
-     echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
-     dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
-     dig feature-config.sslauth.sonos.com
-     curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
-     curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
-     ping -c 600 feature-config.sslauth.sonos.com
+    6)
+      echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
+      dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
+      dig feature-config.sslauth.sonos.com
+      curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
+      curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
+      ping -c 600 feature-config.sslauth.sonos.com
      ;;
-   7)
-     echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
+    7)
+      echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   8)
-     echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
+    8)
+      echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   9)
-     echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
+    9)
+      echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   11)
-     echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
+    11)
+      echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   12)
-     echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
+    12)
+      echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   13)
-     echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
-     dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
-     dig weather02.clouddevice.io
-     curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
-     curl -o /tmp/resideo.file https://weather02.clouddevice.io
-     ping -c 600 weather02.clouddevice.io
+    13)
+      echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
+      dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
+      dig weather02.clouddevice.io
+      curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
+      curl -o /tmp/resideo.file https://weather02.clouddevice.io
+      ping -c 600 weather02.clouddevice.io
      ;;
-   14)
-     echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
+    14)
+      echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   15)
-     echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
+    15)
+      echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   16)
-     echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
+    16)
+      echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   17)
-     echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
+    17)
+      echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
      ;;
-   18)
-     echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
-     curl --insecure -o /tmp/tesla.file https://x3-prod.obs.tesla.com
-     curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
-     curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
-     curl --insecure -o /tmp/tesla.file https://telemetry-prd.vn.tesla.services
+    18)
+      echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
+      curl --insecure -o /tmp/tesla.file https://x3-prod.obs.tesla.com
+      curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
+      curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
+      curl --insecure -o /tmp/tesla.file https://telemetry-prd.vn.tesla.services
      ;;
-   19)
-     echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
-     dig api.my.crestron.com
-     dig fc.crestron.io
-     ping -c 5 5.161.114.106
-     ping -c 5 16.110.135.52
-     ping -c 5 16.110.135.51
+    19)
+      echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
+      dig api.my.crestron.com
+      dig fc.crestron.io
+      ping -c 5 5.161.114.106
+      ping -c 5 16.110.135.52
+      ping -c 5 16.110.135.51
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------  
