@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .07" | tee /usr/scripts/wireless.log
+echo "Script Version .08" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -223,18 +223,19 @@ sudo ifconfig wlp6s16 down
    nslookup www.vmware.com 10.0.0.10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
-   sudo ifconfig enp6s18 up
-   sleep 30
-   echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
-   sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
-   #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
-   sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
-   sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
-   sudo chmod 777 /usr/scripts/wireless.sh
-   sudo ifconfig enp6s18 down
-   echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
   done
-  #sudo dhcpcd -k
-  sudo ifconfig enp6s18 down
+#--------------------------------------------------------------------------------------------------------  
+ sudo ifconfig enp6s18 up
+ sleep 30
+ echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
+ sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
+ #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
+ sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
+ sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
+ sudo chmod 777 /usr/scripts/wireless.sh
+ sudo ifconfig enp6s18 down
+ echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
+ #sudo dhcpcd -k
+ sudo ifconfig enp6s18 down
 done
 sudo reboot now
