@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .06" | tee /usr/scripts/wireless.log
+echo "Script Version .07" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -101,10 +101,10 @@ sudo ifconfig wlp6s16 down
     do
      #Bringing up all interfaces after a random interface was selected to pass traffic (First Interface Online)
      echo "Changing route metric on interface " vwlan$h 
-     sudo ifmetric vwlan$h 1000+$h
+     sudo ifmetric vwlan$h 1000
      sleep 2
      echo "Changing route metric on interface " vwlan1$h 
-     sudo ifmetric vwlan$h 1010+$h
+     sudo ifmetric vwlan$h 1010
      sleep 2
     done
     echo "Setting Primary Interface to " vwlan1$h
