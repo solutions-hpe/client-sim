@@ -1,12 +1,12 @@
 #!/bin/bash
-echo "Script Version .02" | tee /usr/scripts/wireless.log
+echo "Script Version .03" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
 sudo ifconfig enp6s18 down
 sudo ifconfig wlp6s16 down
+#--------------------------------------------------------------------------------------------------------
 #Start  Loop for 12 hours then reboot
-
  for (( x = 1; x <= 360; x++ ))
   do
    echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
@@ -43,7 +43,7 @@ sudo ifconfig wlp6s16 down
    echo "Waiting 60 seconds" | tee -a /usr/scripts/wireless.log
    echo "connecting to WiFi" | tee -a /usr/scripts/wireless.log
    sleep 60
-   
+#--------------------------------------------------------------------------------------------------------  
    echo "Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan1 -c 60,str,"MercurySD" -l 0103061c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan2 -c 60,str,"LiftMaster" -l 0103061c
@@ -63,7 +63,7 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan17 -c 60,str,"Meta OculusVR" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
-
+#--------------------------------------------------------------------------------------------------------
    echo "Step 2 - Starting Interfaces" | tee -a /usr/scripts/wireless.log
    for (( h = 1; h <= 9; h++ ))
     do
@@ -75,7 +75,7 @@ sudo ifconfig wlp6s16 down
      sudo ifconfig vwlan1$h up
      sleep 2
     done
-   
+#--------------------------------------------------------------------------------------------------------   
    echo "Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan1 -c 60,str,"MercurySD" -l 0103061c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan2 -c 60,str,"LiftMaster" -l 0103061c
@@ -95,7 +95,7 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan17 -c 60,str,"Meta OculusVR" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
-
+#--------------------------------------------------------------------------------------------------------
   sudo ifconfig enp6s18 down 
   echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
   #Loop to run tests
@@ -194,7 +194,7 @@ sudo ifconfig wlp6s16 down
      ping -c 5 16.110.135.51
      ;;
   esac
-  
+#--------------------------------------------------------------------------------------------------------  
   echo "Generating DNS Traffic &" | tee -a /usr/scripts/wireless.log
   echo "ICMP for Central Stats" | tee -a /usr/scripts/wireless.log
   for (( i = 1; i <= 9; i++ ))
@@ -215,6 +215,7 @@ sudo ifconfig wlp6s16 down
    #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
    find /tmp -type -f size 0 | sudo xargs -r -o rm -v
    sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
+   sudo chmod 777 /usr/scripts/wireless.sh
    sudo ifconfig enp6s18 down
    echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
    sleep 1800
