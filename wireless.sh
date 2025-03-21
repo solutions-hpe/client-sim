@@ -11,6 +11,7 @@ sudo ifconfig wlp6s16 down
   do
    echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -b
+   sudo ifconfig enp6s18 down
    echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
    sudo pkill wpa_supplicant
    echo "Starting Main Loop " $x | tee -a /usr/scripts/wireless.log
@@ -32,6 +33,7 @@ sudo ifconfig wlp6s16 down
      sudo ifconfig vwlan1$h down
      sleep 2
     done
+   sudo ifconfig enp6s18 down
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    #Only 1 interface can pass traffic at a time
@@ -93,7 +95,8 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan17 -c 60,str,"Meta OculusVR" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
-   
+
+  sudo ifconfig enp6s18 down 
   echo "Step 3 - Running Simulations" | tee -a /usr/scripts/wireless.log
   #Loop to run tests
   case "$active" in
@@ -214,5 +217,6 @@ sudo ifconfig wlp6s16 down
    sleep 1800
   done
   sudo dhcpcd -k
+  sudo ifconfig enp6s18 down
 done
 sudo reboot now
