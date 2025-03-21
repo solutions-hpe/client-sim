@@ -64,17 +64,17 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
-   echo "Step 2 - Starting Interfaces" | tee -a /usr/scripts/wireless.log
-   for (( h = 1; h <= 9; h++ ))
-    do
+   #echo "Step 2 - Starting Interfaces" | tee -a /usr/scripts/wireless.log
+   #for (( h = 1; h <= 9; h++ ))
+   # do
      #Bringing up all interfaces after a random interface was selected to pass traffic (First Interface Online)
-     echo "Bringing up interface " vwlan$h 
-     sudo ifconfig vwlan$h up
-     sleep 2
-     echo "Bringing up interface " vwlan1$h 
-     sudo ifconfig vwlan1$h up
-     sleep 2
-    done
+   #  echo "Bringing up interface " vwlan$h 
+   #  sudo ifconfig vwlan$h up
+   #  sleep 2
+   #  echo "Bringing up interface " vwlan1$h 
+   #  sudo ifconfig vwlan1$h up
+   #  sleep 2
+   # done
 #--------------------------------------------------------------------------------------------------------   
    echo "Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan1 -c 60,str,"MercurySD" -l 01061c
