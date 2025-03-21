@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .04" | tee /usr/scripts/wireless.log
+echo "Script Version .05" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -213,7 +213,7 @@ sudo ifconfig wlp6s16 down
    echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
    sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
    #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
-   find /tmp -type -f size 0 | sudo xargs -r -o rm -v
+   sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
    sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
    sudo chmod 777 /usr/scripts/wireless.sh
    sudo ifconfig enp6s18 down
