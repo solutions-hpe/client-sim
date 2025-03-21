@@ -1,5 +1,6 @@
 #!/bin/bash
-echo "Starting Wireless Simulations" | tee /usr/scripts/wireless.log
+echo "Script Version .01" | tee /usr/scripts/wireless.log
+echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
 sudo ifconfig enp6s18 down
