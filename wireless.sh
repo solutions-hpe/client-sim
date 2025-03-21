@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .08" | tee /usr/scripts/wireless.log
+echo "Script Version .09" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -43,27 +43,7 @@ sudo ifconfig wlp6s16 down
    echo "Waiting 60 seconds" | tee -a /usr/scripts/wireless.log
    echo "connecting to WiFi" | tee -a /usr/scripts/wireless.log
    sleep 60
-#--------------------------------------------------------------------------------------------------------  
-   echo "Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan1 -c 60,str,"MercurySD" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan2 -c 60,str,"LiftMaster" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan3 -c 60,str,"RingDevice" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan4 -c 60,str,"AppleIPad" -l 060301790f6c7277fc
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan5 -c 60,str,"SamsungTV" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan6 -c 60,str,"SONOS" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan7 -c 60,str,"Hewlett-Packard JetDirect" -l 0603010f42430d2c770c51fc
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan8 -c 60,str,"PolycomIPPhone" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan9 -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan11 -c 60,str,"AppleIPhone" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan12 -c 60,str,"RingDevice" -l 0103061c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan13 -c 60,str,"Resideo" -l 010306
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan14 -c 60,str,"BarcoShare" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan15 -c 60,str,"WePresentGW" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan16 -c 60,str,"DensitySensor" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan17 -c 60,str,"Meta OculusVR" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -V -f -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
-#--------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------   
    #echo "Step 2 - Starting Interfaces" | tee -a /usr/scripts/wireless.log
    #for (( h = 1; h <= 9; h++ ))
    # do
