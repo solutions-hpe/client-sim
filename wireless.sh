@@ -208,7 +208,7 @@ sudo ifconfig wlp6s16 down
    sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
    #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
    find /tmp -type -f size 0 | sudo xargs -r -o rm -v
-   mv /tmp/wireless.sh /usr/scripts/wireless.sh
+   sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
    echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
    sleep 1800
   done
