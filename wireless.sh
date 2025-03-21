@@ -104,7 +104,7 @@ sudo ifconfig wlp6s16 down
      sudo ifmetric vwlan$h 1000
      sleep 2
      echo "Changing route metric on interface " vwlan1$h 
-     sudo ifmetric vwlan$h 1010
+     sudo ifmetric vwlan1$h 1010
      sleep 2
     done
     echo "Setting Primary Interface to " vwlan1$h
