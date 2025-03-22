@@ -78,6 +78,7 @@ sudo ifconfig wlp6s16 down
       dig connect-ca.myqdevice.com
       curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
       curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
+      wget -r -np -k http://www.liftmaster.com/
      ;;
     3)
       echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
@@ -102,9 +103,11 @@ sudo ifconfig wlp6s16 down
      ;;
     4)
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
+      wget -r -np -k http://www.apple.com/
      ;;
     5)
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
+      wget -r -np -k http://www.samsung.com/
      ;;
     6)
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
@@ -113,12 +116,14 @@ sudo ifconfig wlp6s16 down
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
       ping -c 600 feature-config.sslauth.sonos.com
+      wget -r -np -k http://www.sonos.com/
      ;;
     7)
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
+      wget -r -np -k https://www.hp.com/us-en/poly.html
      ;;
     9)
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
