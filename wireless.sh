@@ -97,6 +97,7 @@ sudo ifconfig wlp6s16 down
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
+      wget -r -np -k http://ring.com/
       ping -c 600 10.0.0.10
      ;;
     4)
