@@ -55,23 +55,23 @@ sudo ifconfig wlp6s16 down
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan1 -c 60,str,"MercurySD" -l 0103060f
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -c 60,str,"LiftMaster" -l 01061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -c 60,str,"RingDevice" -l 01061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -c 60,str,"AppleIPad" -l 0601790f6c7277fc
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan5 -c 60,str,"SamsungTV" -l 01061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan6 -c 60,str,"SONOS" -l 01061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -c 60,str,"LiftMaster" -l 0103061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -c 60,str,"RingDevice" -l 0103061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -c 60,str,"AppleIPad" -l 010306796c0f7277fc
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan5 -c 60,str,"SamsungTV" -l 0103061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan6 -c 60,str,"SONOS" -l 0103061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -c 60,str,"Hewlett-Packard JetDirect" -l 06010f42430d2c770c51fc
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -c 60,str,"PolycomIPPhone" -l 01061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -l 01061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -c 60,str,"PolycomIPPhone" -l 0103061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -l 0103061afc2a0f0c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -c 60,str,"AppleIPhone" -l 010306796c0f7277fc
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -c 60,str,"RingDevice" -l 01061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -c 60,str,"Resideo" -l 0106
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -c 60,str,"BarcoShare" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan15 -c 60,str,"WePresentGW" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan16 -c 60,str,"DensitySensor" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan17 -c 60,str,"Meta OculusVR" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan18 -c 60,str,"Tesla,Inc" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 01060c0f1c28292a7d
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -c 60,str,"RingDevice" -l 0103061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -c 60,str,"Resideo" -l 010306
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -c 60,str,"BarcoShare" -l 0103061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan15 -c 60,str,"WePresentGW" -l 0103061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan16 -c 60,str,"DensitySensor" -l 0103061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan17 -c 60,str,"Meta OculusVR" -l 0103061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan18 -c 60,str,"Tesla,Inc" -l 0103061afc2a0f0c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -c 60,str,"udhcp 1.4.2" -l 0103060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
    echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
    for (( h = 1; h <= 9; h++ ))
