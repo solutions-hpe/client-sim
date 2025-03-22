@@ -10,7 +10,7 @@ sudo ifconfig wlp6s16 down
  for (( x = 1; x <= 360; x++ ))
   do
    echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
-   sudo dhcpcd --inactive
+   sudo dhcpcd
    sudo ifconfig enp6s18 down
    echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
    sudo pkill wpa_supplicant
