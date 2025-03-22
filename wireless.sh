@@ -127,6 +127,23 @@ sudo ifconfig wlp6s16 down
      ;;
     12)
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
+      sleep 5
+      dig ec2-3-235-249-68.prd.rings.solutions
+      dig api.prod.signalling.ring.devices.a2z.com
+      dig alexa.na.gateway.devices.a2z.com
+      dig spectrum.s3.amazonaws.com
+      dig api.amazon.com
+      dig amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
+      dig stickupcammini.devices.prod.rss.ring.amazon.dev
+      dig fw-eventstream.ring.com
+      curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
+      curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
+      curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
+      curl -o /tmp/ring.file https://api.amazon.comonaws.com
+      curl -o /tmp/ring.file https://api.amazon.com
+      curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
+      curl -o /tmp/ring.file https://fw-eventstream.ring.com
+      ping -c 600 10.0.0.10
      ;;
     13)
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
