@@ -25,33 +25,11 @@ sudo ifconfig wlp6s16 down
      sleep 2
      sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
      sleep 2
-     #Bringing all Interfaces down
-     #echo "Shutting down interface " vwlan$h 
-     #sudo ifconfig vwlan$h down
-     #sleep 2
-     #echo "Shutting down interface " vwlan1$h 
-     #sudo ifconfig vwlan1$h down
-     #sleep 2
     done
    sudo ifconfig enp6s18 down
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
-   #echo "Waiting 60 seconds" | tee -a /usr/scripts/wireless.log
-   #echo "connecting to WiFi" | tee -a /usr/scripts/wireless.log
-   #sleep 60
-#--------------------------------------------------------------------------------------------------------   
-   #echo "Step 2 - Starting Interfaces" | tee -a /usr/scripts/wireless.log
-   #for (( h = 1; h <= 9; h++ ))
-   # do
-     #Bringing up all interfaces after a random interface was selected to pass traffic (First Interface Online)
-   #  echo "Bringing up interface " vwlan$h 
-   #  sudo ifconfig vwlan$h up
-   #  sleep 2
-   #  echo "Bringing up interface " vwlan1$h 
-   #  sudo ifconfig vwlan1$h up
-   #  sleep 2
-   # done
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan1 -c 60,str,"MercurySD" -l 0103060f
@@ -63,7 +41,7 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -c 60,str,"Hewlett-Packard JetDirect" -l 06010f42430d2c770c51fc
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -c 60,str,"PolycomIPPhone" -l 0103061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -l 0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -c 60,str,"AppleIPhone" -l 010306796c0f7277fc
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -c 60,str,"AppleMAC" -l 017903060f6c7277fc5f2c2e
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -c 60,str,"RingDevice" -l 0103061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -c 60,str,"Resideo" -l 010306
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -c 60,str,"BarcoShare" -l 0103061afc2a0f0c
