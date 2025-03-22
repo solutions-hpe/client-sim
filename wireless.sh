@@ -54,7 +54,7 @@ sudo ifconfig wlp6s16 down
    # done
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan1 -c 60,str,"MercurySD" -l 01061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan1 -c 60,str,"MercurySD" -l 0103060f
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -c 60,str,"LiftMaster" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -c 60,str,"RingDevice" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -c 60,str,"AppleIPad" -l 0601790f6c7277fc
@@ -63,7 +63,7 @@ sudo ifconfig wlp6s16 down
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -c 60,str,"Hewlett-Packard JetDirect" -l 06010f42430d2c770c51fc
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -c 60,str,"PolycomIPPhone" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -l 01061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -c 60,str,"AppleIPhone" -l 01061c
+   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -c 60,str,"AppleIPhone" -l 010306796c0f7277fc
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -c 60,str,"RingDevice" -l 01061c
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -c 60,str,"Resideo" -l 0106
    sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -c 60,str,"BarcoShare" -l 01061afc2a0f0c
