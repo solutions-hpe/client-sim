@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .20" | tee /usr/scripts/wireless.log
+echo "Script Version .21" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #System level changes - checking at every start
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
@@ -9,32 +9,31 @@ echo 'blacklist ipv6' | sudo tee -a '/etc/modprobe.d/blacklist.local' >/dev/null
 sudo shutdown -r +45000
 sudo ifconfig enp6s18 down
 sudo ifconfig wlp6s16 down
+echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
+sudo dhcpcd
+echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
+sudo pkill wpa_supplicant
+echo "Starting Main Loop " $x | tee -a /usr/scripts/wireless.log
+echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
+#Loop to Shutdown Adapters
+for (( h = 1; h <= 9; h++ ))
+ do
+  echo "Starting WPA Supplicant" 
+  sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan$h
+  sleep 2
+  sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
+  sleep 2
+ done
+echo "Waiting for network Connection" | tee -a /usr/scripts/wireless.log
+sleep 60
 httpwait=1
 #--------------------------------------------------------------------------------------------------------
  for (( x = 1; x <= 5; x++ ))
   do
-   echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
-   sudo dhcpcd
-   echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
-   sudo pkill wpa_supplicant
-   echo "Starting Main Loop " $x | tee -a /usr/scripts/wireless.log
-   echo "Step 1 - Shutting down interfaces" | tee -a /usr/scripts/wireless.log
-   echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
-   #Loop to Shutdown Adapters
-   for (( h = 1; h <= 9; h++ ))
-    do
-     echo "Starting WPA Supplicant" 
-     sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan$h
-     sleep 2
-     sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
-     sleep 2
-    done
-   sudo ifconfig enp6s18 down
+   echo "Step 1 - Set random interface" | tee -a /usr/scripts/wireless.log  
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
-   echo "Waiting for network Connection" | tee -a /usr/scripts/wireless.log
-   sleep 60
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
