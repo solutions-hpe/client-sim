@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .19" | tee /usr/scripts/wireless.log
+echo "Script Version .20" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #System level changes - checking at every start
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
@@ -34,7 +34,6 @@ httpwait=1
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
    echo "Waiting for network Connection" | tee -a /usr/scripts/wireless.log
-   sleep 120
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
@@ -94,9 +93,11 @@ httpwait=1
    #Loop to run tests
    case "$active" in
     1)
+      sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     2)
+      sudo ifmetric vwlan$active 20
       echo "Running LiftMaster Simulations" | tee -a /usr/scripts/wireless.log
       dig connect-ca.myqdevice.com
       curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
@@ -104,6 +105,7 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.liftmaster.com/
      ;;
     3)
+      sudo ifmetric vwlan$active 20
       echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
       sleep 5
       dig ec2-3-235-249-68.prd.rings.solutions
@@ -125,14 +127,17 @@ httpwait=1
       ping -c 600 10.0.0.10
      ;;
     4)
+      sudo ifmetric vwlan$active 20
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.apple.com/
      ;;
     5)
+      sudo ifmetric vwlan$active 20
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.samsung.com/
      ;;
     6)
+      sudo ifmetric vwlan$active 20
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
       dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       dig feature-config.sslauth.sonos.com
@@ -142,20 +147,25 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.sonos.com/
      ;;
     7)
+      sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
+      sudo ifmetric vwlan$active 20
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
+      sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
+      sudo ifmetric vwlan$active 20
       echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.apple.com/
      ;;
     12)
+      sudo ifmetric vwlan$active 20
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
       sleep 5
       dig ec2-3-235-249-68.prd.rings.solutions
@@ -177,6 +187,7 @@ httpwait=1
       ping -c 600 10.0.0.10
      ;;
     13)
+      sudo ifmetric vwlan$active 20
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
       dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
       dig weather02.clouddevice.io
@@ -186,19 +197,24 @@ httpwait=1
       ping -c 600 weather02.clouddevice.io
      ;;
     14)
+      sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     15)
+      sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     16)
+      sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     17)
+      sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.meta.com/
      ;;
     18)
+      sudo ifmetric vwlan$active 20
       echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
       curl --insecure -o /tmp/tesla.file https://x3-prod.obs.tesla.com
       curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
@@ -207,6 +223,7 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.tesla.com/
      ;;
     19)
+      sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       dig api.my.crestron.com
       dig fc.crestron.io
@@ -217,6 +234,7 @@ httpwait=1
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------  
+  sudo ifmetric vwlan$active 20
   echo "Generating DNS Traffic &" | tee -a /usr/scripts/wireless.log
   echo "ICMP for Central Stats" | tee -a /usr/scripts/wireless.log
   for (( i = 1; i <= 9; i++ ))
