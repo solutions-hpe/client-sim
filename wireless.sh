@@ -87,8 +87,8 @@ httpwait=1
    #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -h Crestron -c 60,str,"udhcp 1.4.2" -c 55,hex,0103060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
    echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
-   echo "Setting Primary Interface to " vwlan1$active | tee -a /usr/scripts/wireless.log
-   echo "Changing route metric on interface " vwlan1$active | tee -a /usr/scripts/wireless.log
+   echo "Setting Primary Interface to " vwlan$active | tee -a /usr/scripts/wireless.log
+   echo "Changing route metric on interface " vwlan$active | tee -a /usr/scripts/wireless.log
    sudo ifmetric vwlan$active 20
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down
