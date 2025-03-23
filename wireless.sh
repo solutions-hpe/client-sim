@@ -211,7 +211,7 @@ sudo ifconfig wlp6s16 down
  sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
  sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
  sudo chmod 777 /usr/scripts/wireless.sh
- sudo apt install isc-dhcp-client -y
+ sudo apt remove isc-dhcp-client -y
  sudo ifconfig enp6s18 down
  echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
  #sudo dhcpcd -k
