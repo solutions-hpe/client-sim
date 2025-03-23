@@ -67,6 +67,8 @@ httpwait=1
    sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -G vwlan17
    sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
    sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
+   sudo ifconifg vwlan$active down
+   sudo ifconfig vwlan$active up
    echo "Waiting for DHCP address" | tee -a /usr/scripts/wireless.log
    sleep 60
    #DHTest Code not working right
