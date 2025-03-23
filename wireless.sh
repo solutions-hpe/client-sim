@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .14" | tee /usr/scripts/wireless.log
+echo "Script Version .15" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -223,6 +223,7 @@ sudo ifconfig wlp6s16 down
 #--------------------------------------------------------------------------------------------------------  
  sudo ifconfig enp6s18 up
  sleep 30
+ sudo ifmetric enp6s18 10
  echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
  #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
@@ -232,7 +233,6 @@ sudo ifconfig wlp6s16 down
  sudo apt remove isc-dhcp-client -y
  sudo ifconfig enp6s18 down
  echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
- #sudo dhcpcd -k
  sudo ifconfig enp6s18 down
 done
 sudo reboot now
