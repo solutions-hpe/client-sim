@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .23" | tee /usr/scripts/wireless.log
+echo "Script Version .24" | tee /usr/scripts/wireless.log
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
@@ -21,7 +21,8 @@ sudo shutdown -r +45000
 sudo ifconfig enp6s18 down
 sudo ifconfig wlp6s16 down
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
-sudo dhcpcd
+sudo dhcpcd --inactive
+
 echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
 sudo pkill wpa_supplicant
 echo "Starting Main Loop " $x | tee -a /usr/scripts/wireless.log
