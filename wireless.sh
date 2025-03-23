@@ -6,8 +6,7 @@ sudo shutdown -r +45000
 sudo ifconfig enp6s18 down
 sudo ifconfig wlp6s16 down
 #--------------------------------------------------------------------------------------------------------
-#Start  Loop for 12 hours then reboot
- for (( x = 1; x <= 360; x++ ))
+ for (( x = 1; x <= 5; x++ ))
   do
    echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd
@@ -235,4 +234,4 @@ sudo ifconfig wlp6s16 down
  echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
  sudo ifconfig enp6s18 down
 done
-sudo reboot now
+bash /usr/scripts/wireless.sh
