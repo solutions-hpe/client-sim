@@ -1,5 +1,16 @@
 #!/bin/bash
 echo "Script Version .22" | tee /usr/scripts/wireless.log
+sudo ifmetric enp6s18 10
+echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
+sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
+#Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
+sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
+sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
+sudo chmod 777 /usr/scripts/wireless.sh
+sudo apt remove isc-dhcp-client -y
+sudo ifconfig enp6s18 down
+echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
+sudo ifconfig enp6s18 down
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #System level changes - checking at every start
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
@@ -76,21 +87,12 @@ httpwait=1
    #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -h Crestron -c 60,str,"udhcp 1.4.2" -c 55,hex,0103060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
    echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
-   for (( h = 1; h <= 9; h++ ))
-    do
-     #Bringing up all interfaces after a random interface was selected to pass traffic (First Interface Online)
-     echo "Changing route metric on interface " vwlan$h 
-     sudo ifmetric vwlan$h 1000
-     sleep 2
-     echo "Changing route metric on interface " vwlan1$h 
-     sudo ifmetric vwlan1$h 1010
-     sleep 2
-    done
    echo "Setting Primary Interface to " vwlan1$active | tee -a /usr/scripts/wireless.log
    echo "Changing route metric on interface " vwlan1$active | tee -a /usr/scripts/wireless.log
    sudo ifmetric vwlan$active 20
 #--------------------------------------------------------------------------------------------------------  
-   sudo ifconfig enp6s18 down 
+   sudo ifconfig enp6s18 down
+   sudo ifconfig wlp6s16 down
    echo "Step 4 - Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
    case "$active" in
@@ -251,19 +253,6 @@ httpwait=1
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
-#--------------------------------------------------------------------------------------------------------  
- sudo ifconfig enp6s18 up
- sleep 30
- sudo ifmetric enp6s18 10
- echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
- sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
- #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
- sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
- sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
- sudo chmod 777 /usr/scripts/wireless.sh
- sudo apt remove isc-dhcp-client -y
- sudo ifconfig enp6s18 down
- echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
- sudo ifconfig enp6s18 down
+#--------------------------------------------------------------------------------------------------------
 done
 bash /usr/scripts/wireless.sh
