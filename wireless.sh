@@ -34,6 +34,7 @@ httpwait=1
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
    echo "Waiting for network Connection" | tee -a /usr/scripts/wireless.log
+   sleep 60
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
@@ -54,6 +55,8 @@ httpwait=1
    sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 vwlan17
    sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
    sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
+   echo "Waiting for DHCP address" | tee -a /usr/scripts/wireless.log
+   sleep 60
    #DHTest Code not working right
    #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -h LiftMaster -c 60,str,"LiftMaster" -c 55,hex,0103061c
    #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
