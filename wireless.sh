@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .16" | tee /usr/scripts/wireless.log
+echo "Script Version .17" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -116,16 +116,16 @@ sudo ifconfig wlp6s16 down
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -l 2-np -k http://ring.com/
+      wget -r -l 0 -np -k http://ring.com/
       ping -c 600 10.0.0.10
      ;;
     4)
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l 2 -np -k http://www.apple.com/
+      wget -r -l 0 -np -k http://www.apple.com/
      ;;
     5)
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l 2 -np -k http://www.samsung.com/
+      wget -r -l 0 -np -k http://www.samsung.com/
      ;;
     6)
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
@@ -134,14 +134,14 @@ sudo ifconfig wlp6s16 down
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
       ping -c 600 feature-config.sslauth.sonos.com
-      wget -r -l 2 -np -k http://www.sonos.com/
+      wget -r -l 0 -np -k http://www.sonos.com/
      ;;
     7)
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l 2 -np -k https://www.hp.com/us-en/poly.html
+      wget -r -l 0 -np -k https://www.hp.com/us-en/poly.html
      ;;
     9)
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
