@@ -88,7 +88,7 @@ httpwait=1
 #--------------------------------------------------------------------------------------------------------
    echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
    echo "Setting Primary Interface to " vwlan$active | tee -a /usr/scripts/wireless.log
-   echo "Changing route metric on interface " vwlan$active | tee -a /usr/scripts/wireless.log
+   echo "Changing route metric on " vwlan$active | tee -a /usr/scripts/wireless.log
    sudo ifmetric vwlan$active 20
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down
