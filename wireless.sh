@@ -104,7 +104,7 @@ httpwait=1
       dig connect-ca.myqdevice.com
       curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
       curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.liftmaster.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
       sudo ifmetric vwlan$active 20
@@ -125,18 +125,18 @@ httpwait=1
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://ring.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ping -c 600 10.0.0.10
      ;;
     4)
       sudo ifmetric vwlan$active 20
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.apple.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
       sudo ifmetric vwlan$active 20
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.samsung.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
      ;;
     6)
       sudo ifmetric vwlan$active 20
@@ -146,7 +146,7 @@ httpwait=1
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
       ping -c 600 feature-config.sslauth.sonos.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.sonos.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
      ;;
     7)
       sudo ifmetric vwlan$active 20
@@ -164,7 +164,7 @@ httpwait=1
     11)
       sudo ifmetric vwlan$active 20
       echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.apple.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
       sudo ifmetric vwlan$active 20
@@ -185,7 +185,7 @@ httpwait=1
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://ring.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ping -c 600 10.0.0.10
      ;;
     13)
@@ -195,7 +195,7 @@ httpwait=1
       dig weather02.clouddevice.io
       curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
       curl -o /tmp/resideo.file https://weather02.clouddevice.io
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.resideo.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
       ping -c 600 weather02.clouddevice.io
      ;;
     14)
@@ -213,7 +213,7 @@ httpwait=1
     17)
       sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.meta.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
       sudo ifmetric vwlan$active 20
@@ -222,14 +222,14 @@ httpwait=1
       curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
       curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
       curl --insecure -o /tmp/tesla.file https://telemetry-prd.vn.tesla.services
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.tesla.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
       sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       dig api.my.crestron.com
       dig fc.crestron.io
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k http://www.crestron.com/
+      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
       ping -c 5 5.161.114.106
       ping -c 5 16.110.135.52
       ping -c 5 16.110.135.51
