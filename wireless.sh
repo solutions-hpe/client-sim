@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .22" | tee /usr/scripts/wireless.log
+echo "Script Version .23" | tee /usr/scripts/wireless.log
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
