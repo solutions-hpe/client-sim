@@ -32,24 +32,42 @@ sudo ifconfig wlp6s16 down
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan1 -h MercurySD -c 60,str,"MercurySD" -c 55,hex,0103060f
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -h LiftMaster -c 60,str,"LiftMaster" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -h AppleIPad -c 60,str,"AppleIPad" -c 55,hex,010306796c0f7277fc
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan5 -h SamsungTV -c 60,str,"SamsungTV" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan6 -h SONOS -c 60,str,"SONOS" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -h HPPrinter -c 60,str,"Hewlett-Packard JetDirect" -c 55,hex,06010f42430d2c770c51fc
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -h Polycom -c 60,str,"PolycomIPPhone" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -h Axis -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -h AppleMAC -c 60,str,"AppleMAC" -c 55,hex,017903060f6c7277fc5f2c2e
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -h Resideo -c 60,str,"Resideo" -c 55,hex,010306
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -h BarcoShare -c 60,str,"BarcoShare" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan15 -h WePresentGW -c 60,str,"WePresentGW" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan16 -h Density -c 60,str,"DensitySensor" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan17 -h Oculus -c 60,str,"Meta OculusVR" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan18 -h Tesla -c 60,str,"Tesla,Inc" -c 55,hex,0103061afc2a0f0c
-   sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -h Crestron -c 60,str,"udhcp 1.4.2" -c 55,hex,0103060c0f1c28292a7d
+   sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
+   sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 vwlan2
+   sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan3
+   sudo dhcpcd -h iPad -i Apple -o 1,3,6 vwlan4
+   sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 vwlan5
+   sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 vwlan6
+   sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 vwlan7
+   sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 vwlan8
+   sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 vwlan9
+   sudo dhcpcd -h MacBook -i Apple -o 1,3,6 vwlan11
+   sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan12
+   sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 vwlan13
+   sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 vwlan14
+   sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 vwlan15
+   sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 vwlan16
+   sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 vwlan17
+   sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
+   sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
+   #DHTest Code not working right
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -h LiftMaster -c 60,str,"LiftMaster" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -h AppleIPad -c 60,str,"AppleIPad" -c 55,hex,010306796c0f7277fc
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan5 -h SamsungTV -c 60,str,"SamsungTV" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan6 -h SONOS -c 60,str,"SONOS" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -h HPPrinter -c 60,str,"Hewlett-Packard JetDirect" -c 55,hex,06010f42430d2c770c51fc
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -h Polycom -c 60,str,"PolycomIPPhone" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -h Axis -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -h AppleMAC -c 60,str,"AppleMAC" -c 55,hex,017903060f6c7277fc5f2c2e
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -h Resideo -c 60,str,"Resideo" -c 55,hex,010306
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -h BarcoShare -c 60,str,"BarcoShare" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan15 -h WePresentGW -c 60,str,"WePresentGW" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan16 -h Density -c 60,str,"DensitySensor" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan17 -h Oculus -c 60,str,"Meta OculusVR" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan18 -h Tesla -c 60,str,"Tesla,Inc" -c 55,hex,0103061afc2a0f0c
+   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -h Crestron -c 60,str,"udhcp 1.4.2" -c 55,hex,0103060c0f1c28292a7d
 #--------------------------------------------------------------------------------------------------------
    echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
    for (( h = 1; h <= 9; h++ ))
