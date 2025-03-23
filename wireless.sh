@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .24" | tee /usr/scripts/wireless.log
+echo "Script Version .25" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 sudo dhcpcd enp6s18
