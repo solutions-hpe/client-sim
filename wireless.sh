@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .21" | tee /usr/scripts/wireless.log
+echo "Script Version .22" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #System level changes - checking at every start
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
