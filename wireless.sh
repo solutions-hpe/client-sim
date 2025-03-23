@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .15" | tee /usr/scripts/wireless.log
+echo "Script Version .16" | tee /usr/scripts/wireless.log
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #Scheduled Reboot
 sudo shutdown -r +45000
@@ -29,6 +29,8 @@ sudo ifconfig wlp6s16 down
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
+   echo "Waiting for network Connection" | tee -a /usr/scripts/wireless.log
+   sleep 120
 #--------------------------------------------------------------------------------------------------------   
    echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
