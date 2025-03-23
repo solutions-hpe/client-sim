@@ -86,8 +86,8 @@ httpwait=1
      sudo ifmetric vwlan1$h 1010
      sleep 2
     done
-   echo "Setting Primary Interface to " vwlan1$h
-   echo "Changing route metric on interface " vwlan1$h
+   echo "Setting Primary Interface to " vwlan1$active | tee -a /usr/scripts/wireless.log
+   echo "Changing route metric on interface " vwlan1$active | tee -a /usr/scripts/wireless.log
    sudo ifmetric vwlan$active 20
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down 
