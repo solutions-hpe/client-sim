@@ -263,6 +263,7 @@ dhcpsleep=10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
+sudo dhchpcd -k vwlan$active
 #--------------------------------------------------------------------------------------------------------
 done
 bash /usr/scripts/wireless.sh
