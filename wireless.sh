@@ -70,8 +70,6 @@ dhcpsleep=10
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log 
 #--------------------------------------------------------------------------------------------------------  
-   sudo ifconfig enp6s18 down
-   sudo ifconfig wlp6s16 down
    echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
    case "$active" in
