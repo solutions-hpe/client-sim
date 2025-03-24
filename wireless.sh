@@ -57,8 +57,8 @@ for (( h = 1; h <= 9; h++ ))
   #sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
   #sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
 echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
-echo "Sleeping for 3 minutes" | tee -a /usr/scripts/wireless.log
-sleep 180
+echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
+sleep 300
 #Variable for how long to wait for HTTP/HTTPS timeout in wget command
 httpwait=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
