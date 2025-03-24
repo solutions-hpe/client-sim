@@ -159,7 +159,7 @@ dhcpsleep=10
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
+      #wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
       sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -m 20 vwlan9
