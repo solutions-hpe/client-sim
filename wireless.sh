@@ -1,6 +1,7 @@
 #!/bin/bash
 echo "Script Version .29" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
+sudo ifconfig enp6s18 down
 sudo dhcpcd --inactive
 sudo dhcpcd enp6s18
 sleep 5
