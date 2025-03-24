@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .31" | tee /usr/scripts/wireless.log
+echo "Script Version .32" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
@@ -262,7 +262,7 @@ dhcpsleep=10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
-sudo dhchpcd -k vwlan$active
+sudo dhcpcd -k vwlan$active
 #--------------------------------------------------------------------------------------------------------
 done
 bash /usr/scripts/wireless.sh
