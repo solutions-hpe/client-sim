@@ -75,6 +75,8 @@ dhcpsleep=10
    echo "Set random interface" | tee -a /usr/scripts/wireless.log 
    ip a | grep NO-CARRIER
    ip route | grep "metric 20"
+   sudo dhcpcd -k vwlan$active
+   sleep 5
 #--------------------------------------------------------------------------------------------------------  
    echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
@@ -283,9 +285,12 @@ dhcpsleep=10
   done
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
- sudo dhcpcd -k
+ sudo dhcpcd -k vwlan$active
+ sleep 2
  sudo dhcpcd -x
+ sleep 2
  sudo dhcpcd --inactive
+ sleep 2
  sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
  sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan3
  sudo dhcpcd -h iPad -i Apple -o 1,3,6 vwlan4
