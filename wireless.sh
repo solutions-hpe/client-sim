@@ -65,7 +65,7 @@ httpretry=1
 #Variable for how many recursive directories WGET attempts to download
 httpdepth=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
-dhcpsleep=10
+dhcpsleep=15
 #--------------------------------------------------------------------------------------------------------
  for (( x = 1; x <= 5; x++ ))
   do
@@ -76,7 +76,7 @@ dhcpsleep=10
    ip a | grep NO-CARRIER
    ip route | grep "metric 20"
    sudo dhcpcd -k vwlan$active
-   sleep 5
+   sleep $dhcpsleep
 #--------------------------------------------------------------------------------------------------------  
    echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
