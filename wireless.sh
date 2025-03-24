@@ -120,7 +120,6 @@ dhcpsleep=10
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
-      ping -c 600 10.0.0.10
      ;;
     4)
       sudo dhcpcd -h iPad -i Apple -o 1,3,6 -m 20 vwlan4
@@ -204,8 +203,7 @@ dhcpsleep=10
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
-      ping -c 600 10.0.0.10
-     ;;
+      ;;
     13)
       sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -m 20 vwlan13
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
@@ -217,7 +215,6 @@ dhcpsleep=10
       curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
       curl -o /tmp/resideo.file https://weather02.clouddevice.io
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
-      ping -c 600 weather02.clouddevice.io
      ;;
     14)
       sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -m 20 vwlan14
@@ -269,9 +266,6 @@ dhcpsleep=10
       dig api.my.crestron.com
       dig fc.crestron.io
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
-      ping -c 5 5.161.114.106
-      ping -c 5 16.110.135.52
-      ping -c 5 16.110.135.51
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------  
@@ -286,8 +280,6 @@ dhcpsleep=10
    nslookup www.apple.com 10.0.0.10
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
-   #Traffic for stats in central - ICMP and random file downloads
-   ping -c 10 10.0.0.10
   done
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
