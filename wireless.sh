@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .35" | tee /usr/scripts/wireless.log
+echo "Script Version .36" | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
@@ -291,5 +291,7 @@ dhcpsleep=10
    ping -c 10 10.0.0.10
   done
 #--------------------------------------------------------------------------------------------------------
+sudo dhcpcd -k
+sudo dhcpcd -x
 done
 bash /usr/scripts/wireless.sh
