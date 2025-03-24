@@ -57,8 +57,8 @@ for (( h = 1; h <= 9; h++ ))
   #sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
   #sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
 echo "Waiting for network connection"
-echo "Sleeping for 5 minutes"
-sleep 300
+echo "Sleeping for 3 minutes"
+sleep 180
 httpwait=1
 dhcpsleep=10
 #--------------------------------------------------------------------------------------------------------
