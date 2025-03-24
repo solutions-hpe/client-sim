@@ -1,8 +1,7 @@
 #!/bin/bash
-echo "Script Version .25" | tee /usr/scripts/wireless.log
+echo "Script Version .26" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
-sudo dhcpcd --inactive
-sudo dhcpcd enp6s18
+sudo dhcpc
 sleep 30
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
@@ -43,68 +42,23 @@ httpwait=1
 #--------------------------------------------------------------------------------------------------------
  for (( x = 1; x <= 5; x++ ))
   do
-   echo "Step 1 - Set random interface" | tee -a /usr/scripts/wireless.log  
+   echo "Set random interface" | tee -a /usr/scripts/wireless.log  
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
-   echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
-#--------------------------------------------------------------------------------------------------------   
-   echo "Step 2 - Running DHCP Simulation" | tee -a /usr/scripts/wireless.log
-   sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -G vwlan1
-   sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -G vwlan2
-   sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan3
-   sudo dhcpcd -h iPad -i Apple -o 1,3,6 -G vwlan4
-   sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -G vwlan5
-   sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -G vwlan6
-   sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -G vwlan7
-   sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -G vwlan8
-   sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -G vwlan9
-   sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -G vwlan11
-   sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan12
-   sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -G vwlan13
-   sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -G vwlan14
-   sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -G vwlan15
-   sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -G vwlan16
-   sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -G vwlan17
-   sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
-   sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
-   sudo ifconifg vwlan$active down
-   sudo ifconfig vwlan$active up
-   echo "Waiting for DHCP address" | tee -a /usr/scripts/wireless.log
-   sleep 60
-   #DHTest Code not working right
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan2 -h LiftMaster -c 60,str,"LiftMaster" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan3 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan4 -h AppleIPad -c 60,str,"AppleIPad" -c 55,hex,010306796c0f7277fc
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan5 -h SamsungTV -c 60,str,"SamsungTV" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan6 -h SONOS -c 60,str,"SONOS" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan7 -h HPPrinter -c 60,str,"Hewlett-Packard JetDirect" -c 55,hex,06010f42430d2c770c51fc
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan8 -h Polycom -c 60,str,"PolycomIPPhone" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan9 -h Axis -c 60,str,"AXIS,NetworkCamera,P3375-V,7.25.1.1" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan11 -h AppleMAC -c 60,str,"AppleMAC" -c 55,hex,017903060f6c7277fc5f2c2e
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan12 -h RingDevice -c 60,str,"RingDevice" -c 55,hex,0103061c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan13 -h Resideo -c 60,str,"Resideo" -c 55,hex,010306
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan14 -h BarcoShare -c 60,str,"BarcoShare" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan15 -h WePresentGW -c 60,str,"WePresentGW" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan16 -h Density -c 60,str,"DensitySensor" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan17 -h Oculus -c 60,str,"Meta OculusVR" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan18 -h Tesla -c 60,str,"Tesla,Inc" -c 55,hex,0103061afc2a0f0c
-   #sudo /usr/scripts/dhtest/dhtest -t 15 -i vwlan19 -h Crestron -c 60,str,"udhcp 1.4.2" -c 55,hex,0103060c0f1c28292a7d
-#--------------------------------------------------------------------------------------------------------
-   echo "Step 3 - Resetting Routes" | tee -a /usr/scripts/wireless.log
-   echo "Setting Primary Interface to " vwlan$active | tee -a /usr/scripts/wireless.log
-   echo "Changing route metric on " vwlan$active | tee -a /usr/scripts/wireless.log
-   sudo ifmetric vwlan$active 20
+   echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log 
 #--------------------------------------------------------------------------------------------------------  
    sudo ifconfig enp6s18 down
    sudo ifconfig wlp6s16 down
-   echo "Step 4 - Running Simulations" | tee -a /usr/scripts/wireless.log
+   echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
    case "$active" in
     1)
+      sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -m 20 vwlan1
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     2)
+      sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -m 20 vwlan2
       sudo ifmetric vwlan$active 20
       echo "Running LiftMaster Simulations" | tee -a /usr/scripts/wireless.log
       dig connect-ca.myqdevice.com
@@ -113,6 +67,7 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
+      sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan3
       sudo ifmetric vwlan$active 20
       echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
       sleep 5
@@ -135,16 +90,19 @@ httpwait=1
       ping -c 600 10.0.0.10
      ;;
     4)
+      sudo dhcpcd -h iPad -i Apple -o 1,3,6 -m 20 vwlan4
       sudo ifmetric vwlan$active 20
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
+      sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -m 20 vwlan5
       sudo ifmetric vwlan$active 20
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
      ;;
     6)
+      sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -m 20 vwlan6
       sudo ifmetric vwlan$active 20
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
       dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
@@ -155,24 +113,29 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
      ;;
     7)
+      sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -m 20 vwlan7
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
+      sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -m 20 vwlan8
       sudo ifmetric vwlan$active 20
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
+      sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -m 20 vwlan9
       sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
+      sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -m 20 vwlan11
       sudo ifmetric vwlan$active 20
       echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
+      sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan12
       sudo ifmetric vwlan$active 20
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
       sleep 5
@@ -195,6 +158,7 @@ httpwait=1
       ping -c 600 10.0.0.10
      ;;
     13)
+      sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -m 20 vwlan13
       sudo ifmetric vwlan$active 20
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
       dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
@@ -205,23 +169,28 @@ httpwait=1
       ping -c 600 weather02.clouddevice.io
      ;;
     14)
+      sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -m 20 vwlan14
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     15)
+      sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -m 20 vwlan15
       sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     16)
+      sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -m 20 vwlan16
       sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     17)
+      sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -m 20 vwlan17
       sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
+      sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -m 20 vwlan18
       sudo ifmetric vwlan$active 20
       echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
       curl --insecure -o /tmp/tesla.file https://x3-prod.obs.tesla.com
@@ -231,6 +200,7 @@ httpwait=1
       wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
+      sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -m 20 vwlan19
       sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       dig api.my.crestron.com
@@ -242,7 +212,6 @@ httpwait=1
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------  
-  sudo ifmetric vwlan$active 20
   echo "Generating DNS Traffic &" | tee -a /usr/scripts/wireless.log
   echo "ICMP for Central Stats" | tee -a /usr/scripts/wireless.log
   for (( i = 1; i <= 9; i++ ))
