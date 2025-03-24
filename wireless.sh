@@ -265,7 +265,7 @@ dhcpsleep=10
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       dig api.my.crestron.com
       dig fc.crestron.io
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
+      #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------  
