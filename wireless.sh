@@ -59,7 +59,9 @@ for (( h = 1; h <= 9; h++ ))
 echo "Waiting for network connection"
 echo "Sleeping for 3 minutes"
 sleep 180
+#Variable for how long to wait for HTTP/HTTPS timeout in wget command
 httpwait=1
+#Variable for how long to wait for IP address after running dhcpcd command before running simulation
 dhcpsleep=10
 #--------------------------------------------------------------------------------------------------------
  for (( x = 1; x <= 5; x++ ))
