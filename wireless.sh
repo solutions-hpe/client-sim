@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Script Version .26" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
-sudo dhcpc
+sudo dhcpcd
 sleep 30
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
