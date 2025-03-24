@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .32" | tee /usr/scripts/wireless.log
+echo "Script Version .33" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
@@ -56,8 +56,8 @@ for (( h = 1; h <= 9; h++ ))
   #sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -G vwlan17
   #sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
   #sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
-echo "Waiting for network connection"
-echo "Sleeping for 3 minutes"
+echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
+echo "Sleeping for 3 minutes" | tee -a /usr/scripts/wireless.log
 sleep 180
 #Variable for how long to wait for HTTP/HTTPS timeout in wget command
 httpwait=1
@@ -76,12 +76,14 @@ dhcpsleep=10
    case "$active" in
     1)
       sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -m 20 vwlan1
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     2)
       sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -m 20 vwlan2
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running LiftMaster Simulations" | tee -a /usr/scripts/wireless.log
@@ -92,6 +94,7 @@ dhcpsleep=10
      ;;
     3)
       sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan3
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
@@ -116,6 +119,7 @@ dhcpsleep=10
      ;;
     4)
       sudo dhcpcd -h iPad -i Apple -o 1,3,6 -m 20 vwlan4
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
@@ -123,6 +127,7 @@ dhcpsleep=10
      ;;
     5)
       sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -m 20 vwlan5
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
@@ -130,6 +135,7 @@ dhcpsleep=10
      ;;
     6)
       sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -m 20 vwlan6
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
@@ -142,12 +148,14 @@ dhcpsleep=10
      ;;
     7)
       sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -m 20 vwlan7
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
       sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -m 20 vwlan8
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
@@ -155,12 +163,14 @@ dhcpsleep=10
      ;;
     9)
       sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -m 20 vwlan9
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
       sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -m 20 vwlan11
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
@@ -168,6 +178,7 @@ dhcpsleep=10
      ;;
     12)
       sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan12
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
@@ -192,6 +203,7 @@ dhcpsleep=10
      ;;
     13)
       sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -m 20 vwlan13
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
@@ -204,24 +216,28 @@ dhcpsleep=10
      ;;
     14)
       sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -m 20 vwlan14
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     15)
       sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -m 20 vwlan15
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     16)
       sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -m 20 vwlan16
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     17)
       sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -m 20 vwlan17
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
@@ -229,6 +245,7 @@ dhcpsleep=10
      ;;
     18)
       sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -m 20 vwlan18
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
@@ -240,6 +257,7 @@ dhcpsleep=10
      ;;
     19)
       sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -m 20 vwlan19
+      echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
@@ -266,6 +284,7 @@ dhcpsleep=10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
+echo "Releasing Network Connection for " vwlan$active | tee -a /usr/scripts/wireless.log
 sudo dhcpcd -k vwlan$active
 #--------------------------------------------------------------------------------------------------------
 done
