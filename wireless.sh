@@ -283,25 +283,25 @@ dhcpsleep=10
   done
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
-sudo dhcpcd -k
-sudo dhcpcd -x
-sudo dhcpcd --inactive
-sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
-sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan3
-sudo dhcpcd -h iPad -i Apple -o 1,3,6 vwlan4
-sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 vwlan5
-sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 vwlan6
-sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 vwlan7
-sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 vwlan8
-sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 vwlan9
-sudo dhcpcd -h MacBook -i Apple -o 1,3,6 vwlan11
-sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan12
-sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 vwlan13
-sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 vwlan14
-sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 vwlan15
-sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 vwlan16
-sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 vwlan17
-sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
-sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
+ sudo dhcpcd -k
+ sudo dhcpcd -x
+ sudo dhcpcd --inactive
+ sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 vwlan1
+ sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan3
+ sudo dhcpcd -h iPad -i Apple -o 1,3,6 vwlan4
+ sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 vwlan5
+ sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 vwlan6
+ sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 vwlan7
+ sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 vwlan8
+ sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 vwlan9
+ sudo dhcpcd -h MacBook -i Apple -o 1,3,6 vwlan11
+ sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 vwlan12
+ sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 vwlan13
+ sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 vwlan14
+ sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 vwlan15
+ sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 vwlan16
+ sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 vwlan17
+ sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
+ sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
 done
 bash /usr/scripts/wireless.sh
