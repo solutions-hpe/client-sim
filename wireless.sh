@@ -61,7 +61,9 @@ sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 vwlan17
 sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
 sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
 #Variable for how long to wait for HTTP/HTTPS timeout in wget command
-httpwait=1
+httpretry=1
+#Variable for how many recursive directories WGET attempts to download
+httpdepth=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
 dhcpsleep=10
 #--------------------------------------------------------------------------------------------------------
@@ -96,7 +98,7 @@ dhcpsleep=10
       dig connect-ca.myqdevice.com
       curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
       curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
       sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan3
@@ -120,7 +122,7 @@ dhcpsleep=10
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://ring.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ping -c 600 10.0.0.10
      ;;
     4)
@@ -129,7 +131,7 @@ dhcpsleep=10
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
       sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -m 20 vwlan5
@@ -137,7 +139,7 @@ dhcpsleep=10
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
      ;;
     6)
       sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -m 20 vwlan6
@@ -150,7 +152,7 @@ dhcpsleep=10
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
       ping -c 600 feature-config.sslauth.sonos.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
      ;;
     7)
       sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -m 20 vwlan7
@@ -180,7 +182,7 @@ dhcpsleep=10
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
       sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan12
@@ -204,7 +206,7 @@ dhcpsleep=10
       curl -o /tmp/ring.file https://api.amazon.com
       curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://ring.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ping -c 600 10.0.0.10
      ;;
     13)
@@ -217,7 +219,7 @@ dhcpsleep=10
       dig weather02.clouddevice.io
       curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
       curl -o /tmp/resideo.file https://weather02.clouddevice.io
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
       ping -c 600 weather02.clouddevice.io
      ;;
     14)
@@ -247,7 +249,7 @@ dhcpsleep=10
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
       sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -m 20 vwlan18
@@ -259,7 +261,7 @@ dhcpsleep=10
       curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
       curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
       curl --insecure -o /tmp/tesla.file https://telemetry-prd.vn.tesla.services
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
       sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -m 20 vwlan19
@@ -269,7 +271,7 @@ dhcpsleep=10
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       dig api.my.crestron.com
       dig fc.crestron.io
-      wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
       ping -c 5 5.161.114.106
       ping -c 5 16.110.135.52
       ping -c 5 16.110.135.51
