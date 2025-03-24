@@ -74,7 +74,7 @@ dhcpsleep=10
    echo "Set random interface" | tee -a /usr/scripts/wireless.log 
    sudo dhcpcd -k vwlan$active
    ip a | grep NO-CARRIER
-   ip route
+   ip route | grep "metric 20"
 #--------------------------------------------------------------------------------------------------------  
    echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
