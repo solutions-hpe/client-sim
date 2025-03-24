@@ -17,6 +17,8 @@ sudo ifconfig wlp6s16 down
 #Clearing out any WPA supplicant configuration
 echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
 sudo pkill wpa_supplicant
+#Waiting for network to come up
+sleep 30
 #Setting route metric for wired interface for script update process
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
