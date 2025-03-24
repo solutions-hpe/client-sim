@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .28" | tee /usr/scripts/wireless.log
+echo "Script Version .29" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 sleep 5
@@ -37,24 +37,24 @@ for (( h = 1; h <= 9; h++ ))
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
   sleep 2
  done
-  sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -G vwlan1
-  sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -G vwlan
-  sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan3
-  sudo dhcpcd -h iPad -i Apple -o 1,3,6 -G vwlan4
-  sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -G vwlan5
-  sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -G vwlan6
-  sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -G vwlan7
-  sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -G vwlan8
-  sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -G vwlan9
-  sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -G vwlan11
-  sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan12
-  sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -G vwlan13
-  sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -G vwlan14
-  sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -G vwlan15
-  sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -G vwlan16
-  sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -G vwlan17
-  sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
-  sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
+  #sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -G vwlan1
+  #sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -G vwlan
+  #sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan3
+  #sudo dhcpcd -h iPad -i Apple -o 1,3,6 -G vwlan4
+  #sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -G vwlan5
+  #sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -G vwlan6
+  #sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -G vwlan7
+  #sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -G vwlan8
+  #sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -G vwlan9
+  #sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -G vwlan11
+  #sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -G vwlan12
+  #sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -G vwlan13
+  #sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -G vwlan14
+  #sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -G vwlan15
+  #sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -G vwlan16
+  #sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -G vwlan17
+  #sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -G vwlan18
+  #sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -G vwlan19
 httpwait=1
 dhcpsleep=10
 #--------------------------------------------------------------------------------------------------------
