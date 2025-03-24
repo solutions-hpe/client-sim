@@ -22,7 +22,7 @@ sleep 30
 #Setting route metric for wired interface for script update process
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/T3/main/wireless.sh -O /tmp/wireless.sh
+sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/wireless.sh -O /tmp/wireless.sh
 #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
 sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
 #Moving file to script repo - put in tmp location because if the download fails it overwrites the existing script
