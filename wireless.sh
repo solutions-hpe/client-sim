@@ -284,7 +284,7 @@ dhcpsleep=10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
-echo "Releasing Network Connection for " vwlan$active | tee -a /usr/scripts/wireless.log
+echo "Releasing IP for " vwlan$active | tee -a /usr/scripts/wireless.log
 sudo dhcpcd -k vwlan$active
 #--------------------------------------------------------------------------------------------------------
 done
