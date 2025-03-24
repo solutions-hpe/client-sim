@@ -10,21 +10,25 @@ echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
 #Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
 sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
+#Moving file to script repo - put in tmp location because if the download fails it overwrites the existing script
 sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
+#Setting permission to execute the script
 sudo chmod 777 /usr/scripts/wireless.sh
-sudo apt remove isc-dhcp-client -y
+#Shutting down wired interface so the simulations are forced out the WLAN
 sudo ifconfig enp6s18 down
 echo "Simulation Script Sleeping" | tee -a /usr/scripts/wireless.log 
-sudo ifconfig enp6s18 down
 echo "Starting Wireless Simulations" | tee -a /usr/scripts/wireless.log
 #System level changes - checking at every start
+#Shutting down the MDNS responder
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
+#Disabling IPV6 system wide
 echo 'blacklist ipv6' | sudo tee -a '/etc/modprobe.d/blacklist.local' >/dev/null 
 #Scheduled Reboot
 sudo shutdown -r +45000
-sudo ifconfig enp6s18 down
+#Disabling parent WLAN Adapter for simulation
 sudo ifconfig wlp6s16 down
+#Clearing out any WPA supplicant configuration
 echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
 sudo pkill wpa_supplicant
 echo "Starting Main Loop " $x | tee -a /usr/scripts/wireless.log
@@ -32,7 +36,7 @@ echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
 #Loop to Shutdown Adapters
 for (( h = 1; h <= 9; h++ ))
  do
-  echo "Starting WPA Supplicant" 
+  echo "Starting WPA Supplicant"
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan$h
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
  done
