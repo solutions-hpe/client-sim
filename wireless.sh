@@ -2,9 +2,10 @@
 echo "Script Version .31" | tee /usr/scripts/wireless.log
 echo "Starting DHCPCD Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
+sleep 10
 sudo dhcpcd --inactive
 sudo dhcpcd enp6s18
-sleep 5
+sleep 10
 sudo ifmetric enp6s18 10
 echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/wireless.sh -O /tmp/wireless.sh
