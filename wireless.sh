@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .34" | tee /usr/scripts/wireless.log
+echo "Script Version .35" | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
@@ -72,6 +72,7 @@ dhcpsleep=10
    #Generate a random number to select a random interface to bring online
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
    echo "Set random interface" | tee -a /usr/scripts/wireless.log 
+   echo "Releasing IP for " vwlan$active | tee -a /usr/scripts/wireless.log
    sudo dhcpcd -k vwlan$active
    ip a | grep NO-CARRIER
    ip route | grep "metric 20"
@@ -289,8 +290,6 @@ dhcpsleep=10
    #Traffic for stats in central - ICMP and random file downloads
    ping -c 10 10.0.0.10
   done
-echo "Releasing IP for " vwlan$active | tee -a /usr/scripts/wireless.log
-sudo dhcpcd -k vwlan$active
 #--------------------------------------------------------------------------------------------------------
 done
 bash /usr/scripts/wireless.sh
