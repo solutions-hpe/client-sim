@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .40" | tee /usr/scripts/wireless.log
+echo "Script Version .41" | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
@@ -82,14 +82,14 @@ dhcpsleep=15
    #Loop to run tests
    case "$active" in
     1)
-      sudo dhcpcd -h MercurySD -i Mercury -o 1,3,6 -m 20 vwlan1
+      sudo dhcpcd -h MercurySD -i "dhcpcd-5.5.6:Mercury-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan1
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     2)
-      sudo dhcpcd -h Liftmaster -i Automation -o 1,3,6 -m 20 vwlan2
+      sudo dhcpcd -h Liftmaster -i "dhcpcd-5.5.6:busybox-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan2
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -100,7 +100,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
-      sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan3
+      sudo dhcpcd -h Ring -i "dhcpcd-5.5.6:busybox-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan3
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -124,7 +124,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
      ;;
     4)
-      sudo dhcpcd -h iPad -i Apple -o 1,3,6 -m 20 vwlan4
+      sudo dhcpcd -h iPad -i "darwin-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan4
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -132,7 +132,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
-      sudo dhcpcd -h Samsung -i SamsungTV -o 1,3,6 -m 20 vwlan5
+      sudo dhcpcd -h Samsung -i "dhcpcd-5.5.6:linux-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan5
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -140,7 +140,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
      ;;
     6)
-      sudo dhcpcd -h SONOS -i SonosAudio -o 1,3,6 -m 20 vwlan6
+      sudo dhcpcd -h SONOS -i "dhcpcd-5.5.6:SONOS-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan6
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -153,14 +153,14 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
      ;;
     7)
-      sudo dhcpcd -h HPPrinter -i HPJetDirect -o 1,3,6 -m 20 vwlan7
+      sudo dhcpcd -h HPPrinter -i "Hewlett-Packard JetDirect" -o 1,3,6 -m 20 vwlan7
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
-      sudo dhcpcd -h PolyCom -i IPPhone -o 1,3,6 -m 20 vwlan8
+      sudo dhcpcd -h PolyCom -i "dhcpcd-5.2.10:Linux-2.6.37+:armv7l:ti8168evm" -o 1,3,6 -m 20 vwlan8
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -168,14 +168,14 @@ dhcpsleep=15
       #wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
-      sudo dhcpcd -h AxisCam -i AxisSecurity -o 1,3,6 -m 20 vwlan9
+      sudo dhcpcd -h AxisCam -i "Axis,Dome Camera,P3265-LV,10.12.165" -o 1,3,6 -m 20 vwlan9
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
-      sudo dhcpcd -h MacBook -i Apple -o 1,3,6 -m 20 vwlan11
+      sudo dhcpcd -h MacBook -i "darwin" -o 1,3,6 -m 20 vwlan11
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -183,7 +183,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
-      sudo dhcpcd -h Ring -i RingDevice -o 1,3,6 -m 20 vwlan12
+      sudo dhcpcd -h Ring -i "busybox" -o 1,3,6 -m 20 vwlan12
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -207,7 +207,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ;;
     13)
-      sudo dhcpcd -h Resideo -i TempControl -o 1,3,6 -m 20 vwlan13
+      sudo dhcpcd -h Resideo -i "bsd-kernel:6.9.9" -o 1,3,6 -m 20 vwlan13
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -219,28 +219,28 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
      ;;
     14)
-      sudo dhcpcd -h BarcoShare -i Barco -o 1,3,6 -m 20 vwlan14
+      sudo dhcpcd -h BarcoShare -i "Barco-linux-bsd:6.9.9" -o 1,3,6 -m 20 vwlan14
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     15)
-      sudo dhcpcd -h WePresentGW -i Presentation -o 1,3,6 -m 20 vwlan15
+      sudo dhcpcd -h WePresentGW -i "udhcp 0.9.9-pre" -o 1,3,6 -m 20 vwlan15
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     16)
-      sudo dhcpcd -h Desnity -i Sensor -o 1,3,6 -m 20 vwlan16
+      sudo dhcpcd -h Desnity -i "Density Device" -o 1,3,6 -m 20 vwlan16
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     17)
-      sudo dhcpcd -h Oculus -i MetaVR -o 1,3,6 -m 20 vwlan17
+      sudo dhcpcd -h Oculus -i "android-dhcp-12" -o 1,3,6 -m 20 vwlan17
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -248,7 +248,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
-      sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 -m 20 vwlan18
+      sudo dhcpcd -h Tesla -i "tesla-busybox-1.9.9" -o 1,3,6 -m 20 vwlan18
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -260,7 +260,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
-      sudo dhcpcd -h Crestron -i Conference -o 1,3,6 -m 20 vwlan19
+      sudo dhcpcd -h Crestron -i "freebsd-kernel:3.9.1" -o 1,3,6 -m 20 vwlan19
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
