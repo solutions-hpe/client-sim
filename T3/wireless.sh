@@ -84,28 +84,12 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
-      sudo dhcpcd -h Ring -i "dhcpcd-5.5.6:busybox-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan3
+      sudo dhcpcd -h BrightSign -i "BrightSign XT1144" -o 1,3,6,12,15,26,28,33,42,43,51,58,59,119,121 -m 20 vwlan3
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
-      echo "Running RING Simulations" | tee -a /usr/scripts/wireless.log
+      echo "Running BrightSign Simulations" | tee -a /usr/scripts/wireless.log
       sleep 5
-      dig ec2-3-235-249-68.prd.rings.solutions
-      dig api.prod.signalling.ring.devices.a2z.com
-      dig alexa.na.gateway.devices.a2z.com
-      dig spectrum.s3.amazonaws.com
-      dig api.amazon.com
-      dig amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
-      dig stickupcammini.devices.prod.rss.ring.amazon.dev
-      dig fw-eventstream.ring.com
-      curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
-      curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
-      curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
-      curl -o /tmp/ring.file https://api.amazon.comonaws.com
-      curl -o /tmp/ring.file https://api.amazon.com
-      curl -o /tmp/ring.file https://amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
-      curl -o /tmp/ring.file https://fw-eventstream.ring.com
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
      ;;
     4)
       sudo dhcpcd -h iPad -i "darwin-6.99.5:i386:i386" -o 1,3,6 -m 20 vwlan4
