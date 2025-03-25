@@ -225,7 +225,7 @@ dhcpsleep=15
       curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
       curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
       curl --insecure -o /tmp/tesla.file https://telemetry-prd.vn.tesla.services
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
+      #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
       sudo dhcpcd -h Crestron -i "freebsd-kernel:3.9.1" -o 1,3,6 -m 20 vwlan19
