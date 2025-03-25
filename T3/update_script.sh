@@ -1,6 +1,6 @@
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
-sudo sleep 30
+sudo sleep 15
 sudo dhcpcd enp6s18
 #--------------------------------------------------------------------------------------------------------
 #Setting route metric for wired interface for script update process
