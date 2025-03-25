@@ -1,17 +1,13 @@
 #!/bin/bash
 echo "Script Version .41" | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
-sudo ifconfig enp6s18 up
 sudo dhcpcd --inactive
-sudo dhcpcd enp6s18
 #System level changes - checking at every start
 #Shutting down the MDNS responder
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
 #Disabling IPV6 system wide
-echo 'blacklist ipv6' | sudo tee -a '/etc/modprobe.d/blacklist.local' >/dev/null 
-#Scheduled Reboot
-sudo shutdown -r +720
+echo 'blacklist ipv6' | sudo tee -a '/etc/modprobe.d/blacklist.local' >/dev/null
 #Disabling parent WLAN Adapter for simulation
 sudo ifconfig wlp6s16 down
 #Clearing out any WPA supplicant configuration
@@ -19,18 +15,6 @@ echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
 sudo pkill wpa_supplicant
 echo "Waiting for Network Connection" | tee -a /usr/scripts/wireless.log
 sleep 30
-#Setting route metric for wired interface for script update process
-sudo ifmetric enp6s18 10
-echo "Updating Simulation Script" | tee -a /usr/scripts/wireless.log 
-sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/wireless.sh -O /tmp/wireless.sh
-#Checking to see if the file downloaded from GitHub is 0 Bytes, if so deleting it as the download failed
-sudo find /tmp -type f -size 0 | sudo xargs -r -o rm -v -f
-#Moving file to script repo - put in tmp location because if the download fails it overwrites the existing script
-sudo mv -f /tmp/wireless.sh /usr/scripts/wireless.sh
-#Setting permission to execute the script
-sudo chmod 777 /usr/scripts/wireless.sh
-#Shutting down wired interface so the simulations are forced out the WLAN
-sudo ifconfig enp6s18 down
 echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
 #Loop to Shutdown Adapters
 for (( h = 1; h <= 9; h++ ))
@@ -309,4 +293,4 @@ dhcpsleep=15
  sudo dhcpcd -h Tesla -i Automobile -o 1,3,6 vwlan18
  sudo dhcpcd -h Crestron -i Conference -o 1,3,6 vwlan19
 done
-bash /usr/scripts/wireless.sh
+bash /usr/scripts/update_script.sh
