@@ -1,5 +1,6 @@
 #!/bin/bash
-echo "Script Version .44" | tee /usr/scripts/wireless.log
+scriptver=".44"
+echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 #System level changes - checking at every start
@@ -55,6 +56,7 @@ dhcpsleep=15
   do
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
+   echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
    echo "Set random interface" | tee -a /usr/scripts/wireless.log 
    ip a | grep NO-CARRIER
