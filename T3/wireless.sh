@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Script Version .43" | tee /usr/scripts/wireless.log
+echo "Script Version .44" | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 #System level changes - checking at every start
