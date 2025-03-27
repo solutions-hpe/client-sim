@@ -18,7 +18,8 @@ density_opt60="Density Device"
 hpprint_opt60"Hewlett-Packard JetDirect"
 oculus_opt60="android-dhcp-12"
 axis_opt60="Axis,Dome Camera,P3265-LV,10.12.165"
-macbook_opt60="darwin"
+moxa_opt60="udhcp 1.19.2"
+moxs_opt55="1,3,4,12,15,28,42"
 brightsn_opt55="1,3,6,12,15,26,28,33,42,43,51,58,59,119,121"
 echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
@@ -57,7 +58,7 @@ sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
 sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
-sudo dhcpcd -h MacBook -i $macbook_opt60 -o $generic_opt55 vwlan11
+sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
 sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
 sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
 sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
@@ -166,12 +167,12 @@ dhcpsleep=15
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
-      sudo dhcpcd -h MacBook -i $macbook_opt60 -o $generic_opt55 -m 20 vwlan11
+      sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -m 20 vwlan11
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
-      echo "Running AppleIPhone Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
+      echo "Running MoxaDevice Simulations" | tee -a /usr/scripts/wireless.log
+      #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
       sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 -m 20 vwlan12
@@ -291,7 +292,7 @@ sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
 sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
-sudo dhcpcd -h MacBook -i $macbook_opt60 -o $generic_opt55 vwlan11
+sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
 sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
 sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
 sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
