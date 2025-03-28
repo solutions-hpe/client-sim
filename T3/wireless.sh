@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".45"
+scriptver=".46"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -9,7 +9,8 @@ tesla_opt60="tesla-busybox-1.9.9"
 sonos_opt60="dhcpcd-5.5.6:SONOS-6.99.5:i386:i386"
 samsung_opt60="dhcpcd-5.5.6:linux-6.99.5:i386:i386"
 polycom_opt60="dhcpcd-5.2.10:Linux-2.6.37+:armv7l:ti8168evm"
-ipad_opt60="dhcpcd-5.2.10:darwin-2.6.37+:armv7l:ti8168evm"
+zebra_opt60="Zebra Technologies ZTC ZT230-203dpi ZPL"
+zebra_opt55="1,3,44,6,15,12,11"
 ring_opt60="busybox"
 wepresent_opt60="udhcp 0.9.9-pre"
 barco_opt60="Barco-linux-bsd:6.9.9"
@@ -52,7 +53,7 @@ echo "Starting DHCP Simulation"
 sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
 sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
 sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
-sudo dhcpcd -h iPad -i $ipad_opt60 -o $generic_opt55 vwlan4
+sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
 sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 vwlan5
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
@@ -116,12 +117,12 @@ dhcpsleep=15
       sleep 5
      ;;
     4)
-      sudo dhcpcd -h iPad -i $ipad_opt60 -o $generic_opt55 -m 20 vwlan4
+      sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -m 20 vwlan4
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
-      echo "Running iPad Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
+      echo "Running Zebra Simulations" | tee -a /usr/scripts/wireless.log
+      #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
       sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 -m 20 vwlan5
@@ -286,7 +287,7 @@ dhcpsleep=15
 sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
 sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
 sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
-sudo dhcpcd -h iPad -i $ipad_opt60 -o $generic_opt55 vwlan4
+sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
 sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 vwlan5
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
