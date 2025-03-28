@@ -19,4 +19,7 @@ sudo chmod 777 /usr/scripts/update_script.sh
 #Shutting down wired interface so the simulations are forced out the WLAN
 sudo ifconfig enp6s18 down
 #--------------------------------------------------------------------------------------------------------
+#Removing downloaded files from simulations
+rm -r www.*
+#--------------------------------------------------------------------------------------------------------
 bash /usr/scripts/wireless.sh
