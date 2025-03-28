@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".46"
+scriptver=".47"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -39,6 +39,7 @@ sudo pkill wpa_supplicant
 echo "Waiting for Network Connection" | tee -a /usr/scripts/wireless.log
 sleep 30
 echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
+#--------------------------------------------------------------------------------------------------------
 #Loop to Shutdown Adapters
 for (( h = 1; h <= 9; h++ ))
  do
@@ -46,6 +47,7 @@ for (( h = 1; h <= 9; h++ ))
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan$h
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
  done
+#--------------------------------------------------------------------------------------------------------
 echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
@@ -75,8 +77,6 @@ httpdepth=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
 dhcpsleep=15
 #--------------------------------------------------------------------------------------------------------
- for (( x = 1; x <= 5; x++ ))
-  do
    active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
@@ -302,5 +302,6 @@ sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 vwlan16
 sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 vwlan17
 sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
 sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
-done
+#--------------------------------------------------------------------------------------------------------
+#Updating Scripts and restarting simulation
 bash /usr/scripts/update_script.sh
