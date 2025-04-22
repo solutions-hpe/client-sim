@@ -61,23 +61,41 @@ echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 echo "Starting DHCP Simulation"
+#vwlan1
 sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
+#vwlan2
 sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
+#vwlan3
 sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
+#vwlan4
 sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
+#vwlan5
 sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 vwlan5
+#vwlan6
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
+#vwlan7
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
+#vwlan8
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
+#vwlan9
 sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
+#vwlan11
 sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
+#vwlan12
 sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
+#vwlan13
 sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
+#vwlan14
 sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
+#vwlan15
 sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 vwlan15
+#vwlan16
 sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 vwlan16
+#vwlan17
 sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 vwlan17
+#vwlan18
 sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
+#vwlan19
 sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
 #Variable for how long to wait for HTTP/HTTPS timeout in wget command
 httpretry=1
