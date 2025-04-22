@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".55"
+scriptver=".56"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -27,13 +27,17 @@ echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 #System level changes - checking at every start
 #Disable SNAP
+echo "Disabling SNAP" | tee -a /usr/scripts/wireless.log
 sudo snap refresh --hold
 #Scheduling Reboot in 10 hrs
+echo "Scheduling Reboot" | tee -a /usr/scripts/wireless.log
 sudo shutdown -r 600
 #Shutting down the MDNS responder
+echo "Shutting down MDNS responder" | tee -a /usr/scripts/wireless.log
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
 #Disabling IPV6 system wide
+echo "Disabling IPV6" | tee -a /usr/scripts/wireless.log
 sudo sysctl --write net.ipv6.conf.all.disable_ipv6=1
 echo 'blacklist ipv6' | sudo tee '/etc/modprobe.d/blacklist.local' >/dev/null
 #Disabling parent WLAN Adapter for simulation
