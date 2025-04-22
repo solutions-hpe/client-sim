@@ -54,24 +54,24 @@ echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 echo "Starting DHCP Simulation"
-sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
-sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
-sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
-sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
-sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 vwlan5
-sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
-sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
-sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
-sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
-sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
-sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
-sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
-sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
-sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 vwlan15
-sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 vwlan16
-sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 vwlan17
-sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
-sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
+sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan1
+sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan2
+sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 -f /usr/scripts/dhcpcd.conf  vwlan3
+sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -f /usr/scripts/dhcpcd.conf  vwlan4
+sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan5
+sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan6
+sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan7
+sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan8
+sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan9
+sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -f /usr/scripts/dhcpcd.conf  vwlan11
+sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan12
+sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan13
+sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan14
+sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan15
+sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan16
+sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan17
+sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf vwlan18
+sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan19
 #Variable for how long to wait for HTTP/HTTPS timeout in wget command
 httpretry=1
 #Variable for how many recursive directories WGET attempts to download
@@ -93,14 +93,14 @@ dhcpsleep=15
    #Loop to run tests
    case "$active" in
     1)
-      sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 -m 20 vwlan1
+      sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan1
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     2)
-      sudo dhcpcd -h Liftmaster -i $liftmstr_opt60 -o $generic_opt55 -m 20 vwlan2
+      sudo dhcpcd -h Liftmaster -i $liftmstr_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan2
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -111,7 +111,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
      ;;
     3)
-      sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 -m 20 vwlan3
+      sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 -f /usr/scripts/dhcpcd.conf -m 20 vwlan3
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -119,7 +119,7 @@ dhcpsleep=15
       sleep 5
      ;;
     4)
-      sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -m 20 vwlan4
+      sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan4
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -127,7 +127,7 @@ dhcpsleep=15
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
-      sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 -m 20 vwlan5
+      sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan5
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -135,7 +135,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
      ;;
     6)
-      sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -m 20 vwlan6
+      sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan6
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -148,14 +148,14 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.sonos.com/
      ;;
     7)
-      sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 -m 20 vwlan7
+      sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan7
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     8)
-      sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -m 20 vwlan8
+      sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan8
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -163,14 +163,14 @@ dhcpsleep=15
       #wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
-      sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 -m 20 vwlan9
+      sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan9
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     11)
-      sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -m 20 vwlan11
+      sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan11
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -178,7 +178,7 @@ dhcpsleep=15
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
-      sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 -m 20 vwlan12
+      sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan12
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -202,7 +202,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://ring.com/
       ;;
     13)
-      sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 -m 20 vwlan13
+      sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan13
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -214,28 +214,28 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.resideo.com/
      ;;
     14)
-      sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 -m 20 vwlan14
+      sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan14
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     15)
-      sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -m 20 vwlan15
+      sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan15
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     16)
-      sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 -m 20 vwlan16
+      sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan16
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
      ;;
     17)
-      sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 -m 20 vwlan17
+      sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan17
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -243,7 +243,7 @@ dhcpsleep=15
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
-      sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 -m 20 vwlan18
+      sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan18
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -255,7 +255,7 @@ dhcpsleep=15
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.tesla.com/
      ;;
     19)
-      sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 -m 20 vwlan19
+      sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  -m 20 vwlan19
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -286,24 +286,24 @@ dhcpsleep=15
  sleep 2
  sudo dhcpcd --inactive
  sleep 2
-sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
-sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
-sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
-sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
-sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 vwlan5
-sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
-sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
-sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
-sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
-sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
-sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
-sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
-sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
-sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 vwlan15
-sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 vwlan16
-sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 vwlan17
-sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
-sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
+sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan1
+sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan2
+sudo dhcpcd -h Ring -i $brightsg_opt60 -o $brightsn_opt55 -f /usr/scripts/dhcpcd.conf  vwlan3
+sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -f /usr/scripts/dhcpcd.conf  vwlan4
+sudo dhcpcd -h Samsung -i $samsung_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan5
+sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan6
+sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan7
+sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan8
+sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan9
+sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -f /usr/scripts/dhcpcd.conf  vwlan11
+sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan12
+sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan13
+sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan14
+sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan15
+sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan16
+sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan17
+sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan18
+sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 -f /usr/scripts/dhcpcd.conf  vwlan19
 #--------------------------------------------------------------------------------------------------------
 #Updating Scripts and restarting simulation
 bash /usr/scripts/update_script.sh
