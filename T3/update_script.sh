@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".01"
+scriptver=".02"
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo sleep 15
@@ -18,6 +18,7 @@ sudo mv -f /tmp/update_script.sh /usr/scripts/update_script.sh
 #Setting permission to execute the script
 sudo chmod 777 /usr/scripts/wireless.sh
 sudo chmod 777 /usr/scripts/update_script.sh
+sudo chmod -x /etc/udev/rules.d/90-Wireless.rules
 #Shutting down wired interface so the simulations are forced out the WLAN
 sudo ifconfig enp6s18 down
 #--------------------------------------------------------------------------------------------------------
