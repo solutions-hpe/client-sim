@@ -1,3 +1,5 @@
+#!/bin/bash
+scriptver=".01"
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo ifconfig enp6s18 up
 sudo sleep 15
