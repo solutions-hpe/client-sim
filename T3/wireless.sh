@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".49"
+scriptver=".50"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -28,6 +28,8 @@ sudo dhcpcd --inactive
 #System level changes - checking at every start
 #Disable SNAP
 sudo snap refresh --hold
+#Scheduling Reboot in 10 hrs
+sudo shutdown -r 600
 #Shutting down the MDNS responder
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
