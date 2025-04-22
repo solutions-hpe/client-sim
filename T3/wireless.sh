@@ -303,6 +303,8 @@ dhcpsleep=15
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
   done
+echo "Sleeping for 19 minutes" | tee -a /usr/scripts/wireless.log
+sleep 900
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
  sudo dhcpcd -k vwlan$active
