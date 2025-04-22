@@ -23,5 +23,7 @@ sudo ifconfig enp6s18 down
 #--------------------------------------------------------------------------------------------------------
 #Removing downloaded files from simulations
 rm -r www.*
+#Old file cleanup
+rm /usr/scripts/dhcpcd.conf
 #--------------------------------------------------------------------------------------------------------
 bash /usr/scripts/wireless.sh
