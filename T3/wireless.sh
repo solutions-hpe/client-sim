@@ -26,6 +26,8 @@ echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
 #System level changes - checking at every start
+#Disable SNAP
+sudo snap refresh --hold
 #Shutting down the MDNS responder
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
