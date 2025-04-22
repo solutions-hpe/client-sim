@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".56"
+scriptver=".57"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -114,6 +114,8 @@ dhcpsleep=15
    sudo dhcpcd -k vwlan$active
    sleep $dhcpsleep
 #--------------------------------------------------------------------------------------------------------  
+for (( h = 1; h <= 9; h++ ))
+ do
    echo "Running Simulations" | tee -a /usr/scripts/wireless.log
    #Loop to run tests
    case "$active" in
@@ -303,6 +305,10 @@ dhcpsleep=15
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
   done
+#--------------------------------------------------------------------------------------------------------
+#End of Loop
+done
+#Sleeping to keep clients associated
 echo "Sleeping for 19 minutes" | tee -a /usr/scripts/wireless.log
 sleep 900
 #--------------------------------------------------------------------------------------------------------
