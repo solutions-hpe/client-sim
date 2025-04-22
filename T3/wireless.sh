@@ -34,7 +34,7 @@ sudo shutdown -r 600
 sudo systemctl stop avahi-daemon.socket avahi-daemon.service
 sudo systemctl disable avahi-daemon.socket avahi-daemon.service
 #Disabling IPV6 system wide
-echo 'blacklist ipv6' | sudo tee -a '/etc/modprobe.d/blacklist.local' >/dev/null
+echo 'blacklist ipv6' | sudo tee '/etc/modprobe.d/blacklist.local' >/dev/null
 #Disabling parent WLAN Adapter for simulation
 sudo ifconfig wlp6s16 down
 #Clearing out any WPA supplicant configuration
