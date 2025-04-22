@@ -328,7 +328,7 @@ sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
 sudo dhcpcd -h AxisCam -i $axis_opt60 -o $generic_opt55 vwlan9
-sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 wlan11
+sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 vwlan11
 sudo dhcpcd -h Ring -i $ring_opt60 -o $generic_opt55 vwlan12
 sudo dhcpcd -h Resideo -i $resideo_opt60 -o $generic_opt55 vwlan13
 sudo dhcpcd -h BarcoShare -i $barco_opt60 -o $generic_opt55 vwlan14
