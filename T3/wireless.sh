@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".58"
+scriptver=".59"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -158,8 +158,8 @@ for (( h = 1; h <= 9; h++ ))
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
-      echo "Running SamsungTV Simulations" | tee -a /usr/scripts/wireless.log
-      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.samsung.com/
+      echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
      ;;
     6)
       sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -m 20 vwlan6
