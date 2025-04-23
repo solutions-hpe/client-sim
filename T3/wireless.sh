@@ -323,7 +323,7 @@ sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
 sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
 sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
 sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
-sudo dhcpcd -h Samsung -i $play_signage_opt60 -o $generic_opt55 vwlan5
+sudo dhcpcd -h PlaySinage -i $play_signage_opt60 -o $generic_opt55 vwlan5
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
