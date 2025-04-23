@@ -310,8 +310,8 @@ for (( h = 1; h <= 9; h++ ))
 #End of Loop
 done
 #Sleeping to keep clients associated
-echo "Sleeping for 19 minutes" | tee -a /usr/scripts/wireless.log
-sleep 900
+#echo "Sleeping for 15 minutes" | tee -a /usr/scripts/wireless.log
+#sleep 900
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
  sudo dhcpcd -k vwlan$active
