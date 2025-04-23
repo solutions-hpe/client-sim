@@ -7,7 +7,7 @@ brightsg_opt60="BrightSign-XT1144"
 crestron_opt60="freebsd-kernel:3.9.1"
 tesla_opt60="tesla-busybox-1.9.9"
 sonos_opt60="dhcpcd-5.5.6:SONOS-6.99.5:i386:i386"
-play_sinage_opt60="dhcpcd-5.5.6:linux-6.99.5:i386:i386"
+play_signage_opt60="dhcpcd-5.5.6:linux-6.99.5:i386:i386"
 polycom_opt60="dhcpcd-5.2.10:Linux-2.6.37+:armv7l:ti8168evm"
 zebra_opt60="Zebra-Technologies-ZTC-ZT230-203dpi-ZPL"
 zebra_opt55="1,3,44,6,15,12,11"
@@ -70,7 +70,7 @@ sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
 #vwlan4
 sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
 #vwlan5
-sudo dhcpcd -h PlaySignage -i $play_sinage_opt60 -o $generic_opt55 vwlan5
+sudo dhcpcd -h PlaySignage -i $play_signage_opt60 -o $generic_opt55 vwlan5
 #vwlan6
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 #vwlan7
@@ -154,7 +154,7 @@ for (( h = 1; h <= 9; h++ ))
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
-      sudo dhcpcd -h PlaySignage -i $play_sinage_opt60 -o $generic_opt55 -m 20 vwlan5
+      sudo dhcpcd -h PlaySignage -i $play_signage_opt60 -o $generic_opt55 -m 20 vwlan5
       echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
@@ -323,7 +323,7 @@ sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
 sudo dhcpcd -h LiftMaster -i $liftmstr_opt60 -o $generic_opt55 vwlan2
 sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 vwlan3
 sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 vwlan4
-sudo dhcpcd -h PlaySinage -i $play_signage_opt60 -o $generic_opt55 vwlan5
+sudo dhcpcd -h PlaySignage -i $play_signage_opt60 -o $generic_opt55 vwlan5
 sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 vwlan6
 sudo dhcpcd -h HPPrinter -i $hpprint_opt60 -o $generic_opt55 vwlan7
 sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 vwlan8
