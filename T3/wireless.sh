@@ -104,7 +104,8 @@ httpdepth=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
 dhcpsleep=15
 #--------------------------------------------------------------------------------------------------------
-   active=$((RANDOM%19+1))
+   #active=$((RANDOM%19+1))
+   active=5
    #Generate a random number to select a random interface to bring online
    echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
