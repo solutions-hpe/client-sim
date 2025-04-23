@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".60"
+scriptver=".61"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
