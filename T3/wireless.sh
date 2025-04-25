@@ -311,6 +311,10 @@ for (( h = 1; h <= 9; h++ ))
    nslookup www.apple.com 10.0.0.10
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
+   #Toggling NTP to force an update
+   echo "Toggling NTP" | tee -a /usr/scripts/wireless.log
+   sudo timedatectl set-ntp off
+   sudo timedatectl set-ntp on
   done
 #--------------------------------------------------------------------------------------------------------
 #End of Loop
