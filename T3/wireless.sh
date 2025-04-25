@@ -43,9 +43,9 @@ echo 'blacklist ipv6' | sudo tee '/etc/modprobe.d/blacklist.local' >/dev/null
 #Disabling parent WLAN Adapter for simulation
 sudo ifconfig wlp6s16 down
 #Clearing out any WPA supplicant configuration
-echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
-sudo pkill wpa_supplicant
-sleep 30
+#echo "Killing WPA Supplicant" | tee -a /usr/scripts/wireless.log
+#sudo pkill wpa_supplicant
+#sleep 30
 echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
 #--------------------------------------------------------------------------------------------------------
 #Loop to Shutdown Adapters
@@ -56,9 +56,9 @@ for (( h = 1; h <= 9; h++ ))
   sudo wpa_supplicant -c /etc/wpa.conf -B -i vwlan1$h
  done
 #--------------------------------------------------------------------------------------------------------
-echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
-echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
-sleep 300
+#echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
+#echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
+#sleep 300
 echo "Starting DHCP Simulation"
 #vwlan1
 sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
