@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".62"
+scriptver=".63"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -162,6 +162,10 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://my.playsignage.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://us-storage.playsignage.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://stream.playsignage.com/
+      wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://release.playsignage.com/
       sudo apt update
      ;;
     6)
