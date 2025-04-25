@@ -299,7 +299,11 @@ for (( h = 1; h <= 9; h++ ))
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
      ;;
   esac
-#--------------------------------------------------------------------------------------------------------  
+#--------------------------------------------------------------------------------------------------------     
+  #Toggling NTP to force an update
+  echo "Toggling NTP" | tee -a /usr/scripts/wireless.log
+  sudo timedatectl set-ntp off
+  sudo timedatectl set-ntp on
   echo "Generating DNS Traffic &" | tee -a /usr/scripts/wireless.log
   echo "ICMP for Central Stats" | tee -a /usr/scripts/wireless.log
   for (( i = 1; i <= 9; i++ ))
@@ -311,10 +315,6 @@ for (( h = 1; h <= 9; h++ ))
    nslookup www.apple.com 10.0.0.10
    nslookup www.hpe.com 10.0.0.10
    nslookup www.vmware.com 10.0.0.10
-   #Toggling NTP to force an update
-   echo "Toggling NTP" | tee -a /usr/scripts/wireless.log
-   sudo timedatectl set-ntp off
-   sudo timedatectl set-ntp on
   done
 #--------------------------------------------------------------------------------------------------------
 #End of Loop
