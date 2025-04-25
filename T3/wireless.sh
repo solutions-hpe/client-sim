@@ -162,6 +162,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
+      sudo apt update
      ;;
     6)
       sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -m 20 vwlan6
