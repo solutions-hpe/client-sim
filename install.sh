@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.26
+version=.27
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -46,6 +46,7 @@ sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
 sudo apt install firefox-esr -y
+sudo apt autoremove -y
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
