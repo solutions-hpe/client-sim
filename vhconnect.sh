@@ -1,6 +1,6 @@
 #!/bin/bash
-vversion=.07
-echo --------------------------| tee /usr/local/scripts/sim.log
+vversion=.08
+echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $vversion | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #Dumping Current Device List
