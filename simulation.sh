@@ -98,8 +98,8 @@ if [ $kill_switch == "off" ]; then
     		sudo rfkill unblock wifi; sudo rfkill unblock all
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Connecting to: | tee -a /usr/local/scripts/sim.log
-			echo SSID - $ssid with | tee -a /usr/local/scripts/sim.log
-			echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
+			echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
+			#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			nmcli dev wifi connect $ssid password $ssidpw 
    			echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
