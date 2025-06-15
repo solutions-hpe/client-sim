@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.27
+version=.28
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -149,7 +149,8 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.
 #rasberrypi uses lxterminal
 #echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+#echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=100x15+1400+525 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
@@ -160,7 +161,8 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.
 #rasberrypi uses lxterminal
 #echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 #Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+#echo Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Exec=gnome-terminal --geometry=34x15+0+525 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 #End Log Viewer
 #------------------------------------------------------------
 #Create journalctl Viewer 
