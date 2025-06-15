@@ -114,22 +114,22 @@ if [ $kill_switch == "off" ]; then
    		 source '/usr/local/scripts/update.sh'
 		else
   			echo Network connection failed | tee -a /usr/local/scripts/sim.log
-     		echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
+     			echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
 			#Running API to VHClient to disconnect all clients this device is connecting to
    			#When a device ID changes on VH the client can think it should connect to multiple devices
    			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 			/usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-      		 #VHCached.txt will hold the server and device ID from VH so we use the same device every time
+      		 	#VHCached.txt will hold the server and device ID from VH so we use the same device every time
 		 	#In the case when a device ID Changes, puring this setting will make sure a new device is captured
    		 	#Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-      		#changes occur in the environment. This is a workaround just for when the IDs change.
+      			#changes occur in the environment. This is a workaround just for when the IDs change.
 		 	rm /usr/local/scripts/vhcached.txt
 			#------------------------------------------------------------
 			#Looping Script - Network Connectivity Failed
 			#------------------------------------------------------------
 			source /usr/local/scripts/simulation.sh
 		fi
-    	#------------------------------------------------------------
+    		#------------------------------------------------------------
 		#End Connecting to Network
 		#------------------------------------------------------------
 		#Running WWW Traffic Simulation
@@ -139,34 +139,34 @@ if [ $kill_switch == "off" ]; then
 			echo Running WWW Traffic simulation
 			wwwfile=$(cat /usr/local/scripts/websites.txt)
 				for r in $wwwfile; do
-					r_count=$((r_count+1))
+				 r_count=$((r_count+1))
 				done
-				rn_www=$((1 + RANDOM % $r_count))
-				r_count=0
-				for r in $wwwfile; do
+				 rn_www=$((1 + RANDOM % $r_count))
+				 r_count=0
+				 for r in $wwwfile; do
 					r_count=$((r_count+1))
 					if [[ $r_count == $rn_www ]]; then
-						echo Closing Firefox | tee -a /usr/local/scripts/sim.log
-						pkill -f firefox
-						sleep 1
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo $(date) | tee -a /usr/local/scripts/sim.log
-      					echo --------------------------| tee -a /usr/local/scripts/sim.log
-      					echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-						echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
-      					echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-						echo WWW Sim: $www_traffic | tee -a /usr/local/scripts/sim.log
-						echo WWW Traffic Generation: | tee -a /usr/local/scripts/sim.log
-						echo Website: $r | tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						firefox --headless --newtab $r &
-						#firefox --new-tab $r &
-						www_traffic=off
+					 echo Closing Firefox | tee -a /usr/local/scripts/sim.log
+					 pkill -f firefox
+					 sleep 1
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo $(date) | tee -a /usr/local/scripts/sim.log
+      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
+      					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+					 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+					 echo WWW Sim: $www_traffic | tee -a /usr/local/scripts/sim.log
+					 echo WWW Traffic Generation: | tee -a /usr/local/scripts/sim.log
+					 echo Website: $r | tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 firefox --headless --newtab $r &
+					 #firefox --new-tab $r &
+					 www_traffic=off
 					fi
 				done
 		fi
@@ -179,7 +179,7 @@ if [ $kill_switch == "off" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
    			echo $(date) | tee -a /usr/local/scripts/sim.log
-     		echo --------------------------| tee -a /usr/local/scripts/sim.log
+     			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
@@ -201,10 +201,10 @@ if [ $kill_switch == "off" ]; then
 		#Running download simulation
   		#------------------------------------------------------------
 		if [ $download == "on" ]; then
-				echo Running download simulation | tee -a /usr/local/scripts/sim.log
-				wget -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
-				wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
-				wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
+			echo Running download simulation | tee -a /usr/local/scripts/sim.log
+			wget -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
+			wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
+			wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
     			wget -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
 		fi
 		#Running apt update & apt upgrade
@@ -221,32 +221,32 @@ if [ $kill_switch == "off" ]; then
 			for i in {1..100}; do
 				for r in $dnsfile
 					do
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo $(date) | tee -a /usr/local/scripts/sim.log
-      					echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-						echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-						echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-		  				echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-						echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-						echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-						echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-						echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
-						echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
-						echo $r | tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						echo --------------------------| tee -a /usr/local/scripts/sim.log
-						dig @$dns_bad_record_1 $r &
-						dig @$dns_bad_record_2 $r &
-						dig @$dns_bad_record_3 $r &
-						dig @$dns_bad_ip_1 $r &
-						dig @$dns_bad_ip_2 $r &
-						dig @$dns_bad_ip_3 $r &
-						dig @$dns_latency_1 $r &
-						dig @$dns_latency_2 $r &
-						dig @$dns_latency_3 $r &
-						sleep 5
+     					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo $(date) | tee -a /usr/local/scripts/sim.log
+      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+		  			 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+					 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+					 echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
+					 echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
+					 echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
+					 echo $r | tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 dig @$dns_bad_record_1 $r &
+					 dig @$dns_bad_record_2 $r &
+					 dig @$dns_bad_record_3 $r &
+					 dig @$dns_bad_ip_1 $r &
+					 dig @$dns_bad_ip_2 $r &
+					 dig @$dns_bad_ip_3 $r &
+					 dig @$dns_latency_1 $r &
+					 dig @$dns_latency_2 $r &
+					 dig @$dns_latency_3 $r &
+					 sleep 5
 					done
 			done
 		fi
