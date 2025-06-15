@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.28
+version=.29
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -26,6 +26,8 @@ gsettings set org.gnome.desktop.session idle-delay 0
 xset s noblank
 xset -dpms
 xset s off
+#Setting Resolution
+xrandr --output Virtual-1 --mode 1440x900
 #On raspberrypi changing WLAN local to US
 #Only applies to raspberrypi
 sudo raspi-config nonint do_change_locale en_US.UTF-8
