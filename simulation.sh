@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.24
+version=.25
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -99,13 +99,13 @@ if [ $kill_switch == "off" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Connecting to: | tee -a /usr/local/scripts/sim.log
 			echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
-   			sleep 30 | tee -a /usr/local/scripts/sim.log
+   			sleep 15 | tee -a /usr/local/scripts/sim.log
 			#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			nmcli dev wifi connect $ssid password $ssidpw 
    			echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
 			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-			sleep 60 | tee -a /usr/local/scripts/sim.log
+			sleep 15 | tee -a /usr/local/scripts/sim.log
   		fi
     		inet_check=raw.githubusercontent.com
 		ping -c1 $inet_check
@@ -255,6 +255,7 @@ if [ $kill_switch == "off" ]; then
 		#End DNS Fail Simulation
 		#------------------------------------------------------------
 	echo End of simulation sleeping for 5 seconds
+ 	sudo nmcli connection delete id MIA-PSK
 	sleep 5
  	#------------------------------------------------------------
 	#End of 100 Loop Count
