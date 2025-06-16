@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.26
+version=.27
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -99,18 +99,20 @@ if [ $kill_switch == "off" ]; then
       			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
 	 		nmcli radio wifi on
+    			sleep 5
     			nmcli device wifi rescan
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Connecting to: | tee -a /usr/local/scripts/sim.log
 			echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
-   			sleep 15 | tee -a /usr/local/scripts/sim.log
+   			#sleep 15 | tee -a /usr/local/scripts/sim.log
 			#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			nmcli device wifi connect $ssid password $ssidpw
-      			echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
+      			#echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
    			nmcli radio wifi off
       			nmcli radio wifi on
-	 		nmcli connection up $ssid
+	 		sleep 5
+    			nmcli connection up $ssid
 			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 			sleep 15 | tee -a /usr/local/scripts/sim.log
   		fi
