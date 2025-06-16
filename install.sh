@@ -94,6 +94,7 @@ git clone https://github.com/morrownr/8821au-20210708.git
 git clone https://github.com/morrownr/8821cu-20210916.git
 git clone https://github.com/morrownr/8814au.git
 git clone https://github.com/morrownr/8812au-20210820.git
+#git clone https://github.com/aircrack-ng/rtl8812au
 git clone https://github.com/morrownr/88x2bu-20210702.git
 git clone https://github.com/lwfinger/rtl8852au.git
 git clone https://github.com/lwfinger/rtl8188eu.git
@@ -117,6 +118,11 @@ echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
 cd 8812au-20210820
 sudo ./install-driver.sh NoPrompt
 cd ..
+#echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
+#cd rtl8812au
+#sudo make
+#sudo make install
+#cd ..
 echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
 cd 88x2bu-20210702
 sudo ./install-driver.sh NoPrompt
