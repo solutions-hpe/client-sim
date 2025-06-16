@@ -118,7 +118,7 @@ echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
 #cd 8812au-20210820
 #sudo ./install-driver.sh NoPrompt
 #cd ..
-echo Installing Wireless Adapter 8812au (TP-Link T3 Archer) | tee -a /tmp/client-sim.log
+echo Installing Wireless Adapter 8812au TP-Link T3 Archer | tee -a /tmp/client-sim.log
 cd rtl8812au
 sudo make
 sudo make install
