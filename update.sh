@@ -34,3 +34,48 @@ fi
 #------------------------------------------------------------
 #End Updating Scripts
 #------------------------------------------------------------
+echo Creating auto Start files | tee -a /tmp/client-sim.log
+#Creating Startup
+echo [Desktop Entry] | sudo tee /etc/xdg/autostart/startup.desktop
+echo Type=Application | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.desktop
+#rasberrypi uses lxterminal
+#echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+#Ubuntu/Debian with gnome
+#echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=100x15+1400+525 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+#End Create Startup
+#------------------------------------------------------------
+#Create Log Viewer 
+echo [Desktop Entry] | sudo tee /etc/xdg/autostart/logview.desktop
+echo Type=Application | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.desktop
+#rasberrypi uses lxterminal
+#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+#Ubuntu/Debian with gnome
+#echo Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Exec=gnome-terminal --geometry=34x15+0+525 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+#End Log Viewer
+#------------------------------------------------------------
+#Create journalctl Viewer 
+echo [Desktop Entry] | sudo tee /etc/xdg/autostart/journalctl.desktop
+echo Type=Application | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+#rasberrypi uses lxterminal
+#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+#Ubuntu/Debian with gnome
+echo Exec=gnome-terminal --geometry=140x20+0+0 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+#End Log Viewer#------------------------------------------------------------
+#Create journalctl Viewer 
+echo [Desktop Entry] | sudo tee /etc/xdg/autostart/sim_update.desktop
+echo Type=Application | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+echo Name=StartUp | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+echo Comment=Simulation Update | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+#rasberrypi uses lxterminal
+#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
+#Ubuntu/Debian with gnome
+echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /etc/xdg/autostart/sim_update.desktop
+#End Log Viewer#------------------------------------------------------------
