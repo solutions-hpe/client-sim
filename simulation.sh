@@ -219,7 +219,8 @@ if [ $kill_switch == "off" ]; then
 			wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
 			wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
        			wget -o /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
-	  		iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
+	  		echo Running iPerf simulation | tee -a /usr/local/scripts/sim.log
+     			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
