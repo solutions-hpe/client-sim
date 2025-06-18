@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.28
+version=.29
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -93,6 +93,8 @@ if [ $kill_switch == "off" ]; then
 		echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
 		echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
 		echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
+  		echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
+    		echo Download: $download | tee -a /usr/local/scripts/sim.log
 		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
 		echo --------------------------| tee -a /usr/local/scripts/sim.log
 		#------------------------------------------------------------
@@ -172,9 +174,7 @@ if [ $kill_switch == "off" ]; then
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
       					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-					 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-					 echo WWW Sim: $www_traffic | tee -a /usr/local/scripts/sim.log
-					 echo WWW Traffic Generation: | tee -a /usr/local/scripts/sim.log
+					 echo Running WWW Traffic Simulation: | tee -a /usr/local/scripts/sim.log
 					 echo Website: $r | tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -200,7 +200,6 @@ if [ $kill_switch == "off" ]; then
 	  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log		
    			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-			echo Ping Sim: $ping_test | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
 			echo Count: $rn | tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
@@ -216,7 +215,14 @@ if [ $kill_switch == "off" ]; then
 		#Running iPerf simulation
   		#------------------------------------------------------------
    		if [ $iperf == "on" ]; then
-			echo Running iPerf simulation | tee -a /usr/local/scripts/sim.log
+           		echo --------------------------| tee -a /usr/local/scripts/sim.log
+			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+		  	echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+			echo Running iPerf simulation: | tee -a /usr/local/scripts/sim.log
      			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 		fi
     		#------------------------------------------------------------
