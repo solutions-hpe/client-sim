@@ -47,7 +47,7 @@ sudo apt install net-tools -y
 sudo apt install smbclient -y
 sudo apt install dnsutils -y
 sudo apt install dkms -y
-sudo apt install iperf -y
+sudo apt install iperf3 -y
 sudo apt install firefox-esr -y
 sudo apt autoremove -y
 #------------------------------------------------------------
