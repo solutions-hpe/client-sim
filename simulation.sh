@@ -31,6 +31,7 @@ assoc_fail=$(get_value 'simulation' 'assoc_fail')
 port_flap=$(get_value 'simulation' 'port_flap')
 ping_test=$(get_value 'simulation' 'ping_test')
 download=$(get_value 'simulation' 'download')
+iperf=$(get_value 'simulation' 'iperf')
 www_traffic=$(get_value 'simulation' 'www_traffic')
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server=$(get_value 'simulation' 'vh_server')
@@ -211,6 +212,17 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
 		#End Ping Simulation
  		#------------------------------------------------------------
+     		#------------------------------------------------------------
+		#Running iPerf simulation
+  		#------------------------------------------------------------
+   		if [ $iperf == "on" ]; then
+			echo Running iPerf simulation | tee -a /usr/local/scripts/sim.log
+     			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
+		fi
+    		#------------------------------------------------------------
+		#End Download Simulation
+		#------------------------------------------------------------
+  		#------------------------------------------------------------
 		#Running download simulation
   		#------------------------------------------------------------
 		if [ $download == "on" ]; then
@@ -219,8 +231,6 @@ if [ $kill_switch == "off" ]; then
 			wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
 			wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
        			wget -o /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
-	  		echo Running iPerf simulation | tee -a /usr/local/scripts/sim.log
-     			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
