@@ -49,6 +49,7 @@ dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
 dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
+iperf_server=$(get_value 'address' 'iperf_server')
 #------------------------------------------------------------
 #Checking global kill switch config
 #------------------------------------------------------------
@@ -57,6 +58,8 @@ gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
 #Generating a random number to have some variance in the scripts
 #------------------------------------------------------------
 rn=$((1 + RANDOM % 60))
+rn_iperf_port=$((5201 + RANDOM % 10))
+rn_iperf_timer=((1+ RANDOM % 300))
 #------------------------------------------------------------
 #Dumping Current Device List
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
@@ -215,7 +218,8 @@ if [ $kill_switch == "off" ]; then
 			wget -o /tmp/Ubuntu.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
 			wget -o /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
 			wget -o /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
-    			wget -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
+       			wget -0 /tmp/bootcamp5.1.5769.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
+	  		iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
