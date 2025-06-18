@@ -53,7 +53,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.
 #echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #Ubuntu/Debian with gnome
 #echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Exec=gnome-terminal --geometry=115x16+1400+525 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=110x15+1400+525 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
@@ -65,7 +65,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.
 #echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 #Ubuntu/Debian with gnome
 #echo Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Exec=gnome-terminal --geometry=34x16+0+525 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
+echo Exec=gnome-terminal --geometry=35x15+0+525 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
 #End Log Viewer
 #------------------------------------------------------------
 #Create journalctl Viewer 
