@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.30
+version=.31
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -56,7 +56,9 @@ sudo apt autoremove -y
 #Installing so the client is ready to connect to a server if configured
 echo Downloading VirtualHere client | tee -a /tmp/client-sim.log
 wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
+sleep 1
 wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
+sleep 1
 chmod +x ./vhclientx86_64
 echo Installing VirtualHere client | tee -a /tmp/client-sim.log
 sudo mv ./vhclientx86_64 /usr/sbin
@@ -71,14 +73,23 @@ smbclient //nas/scripts -N -c 'lcd /usr/local/scripts/; cd /SIM/CONFIG/; prompt 
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sim-update.sh -O /usr/local/scripts/sim-update.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/update.sh -O /usr/local/scripts/update.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websites.txt
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
+sleep 1
 sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/public_kill_switch.txt -O /usr/local/scripts/public_kill_switch.txt
+sleep 1
 if [ -e "/usr/local/scripts/simulation.conf" ]; then
   echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
