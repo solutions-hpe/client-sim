@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.30
+version=.31
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -222,6 +222,9 @@ if [ $kill_switch == "off" ]; then
 		  	echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+   			echo iPerf Server: $iperf_server | tee -a /usr/local/scripts/sim.log
+   			echo iPerf Port: $rn_iperf_port | tee -a /usr/local/scripts/sim.log
+      			echo iPerf Time: $rn_iperf_time | tee -a /usr/local/scripts/sim.log
 			echo Running iPerf simulation: | tee -a /usr/local/scripts/sim.log
      			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 		fi
