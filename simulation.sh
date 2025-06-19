@@ -60,7 +60,7 @@ gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
 #------------------------------------------------------------
 rn=$((1 + RANDOM % 60))
 rn_iperf_port=$((5201 + RANDOM % 10))
-rn_iperf_timer=((1+ RANDOM % 300))
+rn_iperf_time=((1+ RANDOM % 300))
 #------------------------------------------------------------
 #Dumping Current Device List
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
