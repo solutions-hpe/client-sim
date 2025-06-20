@@ -61,6 +61,7 @@ gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
 rn=$((1 + RANDOM % 60))
 rn_iperf_port=$((5201 + RANDOM % 10))
 rn_iperf_time=$((1 + RANDOM % 300))
+rn_ping_size=$((1 + RANDOM % 65000))
 #------------------------------------------------------------
 #Dumping Current Device List
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
@@ -206,7 +207,7 @@ if [ $kill_switch == "off" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Running ping simulation
 			echo Pinging Default Gateway
-			ping -c $rn $ping_address
+			ping -c $rn $ping_address -s $rn_ping_size
 		fi
   		#------------------------------------------------------------
 		#End Ping Simulation
