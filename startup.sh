@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.16
+version=.17
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -35,8 +35,9 @@ smb_address=$(get_value 'address' 'smb_address')
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 #------------------------------------------------------------
 #Scheduling Reboot
+rn=$((1 + RANDOM % 600))
 echo Scheduling reboot $reboot_schedule minutes | tee -a /usr/local/scripts/sim.log
-shutdown -r $reboot_schedule
+shutdown -r $reboot_schedule+$rn
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
