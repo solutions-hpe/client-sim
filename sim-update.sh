@@ -23,12 +23,19 @@ ping -c1 $github
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
    sleep 1
    sudo chmod -R 777 /usr/local/scripts
+   echo Simulation Script Version
    cat /usr/local/scripts/simulation.sh | grep version=
+   echo Startup Script Version
    cat /usr/local/scripts/startup.sh | grep version=
+   echo Update Script Version
    cat /usr/local/scripts/update.sh | grep version=
+   echo VHConnect Script Version
    cat /usr/local/scripts/vhconnect.sh | grep version=
+   echo DNS Fail Version
    cat /usr/local/scripts/dns_fail.txt | grep version=
+   echo Kill Switch Version
    cat /usr/local/scripts/kill_switch.txt | grep version=
+   echo Websites Version
    cat /usr/local/scripts/websites.txt | grep version=
 else
  echo Network connection failed to GitHub - skipping script updates
