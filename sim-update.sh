@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.07
+version=.08
 github=raw.githubusercontent.com
 ping -c1 $github
  if [ $? -eq 0 ]; then
@@ -23,6 +23,13 @@ ping -c1 $github
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
    sleep 1
    sudo chmod -R 777 /usr/local/scripts
+   cat /usr/local/scripts/simulation.sh | grep version
+   cat /usr/local/scripts/startup.sh | grep version
+   cat /usr/local/scripts/update.sh | grep version
+   cat /usr/local/scripts/vhconnect.sh | grep version
+   cat /usr/local/scripts/dns_fail.txt | grep version
+   cat /usr/local/scripts/kill_switch.txt | grep version
+   cat /usr/local/scripts/websites.txt | grep version
 else
  echo Network connection failed to GitHub - skipping script updates
 fi
