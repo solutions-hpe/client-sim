@@ -107,10 +107,10 @@ echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
 #git clone https://github.com/morrownr/8814au.git
 #git clone https://github.com/morrownr/8812au-20210820.git
 rm -Rf rtl8812au
-git clone https://github.com/aircrack-ng/rtl8812au
+git clone https://github.com/aircrack-ng/rtl8812au.git
 #git clone https://github.com/morrownr/88x2bu-20210702.git
 rm -Rf rtl8852au
-git clone https://github.com/lwfinger/rtl8852au
+git clone https://github.com/lwfinger/rtl8852au.git
 #git clone https://github.com/lwfinger/rtl8188eu.git
 #git clone https://github.com/lwfinger/rtw89.git
 #git clone https://github.com/lwfinger/rtl8723au.git
