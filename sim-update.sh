@@ -1,5 +1,7 @@
 #!/bin/bash
 version=.09
+#Making backup of script
+cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
 github=raw.githubusercontent.com
 ping -c1 $github
  if [ $? -eq 0 ]; then
