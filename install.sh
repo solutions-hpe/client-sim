@@ -146,9 +146,9 @@ cd ..
 #cd ..
 echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
 cd rtl8852au
-make
+sudo make
 sudo make install
-#cd ..
+cd ..
 #echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
 #cd rtw89
 #make
