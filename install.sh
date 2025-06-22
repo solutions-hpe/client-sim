@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.34
+version=.35
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -102,65 +102,73 @@ echo Installer Version $version | tee /usr/local/scripts/sim.log
 sudo chmod -R 777 /usr/local/scripts
 #------------------------------------------------------------
 echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
-#git clone https://github.com/morrownr/8821au-20210708.git
-#git clone https://github.com/morrownr/8821cu-20210916.git
-#git clone https://github.com/morrownr/8814au.git
-#git clone https://github.com/morrownr/8812au-20210820.git
+rm -Rf 8821au-20210708
+git clone https://github.com/morrownr/8821au-20210708.git
+rm -Rf 8821cu-20210916
+git clone https://github.com/morrownr/8821cu-20210916.git
+rm -Rf 8814au
+git clone https://github.com/morrownr/8814au.git
+rm -Rf 8812au-20210820
+git clone https://github.com/morrownr/8812au-20210820.git
 rm -Rf rtl8812au
 git clone https://github.com/aircrack-ng/rtl8812au.git
-#git clone https://github.com/morrownr/88x2bu-20210702.git
+rm -Rf 88x2bu-20210702
+git clone https://github.com/morrownr/88x2bu-20210702.git
 rm -Rf rtl8852au
 git clone https://github.com/lwfinger/rtl8852au.git
-#git clone https://github.com/lwfinger/rtl8188eu.git
-#git clone https://github.com/lwfinger/rtw89.git
-#git clone https://github.com/lwfinger/rtl8723au.git
+rm -Rf rtl8188eu
+git clone https://github.com/lwfinger/rtl8188eu.git
+rm -Rf rtw89
+git clone https://github.com/lwfinger/rtw89.git
+rm -Rf rtl8723au
+git clone https://github.com/lwfinger/rtl8723au.git
 #------------------------------------------------------------
 echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
-#echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
-#cd 8821au-20210708
-#sudo ./install-driver.sh NoPrompt
-#cd ..
-#echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
-#cd 8821cu-20210916
-#sudo ./install-driver.sh NoPrompt
-#cd ..
-#echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
-#cd 8814au
-#sudo ./install-driver.sh NoPrompt
-#cd ..
-#echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
-#cd 8812au-20210820
-#sudo ./install-driver.sh NoPrompt
-#cd ..
+echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
+cd 8821au-20210708
+sudo ./install-driver.sh NoPrompt
+cd ..
+echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
+cd 8821cu-20210916
+sudo ./install-driver.sh NoPrompt
+cd ..
+echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
+cd 8814au
+sudo ./install-driver.sh NoPrompt
+cd ..
+echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
+cd 8812au-20210820
+sudo ./install-driver.sh NoPrompt
+cd ..
 echo Installing Wireless Adapter 8812au TP-Link T3 Archer | tee -a /tmp/client-sim.log
 cd rtl8812au
 sudo make
 sudo make install
 cd ..
-#echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
-#cd 88x2bu-20210702
-#sudo ./install-driver.sh NoPrompt
-#cd ..
-#echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
-#cd rtl8188eu
-#make all
-#sudo make install
-#cd ..
+echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
+cd 88x2bu-20210702
+sudo ./install-driver.sh NoPrompt
+cd ..
+echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
+cd rtl8188eu
+sudo make all
+sudo make install
+cd ..
 echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
 cd rtl8852au
 sudo make
 sudo make install
 cd ..
-#echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
-#cd rtw89
-#make
-#sudo make install
-#cd ..
-#echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
-#cd rtl8723au
-#make
-#sudo make install
-#sudo modprobe 8723au
+echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
+cd rtw89
+sudo make
+sudo make install
+cd ..
+echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
+cd rtl8723au
+sudo make
+sudo make install
+sudo modprobe 8723au
 #------------------------------------------------------------
 echo Creating auto Start files | tee -a /tmp/client-sim.log
 #Creating Startup
