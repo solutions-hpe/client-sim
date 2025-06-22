@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.09
+version=.10
 #Making backup of script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
 github=raw.githubusercontent.com
