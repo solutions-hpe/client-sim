@@ -1,7 +1,7 @@
 #!/bin/bash
-version=.07
+version=.08
 echo --------------------------| tee /usr/local/scripts/sim.log
-echo VHConnect Script Version $uversion | tee -a /usr/local/scripts/sim.log
+echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Updating Scripts
