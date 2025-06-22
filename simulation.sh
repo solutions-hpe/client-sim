@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.33
+version=.34
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -305,6 +305,10 @@ if [ $kill_switch == "off" ]; then
 	done
 else
 	#------------------------------------------------------------
+	#Running Cleanup from old simulations
+	rm /usr/local/scripts/Contents*
+	rm /usr/local/scripts/main.cvd*
+	rm /usr/local/scripts/manifest*
 	#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
