@@ -123,7 +123,7 @@ if [ $kill_switch == "off" ]; then
 			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 			sleep 15 | tee -a /usr/local/scripts/sim.log
   		fi
-    		inet_check=raw.githubusercontent.com
+    		inet_check=www.google.com
 		ping -c1 $inet_check
 		if [ $? -eq 0 ]; then
 		 echo Successful network connection | tee -a /usr/local/scripts/sim.log
