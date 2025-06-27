@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.34
+version=.35
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -252,8 +252,20 @@ if [ $kill_switch == "off" ]; then
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
-		sudo apt update 
+		sudo apt update
 		sudo apt upgrade -y
+		sudo apt install git -y
+		sudo apt install wget -y
+		sudo apt install gnome-terminal -y
+		sudo apt install network-manager -y
+		sudo apt install qemu-guest-agent -y
+		sudo apt install net-tools -y
+		sudo apt install smbclient -y
+		sudo apt install dnsutils -y
+		sudo apt install dkms -y
+		sudo apt install iperf3 -y
+		sudo apt install firefox-esr -y
+		sudo apt autoremove -y
   		#------------------------------------------------------------
 		#End Download Simulation
 		#------------------------------------------------------------
