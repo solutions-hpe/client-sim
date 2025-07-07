@@ -1,0 +1,1 @@
+Remove-NetAdapterAdvancedProperty -Name "Wi-Fi 2" -RegistryKeyword "NetworkAddress" -AllProperties
