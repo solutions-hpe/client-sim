@@ -53,7 +53,7 @@ echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.
 #echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
 #Ubuntu/Debian with gnome
 #echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Exec=gnome-terminal --geometry=103x15+1400+525 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
+echo Exec=gnome-terminal --geometry=103x15+1400+525 -- bash -c /usr/local/scripts/startup.sh || systemctl reboot | sudo tee -a /etc/xdg/autostart/startup.desktop
 #End Create Startup
 #------------------------------------------------------------
 #Create Log Viewer 
