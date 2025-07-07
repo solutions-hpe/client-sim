@@ -1,0 +1,2 @@
+copy \\10.79.254.5\storage\scripts\sysprep\unattended.xml c:\windows\system32\sysprep\ /y
+c:\windows\system32\sysprep\sysprep.exe /generalize /oobe /quit /unattend:c:\windows\system32\sysprep\unattended.xml
