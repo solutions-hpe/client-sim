@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.35
+version=.36
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -253,6 +253,7 @@ if [ $kill_switch == "off" ]; then
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
 		sudo apt update
+  		sudo apt remove sysstat -y
 		sudo apt upgrade -y
 		sudo apt install git -y
 		sudo apt install wget -y
