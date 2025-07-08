@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.03
+version=.04
 echo --------------------------| tee /usr/local/scripts/sim_reboot.log
 echo System Monitor Script Version $version | tee -a /usr/local/scripts/sim_reboot.log
 echo $(date) | tee -a /usr/local/scripts/sim_reboot.log
