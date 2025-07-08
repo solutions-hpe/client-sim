@@ -4,6 +4,8 @@ echo --------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
+#Check Logs Script
+source /usr/local/scripts/sys_mon.sh
 #------------------------------------------------------------
 #Running Cleanup from old simulations
 rm /usr/local/scripts/Contents*
