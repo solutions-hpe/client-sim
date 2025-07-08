@@ -32,6 +32,8 @@ if [ $public_repo == "on" ]; then
    sleep 1
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
    sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
+   sleep 1
    sudo chmod -R 777 /usr/local/scripts
   else
    echo Network connection failed to GitHub - skipping script updates
