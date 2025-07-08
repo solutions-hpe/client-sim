@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.11
+version=.12
 #Making backup of script
 echo Making backup of Script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
