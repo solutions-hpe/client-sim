@@ -11,7 +11,7 @@ tail -f $LOG_FILE | while read LOGLINE; do
     if [[ "$LOGLINE" == *"$KEYWORD"* ]]; then
         echo "Failure message Found" | tee -a /usr/local/scripts/sim_reboot.log
         echo "Rebooting system" | tee -a /usr/local/scripts/sim_reboot.log
-        sudo reboot -f
+        reboot
     fi
 done
 exit
