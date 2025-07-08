@@ -37,6 +37,8 @@ ping -c1 $github
    cat /usr/local/scripts/startup.sh | grep version=
    echo Update Script Version
    cat /usr/local/scripts/update.sh | grep version=
+   echo Sim Update Script Version
+   cat /usr/local/scripts/sim-update.sh | grep version=
    echo VHConnect Script Version
    cat /usr/local/scripts/vhconnect.sh | grep version=
    echo DNS Fail Version
