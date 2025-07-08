@@ -3,6 +3,8 @@ version=.10
 echo --------------------------| tee /usr/local/scripts/sim.log
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
+#Making sure the script will exit on error
+set -o errexit
 #------------------------------------------------------------
 #Updating Scripts
 #------------------------------------------------------------
