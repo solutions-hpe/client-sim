@@ -92,6 +92,8 @@ sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubuserco
 sleep 1
 sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/public_kill_switch.txt -O /usr/local/scripts/public_kill_switch.txt
 sleep 1
+sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
+sleep 1
 if [ -e "/usr/local/scripts/simulation.conf" ]; then
   echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
