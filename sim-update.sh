@@ -2,6 +2,8 @@
 version=.11
 #Making backup of script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
+#Making sure the script will exit on error
+set -o errexit
 sleep 300
 github=raw.githubusercontent.com
 ping -c1 $github
