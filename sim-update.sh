@@ -39,12 +39,6 @@ ping -c1 $github
    cat /usr/local/scripts/update.sh | grep version=
    echo VHConnect Script Version
    cat /usr/local/scripts/vhconnect.sh | grep version=
-   echo DNS Fail Version
-   cat /usr/local/scripts/dns_fail.txt | grep version=
-   echo Kill Switch Version
-   cat /usr/local/scripts/kill_switch.txt | grep version=
-   echo Websites Version
-   cat /usr/local/scripts/websites.txt | grep version=
 else
  echo Network connection failed to GitHub - skipping script updates
 fi
