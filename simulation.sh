@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.38
+version=.39
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -263,7 +263,7 @@ if [ $kill_switch == "off" ]; then
 					 echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
 					 echo Website: $r | tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
-      					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/tile.tmp $r | tee -a /usr/local/scripts/sim.log
+      					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
 					fi
      				done
 			#echo Running download simulation | tee -a /usr/local/scripts/sim.log
@@ -342,6 +342,7 @@ else
 	rm /usr/local/scripts/Contents*
 	rm /usr/local/scripts/main.cvd*
 	rm /usr/local/scripts/manifest*
+ 	rm /tmp/file.tmp
 	#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
