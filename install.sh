@@ -4,8 +4,6 @@ touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
 lxterminal -t Installer --geometry=80x15 -e tail -f /tmp/client-sim.log
-#Making sure the script will exit on error
-set -o errexit
 #------------------------------------------------------------
 #Checking OS
 os=$(uname -n)
