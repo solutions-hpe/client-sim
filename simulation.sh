@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.37
+version=.38
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -167,7 +167,6 @@ if [ $kill_switch == "off" ]; then
 					 pkill -f firefox
 					 sleep 1
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo $(date) | tee -a /usr/local/scripts/sim.log
       					 echo --------------------------| tee -a /usr/local/scripts/sim.log
       					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -177,7 +176,6 @@ if [ $kill_switch == "off" ]; then
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Running WWW Traffic Simulation: | tee -a /usr/local/scripts/sim.log
 					 echo Website: $r | tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 firefox --headless --newtab $r &
 					 #firefox --new-tab $r &
@@ -192,7 +190,6 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
 		if [ $ping_test == "on" ]; then
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
-			echo --------------------------| tee -a /usr/local/scripts/sim.log
    			echo $(date) | tee -a /usr/local/scripts/sim.log
      			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -203,7 +200,6 @@ if [ $kill_switch == "off" ]; then
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
 			echo Count: $rn | tee -a /usr/local/scripts/sim.log
-			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo --------------------------| tee -a /usr/local/scripts/sim.log
 			echo Running ping simulation
 			echo Pinging Default Gateway
@@ -244,11 +240,37 @@ if [ $kill_switch == "off" ]; then
 		#Running download simulation
   		#------------------------------------------------------------
 		if [ $download == "on" ]; then
-			echo Running download simulation | tee -a /usr/local/scripts/sim.log
-			if [[ $rn == 10 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/Contents-i386.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
-			if [[ $rn == 20 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
-			if [[ $rn == 30 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
-       			if [[ $rn == 40 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/bootcamp.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
+  			r_count=0
+			echo Running Download simulation
+			dlfile=$(cat /usr/local/scripts/downloads.txt)
+				for r in $dlfile; do
+				 r_count=$((r_count+1))
+				done
+				 rn_dl=$((1 + RANDOM % $r_count))
+				 r_count=0
+				 for r in $dlfile; do
+					r_count=$((r_count+1))
+					if [[ $r_count == $rn_dl ]]; then
+					 sleep 1
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo $(date) | tee -a /usr/local/scripts/sim.log
+      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
+      					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+					 echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
+					 echo Website: $r | tee -a /usr/local/scripts/sim.log
+					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/tile.tmp $r | tee -a /usr/local/scripts/sim.log
+					fi
+     				done
+			#echo Running download simulation | tee -a /usr/local/scripts/sim.log
+			#if [[ $rn == 10 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/Contents-i386.gz http://archive.ubuntu.com/ubuntu/dists/bionic/Contents-i386.gz | tee -a /usr/local/scripts/sim.log 
+			#if [[ $rn == 20 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/main.cvd https://packages.microsoft.com/clamav/main.cvd | tee -a /usr/local/scripts/sim.log
+			#if [[ $rn == 30 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/manifest https://android.googlesource.com/platform/manifest | tee -a /usr/local/scripts/sim.log
+       			#if [[ $rn == 40 ]]; then wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/bootcamp.zip https://download.info.apple.com/Mac_OS_X/031-30890-20150812-ea191174-4130-11e5-a125-930911ba098f/bootcamp5.1.5769.zip| tee -a /usr/local/scripts/sim.log
 		fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
@@ -278,7 +300,6 @@ if [ $kill_switch == "off" ]; then
 				for r in $dnsfile
 					do
      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo $(date) | tee -a /usr/local/scripts/sim.log
       					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -291,7 +312,6 @@ if [ $kill_switch == "off" ]; then
 					 echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
 					 echo $r | tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 dig @$dns_bad_record_1 $r &
 					 dig @$dns_bad_record_2 $r &
