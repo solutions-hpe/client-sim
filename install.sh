@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.36
+version=.37
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -38,6 +38,7 @@ sudo raspi-config nonint do_wifi_country US
 echo Running system updates | tee -a /tmp/client-sim.log
 sudo apt update
 sudo apt upgrade -y
+sudo apt remote sysstat -y
 sudo apt install git -y
 sudo apt install wget -y
 sudo apt install gnome-terminal -y
