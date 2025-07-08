@@ -4,8 +4,6 @@ echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
-#Making sure the script will exit on error
-set -o errexit
 #Calling config parser script
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
