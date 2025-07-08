@@ -3,6 +3,8 @@ version=.10
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
+#Making sure the script will exit on error
+set -o errexit
 #Dumping Current Device List
 echo Getting VH device list | tee -a /usr/local/scripts/sim.log
 sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
