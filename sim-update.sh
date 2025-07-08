@@ -1,8 +1,9 @@
 #!/bin/bash
 version=.11
 #Making backup of script
+echo Making backup of Script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
-sleep 300
+sleep 5
 github=raw.githubusercontent.com
 ping -c1 $github
  if [ $? -eq 0 ]; then
@@ -30,6 +31,8 @@ ping -c1 $github
    sudo chmod -R 777 /usr/local/scripts
    echo Simulation Script Version
    cat /usr/local/scripts/simulation.sh | grep version=
+   echo System Monitor Script Version
+   cat /usr/local/scripts/sys_mon.sh | grep version=
    echo Startup Script Version
    cat /usr/local/scripts/startup.sh | grep version=
    echo Update Script Version
