@@ -94,6 +94,7 @@ sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubuserco
 sleep 1
 sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
 sleep 1
+sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/downloads.txt -O /usr/local/scripts/downloads.txt
 if [ -e "/usr/local/scripts/simulation.conf" ]; then
   echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
