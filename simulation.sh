@@ -276,7 +276,6 @@ if [ $kill_switch == "off" ]; then
       					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
-					 echo Website: $r | tee -a /usr/local/scripts/sim.log
 					 echo --------------------------| tee -a /usr/local/scripts/sim.log
       					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
 					fi
@@ -322,7 +321,6 @@ if [ $kill_switch == "off" ]; then
 					 echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
 					 echo $r | tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
 					 dig @$dns_bad_record_1 $r &
 					 dig @$dns_bad_record_2 $r &
 					 dig @$dns_bad_record_3 $r &
