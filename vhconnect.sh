@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.10
+version=.11
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
@@ -22,6 +22,13 @@ vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{
 	r_count=$((r_count+1))
 done
 echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
+if [[$r_count = 0 ]]; then
+ echo No Available Adapters | tee -a /usr/local/scripts/sim.log
+ echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
+ echo Will retry afer sleep | tee -a /usr/local/scripts/sim.log
+ sleep 300
+ exit
+fi
 if [ $vh_server == "on" ]; then
 	if [ -e "/usr/local/scripts/vhcached.txt" ]; then
  		#Setting value to cached adapter
