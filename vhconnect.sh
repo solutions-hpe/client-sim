@@ -2,12 +2,12 @@
 version=.10
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
-echo $(date) | tee -a /usr/local/scripts/sim.log
+echo $(date)
 #Dumping Current Device List
-echo Getting VH device list | tee -a /usr/local/scripts/sim.log
+echo Getting VH device list
 sudo /usr/sbin/vhclientx86_64 -t LIST -r /tmp/vhactive.txt
 #Checking to see if there is a cache device to connect to
-echo VH Server is $vh_server | tee -a /usr/local/scripts/sim.log
+echo VH Server is $vh_server
 #Counting & searching records in /tmp/vhactive.txt
 r_count=0
 y_count=0
@@ -28,11 +28,11 @@ if [ $vh_server == "on" ]; then
 		#This way the client is always using the same adapter
 		#Otherwise connectivity for clients will have gaps when the adapter changes in Central
 		vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
-		echo Cached $vhserver_device | tee -a /usr/local/scripts/sim.log
+		echo Cached $vhserver_device
 		#If Client is connected to more than 1 device - disconnecting
 		if [[ $y_count -gt 1 ]]; then
-			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
-   			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
+			echo Found multiple devices in-use
+   			echo Clearing out all devices in-use
 			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
 			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 		fi
@@ -43,8 +43,8 @@ if [ $vh_server == "on" ]; then
 		rn_vhactive=$((1 + RANDOM % $r_count))
 		#If Client is connected to more than 1 device - disconnecting
 		if [[ $y_count -gt 1 ]]; then
-  			echo Found multiple devices in-use | tee -a /usr/local/scripts/sim.log
-			echo Clearing out all devices in-use | tee -a /usr/local/scripts/sim.log
+  			echo Found multiple devices in-use
+			echo Clearing out all devices in-use
 			sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
 			sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 		fi
