@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.40
+version=.41
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -281,6 +281,7 @@ if [ $kill_switch == "off" ]; then
       					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
 					fi
      				done
+	 	fi
 		#Running apt update & apt upgrade
 		echo Running Updates | tee -a /usr/local/scripts/sim.log
 		sudo apt update
