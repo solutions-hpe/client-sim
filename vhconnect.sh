@@ -78,6 +78,7 @@ if [ $vh_server == "on" ]; then
 	/usr/sbin/vhclientx86_64 -t "AUTO USE PORT,$vhserver_device"
 	#End Connecting to VirtualHere Server
  	echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
+	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	#----------------------------------------------------------------
 	sleep 30
 #End if VirtualHere Server is enabled
