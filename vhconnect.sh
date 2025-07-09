@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.11
+version=.12
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
