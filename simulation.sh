@@ -62,7 +62,8 @@ rn=$((1 + RANDOM % 60))
 rn_iperf_port=$((5201 + RANDOM % 10))
 rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
-rn_offlinetime=$((1 + RANDOM % 14400))
+rn_offline_time=$((1 + RANDOM % 14400))
+rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 #Dumping Current Device List
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
@@ -76,6 +77,45 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $ea
 source '/usr/local/scripts/vhconnect.sh'
 #------------------------------------------------------------
 #End Connecting to VHServer
+#------------------------------------------------------------
+#------------------------------------------------------------
+#Connecting to Network
+#------------------------------------------------------------
+if [ $sim_phy == "wireless" ]; then
+	sudo rfkill unblock wifi; sudo rfkill unblock all
+      	echo --------------------------| tee -a /usr/local/scripts/sim.log
+	echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
+	nmcli radio wifi on
+    	sleep 5
+    	nmcli device wifi rescan
+	echo --------------------------| tee -a /usr/local/scripts/sim.log
+	echo Connecting to: | tee -a /usr/local/scripts/sim.log
+	echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
+   	#sleep 15 | tee -a /usr/local/scripts/sim.log
+	#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
+	echo --------------------------| tee -a /usr/local/scripts/sim.log
+	nmcli device wifi connect $ssid password $ssidpw
+      	#echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
+   	nmcli radio wifi off
+      	nmcli radio wifi on
+	sleep 5
+    	nmcli connection up $ssid
+	echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+	sleep 15 | tee -a /usr/local/scripts/sim.log
+ fi
+#------------------------------------------------------------
+#End Connecting to Network
+#------------------------------------------------------------
+#------------------------------------------------------------
+#Begin Setting up simulation load
+#------------------------------------------------------------
+if $sim_load -lt $rn_sim_load; then
+	echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
+ 	echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
+	sleep $rn_offline_time
+fi
+#------------------------------------------------------------
+#End Setting up simulation load
 #------------------------------------------------------------
 echo Kill Switch is $kill_switch | tee -a /usr/local/scripts/sim.log
 if [ $kill_switch == "off" ]; then
@@ -98,31 +138,6 @@ if [ $kill_switch == "off" ]; then
   		echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
     		echo Download: $download | tee -a /usr/local/scripts/sim.log
 		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
-		#------------------------------------------------------------
-		#Connecting to Network
-  		#------------------------------------------------------------
-  		if [ $sim_phy == "wireless" ]; then
-    		sudo rfkill unblock wifi; sudo rfkill unblock all
-      			echo --------------------------| tee -a /usr/local/scripts/sim.log
-			echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
-	 		nmcli radio wifi on
-    			sleep 5
-    			nmcli device wifi rescan
-			echo --------------------------| tee -a /usr/local/scripts/sim.log
-			echo Connecting to: | tee -a /usr/local/scripts/sim.log
-			echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
-   			#sleep 15 | tee -a /usr/local/scripts/sim.log
-			#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
-			echo --------------------------| tee -a /usr/local/scripts/sim.log
-			nmcli device wifi connect $ssid password $ssidpw
-      			#echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
-   			nmcli radio wifi off
-      			nmcli radio wifi on
-	 		sleep 5
-    			nmcli connection up $ssid
-			echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-			sleep 15 | tee -a /usr/local/scripts/sim.log
-  		fi
     		inet_check=www.google.com
 		ping -c1 $inet_check
 		if [ $? -eq 0 ]; then
@@ -234,7 +249,7 @@ if [ $kill_switch == "off" ]; then
 	 		iperf3 -c $iperf_server -p 1433 -t $rn_iperf_time
 		fi
     		#------------------------------------------------------------
-		#End Download Simulation
+		#End iPerf Simulation
 		#------------------------------------------------------------
   		#------------------------------------------------------------
 		#Running download simulation
