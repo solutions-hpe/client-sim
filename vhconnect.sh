@@ -28,7 +28,6 @@ if [ $r_count == 0 ]; then
  echo Will retry after sleep | tee -a /usr/local/scripts/sim.log
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  sleep 300
- exit
 fi
 if [ $vh_server == "on" ]; then
 	if [ -e "/usr/local/scripts/vhcached.txt" ]; then
