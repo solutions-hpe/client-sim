@@ -4,10 +4,13 @@ echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 #Check Logs Script
+#------------------------------------------------------------
 source /usr/local/scripts/sys_mon.sh &
 #------------------------------------------------------------
 #Running Cleanup from old simulations
+#------------------------------------------------------------
 rm /usr/local/scripts/Contents*
 rm /usr/local/scripts/main.cvd*
 rm /usr/local/scripts/manifest*
@@ -24,6 +27,7 @@ xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
 #------------------------------------------------------------
 #Calling config parser script
+#------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
@@ -42,6 +46,7 @@ echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
+#------------------------------------------------------------
 wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
 echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
@@ -56,6 +61,7 @@ echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
+#------------------------------------------------------------
 if [ $vh_server == "on" ]; then
   echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
   echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
