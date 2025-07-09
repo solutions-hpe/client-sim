@@ -88,7 +88,6 @@ if [ $sim_phy == "wireless" ]; then
 	nmcli radio wifi on
     	sleep 5
     	nmcli device wifi rescan
-	echo --------------------------| tee -a /usr/local/scripts/sim.log
 	echo Connecting to: $ssid | tee -a /usr/local/scripts/sim.log
 	nmcli device wifi connect $ssid password $ssidpw
    	nmcli radio wifi off
