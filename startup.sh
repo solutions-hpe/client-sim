@@ -41,7 +41,7 @@ smb_address=$(get_value 'address' 'smb_address')
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 #------------------------------------------------------------
 #Scheduling Reboot
-rn=$((reboot_schedule + RANDOM % 600))
+rn=$(($reboot_schedule + RANDOM % 600))
 echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #------------------------------------------------------------
