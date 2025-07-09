@@ -207,11 +207,9 @@ if [ $kill_switch == "off" ]; then
    			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
-			echo Count: $rn | tee -a /usr/local/scripts/sim.log
+   			echo Ping Payload: $rn_ping_size | tee -a /usr/local/scripts/sim.log
+			echo Ping Count: $rn | tee -a /usr/local/scripts/sim.log
 			echo ------------------------------| tee -a /usr/local/scripts/sim.log
-			echo Running ping simulation
-			echo Pinging Default Gateway
-   			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			ping -c $rn $ping_address -s $rn_ping_size
 		fi
   		#------------------------------------------------------------
