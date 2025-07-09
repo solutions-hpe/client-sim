@@ -337,6 +337,9 @@ else
 	rm /usr/local/scripts/Contents*
 	rm /usr/local/scripts/main.cvd*
 	rm /usr/local/scripts/manifest*
+ 	rm /tmp/Contents*
+	rm /tmp/main.cvd*
+	rm /tmp/manifest*
  	rm /tmp/file.tmp
 	#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
 	echo Kill switch enabled - sleeping for 5 minutes
