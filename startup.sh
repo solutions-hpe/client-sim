@@ -1,9 +1,9 @@
 #!/bin/bash
 version=.20
-echo --------------------------| tee /usr/local/scripts/sim.log
+echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #Check Logs Script
 source /usr/local/scripts/sys_mon.sh &
 #------------------------------------------------------------
@@ -27,7 +27,7 @@ sudo rfkill unblock wifi; sudo rfkill unblock all
 source '/usr/local/scripts/ini-parser.sh'
 #Setting config file location
 process_ini_file '/usr/local/scripts/simulation.conf'
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 public_repo=$(get_value 'simulation' 'public_repo')
@@ -53,7 +53,7 @@ sudo ifconfig $wladapter up
 #Sleeping for 30 seconds to bring up network interaces
 sleep 30
 echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 if [ $vh_server == "on" ]; then
@@ -63,9 +63,9 @@ if [ $vh_server == "on" ]; then
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo -----------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Launching Simulation Script | tee -a /usr/local/scripts/sim.log
 #Looping Script
