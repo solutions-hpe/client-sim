@@ -22,7 +22,7 @@ vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{
 	r_count=$((r_count+1))
 done
 echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
-if [[$r_count = 0 ]]; then
+if [[$r_count == 0 ]]; then
  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
  echo Will retry afer sleep | tee -a /usr/local/scripts/sim.log
