@@ -1,14 +1,20 @@
 #!/bin/bash
-version=.44
+version=.46
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 #Calling config parser script
+#------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
+#------------------------------------------------------------
 #Setting config file location
+#------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
+#------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
+#------------------------------------------------------------
 wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
 echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
@@ -17,8 +23,10 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 #Settings read from the local config file
 #Simulation settings
+#------------------------------------------------------------
 wsite=$(get_value 'simulation' 'wsite')
 sim_phy=$(get_value 'simulation' 'sim_phy')
 ssid=$(get_value 'simulation' 'ssid')
@@ -66,6 +74,7 @@ rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 #Dumping Current Device List
+#------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
@@ -122,7 +131,7 @@ if [ $kill_switch == "off" ]; then
   		echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+  		if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 		echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 		echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 		echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
@@ -136,19 +145,25 @@ if [ $kill_switch == "off" ]; then
 		ping -c1 $inet_check
 		if [ $? -eq 0 ]; then
 		 echo Successful network connection | tee -a /usr/local/scripts/sim.log
+   		 #------------------------------------------------------------
    		 #Running update to either the cloud repo or local SMB repo
+      		 #------------------------------------------------------------
    		 source '/usr/local/scripts/update.sh'
 		else
   			echo Network connection failed | tee -a /usr/local/scripts/sim.log
      			echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
+			#------------------------------------------------------------
 			#Running API to VHClient to disconnect all clients this device is connecting to
    			#When a device ID changes on VH the client can think it should connect to multiple devices
+     		 	#------------------------------------------------------------
    			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 			/usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+   			#------------------------------------------------------------
       		 	#VHCached.txt will hold the server and device ID from VH so we use the same device every time
 		 	#In the case when a device ID Changes, puring this setting will make sure a new device is captured
    		 	#Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
       			#changes occur in the environment. This is a workaround just for when the IDs change.
+	 		#------------------------------------------------------------
 		 	rm /usr/local/scripts/vhcached.txt
 			#------------------------------------------------------------
 			#Looping Script - Network Connectivity Failed
@@ -180,7 +195,7 @@ if [ $kill_switch == "off" ]; then
       					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
-      					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+      					 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Running WWW Traffic Simulation: | tee -a /usr/local/scripts/sim.log
 					 echo Website: $r | tee -a /usr/local/scripts/sim.log
@@ -202,7 +217,7 @@ if [ $kill_switch == "off" ]; then
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-	  		echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log		
+	  		if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log		
    			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
@@ -223,7 +238,7 @@ if [ $kill_switch == "off" ]; then
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-		  	echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+		  	if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 			echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
    			echo iPerf Server: $iperf_server | tee -a /usr/local/scripts/sim.log
@@ -273,8 +288,10 @@ if [ $kill_switch == "off" ]; then
 					fi
      				done
 	 	fi
+   		#------------------------------------------------------------
 		#Running apt update & apt upgrade
-		echo Running Updates | tee -a /usr/local/scripts/sim.log
+		#------------------------------------------------------------
+  		echo Running Updates | tee -a /usr/local/scripts/sim.log
 		sudo apt update
   		sudo apt remove sysstat -y
 		sudo apt upgrade -y
@@ -305,7 +322,7 @@ if [ $kill_switch == "off" ]; then
 					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-		  			 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
+		  			 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 					 echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
@@ -339,6 +356,7 @@ if [ $kill_switch == "off" ]; then
 else
 	#------------------------------------------------------------
 	#Running Cleanup from old simulations
+ 	#------------------------------------------------------------
 	rm /usr/local/scripts/Contents*
 	rm /usr/local/scripts/main.cvd*
 	rm /usr/local/scripts/manifest*
@@ -346,7 +364,9 @@ else
 	rm /tmp/main.cvd*
 	rm /tmp/manifest*
  	rm /tmp/file.tmp
+  	#------------------------------------------------------------
 	#If kill switch is enabled - sleeping for 5 minutes then restarting the loop
+ 	#------------------------------------------------------------
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
 fi
@@ -361,9 +381,13 @@ sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
 echo Sleeping for $rn_offlinetime seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 #Sleep for up to 4 hours to show the device left
+#------------------------------------------------------------
 sleep $rn_offlinetime
+#------------------------------------------------------------
 #Bringing all interfaces back up to call home/update scripts
+#------------------------------------------------------------
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
