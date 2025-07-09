@@ -1,7 +1,7 @@
 #!/bin/bash
 version=.44
 echo $(date) | tee -a /usr/local/scripts/sim.log
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #Calling config parser script
@@ -83,7 +83,7 @@ source '/usr/local/scripts/vhconnect.sh'
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ]; then
 	sudo rfkill unblock wifi; sudo rfkill unblock all
-      	echo --------------------------| tee -a /usr/local/scripts/sim.log
+      	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
 	nmcli radio wifi on
     	sleep 5
@@ -95,7 +95,7 @@ if [ $sim_phy == "wireless" ]; then
 	sleep 5
     	nmcli connection up $ssid
 	echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-	echo --------------------------| tee -a /usr/local/scripts/sim.log
+	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	sleep 15 | tee -a /usr/local/scripts/sim.log
  fi
 #------------------------------------------------------------
@@ -119,7 +119,7 @@ if [ $kill_switch == "off" ]; then
 		#Logging Simulation
   		#------------------------------------------------------------ 
 		echo $(date) | tee -a /usr/local/scripts/sim.log
-  		echo --------------------------| tee -a /usr/local/scripts/sim.log
+  		echo ------------------------------| tee -a /usr/local/scripts/sim.log
   		echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
@@ -132,7 +132,7 @@ if [ $kill_switch == "off" ]; then
   		echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
     		echo Download: $download | tee -a /usr/local/scripts/sim.log
 		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
-		echo --------------------------| tee -a /usr/local/scripts/sim.log
+		echo ------------------------------| tee -a /usr/local/scripts/sim.log
     		inet_check=www.google.com
 		ping -c1 $inet_check
 		if [ $? -eq 0 ]; then
@@ -177,7 +177,7 @@ if [ $kill_switch == "off" ]; then
 					 pkill -f firefox
 					 sleep 1
 					 echo $(date) | tee -a /usr/local/scripts/sim.log
-      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 echo ------------------------------| tee -a /usr/local/scripts/sim.log
       					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
@@ -185,7 +185,7 @@ if [ $kill_switch == "off" ]; then
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Running WWW Traffic Simulation: | tee -a /usr/local/scripts/sim.log
 					 echo Website: $r | tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 					 firefox --headless --newtab $r &
 					 #firefox --new-tab $r &
 					 www_traffic=off
@@ -199,7 +199,7 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
 		if [ $ping_test == "on" ]; then
    			echo $(date) | tee -a /usr/local/scripts/sim.log
-     			echo --------------------------| tee -a /usr/local/scripts/sim.log
+     			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
@@ -208,10 +208,10 @@ if [ $kill_switch == "off" ]; then
 			echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 			echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
 			echo Count: $rn | tee -a /usr/local/scripts/sim.log
-			echo --------------------------| tee -a /usr/local/scripts/sim.log
+			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			echo Running ping simulation
 			echo Pinging Default Gateway
-   			echo --------------------------| tee -a /usr/local/scripts/sim.log
+   			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			ping -c $rn $ping_address -s $rn_ping_size
 		fi
   		#------------------------------------------------------------
@@ -241,7 +241,7 @@ if [ $kill_switch == "off" ]; then
    			iperf3 -c $iperf_server -p 445 -t $rn_iperf_time
       			iperf3 -c $iperf_server -p 80 -t $rn_iperf_time
 	 		iperf3 -c $iperf_server -p 1433 -t $rn_iperf_time
-          		echo --------------------------| tee -a /usr/local/scripts/sim.log
+          		echo ------------------------------| tee -a /usr/local/scripts/sim.log
 		fi
     		#------------------------------------------------------------
 		#End iPerf Simulation
@@ -263,14 +263,14 @@ if [ $kill_switch == "off" ]; then
 					if [[ $r_count == $rn_dl ]]; then
 					 sleep 1
 					 echo $(date) | tee -a /usr/local/scripts/sim.log
-      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 echo ------------------------------| tee -a /usr/local/scripts/sim.log
       					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
       					 echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 					 echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
-					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+					 echo ------------------------------| tee -a /usr/local/scripts/sim.log
       					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
 					fi
      				done
@@ -303,7 +303,7 @@ if [ $kill_switch == "off" ]; then
 				for r in $dnsfile
 					do
 					 echo $(date) | tee -a /usr/local/scripts/sim.log
-      					 echo --------------------------| tee -a /usr/local/scripts/sim.log
+      					 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 					 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 					 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 					 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
@@ -314,7 +314,7 @@ if [ $kill_switch == "off" ]; then
 					 echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
 					 echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
 					 echo $r | tee -a /usr/local/scripts/sim.log
-         				 echo --------------------------| tee -a /usr/local/scripts/sim.log
+         				 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 					 dig @$dns_bad_record_1 $r &
 					 dig @$dns_bad_record_2 $r &
 					 dig @$dns_bad_record_3 $r &
@@ -362,14 +362,14 @@ echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
 echo Sleeping for $rn_offlinetime seconds
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #Sleep for up to 4 hours to show the device left
 sleep $rn_offlinetime
 #Bringing all interfaces back up to call home/update scripts
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
