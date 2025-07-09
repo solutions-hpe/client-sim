@@ -98,7 +98,6 @@ if [ $kill_switch == "off" ]; then
   		echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
     		echo Download: $download | tee -a /usr/local/scripts/sim.log
 		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
-		echo --------------------------| tee -a /usr/local/scripts/sim.log
 		#------------------------------------------------------------
 		#Connecting to Network
   		#------------------------------------------------------------
