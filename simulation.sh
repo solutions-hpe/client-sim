@@ -231,6 +231,7 @@ if [ $kill_switch == "off" ]; then
    			echo iPerf Port: $rn_iperf_port | tee -a /usr/local/scripts/sim.log
       			echo iPerf Time: $rn_iperf_time | tee -a /usr/local/scripts/sim.log
 			echo Running iPerf simulation: | tee -a /usr/local/scripts/sim.log
+             		echo ------------------------------| tee -a /usr/local/scripts/sim.log
      			iperf3 -u -c $iperf_server -p $rn_iperf_port -t $rn_iperf_time
 			iperf3 -c $iperf_server -p 443 -t $rn_iperf_time
    			iperf3 -c $iperf_server -p 3260 -t $rn_iperf_time
@@ -240,7 +241,6 @@ if [ $kill_switch == "off" ]; then
    			iperf3 -c $iperf_server -p 445 -t $rn_iperf_time
       			iperf3 -c $iperf_server -p 80 -t $rn_iperf_time
 	 		iperf3 -c $iperf_server -p 1433 -t $rn_iperf_time
-          		echo ------------------------------| tee -a /usr/local/scripts/sim.log
 		fi
     		#------------------------------------------------------------
 		#End iPerf Simulation
