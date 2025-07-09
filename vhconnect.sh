@@ -1,6 +1,6 @@
 #!/bin/bash
 version=.13
-echo --------------------------| tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
 #Dumping Current Device List
@@ -26,7 +26,7 @@ if [ $r_count == 0 ]; then
  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
  echo Will retry afer sleep | tee -a /usr/local/scripts/sim.log
- echo --------------------------| tee -a /usr/local/scripts/sim.log
+ echo ------------------------------| tee -a /usr/local/scripts/sim.log
  sleep 300
  exit
 fi
@@ -70,16 +70,16 @@ if [ $vh_server == "on" ]; then
    	#End if VirtualHere cached value check
     fi
 	#End Checking to see if there is a cache device to connect to
-	#------------------------------------------------------------
-	#------------------------------------------------------------
+	#----------------------------------------------------------------
+	#----------------------------------------------------------------
 	#Connecting to VirtualHere Server
 	echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
 	#Connecting to Adapter
 	/usr/sbin/vhclientx86_64 -t "AUTO USE PORT,$vhserver_device"
 	#End Connecting to VirtualHere Server
  	echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
-	#------------------------------------------------------------
+	#----------------------------------------------------------------
 	sleep 30
 #End if VirtualHere Server is enabled
 fi
-#------------------------------------------------------------
+#----------------------------------------------------------------
