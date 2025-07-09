@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.14
+version=.15
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
@@ -28,8 +28,8 @@ if [ $r_count == 0 ]; then
  echo Will retry after sleep | tee -a /usr/local/scripts/sim.log
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  sleep 300
-fi
-if [ $vh_server == "on" ]; then
+else
+ if [ $vh_server == "on" ]; then
 	if [ -e "/usr/local/scripts/vhcached.txt" ]; then
  		#Setting value to cached adapter
 		#This way the client is always using the same adapter
@@ -80,6 +80,7 @@ if [ $vh_server == "on" ]; then
 	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	#----------------------------------------------------------------
 	sleep 30
-#End if VirtualHere Server is enabled
+ #End if VirtualHere Server is enabled
+ fi
 fi
 #----------------------------------------------------------------
