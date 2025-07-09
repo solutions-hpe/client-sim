@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.42
+version=.43
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo --------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -89,13 +89,8 @@ if [ $sim_phy == "wireless" ]; then
     	sleep 5
     	nmcli device wifi rescan
 	echo --------------------------| tee -a /usr/local/scripts/sim.log
-	echo Connecting to: | tee -a /usr/local/scripts/sim.log
-	echo SSID - $ssid | tee -a /usr/local/scripts/sim.log
-   	#sleep 15 | tee -a /usr/local/scripts/sim.log
-	#echo Password - $ssidpw | tee -a /usr/local/scripts/sim.log
-	echo --------------------------| tee -a /usr/local/scripts/sim.log
+	echo Connecting to: $ssid | tee -a /usr/local/scripts/sim.log
 	nmcli device wifi connect $ssid password $ssidpw
-      	#echo Conneting to $ssid on device $wladapter | tee -a /usr/local/scripts/sim.log
    	nmcli radio wifi off
       	nmcli radio wifi on
 	sleep 5
@@ -110,6 +105,7 @@ if [ $sim_phy == "wireless" ]; then
 #Begin Setting up simulation load
 #------------------------------------------------------------
 if $sim_load -lt $rn_sim_load; then
+	echo --------------------------| tee -a /usr/local/scripts/sim.log
 	echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
  	echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
 	sleep $rn_offline_time
