@@ -222,6 +222,7 @@ if [ $kill_switch == "off" ]; then
   		#------------------------------------------------------------
    		if [ $iperf == "on" ]; then
         		echo $(date) | tee -a /usr/local/scripts/sim.log
+	       		echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 			echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 			echo Site: $wsite | tee -a /usr/local/scripts/sim.log
