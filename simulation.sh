@@ -83,7 +83,6 @@ source '/usr/local/scripts/vhconnect.sh'
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ]; then
 	sudo rfkill unblock wifi; sudo rfkill unblock all
-      	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
 	nmcli radio wifi on
     	sleep 5
