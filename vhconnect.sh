@@ -26,6 +26,7 @@ if [ $r_count == 0 ]; then
  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
  echo Will retry afer sleep | tee -a /usr/local/scripts/sim.log
+ echo --------------------------| tee -a /usr/local/scripts/sim.log
  sleep 300
  exit
 fi
