@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.11
+version=.12
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -35,6 +35,8 @@ if [ $public_repo == "on" ]; then
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
    sleep 1
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
+   sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/configs/simulation.conf -O /usr/local/scripts/simulation.conf
    sleep 1
    sudo chmod -R 777 /usr/local/scripts
   else
