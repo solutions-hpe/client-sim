@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.12
+version=.13
 #Making backup of script
 echo Making backup of Script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
@@ -29,6 +29,8 @@ ping -c1 $github
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
    sleep 1
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
+   sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/configs/simulation.conf -O /usr/local/scripts/simulation.conf
    sleep 1
    sudo chmod -R 777 /usr/local/scripts
    echo Simulation Script Version
