@@ -23,26 +23,35 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
+site_based_num=$(get_value 'simulation' 'site_based_num')
+simulation_id=s
+simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 #------------------------------------------------------------
 #Settings read from the local config file
-#Simulation settings
+#Global Simulation settings
 #------------------------------------------------------------
-wsite=$(get_value 'simulation' 'wsite')
-sim_phy=$(get_value 'simulation' 'sim_phy')
-ssid=$(get_value 'simulation' 'ssid')
-ssidpw=$(get_value 'simulation' 'ssidpw')
 kill_switch=$(get_value 'simulation' 'kill_switch')
 sim_load=$(get_value 'simulation' 'sim_load')
-dhcp_fail=$(get_value 'simulation' 'dhcp_fail')
-dns_fail=$(get_value 'simulation' 'dns_fail')
-assoc_fail=$(get_value 'simulation' 'assoc_fail')
-port_flap=$(get_value 'simulation' 'port_flap')
-ping_test=$(get_value 'simulation' 'ping_test')
-download=$(get_value 'simulation' 'download')
-iperf=$(get_value 'simulation' 'iperf')
-www_traffic=$(get_value 'simulation' 'www_traffic')
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server=$(get_value 'simulation' 'vh_server')
+site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
+#------------------------------------------------------------
+#Device Specific Simulation settings
+#------------------------------------------------------------
+wsite=$(get_value $simulation_id 'wsite')
+sim_phy=$(get_value $simulation_id 'sim_phy')
+ssid=$(get_value $simulation_id 'ssid')
+ssidpw=$(get_value $simulation_id 'ssidpw')
+dhcp_fail=$(get_value $simulation_id 'dhcp_fail')
+dns_fail=$(get_value $simulation_id 'dns_fail')
+assoc_fail=$(get_value $simulation_id 'assoc_fail')
+port_flap=$(get_value $simulation_id 'port_flap')
+ping_test=$(get_value $simulation_id 'ping_test')
+download=$(get_value $simulation_id 'download')
+iperf=$(get_value $simulation_id 'iperf')
+www_traffic=$(get_value $simulation_id 'www_traffic')
+
+exit
 #------------------------------------------------------------
 #Simlation IP
 #------------------------------------------------------------
