@@ -367,6 +367,7 @@ else
 	echo Kill switch enabled - sleeping for 5 minutes
 	sleep 300
 fi
+fi
 #------------------------------------------------------------
 #End Kill switch Check 
 #------------------------------------------------------------
