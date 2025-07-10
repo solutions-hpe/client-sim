@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.20
+version=.21
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -14,6 +14,10 @@ source /usr/local/scripts/sys_mon.sh &
 rm /usr/local/scripts/Contents*
 rm /usr/local/scripts/main.cvd*
 rm /usr/local/scripts/manifest*
+rm /tmp/Contents*
+rm /tmp/main.cvd*
+rm /tmp/manifest*
+rm /tmp/file.tmp
 #------------------------------------------------------------
 #Verify key settings changed - since this script is ran at startup
 #this is where you should put system changes you want to make sure 
