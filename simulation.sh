@@ -112,7 +112,7 @@ if [ $sim_phy == "wireless" ]; then
 	echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 	echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	sleep 15 | tee -a /usr/local/scripts/sim.log
- fi
+fi
 #------------------------------------------------------------
 #End Connecting to Network
 #------------------------------------------------------------
@@ -139,50 +139,50 @@ if [ $kill_switch == "off" ]; then
 		echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 		echo Site: $wsite | tee -a /usr/local/scripts/sim.log
   		if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-		echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-		echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-		echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
-		echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-		echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
-  		echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
-    		echo Download: $download | tee -a /usr/local/scripts/sim.log
-		echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
-		echo ------------------------------| tee -a /usr/local/scripts/sim.log
-    		inet_check=www.google.com
-		ping -c1 $inet_check
-		if [ $? -eq 0 ]; then
-		 echo Successful network connection | tee -a /usr/local/scripts/sim.log
-   		 #------------------------------------------------------------
-   		 #Running update to either the cloud repo or local SMB repo
-      		 #------------------------------------------------------------
-   		 source '/usr/local/scripts/update.sh'
-		else
-  			echo Network connection failed | tee -a /usr/local/scripts/sim.log
-     			echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
-			#------------------------------------------------------------
-			#Running API to VHClient to disconnect all clients this device is connecting to
-   			#When a device ID changes on VH the client can think it should connect to multiple devices
-     		 	#------------------------------------------------------------
-   			/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-			/usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-   			#------------------------------------------------------------
-      		 	#VHCached.txt will hold the server and device ID from VH so we use the same device every time
-		 	#In the case when a device ID Changes, puring this setting will make sure a new device is captured
-   		 	#Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-      			#changes occur in the environment. This is a workaround just for when the IDs change.
-	 		#------------------------------------------------------------
-		 	rm /usr/local/scripts/vhcached.txt
-			#------------------------------------------------------------
-			#Looping Script - Network Connectivity Failed
-			#------------------------------------------------------------
-			source /usr/local/scripts/simulation.sh
-		fi
-    		#------------------------------------------------------------
-		#End Connecting to Network
-		#------------------------------------------------------------
-		#Running WWW Traffic Simulation
-  		#------------------------------------------------------------
-		if [ $www_traffic == "on" ]; then
+		 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+		 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+		 echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
+		 echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
+		 echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
+  		 echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
+    		 echo Download: $download | tee -a /usr/local/scripts/sim.log
+		 echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
+		 echo ------------------------------| tee -a /usr/local/scripts/sim.log
+    		 inet_check=www.google.com
+		 ping -c1 $inet_check
+		  if [ $? -eq 0 ]; then
+		   echo Successful network connection | tee -a /usr/local/scripts/sim.log
+   		   #------------------------------------------------------------
+   		   #Running update to either the cloud repo or local SMB repo
+      		   #------------------------------------------------------------
+   		   source '/usr/local/scripts/update.sh'
+		  else
+  		   echo Network connection failed | tee -a /usr/local/scripts/sim.log
+     		   echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
+		   #------------------------------------------------------------
+		   #Running API to VHClient to disconnect all clients this device is connecting to
+   		   #When a device ID changes on VH the client can think it should connect to multiple devices
+     		   #------------------------------------------------------------
+   		   /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+		   /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+   		   #------------------------------------------------------------
+      		   #VHCached.txt will hold the server and device ID from VH so we use the same device every time
+		   #In the case when a device ID Changes, puring this setting will make sure a new device is captured
+   		   #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
+      		   #changes occur in the environment. This is a workaround just for when the IDs change.
+	 	   #------------------------------------------------------------
+		   rm /usr/local/scripts/vhcached.txt
+		   #------------------------------------------------------------
+		   #Looping Script - Network Connectivity Failed
+		   #------------------------------------------------------------
+		   source /usr/local/scripts/simulation.sh
+		  fi
+    		  #------------------------------------------------------------
+		  #End Connecting to Network
+		  #------------------------------------------------------------
+		  #Running WWW Traffic Simulation
+  		  #------------------------------------------------------------
+		  if [ $www_traffic == "on" ]; then
 			r_count=0
 			echo Running WWW Traffic simulation
 			wwwfile=$(cat /usr/local/scripts/websites.txt)
@@ -212,13 +212,13 @@ if [ $kill_switch == "off" ]; then
 					 www_traffic=off
 					fi
 				done
-		fi
-  		#------------------------------------------------------------
-		#End WWW Traffic Simulation	 
-		#------------------------------------------------------------
-		#Running ping simulation
-  		#------------------------------------------------------------
-		if [ $ping_test == "on" ]; then
+		  fi
+  		  #------------------------------------------------------------
+		  #End WWW Traffic Simulation	 
+		  #------------------------------------------------------------
+		  #Running ping simulation
+  		  #------------------------------------------------------------
+		  if [ $ping_test == "on" ]; then
    			echo $(date) | tee -a /usr/local/scripts/sim.log
      			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -232,14 +232,14 @@ if [ $kill_switch == "off" ]; then
 			echo Ping Count: $rn | tee -a /usr/local/scripts/sim.log
 			echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			ping -c $rn $ping_address -s $rn_ping_size
-		fi
-  		#------------------------------------------------------------
-		#End Ping Simulation
- 		#------------------------------------------------------------
-     		#------------------------------------------------------------
-		#Running iPerf simulation
-  		#------------------------------------------------------------
-   		if [ $iperf == "on" ]; then
+		  fi
+  		  #------------------------------------------------------------
+		  #End Ping Simulation
+ 		  #------------------------------------------------------------
+     		  #------------------------------------------------------------
+		  #Running iPerf simulation
+  		  #------------------------------------------------------------
+   		  if [ $iperf == "on" ]; then
         		echo $(date) | tee -a /usr/local/scripts/sim.log
 	       		echo ------------------------------| tee -a /usr/local/scripts/sim.log
 			echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -262,14 +262,14 @@ if [ $kill_switch == "off" ]; then
    			iperf3 -c $iperf_server -p 445 -t $rn_iperf_time
       			iperf3 -c $iperf_server -p 80 -t $rn_iperf_time
 	 		iperf3 -c $iperf_server -p 1433 -t $rn_iperf_time
-		fi
-    		#------------------------------------------------------------
-		#End iPerf Simulation
-		#------------------------------------------------------------
-  		#------------------------------------------------------------
-		#Running download simulation
-  		#------------------------------------------------------------
-		if [ $download == "on" ]; then
+		  fi
+    		  #------------------------------------------------------------
+		  #End iPerf Simulation
+		  #------------------------------------------------------------
+  		  #------------------------------------------------------------
+		  #Running download simulation
+  		  #------------------------------------------------------------
+		  if [ $download == "on" ]; then
   			r_count=0
 			echo Running Download simulation
 			dlfile=$(cat /usr/local/scripts/downloads.txt)
@@ -294,32 +294,32 @@ if [ $kill_switch == "off" ]; then
       					 wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
 					fi
      				done
-	 	fi
-   		#------------------------------------------------------------
-		#Running apt update & apt upgrade
-		#------------------------------------------------------------
-  		echo Running Updates | tee -a /usr/local/scripts/sim.log
-		sudo apt update
-  		sudo apt remove sysstat -y
-		sudo apt upgrade -y
-		sudo apt install git -y
-		sudo apt install wget -y
-		sudo apt install gnome-terminal -y
-		sudo apt install network-manager -y
-		sudo apt install qemu-guest-agent -y
-		sudo apt install net-tools -y
-		sudo apt install smbclient -y
-		sudo apt install dnsutils -y
-		sudo apt install dkms -y
-		sudo apt install iperf3 -y
-		sudo apt install firefox-esr -y
-		sudo apt autoremove -y
-  		#------------------------------------------------------------
-		#End Download Simulation
-		#------------------------------------------------------------
-		#Running DNS Fail simulation
-  		#------------------------------------------------------------
-		if [ $dns_fail == "on" ]; then
+	 	  fi
+   		  #------------------------------------------------------------
+		  #Running apt update & apt upgrade
+		  #------------------------------------------------------------
+  		  echo Running Updates | tee -a /usr/local/scripts/sim.log
+		  sudo apt update
+  		  sudo apt remove sysstat -y
+		  sudo apt upgrade -y
+		  sudo apt install git -y
+		  sudo apt install wget -y
+		  sudo apt install gnome-terminal -y
+		  sudo apt install network-manager -y
+		  sudo apt install qemu-guest-agent -y
+		  sudo apt install net-tools -y
+		  sudo apt install smbclient -y
+		  sudo apt install dnsutils -y
+		  sudo apt install dkms -y
+		  sudo apt install iperf3 -y
+		  sudo apt install firefox-esr -y
+		  sudo apt autoremove -y
+  		  #------------------------------------------------------------
+		  #End Download Simulation
+		  #------------------------------------------------------------
+		  #Running DNS Fail simulation
+  		  #------------------------------------------------------------
+		  if [ $dns_fail == "on" ]; then
 			dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
 			for i in {1..100}; do
 				for r in $dnsfile
@@ -349,16 +349,16 @@ if [ $kill_switch == "off" ]; then
 					 sleep 5
 					done
 			done
-		fi
-  		#------------------------------------------------------------
-		#End DNS Fail Simulation
+		  fi
+  		  #------------------------------------------------------------
+		  #End DNS Fail Simulation
+		  #------------------------------------------------------------
+		echo End of simulation sleeping for 5 seconds
+ 		sudo nmcli connection delete id $ssid
+		sleep 5
+ 		#------------------------------------------------------------
+		#End of 100 Loop Count
 		#------------------------------------------------------------
-	echo End of simulation sleeping for 5 seconds
- 	sudo nmcli connection delete id $ssid
-	sleep 5
- 	#------------------------------------------------------------
-	#End of 100 Loop Count
-	#------------------------------------------------------------
 	done
 else
   	#------------------------------------------------------------
