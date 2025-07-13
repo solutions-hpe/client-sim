@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.50
+version=.51
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -116,6 +116,8 @@ if [ $sim_phy == "wireless" ]; then
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15 | tee -a /usr/local/scripts/sim.log
+  #resetting DHCP Client service - so that the IP and Hostname is refreshed
+  sudo dhclient -r
 fi
 #------------------------------------------------------------
 #End Connecting to Network
