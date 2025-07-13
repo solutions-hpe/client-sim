@@ -379,8 +379,8 @@ fi
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
-sudo ifconfig $eadapter up
-sudo ifconfig $wladapter up
+sudo ifconfig $eadapter down
+sudo ifconfig $wladapter down
 echo Sleeping for $rn_offlinetime seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
