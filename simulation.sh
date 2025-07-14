@@ -116,9 +116,6 @@ if [ $sim_phy == "wireless" ]; then
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15 | tee -a /usr/local/scripts/sim.log
-  #resetting DHCP Client service - so that the IP and Hostname is refreshed
-  sudo dhclient wlan0
-  sudo dhclient eth1
 fi
 #------------------------------------------------------------
 #End Connecting to Network
@@ -129,7 +126,11 @@ fi
 if [ $sim_load -lt $rn_sim_load ]; then
   echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
   echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
+  nmcli radio wifi off
   sleep $rn_offline_time
+  nmcli radio wifi on
+  sleep 5
+  nmcli connection up $ssid
 fi
 #------------------------------------------------------------
 #End Setting up simulation load
