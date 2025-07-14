@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.51
+version=.52
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -106,16 +106,16 @@ if [ $sim_phy == "wireless" ]; then
   echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
   sleep 5
-  nmcli device wifi rescan
+  #nmcli device wifi rescan
   echo Connecting to: $ssid | tee -a /usr/local/scripts/sim.log
   nmcli device wifi connect $ssid password $ssidpw
-  nmcli radio wifi off
-  nmcli radio wifi on
-  sleep 5
-  nmcli connection up $ssid
+  #nmcli radio wifi off
+  #nmcli radio wifi on
+  #sleep 5
+  #nmcli connection up $ssid
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  sleep 15 | tee -a /usr/local/scripts/sim.log
+  sleep 15
 fi
 #------------------------------------------------------------
 #End Connecting to Network
@@ -131,6 +131,7 @@ if [ $sim_load -lt $rn_sim_load ]; then
   nmcli radio wifi on
   sleep 5
   nmcli connection up $ssid
+  sleep 5
 fi
 #------------------------------------------------------------
 #End Setting up simulation load
@@ -157,7 +158,7 @@ if [ $kill_switch == "off" ]; then
     echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
     echo ------------------------------| tee -a /usr/local/scripts/sim.log
     inet_check=www.google.com
-    ping -c1 $inet_check
+    ping -c2 $inet_check
     if [ $? -eq 0 ]; then
       echo Successful network connection | tee -a /usr/local/scripts/sim.log
       #------------------------------------------------------------
