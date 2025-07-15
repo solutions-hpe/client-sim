@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.15
+version=.16
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
@@ -27,7 +27,8 @@ done
 #----------------------------------------------------------------
 #Checking the number of devices that are available
 #----------------------------------------------------------------
-vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | awk -F'[()]' '{print $2}')
+if [ $sim_phy == "wireless" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep 802.11 | awk -F'[()]' '{print $2}'); fi
+if [ $sim_phy == "wired" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep AX88 | awk -F'[()]' '{print $2}'); fi
 for r in $vhactive; do
   r_count=$((r_count+1))
 done
