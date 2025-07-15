@@ -9,6 +9,7 @@ echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #For values assinged to script variables
 #------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
+source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Setting config file location
 #------------------------------------------------------------
