@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.53
+version=.54
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -93,8 +93,11 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $ea
 #Checking for kill switch to stop simulation
 #------------------------------------------------------------
 #Connecting to VHServer
+#Checking to see if google is reachable before 
 #------------------------------------------------------------
-source '/usr/local/scripts/vhconnect.sh'
+inet_check=www.google.com
+ping -c2 $inet_check
+if [ $? -eq 0 ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 #------------------------------------------------------------
 #End Connecting to VHServer
 #------------------------------------------------------------
