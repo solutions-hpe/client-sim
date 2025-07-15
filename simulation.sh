@@ -87,12 +87,19 @@ rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
 rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
+$vmid=$
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
+mac_id=$(echo HOSTNAME | rev | cut -c 3-4 | rev)
+mac_id="${mac_id}:$(echo HOSTNAME | rev | cut -c 1-2 | rev)"
+#sudo ip link set wlan0 down
+#sudo ip link set wlan0 address e8:4e:06:ac: $mac_id
+#sudo ip link set wlan0 up
+echo e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Checking for kill switch to stop simulation
 #------------------------------------------------------------
