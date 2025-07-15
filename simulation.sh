@@ -412,3 +412,4 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #Looping Script
 #------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
+#nmcli con del $(nmcli -t -f UUID,TYPE con | awk -F":" '{if ($2 == "gsm") print $1}')
