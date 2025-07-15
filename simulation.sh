@@ -104,7 +104,7 @@ mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 down
- sudo ip link set wlan0 address e8:4e:06:ac:$mac_id
+ sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
  sudo ip link set wlan0 up
  echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
 fi
