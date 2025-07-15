@@ -97,7 +97,12 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $ea
 #------------------------------------------------------------
 inet_check=www.google.com
 ping -c2 $inet_check
-if [ $? -eq 0 ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+if [ $? -eq 0 ]; then 
+ echo Successful network connection | tee -a /usr/local/scripts/sim.log
+else
+ echo Network Connection failed | tee -a /usr/local/scripts/sim.log
+ if [ $vh_connect == 'on' ] then source '/usr/local/scripts/vhconnect.sh'; fi
+fi
 #------------------------------------------------------------
 #End Connecting to VHServer
 #------------------------------------------------------------
