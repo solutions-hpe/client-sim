@@ -115,9 +115,9 @@ fi
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ]; then
   sudo rfkill unblock wifi; sudo rfkill unblock all
-  echo Setting up WiFi Adapter: | tee -a /usr/local/scripts/sim.log
+  echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
-  sleep 5
+  sleep 10
   #nmcli device wifi rescan
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
   if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
