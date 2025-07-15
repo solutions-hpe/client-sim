@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.64
+version=.65
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -94,8 +94,8 @@ $vmid=$
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
-mac_id=$(echo HOSTNAME | rev | cut -c 3-4 | rev)
-mac_id="${mac_id}:$(echo HOSTNAME | rev | cut -c 1-2 | rev)"
+mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
+mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #sudo ip link set wlan0 down
 #sudo ip link set wlan0 address e8:4e:06:ac: $mac_id
 #sudo ip link set wlan0 up
