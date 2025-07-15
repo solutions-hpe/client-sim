@@ -118,6 +118,7 @@ if [ $sim_phy == "wireless" ]; then
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
   if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite "-" $ssid password $ssidpw; fi
   if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+  echo nmcli device wifi connect $wsite "-" $ssid password $ssidpw | tee -a /usr/local/scripts/sim.log
   #nmcli radio wifi off
   #nmcli radio wifi on
   #sleep 5
