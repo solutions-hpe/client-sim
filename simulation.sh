@@ -123,8 +123,8 @@ if [ $sim_phy == "wireless" ]; then
   if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
   nmcli device wifi rescan
   sleep 5
-  nmcli connection up $ssid
-  nmcli connection up ${wsite}"-"${ssid}
+  if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
