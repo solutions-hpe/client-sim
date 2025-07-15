@@ -40,27 +40,27 @@ if [ $r_count == 0 ]; then
  sleep 300
 else
  if [ $vh_server == "on" ]; then
- if [ -e "/usr/local/scripts/vhcached.txt" ]; then
- #----------------------------------------------------------------
- #If Client is connected to more than 1 device - disconnecting
- #----------------------------------------------------------------
- if [[ $y_count -gt 1 ]]; then
-  echo Found multiple devices in-use
-  echo Clearing out all devices in-use
-  sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-  sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
- fi
- #----------------------------------------------------------------
- #Setting value to cached adapter
- #This way the client is always using the same adapter
- #Otherwise connectivity for clients will have gaps when the adapter changes in Central
- #----------------------------------------------------------------
- vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
- echo Cached $vhserver_device
- #----------------------------------------------------------------
- #If VirtualHere cached value does not exist
- #----------------------------------------------------------------
-else
+  if [ -e "/usr/local/scripts/vhcached.txt" ]; then
+  #----------------------------------------------------------------
+  #If Client is connected to more than 1 device - disconnecting
+  #----------------------------------------------------------------
+  if [[ $y_count -gt 1 ]]; then
+   echo Found multiple devices in-use
+   echo Clearing out all devices in-use
+   sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+   sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+  fi
+  #----------------------------------------------------------------
+  #Setting value to cached adapter
+  #This way the client is always using the same adapter
+  #Otherwise connectivity for clients will have gaps when the adapter changes in Central
+  #----------------------------------------------------------------
+  vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
+  echo Cached $vhserver_device
+  #----------------------------------------------------------------
+  #If VirtualHere cached value does not exist
+  #----------------------------------------------------------------
+ else
  #----------------------------------------------------------------
  #Generating random number to connect to a random adapter
  #----------------------------------------------------------------
