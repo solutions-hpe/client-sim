@@ -93,7 +93,7 @@ rn_sim_load=$((1 + RANDOM % 99))
 #Pure asthetics so the usernames in Central look good
 #------------------------------------------------------------
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
-sudo sed -i "s/gethostname()/$username/g" /etc/dhcp/dhclient.conf
+sudo sed -i "s/gethostname()/"$username"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
