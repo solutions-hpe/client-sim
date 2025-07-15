@@ -87,7 +87,8 @@ rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
 rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
-$vmid=$
+username=$(echo $HOSTNAME | cut -d "-" -f 1)
+echo $username
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
