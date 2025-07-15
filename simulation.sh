@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.56
+version=.57
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -190,7 +190,7 @@ if [ $kill_switch == "off" ]; then
       #changes occur in the environment. This is a workaround just for when the IDs change.
       #------------------------------------------------------------
       rm /usr/local/scripts/vhcached.txt
-      #sudo nmcli con del $(nmcli -t -f UUID,TYPE con | awk -F":" '{if ($2 == "gsm") print $1}')
+      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       #------------------------------------------------------------
       #Looping Script - Network Connectivity Failed
       #------------------------------------------------------------
@@ -413,4 +413,3 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #Looping Script
 #------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
-#nmcli con del $(nmcli -t -f UUID,TYPE con | awk -F":" '{if ($2 == "gsm") print $1}')
