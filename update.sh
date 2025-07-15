@@ -7,7 +7,6 @@ echo $(date) | tee -a /usr/local/scripts/sim.log
 #Updating Scripts
 #------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-echo Checking connectivity to GitHub | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
 if [ $public_repo == "on" ]; then
  #Using remote GitHub repo
