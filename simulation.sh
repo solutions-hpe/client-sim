@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.67
+version=.68
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -93,8 +93,7 @@ rn_sim_load=$((1 + RANDOM % 99))
 #Pure asthetics so the usernames in Central look good
 #------------------------------------------------------------
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
-echo $username
-#sudo sed -i "s/gethostname()/$username/g" /etc/dhcp/dhclient.conf
+sudo sed -i "s/gethostname()/$username/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
