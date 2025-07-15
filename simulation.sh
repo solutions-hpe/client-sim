@@ -190,6 +190,7 @@ if [ $kill_switch == "off" ]; then
       #changes occur in the environment. This is a workaround just for when the IDs change.
       #------------------------------------------------------------
       rm /usr/local/scripts/vhcached.txt
+      #sudo nmcli con del $(nmcli -t -f UUID,TYPE con | awk -F":" '{if ($2 == "gsm") print $1}')
       #------------------------------------------------------------
       #Looping Script - Network Connectivity Failed
       #------------------------------------------------------------
