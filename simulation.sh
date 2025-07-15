@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.57
+version=.58
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -101,7 +101,7 @@ if [ $? -eq 0 ]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network Connection failed | tee -a /usr/local/scripts/sim.log
- if [ $vh_server == 'on' ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
