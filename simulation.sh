@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.66
+version=.67
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -89,6 +89,7 @@ rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
 echo $username
+#sudo sed -i "s/gethostname()/$username/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
