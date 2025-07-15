@@ -142,8 +142,8 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   sleep 5
 fi
 #------------------------------------------------------------
