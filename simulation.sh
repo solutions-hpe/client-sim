@@ -1,5 +1,5 @@
 #!/bin/bash
-version=61
+version=.62
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -173,9 +173,21 @@ if [ $kill_switch == "off" ]; then
     inet_check=www.google.com
     ping -c2 $inet_check
     if [ $? -eq 0 ]; then
-      echo Successful network connection | tee -a /usr/local/scripts/sim.log
+     echo Successful network connection | tee -a /usr/local/scripts/sim.log
     else
-      echo Network connection failed | tee -a /usr/local/scripts/sim.log
+     echo Network connection failed | tee -a /usr/local/scripts/sim.log
+     echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
+     if [ $sim_phy == "wireless" ]; then
+      nmcli radio wifi off
+      nmcli radio wifi on
+     fi
+     sleep 30
+     ping -c2 $inet_check
+     if [ $? -eq 0 ]; then
+      echo Successful network connection | tee -a /usr/local/scripts/sim.log
+     else
+      echo Connection failed muiltiple times | tee -a /usr/local/scripts/sim.log
+      echo Resetting configuration | tee -a /usr/local/scripts/sim.log
       echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
       #------------------------------------------------------------
       #Running API to VHClient to disconnect all clients this device is connecting to
@@ -198,6 +210,7 @@ if [ $kill_switch == "off" ]; then
       #Looping Script - Network Connectivity Failed
       #------------------------------------------------------------
       source /usr/local/scripts/simulation.sh
+     fi
     fi
     #------------------------------------------------------------
     #End Connecting to Network
