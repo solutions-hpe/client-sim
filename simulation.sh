@@ -121,6 +121,15 @@ if [ $? -eq 0 ]; then
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+  sudo ip link set wlan0 down
+  sleep 1
+  sudo ip link set wlan0 address e8:4e:06:ac:$mac_id
+  sleep 1
+  sudo ip link set wlan0 up
+  sleep 1
+  echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
+ fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
