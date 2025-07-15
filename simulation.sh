@@ -87,6 +87,11 @@ rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
 rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
+#------------------------------------------------------------
+#Getting username from hostname extraction
+#changing DHCP Client configuration to send the username as the hostname
+#Pure asthetics so the usernames in Central look good
+#------------------------------------------------------------
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
 echo $username
 #sudo sed -i "s/gethostname()/$username/g" /etc/dhcp/dhclient.conf
