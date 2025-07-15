@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.62
+version=.63
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -121,11 +121,10 @@ if [ $sim_phy == "wireless" ]; then
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
   if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
   if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
-  #nmcli radio wifi off
-  #nmcli radio wifi on
-  #sleep 5
-  #nmcli connection up $ssid
   nmcli device wifi rescan
+  sleep 5
+  nmcli connection up $ssid
+  nmcli connection up ${wsite}"-"${ssid}
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
@@ -143,7 +142,8 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  nmcli connection up $ssid
+  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
+  if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
   sleep 5
 fi
 #------------------------------------------------------------
@@ -180,6 +180,9 @@ if [ $kill_switch == "off" ]; then
      if [ $sim_phy == "wireless" ]; then
       nmcli radio wifi off
       nmcli radio wifi on
+      sleep 5
+       if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
+       if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
      fi
      sleep 30
      ping -c2 $inet_check
