@@ -9,6 +9,9 @@ echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #For values assinged to script variables
 #------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
+#------------------------------------------------------------
+#Running update to either the cloud repo or local SMB repo
+#------------------------------------------------------------
 source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Setting config file location
@@ -171,10 +174,6 @@ if [ $kill_switch == "off" ]; then
     ping -c2 $inet_check
     if [ $? -eq 0 ]; then
       echo Successful network connection | tee -a /usr/local/scripts/sim.log
-      #------------------------------------------------------------
-      #Running update to either the cloud repo or local SMB repo
-      #------------------------------------------------------------
-      source '/usr/local/scripts/update.sh'
     else
       echo Network connection failed | tee -a /usr/local/scripts/sim.log
       echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
