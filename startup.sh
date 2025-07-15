@@ -75,7 +75,6 @@ fi
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
-echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Launching Simulation Script | tee -a /usr/local/scripts/sim.log
 #Looping Script
