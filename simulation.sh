@@ -190,6 +190,9 @@ if [ $kill_switch == "off" ]; then
       #changes occur in the environment. This is a workaround just for when the IDs change.
       #------------------------------------------------------------
       rm /usr/local/scripts/vhcached.txt
+      #------------------------------------------------------------
+      #Cleaning up old network connection profiles
+      #------------------------------------------------------------
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       #------------------------------------------------------------
       #Looping Script - Network Connectivity Failed
@@ -374,7 +377,6 @@ if [ $kill_switch == "off" ]; then
     #End DNS Fail Simulation
     #------------------------------------------------------------
     echo End of simulation sleeping for 5 seconds
-    sudo nmcli connection delete id $ssid
     sleep 5
     #------------------------------------------------------------
     #End of 100 Loop Count
