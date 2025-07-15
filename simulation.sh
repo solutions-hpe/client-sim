@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.58
+version=.59
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -100,7 +100,7 @@ ping -c2 $inet_check
 if [ $? -eq 0 ]; then 
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
- echo Network Connection failed | tee -a /usr/local/scripts/sim.log
+ echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 fi
 #------------------------------------------------------------
@@ -116,7 +116,7 @@ if [ $sim_phy == "wireless" ]; then
   sleep 5
   #nmcli device wifi rescan
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
-  if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite-$ssid password $ssidpw; fi
+  if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite "-" $ssid password $ssidpw; fi
   if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
   #nmcli radio wifi off
   #nmcli radio wifi on
