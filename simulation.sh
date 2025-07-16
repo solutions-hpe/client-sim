@@ -109,7 +109,6 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sleep 1
  sudo ip link set wlan0 up
  sleep 1
- echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
  sleep 10
 fi
 #------------------------------------------------------------
@@ -143,7 +142,6 @@ if [ $sim_phy == "wireless" ]; then
    sleep 1
    sudo ip link set wlan0 up
    sleep 1
-   echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
   fi
   sleep 10
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
@@ -161,7 +159,6 @@ if [ $sim_phy == "wireless" ]; then
    sleep 1
    sudo ip link set wlan0 up
    sleep 1
-   echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
   fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
@@ -185,7 +182,6 @@ if [ $sim_load -lt $rn_sim_load ]; then
    sleep 1
    sudo ip link set wlan0 up
    sleep 1
-   echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
   fi
   sleep 5
   if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
