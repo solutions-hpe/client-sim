@@ -59,12 +59,16 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
-sudo ip link set wlan0 down
-sleep 1
-sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
-sleep 1
-sudo ip link set wlan0 up
-sleep 1
+mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
+mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+ sudo ip link set wlan0 down
+ sleep 1
+ sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+ sleep 1
+ sudo ip link set wlan0 up
+ sleep 1
+fi
 #Sleeping for 30 seconds to bring up network interaces
 sleep 30
 echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
