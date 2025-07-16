@@ -43,6 +43,7 @@ vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
 smb_address=$(get_value 'address' 'smb_address')
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
+sim_phy=$(get_value $simulation_id 'sim_phy')
 #------------------------------------------------------------
 #Scheduling Reboot
 rn=$(($reboot_schedule + RANDOM % 600))
