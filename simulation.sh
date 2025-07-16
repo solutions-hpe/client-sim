@@ -106,8 +106,10 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 down
  sleep 1
  sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
- sudo ip link set wlan0 address 00:12:5f:08:$mac_id
- sudo ip link set wlan0 address 00:10:7f:08:$mac_id
+ sudo ip link set wlan0 address 00:12:5f:09:$mac_id
+ sudo ip link set wlan0 address 00:10:7f:09:$mac_id
+ sudo ip link set wlan0 address cc:6a:10:09:$mac_id
+ sudo ip link set wlan0 address 08:87:c7:09:$mac_id
  sleep 1
  sudo ip link set wlan0 up
  sleep 1
