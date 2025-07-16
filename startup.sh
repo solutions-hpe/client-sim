@@ -69,7 +69,7 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
-sleep 10
+sleep 20
 if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 down
  sleep 1
@@ -79,7 +79,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sleep 1
 fi
 #Sleeping for 30 seconds to bring up network interaces
-sleep 20
+sleep 10
 echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
