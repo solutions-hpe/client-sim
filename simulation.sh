@@ -168,6 +168,13 @@ if [ $sim_load -lt $rn_sim_load ]; then
   nmcli radio wifi off
   sleep $rn_offline_time
   nmcli radio wifi on
+  sudo ip link set wlan0 down
+  sleep 1
+  sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+  sleep 1
+  sudo ip link set wlan0 up
+  sleep 1
+  echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
   sleep 5
   if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
   if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
@@ -207,6 +214,13 @@ if [ $kill_switch == "off" ]; then
      if [ $sim_phy == "wireless" ]; then
       nmcli radio wifi off
       nmcli radio wifi on
+      sudo ip link set wlan0 down
+      sleep 1
+      sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+      sleep 1
+      sudo ip link set wlan0 up
+      sleep 1
+      echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
       sleep 5
        if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
        if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
