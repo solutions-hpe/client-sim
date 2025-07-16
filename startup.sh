@@ -43,6 +43,9 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Settings read from the local config file
 #------------------------------------------------------------
+site_based_num=$(get_value 'simulation' 'site_based_num')
+simulation_id=s
+simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
