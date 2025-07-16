@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.24
+version=.25
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -59,6 +59,17 @@ rn=$(($reboot_schedule + RANDOM % 600))
 echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #------------------------------------------------------------
+#Finding adapter names and setting usable variables for interfaces
+#------------------------------------------------------------
+wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
+#Making sure eth0 and wlan0 are online
+echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
+sudo ifconfig $eadapter up
+sudo ifconfig $wladapter up
+#------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
@@ -71,17 +82,6 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 up
  sleep 1
 fi
-#------------------------------------------------------------
-#Finding adapter names and setting usable variables for interfaces
-#------------------------------------------------------------
-wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
-echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
-echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
-#Making sure eth0 and wlan0 are online
-echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
-sudo ifconfig $eadapter up
-sudo ifconfig $wladapter up
 #Sleeping for 30 seconds to bring up network interaces
 sleep 30
 echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
