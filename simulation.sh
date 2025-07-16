@@ -124,15 +124,6 @@ if [ $? -eq 0 ]; then
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
- if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-  sudo ip link set wlan0 down
-  sleep 1
-  sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
-  sleep 1
-  sudo ip link set wlan0 up
-  sleep 1
-  echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
- fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
@@ -144,6 +135,15 @@ if [ $sim_phy == "wireless" ]; then
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
+  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+   sudo ip link set wlan0 down
+   sleep 1
+   sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+   sleep 1
+   sudo ip link set wlan0 up
+   sleep 1
+   echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
+  fi
   sleep 10
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
   if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
