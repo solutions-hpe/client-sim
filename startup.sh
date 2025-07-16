@@ -69,6 +69,10 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
+#Sleeping for 30 seconds to bring up network interaces
+sleep 30
+echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
+echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
@@ -82,10 +86,6 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 up
  sleep 1
 fi
-#Sleeping for 30 seconds to bring up network interaces
-sleep 30
-echo Wating for sytem startup | tee -a /usr/local/scripts/sim.log
-echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
