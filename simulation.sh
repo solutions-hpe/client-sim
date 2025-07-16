@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.71
+version=.72
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -110,6 +110,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
  sudo ip link set wlan0 up
  sleep 1
  echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
+ sleep 10
 fi
 #------------------------------------------------------------
 #Checking for kill switch to stop simulation
@@ -153,6 +154,15 @@ if [ $sim_phy == "wireless" ]; then
   if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
   if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+   sudo ip link set wlan0 down
+   sleep 1
+   sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+   sleep 1
+   sudo ip link set wlan0 up
+   sleep 1
+   echo Set MAC to e8:4e:06:ac:$mac_id | tee -a /usr/local/scripts/sim.log
+  fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
 fi
