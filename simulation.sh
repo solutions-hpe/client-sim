@@ -295,7 +295,7 @@ if [ $kill_switch == "off" ]; then
 	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 	  echo Website: $r | tee -a /usr/local/scripts/sim.log
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-          firefox --headless $r &
+          firefox $r &
 	  www_traffic=off
 	fi
       done
