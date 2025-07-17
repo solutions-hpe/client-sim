@@ -164,22 +164,26 @@ echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
 cd rtl8188eu
 sudo make all
 sudo make install
+sudo dkms add .
 cd ..
 echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
 cd rtl8852au
-sudo make
+sudo make all
 sudo make install
+sudo dkms add .
 cd ..
 echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
 cd rtw89
 sudo make
 sudo make install
+sudo kdms add .
 cd ..
 echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
 cd rtl8723au
 sudo make
 sudo make install
 sudo modprobe 8723au
+sudo dkms add .
 #------------------------------------------------------------
 echo Creating auto Start files | tee -a /tmp/client-sim.log
 #Creating Startup
