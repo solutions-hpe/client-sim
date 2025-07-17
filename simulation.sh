@@ -285,9 +285,6 @@ if [ $kill_switch == "off" ]; then
       for r in $wwwfile; do
 	r_count=$((r_count+1))
 	if [[ $r_count == $rn_www ]]; then
-	  echo Closing Firefox | tee -a /usr/local/scripts/sim.log
-	  pkill -f firefox
-	  sleep 1
 	  echo $(date) | tee -a /usr/local/scripts/sim.log
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -297,6 +294,7 @@ if [ $kill_switch == "off" ]; then
 	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 	  echo Website: $r | tee -a /usr/local/scripts/sim.log
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
+          firefox $r &
 	  www_traffic=off
 	fi
       done
@@ -451,6 +449,11 @@ else
   echo Kill switch enabled - sleeping for 5 minutes
   sleep 300
 fi
+#------------------------------------------------------------
+#Killing Firefox simulation
+#------------------------------------------------------------
+echo Closing Firefox | tee -a /usr/local/scripts/sim.log
+pkill -f firefox
 #------------------------------------------------------------
 #End Kill switch Check 
 #------------------------------------------------------------
