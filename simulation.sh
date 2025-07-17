@@ -43,6 +43,7 @@ sim_load=$(get_value 'simulation' 'sim_load')
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
+iperf_bw=$(get_value 'simulation' 'iperf_bw')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
