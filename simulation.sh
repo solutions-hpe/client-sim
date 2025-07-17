@@ -405,7 +405,7 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     if [ $dns_fail == "on" ]; then
       dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
-      for i in {1..100}; do
+      for i in {1..10}; do
 	for r in $dnsfile; do
 	  echo $(date) | tee -a /usr/local/scripts/sim.log
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
