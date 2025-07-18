@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.39
+version=.40
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
@@ -209,25 +209,25 @@ echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
 cd rtl8188eu
 sudo make all
 sudo make install
-#sudo dkms add .
+sudo dkms add .
 cd ..
 echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
 cd rtl8852au
 sudo make all
 sudo make install
-#sudo dkms add .
+sudo dkms add .
 cd ..
 echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
 cd rtw89
 sudo make all
 sudo make install
-#sudo kdms add .
+sudo kdms add .
 cd ..
 echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
 cd rtl8723au
 sudo make all
 sudo make install
 sudo modprobe 8723au
-#sudo dkms add .
+sudo dkms add .
 #------------------------------------------------------------
 echo install is complete | tee -a /tmp/client-sim.log
