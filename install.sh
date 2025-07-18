@@ -2,8 +2,9 @@
 version=.40
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
+sudo apt install gnome-terminal -y
 gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
-lxterminal -t Installer --geometry=80x15 -e tail -f /tmp/client-sim.log
+#lxterminal -t Installer --geometry=80x15 -e tail -f /tmp/client-sim.log
 #------------------------------------------------------------
 #Checking OS
 os=$(uname -n)
@@ -41,7 +42,6 @@ sudo apt upgrade -y
 sudo apt remote sysstat -y
 sudo apt install git -y
 sudo apt install wget -y
-sudo apt install gnome-terminal -y
 sudo apt install network-manager -y
 sudo apt install qemu-guest-agent -y
 sudo apt install net-tools -y
