@@ -184,6 +184,7 @@ for (( h = 1; h <= 9; h++ ))
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://stream.playsignage.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://release.playsignage.com/
       sudo apt update
+      sleep 60
      ;;
     6)
       sudo dhcpcd -h SONOS -i $sonos_opt60 -o $generic_opt55 -m 20 vwlan6
