@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".66"
+scriptver=".67"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -164,12 +164,12 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
-      firefox https://connect.raspberrypi.com/ &
       firefox https://playsignage.com/ &
       firefox https://my.playsignage.com/ &
       firefox https://us-storage.playsignage.com/ &
       firefox https://stream.playsignage.com/ &
       firefox https://release.playsignage.com/ &
+      firefox https://connect.raspberrypi.com/ &
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://my.playsignage.com/
