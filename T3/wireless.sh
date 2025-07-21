@@ -165,17 +165,17 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox playsignage.com
+      firefox playsignage.com &
       sleep 5
-      firefox my.playsignage.com
+      firefox my.playsignage.com &
       sleep 5
-      firefox us-storage.playsignage.com
+      firefox us-storage.playsignage.com &
       sleep 5
-      firefox stream.playsignage.com
+      firefox stream.playsignage.com &
       sleep 5
-      firefox release.playsignage.com
+      firefox release.playsignage.com &
       sleep 5
-      firefox connect.raspberrypi.com
+      firefox connect.raspberrypi.com &
       sleep 5
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
