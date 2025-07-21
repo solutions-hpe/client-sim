@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".69"
+scriptver=".70"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -165,17 +165,17 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox https://playsignage.com &
-      sleep 5
       firefox https://my.playsignage.com &
       sleep 5
       firefox https://us-storage.playsignage.com &
       sleep 5
       firefox https://stream.playsignage.com &
       sleep 5
+      firefox https://connect.raspberrypi.com &
+      sleep 5
       firefox https://release.playsignage.com &
       sleep 5
-      firefox https://connect.raspberrypi.com &
+      firefox https://playsignage.com &
       sleep 5
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
