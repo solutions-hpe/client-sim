@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".64"
+scriptver=".65"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -125,6 +125,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
      ;;
     2)
       sudo dhcpcd -h Liftmaster -i $liftmstr_opt60 -o $generic_opt55 -m 20 vwlan2
@@ -136,6 +137,7 @@ for (( h = 1; h <= 9; h++ ))
       curl --insecure -o /tmp/liftmaster.file https://40.117.182.120:8883
       curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
+      pkill -f firefox
      ;;
     3)
       sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 -m 20 vwlan3
@@ -143,6 +145,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running BrightSign Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       sleep 5
      ;;
     4)
@@ -151,6 +154,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Zebra Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
@@ -159,6 +163,13 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
+      firefox --headless https://connect.raspberrypi.com/ &
+      firefox --headless https://playsignage.com/ &
+      firefox --headless https://my.playsignage.com/ &
+      firefox --headless https://us-storage.playsignage.com/ &
+      firefox --headless https://stream.playsignage.com/ &
+      firefox --headless https://release.playsignage.com/ &
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://my.playsignage.com/
@@ -173,6 +184,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       dig feature-config.sslauth.sonos.com
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
@@ -186,6 +198,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
      ;;
     8)
       sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -m 20 vwlan8
@@ -193,6 +206,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running PolycomIPPhone Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       #wget -r -l $httpwait -np --delete-after --random-wait -e robots=off -k https://www.hp.com/us-en/poly.html
      ;;
     9)
@@ -201,6 +215,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running AxisNetCam Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
      ;;
     11)
       sudo dhcpcd -h MoxaDevice -i $moxa_opt60 -o $moxa_opt55 -m 20 vwlan11
@@ -208,6 +223,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running MoxaDevice Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     12)
@@ -216,6 +232,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       sleep 5
       dig ec2-3-235-249-68.prd.rings.solutions
       dig api.prod.signalling.ring.devices.a2z.com
@@ -240,6 +257,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
       dig weather02.clouddevice.io
       curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
@@ -252,6 +270,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
      ;;
     15)
       sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -m 20 vwlan15
@@ -259,6 +278,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running WePresentGW Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
      ;;
     16)
       sudo dhcpcd -h Desnity -i $density_opt60 -o $generic_opt55 -m 20 vwlan16
@@ -273,6 +293,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
      ;;
     18)
@@ -281,6 +302,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Tesla Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       curl --insecure -o /tmp/tesla.file https://x3-prod.obs.tesla.com
       curl --insecure -o /tmp/tesla.file https://hermes-prd.ap.tesla.services
       curl --insecure -o /tmp/tesla.file https://maps-prd.go.tesla.services
@@ -293,6 +315,7 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
       dig api.my.crestron.com
       dig fc.crestron.io
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
@@ -349,4 +372,5 @@ sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
 sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
 #--------------------------------------------------------------------------------------------------------
 #Updating Scripts and restarting simulation
+pkill -f firefox
 bash /usr/scripts/update_script.sh
