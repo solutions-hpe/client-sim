@@ -164,12 +164,19 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
       firefox playsignage.com
+      sleep 5
       firefox my.playsignage.com
+      sleep 5
       firefox us-storage.playsignage.com
+      sleep 5
       firefox stream.playsignage.com
+      sleep 5
       firefox release.playsignage.com
+      sleep 5
       firefox connect.raspberrypi.com
+      sleep 5
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://my.playsignage.com/
