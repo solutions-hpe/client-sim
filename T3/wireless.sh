@@ -167,8 +167,8 @@ for (( h = 1; h <= 9; h++ ))
       sleep 5
       firefox playsignage.com &
       sleep 5
-      firefox my.playsignage.com &
-      sleep 5
+      #firefox my.playsignage.com &
+      #sleep 5
       firefox us-storage.playsignage.com &
       sleep 5
       firefox stream.playsignage.com &
