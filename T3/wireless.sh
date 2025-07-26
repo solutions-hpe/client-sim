@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".73"
+scriptver=".74"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -58,8 +58,8 @@ for (( h = 1; h <= 9; h++ ))
  done
 #--------------------------------------------------------------------------------------------------------
 #echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
-#echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
-#sleep 300
+echo "Sleeping for 1 minute" | tee -a /usr/scripts/wireless.log
+sleep 60
 #--------------------------------------------------------------------------------------------------------
 echo "Starting DHCP Simulation"
 #vwlan1
@@ -196,6 +196,8 @@ for (( h = 1; h <= 9; h++ ))
       pkill -f firefox
       dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       dig feature-config.sslauth.sonos.com
+      firefox --headless https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com &
+      sleep 5
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
       ping -c 600 feature-config.sslauth.sonos.com
@@ -243,6 +245,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
+      
       dig ec2-3-235-249-68.prd.rings.solutions
       dig api.prod.signalling.ring.devices.a2z.com
       dig alexa.na.gateway.devices.a2z.com
@@ -251,6 +254,8 @@ for (( h = 1; h <= 9; h++ ))
       dig amzn-sidewalk-events-us-east-1-prod.s3.amazonaws.com
       dig stickupcammini.devices.prod.rss.ring.amazon.dev
       dig fw-eventstream.ring.com
+      firefox --headless https://api.prod.signalling.ring.devices.a2z.com &
+      sleep 5
       curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
       curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
       curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
