@@ -275,7 +275,6 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running Ring Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      
       dig ec2-3-235-249-68.prd.rings.solutions
       dig api.prod.signalling.ring.devices.a2z.com
       dig alexa.na.gateway.devices.a2z.com
@@ -315,6 +314,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://www.barco.com/en
+      sleep 5
      ;;
     15)
       sudo dhcpcd -h WePresentGW -i $wepresent_opt60 -o $generic_opt55 -m 20 vwlan15
@@ -330,6 +332,10 @@ for (( h = 1; h <= 9; h++ ))
       sleep $dhcpsleep
       sudo ifmetric vwlan$active 20
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
+      pkill -f firefox
+      sleep 5
+      firefox --headless https://www.density.io
+      sleep 5
      ;;
     17)
       sudo dhcpcd -h Oculus -i $oculus_opt60 -o $generic_opt55 -m 20 vwlan17
