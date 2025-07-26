@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".72"
+scriptver=".73"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -351,7 +351,7 @@ for (( h = 1; h <= 9; h++ ))
 #--------------------------------------------------------------------------------------------------------
 #End of Loop
 #--------------------------------------------------------------------------------------------------------
-Sleeping to keep clients associated
+#Sleeping to keep clients associated
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 done
