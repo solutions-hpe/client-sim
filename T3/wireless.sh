@@ -169,7 +169,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running BrightSign Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://www.brightsign.biz/contact-us/
+      firefox --headless https://www.brightsign.biz/contact-us/ &
       sleep 5
      ;;
     4)
@@ -180,7 +180,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running Zebra Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://www.zebra.com/us/en.html
+      firefox --headless https://www.zebra.com/us/en.html &
       sleep 5
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
@@ -223,7 +223,7 @@ for (( h = 1; h <= 9; h++ ))
       dig feature-config.sslauth.sonos.com
       firefox --headless https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com &
       sleep 5
-      firefox --headless https://www.sonos.com/en-us/home
+      firefox --headless https://www.sonos.com/en-us/home &
       sleep 5
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
@@ -238,7 +238,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://support.hp.com/us-en/printer
+      firefox --headless https://support.hp.com/us-en/printer &
       sleep 5
      ;;
     8)
@@ -315,7 +315,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running BarcoShare Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://www.barco.com/en
+      firefox --headless https://www.barco.com/en/ &
       sleep 5
      ;;
     15)
@@ -334,7 +334,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running DensitySensor Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://www.density.io
+      firefox --headless https://www.density.io &
       sleep 5
      ;;
     17)
@@ -345,6 +345,9 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running OculusVR Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.meta.com/
+      sleep 5
+      firefox --headless https://www.meta.com/quest/ &
+      sleep 5
      ;;
     18)
       sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 -m 20 vwlan18
@@ -367,7 +370,7 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox --headless https://www.crestron.com
+      firefox --headless https://www.crestron.com &
       sleep 5
       dig api.my.crestron.com
       dig fc.crestron.io
