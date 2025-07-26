@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".71"
+scriptver=".72"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -49,6 +49,7 @@ sudo ifconfig wlp6s16 down
 echo "Starting WPA Supplicant" | tee -a /usr/scripts/wireless.log
 #--------------------------------------------------------------------------------------------------------
 #Loop to Shutdown Adapters
+#--------------------------------------------------------------------------------------------------------
 for (( h = 1; h <= 9; h++ ))
  do
   echo "Starting WPA Supplicant"
@@ -59,6 +60,7 @@ for (( h = 1; h <= 9; h++ ))
 #echo "Waiting for network connection" | tee -a /usr/scripts/wireless.log
 #echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 #sleep 300
+#--------------------------------------------------------------------------------------------------------
 echo "Starting DHCP Simulation"
 #vwlan1
 sudo dhcpcd -h MercurySD -i $mercury_opt60 -o $generic_opt55 vwlan1
@@ -164,17 +166,17 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running PlaySinage Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
-      firefox https://my.playsignage.com &
+      firefox --headless https://my.playsignage.com &
       sleep 5
-      firefox https://us-storage.playsignage.com &
+      firefox --headless https://us-storage.playsignage.com &
       sleep 5
-      firefox https://stream.playsignage.com &
+      firefox --headless https://stream.playsignage.com &
       sleep 5
-      firefox https://connect.raspberrypi.com &
+      firefox --headless https://connect.raspberrypi.com &
       sleep 5
-      firefox https://release.playsignage.com &
+      firefox --headless https://release.playsignage.com &
       sleep 5
-      firefox https://playsignage.com &
+      firefox --headless https://playsignage.com &
       sleep 5
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://connect.raspberrypi.com/
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://playsignage.com/
@@ -329,7 +331,8 @@ for (( h = 1; h <= 9; h++ ))
      ;;
   esac
 #--------------------------------------------------------------------------------------------------------     
-  #Toggling NTP to force an update
+#Toggling NTP to force an update
+#--------------------------------------------------------------------------------------------------------
   echo "Toggling NTP" | tee -a /usr/scripts/wireless.log
   sudo timedatectl set-ntp off
   sudo timedatectl set-ntp on
@@ -347,12 +350,14 @@ for (( h = 1; h <= 9; h++ ))
   done
 #--------------------------------------------------------------------------------------------------------
 #End of Loop
+#--------------------------------------------------------------------------------------------------------
 Sleeping to keep clients associated
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 done
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
+#--------------------------------------------------------------------------------------------------------
  sudo dhcpcd -k vwlan$active
  sleep 2
  sudo dhcpcd -x
@@ -379,5 +384,6 @@ sudo dhcpcd -h Tesla -i $tesla_opt60 -o $generic_opt55 vwlan18
 sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
 #--------------------------------------------------------------------------------------------------------
 #Updating Scripts and restarting simulation
+#--------------------------------------------------------------------------------------------------------
 pkill -f firefox
 bash /usr/scripts/update_script.sh
