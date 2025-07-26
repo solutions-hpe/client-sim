@@ -41,6 +41,7 @@ simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 
 kill_switch=$(get_value 'simulation' 'kill_switch')
 sim_load=$(get_value 'simulation' 'sim_load')
 public_repo=$(get_value 'simulation' 'public_repo')
+repo_location=$(get_value 'simulation' 'repo')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
