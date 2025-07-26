@@ -360,6 +360,16 @@ for (( h = 1; h <= 9; h++ ))
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 done
+echo Updating Scripts | tee -a /usr/local/scripts/sim.log
+github=raw.githubusercontent.com
+ping -c1 $github
+  if [ $? -eq 0 ]; then
+   echo Successful network connection to Github - updating scripts
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/wireless.sh -O /usr/local/scripts/wireless.sh
+   sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/update_script.sh -O /usr/local/scripts/update_script.sh
+   sleep 1
+fi
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
 #--------------------------------------------------------------------------------------------------------
