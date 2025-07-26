@@ -285,6 +285,8 @@ for (( h = 1; h <= 9; h++ ))
       dig fw-eventstream.ring.com
       firefox --headless https://api.prod.signalling.ring.devices.a2z.com &
       sleep 5
+      firefox --headless https://ring.com
+      sleep 5
       curl -o /tmp/ring.file https://api.prod.signalling.ring.devices.a2z.com
       curl -o /tmp/ring.file https://alexa.na.gateway.devices.a2z.com
       curl -o /tmp/ring.file http://spectrum.s3.amazonaws.com
