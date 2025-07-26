@@ -303,6 +303,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running Resideo Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://www.resideo.com/us/en/
+      sleep 5
       dig lcc-prodsf-lcc03sf-iothub.azure-devices.net
       dig weather02.clouddevice.io
       curl -o /tmp/resideo.file http://lcc-prodsf-lcc03sf-iothub.azure-devices.net:5671
