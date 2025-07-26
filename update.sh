@@ -1,11 +1,12 @@
 #!/bin/bash
-version=.13
+version=.14
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Updating Scripts
 #------------------------------------------------------------
+#$repo_location=https://raw.githubusercontent.com/solutions-hpe/main/
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
 if [ $public_repo == "on" ]; then
