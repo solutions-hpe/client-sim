@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".78"
+scriptver=".79"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -142,6 +142,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running MercurySD Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://www.mercurysd.ie/products &
+      sleep 5
      ;;
     2)
       sudo dhcpcd -h Liftmaster -i $liftmstr_opt60 -o $generic_opt55 -m 20 vwlan2
@@ -154,6 +157,9 @@ for (( h = 1; h <= 9; h++ ))
       curl --insecure -o /tmp/liftmaster.file https://connect-ca.myqdevice.com:8883
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.liftmaster.com/
       pkill -f firefox
+      sleep 5
+      firefox --headless https://setup.myqdevice.com &
+      sleep 5
      ;;
     3)
       sudo dhcpcd -h BrightSign -i $brightsg_opt60 -o $brightsn_opt55 -m 20 vwlan3
@@ -163,6 +169,8 @@ for (( h = 1; h <= 9; h++ ))
       echo "Running BrightSign Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
       sleep 5
+      firefox --headless https://www.brightsign.biz/contact-us/
+      sleep 5
      ;;
     4)
       sudo dhcpcd -h ZebraPrinter -i $zebra_opt60 -o $zebra_opt55 -m 20 vwlan4
@@ -171,6 +179,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running Zebra Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://www.zebra.com/us/en.html
+      sleep 5
       #wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.apple.com/
      ;;
     5)
@@ -186,8 +197,6 @@ for (( h = 1; h <= 9; h++ ))
       firefox --headless https://us-storage.playsignage.com &
       sleep 5
       firefox --headless https://stream.playsignage.com &
-      sleep 5
-      firefox --headless https://connect.raspberrypi.com &
       sleep 5
       firefox --headless https://release.playsignage.com &
       sleep 5
@@ -209,9 +218,12 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running SONOS Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
       dig onn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       dig feature-config.sslauth.sonos.com
       firefox --headless https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com &
+      sleep 5
+      firefox --headless https://www.sonos.com/en-us/home
       sleep 5
       curl --insecure -o /tmp/sonos.file https://conn-i-09007be6d9db10869-us-east-1.lechmere.prod.ws.sonos.com
       curl -o /tmp/sonos.file https://feature-config.sslauth.sonos.com
@@ -225,6 +237,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running HPPrinter Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://support.hp.com/us-en/printer
+      sleep 5
      ;;
     8)
       sudo dhcpcd -h PolyCom -i $polycom_opt60 -o $generic_opt55 -m 20 vwlan8
@@ -345,6 +360,9 @@ for (( h = 1; h <= 9; h++ ))
       sudo ifmetric vwlan$active 20
       echo "Running Crestron Simulations" | tee -a /usr/scripts/wireless.log
       pkill -f firefox
+      sleep 5
+      firefox --headless https://www.crestron.com
+      sleep 5
       dig api.my.crestron.com
       dig fc.crestron.io
       wget -r -t $httpretry -l $httpdepth -np --delete-after --random-wait -e robots=off -k https://www.crestron.com/
