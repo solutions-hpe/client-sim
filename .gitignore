@@ -1,1 +1,14 @@
+# Environment Information 
+.env
+
+# Configuration Repository
 configs/
+
+# OS Files/Junk
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+*~
