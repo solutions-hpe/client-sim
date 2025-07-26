@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".75"
+scriptver=".76"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -22,6 +22,18 @@ axis_opt60="Axis,DomeCamera,P3265-LV,10.12.165"
 moxa_opt60="udhcp-1.19.2"
 moxs_opt55="1,3,4,12,15,28,42"
 brightsn_opt55="1,3,6,12,15,26,28,33,42,43,51,58,59,119,121"
+#--------------------------------------------------------------------------------------------------------
+echo Updating Scripts | tee -a /usr/local/scripts/sim.log
+github=raw.githubusercontent.com
+ping -c1 $github
+  if [ $? -eq 0 ]; then
+   echo Successful network connection to Github - updating scripts
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/wireless.sh -O /usr/local/scripts/wireless.sh
+   sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/update_script.sh -O /usr/local/scripts/update_script.sh
+   sleep 1
+fi
+#--------------------------------------------------------------------------------------------------------
 echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
 sudo dhcpcd --inactive
@@ -360,16 +372,6 @@ for (( h = 1; h <= 9; h++ ))
 echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
 sleep 300
 done
-echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-github=raw.githubusercontent.com
-ping -c1 $github
-  if [ $? -eq 0 ]; then
-   echo Successful network connection to Github - updating scripts
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/wireless.sh -O /usr/local/scripts/wireless.sh
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/update_script.sh -O /usr/local/scripts/update_script.sh
-   sleep 1
-fi
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
 #--------------------------------------------------------------------------------------------------------
