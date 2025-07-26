@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".70"
+scriptver=".71"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -103,8 +103,7 @@ httpdepth=1
 #Variable for how long to wait for IP address after running dhcpcd command before running simulation
 dhcpsleep=15
 #--------------------------------------------------------------------------------------------------------
-   #active=$((RANDOM%19+1))
-   active=5
+   active=$((RANDOM%19+1))
    #Generate a random number to select a random interface to bring online
    echo "Script Version " $scriptver | tee /usr/scripts/wireless.log
    echo "Active WLAN Interface " vlwan$active | tee -a /usr/scripts/wireless.log
@@ -348,10 +347,10 @@ for (( h = 1; h <= 9; h++ ))
   done
 #--------------------------------------------------------------------------------------------------------
 #End of Loop
+Sleeping to keep clients associated
+echo "Sleeping for 5 minutes" | tee -a /usr/scripts/wireless.log
+sleep 300
 done
-#Sleeping to keep clients associated
-#echo "Sleeping for 15 minutes" | tee -a /usr/scripts/wireless.log
-#sleep 900
 #--------------------------------------------------------------------------------------------------------
 #Resetting DHCP Status on all interfaces
  sudo dhcpcd -k vwlan$active
