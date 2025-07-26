@@ -3,6 +3,8 @@
 
 # Configuration Repository
 /configs/
+configs/simulation.conf
+/configs/simulation.conf
 /local/
 
 # OS Files/Junk
