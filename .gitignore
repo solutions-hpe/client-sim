@@ -3,6 +3,7 @@
 
 # Configuration Repository
 /configs/
+/local/
 
 # OS Files/Junk
 .DS_Store
