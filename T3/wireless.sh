@@ -34,6 +34,8 @@ ping -c1 $github
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/update_script.sh -O /usr/local/scripts/update_script.sh
    sleep 1
 fi
+sudo chmod 777 /usr/scripts/wireless.sh
+sudo chmod 777 /usr/scripts/update_script.sh
 #--------------------------------------------------------------------------------------------------------
 echo "Script Version " $scriptver | tee -a /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
