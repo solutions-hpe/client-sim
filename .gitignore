@@ -2,7 +2,7 @@
 .env
 
 # Configuration Repository
-configs/
+/configs/
 
 # OS Files/Junk
 .DS_Store
