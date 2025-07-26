@@ -1,5 +1,5 @@
 #!/bin/bash
-scriptver=".76"
+scriptver=".77"
 generic_opt55="1,3,6"
 mercury_opt60="dhcpcd-5.5.6:Mercury-6.99.5:i386:i386"
 liftmstr_opt60="dhcpcd-5.5.6:busybox-6.99.5:i386:i386"
@@ -23,6 +23,7 @@ moxa_opt60="udhcp-1.19.2"
 moxs_opt55="1,3,4,12,15,28,42"
 brightsn_opt55="1,3,6,12,15,26,28,33,42,43,51,58,59,119,121"
 #--------------------------------------------------------------------------------------------------------
+sleep 10
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
 ping -c1 $github
