@@ -6,7 +6,8 @@ echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Updating Scripts
 #------------------------------------------------------------
-#$repo_location=https://raw.githubusercontent.com/solutions-hpe/main/
+#repo_location=https://raw.githubusercontent.com/solutions-hpe/main/
+#public_repo=on
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
 if [ $public_repo == "on" ]; then
