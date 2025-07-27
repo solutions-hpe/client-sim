@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.26
+version=.27
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -8,16 +8,6 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #Check Logs Script
 #------------------------------------------------------------
 source /usr/local/scripts/sys_mon.sh &
-#------------------------------------------------------------
-#Running Cleanup from old simulations
-#------------------------------------------------------------
-rm /usr/local/scripts/Contents*
-rm /usr/local/scripts/main.cvd*
-rm /usr/local/scripts/manifest*
-rm /tmp/Contents*
-rm /tmp/main.cvd*
-rm /tmp/manifest*
-rm /tmp/file.tmp
 #------------------------------------------------------------
 #Verify key settings changed - since this script is ran at startup
 #this is where you should put system changes you want to make sure 
@@ -43,13 +33,9 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Settings read from the local config file
 #------------------------------------------------------------
-site_based_num=$(get_value 'simulation' 'site_based_num')
-simulation_id=s
-simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
-smb_address=$(get_value 'address' 'smb_address')
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 #------------------------------------------------------------
