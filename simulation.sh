@@ -10,13 +10,13 @@ echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
-#Running update to either the cloud repo or local SMB repo
-#------------------------------------------------------------
-source '/usr/local/scripts/update.sh'
-#------------------------------------------------------------
 #Setting config file location
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
+#------------------------------------------------------------
+#Running update to either the cloud repo or local SMB repo
+#------------------------------------------------------------
+source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
