@@ -14,10 +14,6 @@ source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
-#Running update to either the cloud repo or local SMB repo
-#------------------------------------------------------------
-source '/usr/local/scripts/update.sh'
-#------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
 #interface not in use. So that we force the traffic out the interface 
@@ -96,6 +92,10 @@ rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
+#------------------------------------------------------------
+#Running update to either the cloud repo or local SMB repo
+#------------------------------------------------------------
+source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
