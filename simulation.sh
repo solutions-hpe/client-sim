@@ -10,10 +10,6 @@ echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
-#Running update to either the cloud repo or local SMB repo
-#------------------------------------------------------------
-source '/usr/local/scripts/update.sh'
-#------------------------------------------------------------
 #Setting config file location
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
@@ -96,6 +92,10 @@ rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 username=$(echo $HOSTNAME | cut -d "-" -f 1)
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
+#------------------------------------------------------------
+#Running update to either the cloud repo or local SMB repo
+#------------------------------------------------------------
+source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------

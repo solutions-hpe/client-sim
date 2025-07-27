@@ -99,7 +99,7 @@ if [ -e "/usr/local/scripts/simulation.conf" ]; then
   echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
   echo Downloading simulation config | tee -a /tmp/client-sim.log
-  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.conf -O /usr/local/scripts/simulation.conf
+  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/configs/sample.conf -O /usr/local/scripts/simulation.conf
 fi
 touch /usr/local/scripts/sim.log
 echo Installer Version $version | tee /usr/local/scripts/sim.log
