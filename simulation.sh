@@ -73,6 +73,75 @@ dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 iperf_server=$(get_value 'address' 'iperf_server')
 #------------------------------------------------------------
+#User/Device Specific Overrides
+#------------------------------------------------------------
+tempvar=$(get_value $username 'smb_address')
+if [[ -n ${tempvar} ]]; then smb_address=$tempvar; fi
+tempvar=$(get_value $username 'ping_address')
+if [[ -n ${tempvar} ]]; then ping_address=$tempvar; fi
+tempvar=$(get_value $username 'dns_latency_1')
+if [[ -n ${tempvar} ]]; then dns_latency_1=$tempvar; fi
+tempvar=$(get_value $username 'dns_latency_2')
+if [[ -n ${tempvar} ]]; then dns_latency_2=$tempvar; fi
+tempvar=$(get_value $username 'dns_latency_3')
+if [[ -n ${tempvar} ]]; then dns_latency_3=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_ip_1')
+if [[ -n ${tempvar} ]]; then dns_bad_ip_1=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_ip_2')
+if [[ -n ${tempvar} ]]; then dns_bad_ip_2=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_ip_3')
+if [[ -n ${tempvar} ]]; then dns_bad_ip_3=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_record_1')
+if [[ -n ${tempvar} ]]; then dns_bad_record_1=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_record_2')
+if [[ -n ${tempvar} ]]; then dns_bad_record_2=$tempvar; fi
+tempvar=$(get_value $username 'dns_bad_record_3')
+if [[ -n ${tempvar} ]]; then dns_bad_record_3=$tempvar; fi
+tempvar=$(get_value $username 'vh_server_addr')
+if [[ -n ${tempvar} ]]; then vh_server_addr=$tempvar; fi
+tempvar=$(get_value $username 'iperf_server')
+if [[ -n ${tempvar} ]]; then iperf_server=$tempvar; fi
+#------------------------------------------------------------
+tempvar=$(get_value $username 'wsite')
+if [[ -n ${tempvar} ]]; then wsite=$tempvar; fi
+tempvar=$(get_value $username 'sim_phy')
+if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
+tempvar=$(get_value $username 'ssid')
+if [[ -n ${tempvar} ]]; then ssid=$tempvar; fi
+tempvar=$(get_value $username 'ssidpw')
+if [[ -n ${tempvar} ]]; then ssidpw=$tempvar; fi
+tempvar=$(get_value $username 'dhcp_fail')
+if [[ -n ${tempvar} ]]; then dhcp_fail=$tempvar; fi
+tempvar=$(get_value $username 'dns_fail')
+if [[ -n ${tempvar} ]]; then dns_fail=$tempvar; fi
+tempvar=$(get_value $username 'assoc_fail')
+if [[ -n ${tempvar} ]]; then assoc_fail=$tempvar; fi
+tempvar=$(get_value $username 'port_flap')
+if [[ -n ${tempvar} ]]; then port_flap=$tempvar; fi
+tempvar=$(get_value $username 'ping_test')
+if [[ -n ${tempvar} ]]; then ping_test=$tempvar; fi
+tempvar=$(get_value $username 'download')
+if [[ -n ${tempvar} ]]; then download=$tempvar; fi
+tempvar=$(get_value $username 'iperf')
+if [[ -n ${tempvar} ]]; then iperf=$tempvar; fi
+tempvar=$(get_value $username 'www_traffic')
+if [[ -n ${tempvar} ]]; then www_traffic=$tempvar; fi
+#------------------------------------------------------------
+tempvar=$(get_value $username 'kill_switch')
+if [[ -n ${tempvar} ]]; then kill_switch=$tempvar; fi
+tempvar=$(get_value $username 'sim_load')
+if [[ -n ${tempvar} ]]; then sim_load=$tempvar; fi
+tempvar=$(get_value $username 'public_repo')
+if [[ -n ${tempvar} ]]; then public_repo=$tempvar; fi
+tempvar=$(get_value $username 'repo_location')
+if [[ -n ${tempvar} ]]; then repo_location=$tempvar; fi
+tempvar=$(get_value $username 'vh_server')
+if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
+tempvar=$(get_value $username 'site_based_ssid')
+if [[ -n ${tempvar} ]]; then site_based_ssid=$tempvar; fi
+tempvar=$(get_value $username 'iperf_bw')
+if [[ -n ${tempvar} ]]; then iperf_bw=$tempvar; fi
+#------------------------------------------------------------
 #Checking global kill switch config
 #------------------------------------------------------------
 gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
