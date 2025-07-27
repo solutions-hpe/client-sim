@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.26
+version=.27
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -39,7 +39,6 @@ simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 
 public_repo=$(get_value 'simulation' 'public_repo')
 vh_server_address=$(get_value 'address' 'vh_server_addr')
 vh_server=$(get_value 'simulation' 'vh_server')
-smb_address=$(get_value 'address' 'smb_address')
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 #------------------------------------------------------------
