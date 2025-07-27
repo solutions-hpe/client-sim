@@ -3,6 +3,7 @@ version=.14
 #Making backup of script
 echo Making backup of Script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
+#repo_location=https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/
 sleep 5
 github=raw.githubusercontent.com
 ping -c1 $github
