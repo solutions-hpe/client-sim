@@ -9,16 +9,6 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 source /usr/local/scripts/sys_mon.sh &
 #------------------------------------------------------------
-#Running Cleanup from old simulations
-#------------------------------------------------------------
-rm /usr/local/scripts/Contents*
-rm /usr/local/scripts/main.cvd*
-rm /usr/local/scripts/manifest*
-rm /tmp/Contents*
-rm /tmp/main.cvd*
-rm /tmp/manifest*
-rm /tmp/file.tmp
-#------------------------------------------------------------
 #Verify key settings changed - since this script is ran at startup
 #this is where you should put system changes you want to make sure 
 #are applied. Some of these may be set during the installer but the 
