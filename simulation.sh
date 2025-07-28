@@ -203,7 +203,7 @@ if [ $? -eq 0 ]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
- if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ if [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
