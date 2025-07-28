@@ -13,7 +13,6 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 #------------------------------------------------------------
-#repo_location=https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/
 sleep 5
 github=raw.githubusercontent.com
 ping -c1 $github
