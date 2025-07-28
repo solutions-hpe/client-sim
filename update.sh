@@ -1,12 +1,24 @@
 #!/bin/bash
-version=.16
+version=.17
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Updating Scripts
 #------------------------------------------------------------
-repo_location=https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/
-public_repo=on
+echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
+#Calling config parser script - reads the simulation.conf file
+#For values assinged to script variables
+#------------------------------------------------------------
+source '/usr/local/scripts/ini-parser.sh'
+#------------------------------------------------------------
+#Setting config file location
+#------------------------------------------------------------
+process_ini_file '/usr/local/scripts/simulation.conf'
+#------------------------------------------------------------
+public_repo=$(get_value 'simulation' 'public_repo')
+repo_location=$(get_value 'simulation' 'repo_location')
+#------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 github=raw.githubusercontent.com
 if [ $public_repo == "on" ]; then
