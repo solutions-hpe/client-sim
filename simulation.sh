@@ -305,7 +305,7 @@ if [ $kill_switch == "off" ]; then
       if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
       sleep 5
       if [ $site_based_ssid == "on" ]; then nmcli connection down $wsite"-"$ssid; fi
-      if [ $site_based_ssid != "on" ]; then nmcli connection down $ssid &; fi
+      if [ $site_based_ssid != "on" ]; then nmcli connection down $ssid; fi
      done
      #------------------------------------------------------------
      #End SSID Incorrect Password Simualtion
