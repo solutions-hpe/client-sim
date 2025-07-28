@@ -65,7 +65,8 @@ else
  #----------------------------------------------------------------
  #Generating random number to connect to a random adapter
  #----------------------------------------------------------------
- echo No Cached VH Device found - finding avaiable adapter
+ echo No Cached VH Device found
+ echo finding avaiable adapter
  rn_vhactive=$((1 + RANDOM % $r_count))
  #----------------------------------------------------------------
  #If Client is connected to more than 1 device - disconnecting
