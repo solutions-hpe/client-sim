@@ -45,7 +45,7 @@ else
   #If Client is connected to more than 1 device - disconnecting
   #----------------------------------------------------------------
   if [[ $y_count -gt 1 ]]; then
-   echo Found multiple devices in-use
+   echo Found multiple devices $y_count in-use
    echo Clearing out all devices in-use
    sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
    sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
