@@ -82,7 +82,7 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #Running Updates
 #------------------------------------------------------------
 echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
-source '/usr/local/scripts/vhconnect.sh'
+source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
