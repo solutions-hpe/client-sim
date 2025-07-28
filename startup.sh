@@ -24,11 +24,17 @@ sudo rfkill unblock wifi; sudo rfkill unblock all
 #------------------------------------------------------------
 #Calling config parser script
 #------------------------------------------------------------
+echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
+#Calling config parser script - reads the simulation.conf file
+#For values assinged to script variables
+#------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
 #Setting config file location
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
+#------------------------------------------------------------
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------

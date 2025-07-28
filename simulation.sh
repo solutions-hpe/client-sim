@@ -3,16 +3,6 @@ version=.81
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
-echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
-#------------------------------------------------------------
-#Calling config parser script - reads the simulation.conf file
-#For values assinged to script variables
-#------------------------------------------------------------
-source '/usr/local/scripts/ini-parser.sh'
-#------------------------------------------------------------
-#Setting config file location
-#------------------------------------------------------------
-process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
