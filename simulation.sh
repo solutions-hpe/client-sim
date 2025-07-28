@@ -249,14 +249,6 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep 5
   if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $ssid; fi
-  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
-   sudo ip link set $wladapter down
-   sleep 1
-   sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-   sleep 1
-   sudo ip link set $wladapter up
-   sleep 1
-  fi
   sleep 5
 fi
 #------------------------------------------------------------
