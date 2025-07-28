@@ -281,16 +281,16 @@ if [ $kill_switch == "off" ]; then
     #SSID Incorrect Password Simulation
     #------------------------------------------------------------
     if [ $ssidpw_fail == "on" ]; then
+     echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
      rm /usr/local/scripts/vhcached.txt
      sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
      sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
      source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password ${ssidpw}; fi
-     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect ${ssid} password ${ssidpw}; fi
+     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      sleep 5
      for i in {1..100}; do
-      echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       sleep 1
       sudo ip link set $wladapter down
@@ -299,11 +299,11 @@ if [ $kill_switch == "off" ]; then
       sleep 1
       sudo ip link set $wladapter up
       sleep 1
-      if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
-      if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
+      if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
+      if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
       sleep 5
-      if [ $site_based_ssid == "on" ]; then nmcli connection down ${wsite}"-"${ssid}; fi
-      if [ $site_based_ssid != "on" ]; then nmcli connection down ${ssid}; fi
+      if [ $site_based_ssid == "on" ]; then nmcli connection down $wsite"-"$ssid; fi
+      if [ $site_based_ssid != "on" ]; then nmcli connection down $ssid; fi
      done
      #------------------------------------------------------------
      #End SSID Incorrect Password Simualtion
