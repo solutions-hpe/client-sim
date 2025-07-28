@@ -273,6 +273,7 @@ if [ $kill_switch == "off" ]; then
     echo Simulation Details: | tee -a /usr/local/scripts/sim.log
     echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
     echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+    echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
     if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
     echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
     echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
@@ -417,7 +418,8 @@ if [ $kill_switch == "off" ]; then
       echo Simulation Details: | tee -a /usr/local/scripts/sim.log
       echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
       echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-      if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi		
+      echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
+      if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
       echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
       echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
       echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
@@ -438,6 +440,7 @@ if [ $kill_switch == "off" ]; then
       echo Simulation Details: | tee -a /usr/local/scripts/sim.log
       echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
       echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+      echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
       if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
       echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
       echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
@@ -477,7 +480,8 @@ if [ $kill_switch == "off" ]; then
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
 	  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 	  echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-	  echo Site: $wsite | tee -a /usr/local/scripts/sim.log	  		
+	  echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+      echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 	  echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
 	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 	  echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
@@ -519,6 +523,7 @@ if [ $kill_switch == "off" ]; then
 	    echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 	    echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 	    echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+        echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 	    if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
 	    echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 	    echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
