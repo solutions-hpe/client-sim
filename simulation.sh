@@ -212,6 +212,7 @@ fi
 #Connecting to Network
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
+  source '/usr/local/scripts/vhconnect.sh'
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
