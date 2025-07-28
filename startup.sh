@@ -46,6 +46,17 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
+vh_server=$(get_value 'simulation' 'vh_server')
+sim_phy=$(get_value $simulation_id 'sim_phy')
+tempvar=$(get_value $username 'repo_location')
+#------------------------------------------------------------
+#Checking to see if this device/user has an override
+#------------------------------------------------------------
+if [[ -n ${tempvar} ]]; then repo_location=$tempvar; fi
+tempvar=$(get_value $username 'vh_server')
+if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
+tempvar=$(get_value $username 'sim_phy')
+if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 #------------------------------------------------------------
 #Scheduling Reboot
 #------------------------------------------------------------
