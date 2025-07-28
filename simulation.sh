@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.84
+version=.85
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -141,6 +141,7 @@ echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
+if [ $vh_server == "off" ]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
@@ -183,7 +184,7 @@ if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
  sudo ip link set $wladapter down
  sleep 1
  sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
