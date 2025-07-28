@@ -67,6 +67,10 @@ rn=$(($reboot_schedule + RANDOM % 600))
 echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #------------------------------------------------------------
+#Waiting for system startup
+#------------------------------------------------------------
+sleep 30
+#------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
 wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
