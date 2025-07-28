@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.83
+version=.84
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -203,7 +203,7 @@ if [ $? -eq 0 ]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
- if [ $vh_server == "on" ]&& [ $ssidpw_fail != "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
@@ -212,7 +212,6 @@ fi
 #Connecting to Network
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
-  source '/usr/local/scripts/vhconnect.sh'
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
