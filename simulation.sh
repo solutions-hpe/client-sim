@@ -142,7 +142,7 @@ echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-if [ $vh_server == "off" ]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
+if [ $sim_phy == "wireless" ]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
