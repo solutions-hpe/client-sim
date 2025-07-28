@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.78
+version=.79
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -282,14 +282,14 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
-      echo Running WPA Incorrect Password Simulation | tee -a /usr/local/scripts/sim.log
+      echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       sudo ip link set wlan0 down
       sleep 1
       sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
       sleep 1
       sudo ip link set wlan0 up
-      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
       if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
       nmcli connection up $ssid
       sleep 30
