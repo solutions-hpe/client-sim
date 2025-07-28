@@ -287,6 +287,7 @@ if [ $kill_switch == "off" ]; then
      sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
      source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     echo Site Based SSID is $site_based_ssid
      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw &; fi
      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw &; fi
      sleep 5
@@ -322,7 +323,8 @@ if [ $kill_switch == "off" ]; then
      echo Network connection failed | tee -a /usr/local/scripts/sim.log
      echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
      if [ $sim_phy == "wireless" ]; then
-     if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+     if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
+      echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
       sudo ip link set $wladapter down
       sleep 1
       sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
@@ -330,18 +332,9 @@ if [ $kill_switch == "off" ]; then
       sudo ip link set $wladapter up
       sleep 1
      fi
-      if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
-      if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+     if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
+     if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
      fi
-     if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-      sudo ip link set $wladapter down
-      sleep 1
-      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-      sleep 1
-      sudo ip link set $wladapter up
-      sleep 1
-     fi
-     sleep 30
      ping -c2 $inet_check
      if [ $? -eq 0 ]; then
       echo Successful network connection | tee -a /usr/local/scripts/sim.log
