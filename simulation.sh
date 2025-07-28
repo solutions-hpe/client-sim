@@ -134,6 +134,24 @@ if [[ -n ${tempvar} ]]; then vh_server_addr=$tempvar; fi
 tempvar=$(get_value $username 'iperf_server')
 if [[ -n ${tempvar} ]]; then iperf_server=$tempvar; fi
 #------------------------------------------------------------
+echo $(date) | tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
+echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
+if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
+echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
+echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
+echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
+echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
+echo Download: $download | tee -a /usr/local/scripts/sim.log
+echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
+echo Incorrect SSID PW: $ssidpw_fail | tee -a /usr/local/scripts/sim.log
+echo ------------------------------| tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 #Checking global kill switch config
 #------------------------------------------------------------
 gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
