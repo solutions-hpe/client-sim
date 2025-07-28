@@ -79,6 +79,11 @@ sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
+#Running Updates
+#------------------------------------------------------------
+echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
+source '/usr/local/scripts/vhconnect.sh'
+#------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
@@ -105,10 +110,6 @@ fi
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 cd /usr/local/scripts/ && sudo chmod +x *.sh
-#------------------------------------------------------------
-#Running Updates
-#------------------------------------------------------------
-source '/usr/local/scripts/vhconnect.sh'
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
