@@ -288,8 +288,8 @@ if [ $kill_switch == "off" ]; then
      source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      echo Site Based SSID is $site_based_ssid
-     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw &; fi
-     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw &; fi
+     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      sleep 5
      for i in {1..100}; do
       echo Enable/Disable WLAN interface $i | tee -a /usr/local/scripts/sim.log
@@ -301,10 +301,10 @@ if [ $kill_switch == "off" ]; then
       sleep 1
       sudo ip link set $wladapter up
       sleep 1
-      if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid &; fi
+      if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
       if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid &; fi
       sleep 5
-      if [ $site_based_ssid == "on" ]; then nmcli connection down $wsite"-"$ssid &; fi
+      if [ $site_based_ssid == "on" ]; then nmcli connection down $wsite"-"$ssid; fi
       if [ $site_based_ssid != "on" ]; then nmcli connection down $ssid &; fi
      done
      #------------------------------------------------------------
