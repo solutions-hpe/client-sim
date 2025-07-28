@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.82
+version=.83
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -202,7 +202,7 @@ if [ $? -eq 0 ]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
- if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ if [ $vh_server == "on" ]&& [ $ssidpw_fail != "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
@@ -290,19 +290,21 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     if [ $ssidpw_fail == "on" ]; then
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
+      sleep 1
       sudo ip link set wlan0 down
       sleep 1
       sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
       sleep 1
       sudo ip link set wlan0 up
-      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
-      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+      sleep 5
       if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
       if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
-      sleep 30
+      sleep 5
      done
      #------------------------------------------------------------
      #End SSID Incorrect Password Simualtion
