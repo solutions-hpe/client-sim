@@ -19,7 +19,7 @@ y_count=0
 #----------------------------------------------------------------
 #Checking for the number of devices that are currently attached
 #----------------------------------------------------------------
-vhactive=$(cat /tmp/vhactive.txt | grep "*-" | awk -F'[()]' '{print $2}')
+vhactive=$(cat /tmp/vhactive.txt | grep "you" | awk -F'[()]' '{print $2}')
 for r in $vhactive; do
   y_count=$((y_count+1))
 done
