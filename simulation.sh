@@ -288,6 +288,8 @@ if [ $kill_switch == "off" ]; then
      source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      echo Site Based SSID is $site_based_ssid | tee -a /usr/local/scripts/sim.log
+     echo Adding SSID Connection | tee -a /usr/local/scripts/sim.log
+     sleep 5
      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      sleep 5
