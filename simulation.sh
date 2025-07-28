@@ -168,7 +168,6 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #changing DHCP Client configuration to send the username as the hostname
 #Pure asthetics so the usernames in Central look good
 #------------------------------------------------------------
-username=$(echo $HOSTNAME | cut -d "-" -f 1)
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Running update to either the cloud repo or local SMB repo
