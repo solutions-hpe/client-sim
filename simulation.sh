@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.81
+version=.82
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -182,7 +182,7 @@ if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
  sudo ip link set wlan0 down
  sleep 1
  sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
@@ -210,7 +210,7 @@ fi
 #------------------------------------------------------------
 #Connecting to Network
 #------------------------------------------------------------
-if [ $sim_phy == "wireless" ]; then
+if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
@@ -247,9 +247,9 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
-  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
-  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $ssid; fi
+  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
    sudo ip link set wlan0 down
    sleep 1
    sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
