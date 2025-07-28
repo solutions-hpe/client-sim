@@ -300,7 +300,8 @@ if [ $kill_switch == "off" ]; then
       sudo ip link set wlan0 up
       if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
       if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
-      nmcli connection up $ssid
+      if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
+      if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
       sleep 30
      done
      #------------------------------------------------------------
