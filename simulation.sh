@@ -114,6 +114,8 @@ tempvar=$(get_value $username 'iperf')
 if [[ -n ${tempvar} ]]; then iperf=$tempvar; fi
 tempvar=$(get_value $username 'www_traffic')
 if [[ -n ${tempvar} ]]; then www_traffic=$tempvar; fi
+tempvar=$(get_value $username 'ssidpw_fail')
+if [[ -n ${tempvar} ]]; then ssidpw_fail=$tempvar; fi
 #------------------------------------------------------------
 tempvar=$(get_value $username 'smb_address')
 if [[ -n ${tempvar} ]]; then smb_address=$tempvar; fi
@@ -273,7 +275,33 @@ if [ $kill_switch == "off" ]; then
     echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
     echo Download: $download | tee -a /usr/local/scripts/sim.log
     echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
+    echo Incorrect SSID PW: $ssidpw_fail | tee -a /usr/local/scripts/sim.log
     echo ------------------------------| tee -a /usr/local/scripts/sim.log
+    #------------------------------------------------------------
+    #SSID Incorrect Password Simulation
+    #------------------------------------------------------------
+    if [ $ssidpw_fail == "on" ]; then
+     for i in {1..100}; do
+      echo Running WPA Incorrect Password Simulation | tee -a /usr/local/scripts/sim.log
+      echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
+      sudo ip link set wlan0 down
+      sleep 1
+      sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+      sleep 1
+      sudo ip link set wlan0 up
+      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+      nmcli connection up $ssid
+      sleep 30
+     done
+     #------------------------------------------------------------
+     #End SSID Incorrect Password Simualtion
+     #------------------------------------------------------------
+    else
+    #------------------------------------------------------------
+    #If SSID Incorrect Password Sim is not triggered then check
+    #for the other simualtions
+    #------------------------------------------------------------
     inet_check=www.google.com
     ping -c2 $inet_check
     if [ $? -eq 0 ]; then
@@ -477,31 +505,31 @@ if [ $kill_switch == "off" ]; then
     if [ $dns_fail == "on" ]; then
       dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
       for i in {1..10}; do
-	for r in $dnsfile; do
-	  echo $(date) | tee -a /usr/local/scripts/sim.log
-	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-	  echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-	  echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-	  if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-	  echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-	  echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-	  echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
-	  echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
-	  echo $r | tee -a /usr/local/scripts/sim.log
-	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	  dig @$dns_bad_record_1 $r &
-	  dig @$dns_bad_record_2 $r &
-	  dig @$dns_bad_record_3 $r &
-	  dig @$dns_bad_ip_1 $r &
-	  dig @$dns_bad_ip_2 $r &
-	  dig @$dns_bad_ip_3 $r &
-	  dig @$dns_latency_1 $r &
-	  dig @$dns_latency_2 $r &
-	  dig @$dns_latency_3 $r &
-	  sleep 5
-	done
+	   for r in $dnsfile; do
+	    echo $(date) | tee -a /usr/local/scripts/sim.log
+	    echo ------------------------------| tee -a /usr/local/scripts/sim.log
+	    echo Simulation Details: | tee -a /usr/local/scripts/sim.log
+	    echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
+	    echo Site: $wsite | tee -a /usr/local/scripts/sim.log
+	    if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
+	    echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
+	    echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
+	    echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
+	    echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
+	    echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
+	    echo $r | tee -a /usr/local/scripts/sim.log
+	    echo ------------------------------| tee -a /usr/local/scripts/sim.log
+	    dig @$dns_bad_record_1 $r &
+	    dig @$dns_bad_record_2 $r &
+	    dig @$dns_bad_record_3 $r &
+	    dig @$dns_bad_ip_1 $r &
+	    dig @$dns_bad_ip_2 $r &
+	    dig @$dns_bad_ip_3 $r &
+	    dig @$dns_latency_1 $r &
+	    dig @$dns_latency_2 $r &
+	    dig @$dns_latency_3 $r &
+	    sleep 5
+       done
       done
     fi
     #------------------------------------------------------------
@@ -512,6 +540,7 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     #End of 100 Loop Count
     #------------------------------------------------------------
+   fi
   done
 else
   #------------------------------------------------------------
