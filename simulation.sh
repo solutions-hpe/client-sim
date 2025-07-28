@@ -334,8 +334,8 @@ if [ $kill_switch == "off" ]; then
       sudo ip link set $wladapter up
       sleep 1
      fi
-     if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
-     if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+     if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
+     if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
      fi
      ping -c2 $inet_check
      if [ $? -eq 0 ]; then
