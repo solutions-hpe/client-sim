@@ -216,11 +216,11 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
   nmcli radio wifi on
   sleep 10
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
-  if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
+  if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
   if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
   nmcli device wifi rescan
   sleep 5
-  if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+  if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
@@ -247,7 +247,7 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $ssid; fi
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
    sudo ip link set wlan0 down
@@ -297,7 +297,7 @@ if [ $kill_switch == "off" ]; then
       sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
       sleep 1
       sudo ip link set wlan0 up
-      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password $ssidpw; fi
+      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
       if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
       nmcli connection up $ssid
       sleep 30
@@ -327,7 +327,7 @@ if [ $kill_switch == "off" ]; then
       sleep 1
      fi
       if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
-      if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
+      if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
      fi
      if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
       sudo ip link set wlan0 down
