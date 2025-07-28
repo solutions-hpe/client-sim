@@ -51,6 +51,7 @@ reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 sim_phy=$(get_value $simulation_id 'sim_phy')
+rapid_update=$(get_value 'simulation' 'rapid_update')
 tempvar=$(get_value $username 'repo_location')
 #------------------------------------------------------------
 #Checking to see if this device/user has an override
@@ -66,17 +67,6 @@ if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 rn=$(($reboot_schedule + RANDOM % 600))
 echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
-#------------------------------------------------------------
-#Waiting for system startup
-#------------------------------------------------------------
-sleep 30
-#------------------------------------------------------------
-#Finding adapter names and setting usable variables for interfaces
-#------------------------------------------------------------
-wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
-echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
-echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
@@ -85,8 +75,19 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
 #------------------------------------------------------------
-echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
-source '/usr/local/scripts/update.sh'
+if [ $rapid_update != "on" ]; then
+ echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
+ source '/usr/local/scripts/update.sh'
+else
+ echo Skipping update due to Rapid Updates | tee -a /usr/local/scripts/sim.log
+fi
+#------------------------------------------------------------
+#Finding adapter names and setting usable variables for interfaces
+#------------------------------------------------------------
+wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
