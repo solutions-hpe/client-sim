@@ -290,8 +290,8 @@ if [ $kill_switch == "off" ]; then
      echo Site Based SSID is $site_based_ssid | tee -a /usr/local/scripts/sim.log
      echo Adding SSID Connection | tee -a /usr/local/scripts/sim.log
      sleep 5
-     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
-     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+     if [ $site_based_ssid == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
      sleep 5
      for i in {1..100}; do
       echo Enable/Disable WLAN interface $i | tee -a /usr/local/scripts/sim.log
