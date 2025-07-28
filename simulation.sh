@@ -291,7 +291,8 @@ if [ $kill_switch == "off" ]; then
      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      sleep 5
      for i in {1..100}; do
-      echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
+      echo Enable/Disable WLAN interface $i | tee -a /usr/local/scripts/sim.log
+      echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       sleep 1
       sudo ip link set $wladapter down
       sleep 1
