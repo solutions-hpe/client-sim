@@ -295,8 +295,8 @@ if [ $kill_switch == "off" ]; then
      sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
      source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
-     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw &; fi
+     if [ $site_based_ssid == "on" ]; then nmcli device wifi connect ${wsite}"-"${ssid} password ${ssidpw}; fi
+     if [ $site_based_ssid != "on" ]; then nmcli device wifi connect ${ssid} password ${ssidpw} &; fi
      sleep 5
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
