@@ -290,7 +290,12 @@ if [ $kill_switch == "off" ]; then
     #SSID Incorrect Password Simulation
     #------------------------------------------------------------
     if [ $ssidpw_fail == "on" ]; then
+     rm /usr/local/scripts/vhcached.txt
+     sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+     sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+     source '/usr/local/scripts/vhconnect.sh'
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     sleep 30
      if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
      if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
      for i in {1..100}; do
