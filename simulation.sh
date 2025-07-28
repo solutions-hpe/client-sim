@@ -25,6 +25,7 @@ simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 
 #Global Simulation settings
 #------------------------------------------------------------
 kill_switch=$(get_value 'simulation' 'kill_switch')
+rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
@@ -175,7 +176,7 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Running update to either the cloud repo or local SMB repo
 #------------------------------------------------------------
-source '/usr/local/scripts/update.sh'
+if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
