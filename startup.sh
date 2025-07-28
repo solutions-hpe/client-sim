@@ -44,6 +44,9 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
+site_based_num=$(get_value 'simulation' 'site_based_num')
+simulation_id=s
+simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
@@ -80,7 +83,7 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [[ -n ${wladapter} ]]; then
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
  sudo ip link set $wladapter down
  sleep 1
  sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
