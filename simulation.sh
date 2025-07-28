@@ -10,7 +10,7 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #set int he simulation.conf
 #------------------------------------------------------------
 wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
-echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -183,12 +183,12 @@ if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
- sudo ip link set wlan0 down
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ] && [[ -n $wladapter ]]; then
+ sudo ip link set $wladapter down
  sleep 1
- sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+ sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
  sleep 1
- sudo ip link set wlan0 up
+ sudo ip link set $wladapter up
  sleep 1
 fi
 #------------------------------------------------------------
@@ -225,11 +225,11 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
   if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-   sudo ip link set wlan0 down
+   sudo ip link set $wladapter down
    sleep 1
-   sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+   sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
    sleep 1
-   sudo ip link set wlan0 up
+   sudo ip link set $wladapter up
    sleep 1
   fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
@@ -251,11 +251,11 @@ if [ $sim_load -lt $rn_sim_load ]; then
   if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $ssid; fi
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
-   sudo ip link set wlan0 down
+   sudo ip link set $wladapter down
    sleep 1
-   sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+   sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
    sleep 1
-   sudo ip link set wlan0 up
+   sudo ip link set $wladapter up
    sleep 1
   fi
   sleep 5
@@ -302,11 +302,11 @@ if [ $kill_switch == "off" ]; then
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       sleep 1
-      sudo ip link set wlan0 down
+      sudo ip link set $wladapter down
       sleep 1
-      sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
       sleep 1
-      sudo ip link set wlan0 up
+      sudo ip link set $wladapter up
       sleep 1
       if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
       if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
@@ -331,22 +331,22 @@ if [ $kill_switch == "off" ]; then
      echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
      if [ $sim_phy == "wireless" ]; then
      if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-      sudo ip link set wlan0 down
+      sudo ip link set $wladapter down
       sleep 1
-      sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
       sleep 1
-      sudo ip link set wlan0 up
+      sudo ip link set $wladapter up
       sleep 1
      fi
       if [ $site_based_ssid != "on" ]; then nmcli connection up ${ssid}; fi
       if [ $site_based_ssid == "on" ]; then nmcli connection up ${wsite}"-"${ssid}; fi
      fi
      if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-      sudo ip link set wlan0 down
+      sudo ip link set $wladapter down
       sleep 1
-      sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
       sleep 1
-      sudo ip link set wlan0 up
+      sudo ip link set $wladapter up
       sleep 1
      fi
      sleep 30
