@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.79
+version=.80
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -281,6 +281,7 @@ if [ $kill_switch == "off" ]; then
     #SSID Incorrect Password Simulation
     #------------------------------------------------------------
     if [ $ssidpw_fail == "on" ]; then
+     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
