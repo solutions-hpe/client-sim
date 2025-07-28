@@ -17,9 +17,6 @@ echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
-site_based_num=$(get_value 'simulation' 'site_based_num')
-simulation_id=s
-simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 #------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
