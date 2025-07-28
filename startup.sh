@@ -80,12 +80,12 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
- sudo ip link set wlan0 down
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
+ sudo ip link set $wladapter down
  sleep 1
- sudo ip link set dev wlan0 address e8:4e:06:ac:$mac_id
+ sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
  sleep 1
- sudo ip link set wlan0 up
+ sudo ip link set $wladapter up
  sleep 1
 fi
 #------------------------------------------------------------
@@ -95,6 +95,7 @@ if [ $vh_server == "on" ]; then
   echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
   echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
   sudo /usr/sbin/vhclientx86_64 -n
+  sleep 5
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
