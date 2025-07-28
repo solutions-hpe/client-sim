@@ -151,6 +151,7 @@ echo Download: $download | tee -a /usr/local/scripts/sim.log
 echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
 echo Incorrect SSID PW: $ssidpw_fail | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
+sleep 5
 #------------------------------------------------------------
 #Checking global kill switch config
 #------------------------------------------------------------
