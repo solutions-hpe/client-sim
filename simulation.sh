@@ -29,6 +29,7 @@ repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
+ssidpw_fail=$(get_value 'simulation_id' 'ssidpw_fail')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -36,7 +37,6 @@ wsite=$(get_value $simulation_id 'wsite')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 ssid=$(get_value $simulation_id 'ssid')
 ssidpw=$(get_value $simulation_id 'ssidpw')
-ssidpw_fail=$(get_value $simulation_id 'ssidpw_fail')
 dhcp_fail=$(get_value $simulation_id 'dhcp_fail')
 dns_fail=$(get_value $simulation_id 'dns_fail')
 assoc_fail=$(get_value $simulation_id 'assoc_fail')
