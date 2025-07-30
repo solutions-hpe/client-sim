@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.85
+version=.86
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -29,7 +29,7 @@ repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
-ssidpw_fail=$(get_value 'simulation_id' 'ssidpw_fail')
+ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
