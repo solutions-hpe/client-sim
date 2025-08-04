@@ -1,6 +1,5 @@
 #!/bin/bash
-version=.16
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
+version=.17
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
 #----------------------------------------------------------------
@@ -20,7 +19,7 @@ y_count=0
 #----------------------------------------------------------------
 #Checking for the number of devices that are currently attached
 #----------------------------------------------------------------
-vhactive=$(cat /tmp/vhactive.txt | grep "*" | awk -F'[()]' '{print $2}')
+vhactive=$(cat /tmp/vhactive.txt | grep "you" | awk -F'[()]' '{print $2}')
 for r in $vhactive; do
   y_count=$((y_count+1))
 done
@@ -33,7 +32,8 @@ for r in $vhactive; do
   r_count=$((r_count+1))
 done
 echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
-if [ $r_count == 0 ]; then
+echo Adapters in use by you $y_count | tee -a /usr/local/scripts/sim.log
+if [ $r_count == 0 ] && [ $y_count != 1 ]; then
  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
  echo Will retry after sleep | tee -a /usr/local/scripts/sim.log
@@ -46,7 +46,7 @@ else
   #If Client is connected to more than 1 device - disconnecting
   #----------------------------------------------------------------
   if [[ $y_count -gt 1 ]]; then
-   echo Found multiple devices in-use
+   echo Found multiple devices $y_count in-use
    echo Clearing out all devices in-use
    sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
    sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
@@ -65,7 +65,8 @@ else
  #----------------------------------------------------------------
  #Generating random number to connect to a random adapter
  #----------------------------------------------------------------
- echo No Cached VH Device found - finding avaiable adapter
+ echo No Cached VH Device found
+ echo finding avaiable adapter
  rn_vhactive=$((1 + RANDOM % $r_count))
  #----------------------------------------------------------------
  #If Client is connected to more than 1 device - disconnecting
