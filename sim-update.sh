@@ -1,8 +1,18 @@
 #!/bin/bash
-version=.14
+version=.15
 #Making backup of script
 echo Making backup of Script
 cp /usr/local/scripts/sim-update.sh /usr/local/scripts/sim-update-backup.sh
+#------------------------------------------------------------
+source '/usr/local/scripts/ini-parser.sh'
+#------------------------------------------------------------
+#Setting config file location
+#------------------------------------------------------------
+process_ini_file '/usr/local/scripts/simulation.conf'
+#------------------------------------------------------------
+public_repo=$(get_value 'simulation' 'public_repo')
+repo_location=$(get_value 'simulation' 'repo_location')
+#------------------------------------------------------------
 sleep 5
 github=raw.githubusercontent.com
 ping -c1 $github
