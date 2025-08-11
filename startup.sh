@@ -79,7 +79,7 @@ if [ $rapid_update != "on" ]; then
  echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
  source '/usr/local/scripts/update.sh'
 else
- echo Rapid Update is $rapid_update
+ echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
  echo Skipping update | tee -a /usr/local/scripts/sim.log
  sleep 60
  echo Waiting for system Startup
