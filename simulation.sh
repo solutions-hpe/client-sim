@@ -279,10 +279,14 @@ if [ $kill_switch == "off" ]; then
     echo Incorrect SSID PW: $ssidpw_fail | tee -a /usr/local/scripts/sim.log
     echo ------------------------------| tee -a /usr/local/scripts/sim.log
     #------------------------------------------------------------
-    #SSID Incorrect Password Simulation
+    #SSID Incorrect Password Simulation or Auth Failure Simulation
+    #since these are very similar they are in the same section one
+    #has a bad PSK and others have a blocked mac or invalud username/password combo
+    #both need to be constantly connecting so we trigger insights
     #------------------------------------------------------------
-    if [ $ssidpw_fail == "on" ]; then
-     echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
+    if [ $ssidpw_fail == "on" || $auth_fail == "on" ]; then
+     if [ $ssidpw_fail == "on" ]; then echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log; fi
+     if [ $auth_fail == "on" ]; then echo Running Auth Failure | tee -a /usr/local/scripts/sim.log; fi
      rm /usr/local/scripts/vhcached.txt
      sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
      sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
@@ -291,8 +295,14 @@ if [ $kill_switch == "off" ]; then
      echo Site Based SSID is $site_based_ssid | tee -a /usr/local/scripts/sim.log
      echo Adding SSID Connection | tee -a /usr/local/scripts/sim.log
      sleep 5
-     if [ $site_based_ssid == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
-     if [ $site_based_ssid != "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
+     if [ $site_based_ssid == "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
+     sleep 1
+     sudo ip link set $wladapter down
+     sleep 1
+     sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
+     sleep 1
+     sudo ip link set $wladapter up
      sleep 5
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
@@ -311,7 +321,7 @@ if [ $kill_switch == "off" ]; then
       if [ $site_based_ssid != "on" ]; then nmcli connection down $ssid; fi
      done
      #------------------------------------------------------------
-     #End SSID Incorrect Password Simualtion
+     #End SSID Incorrect Password Simualtion or Auth Failure Simulation
      #------------------------------------------------------------
     else
     #------------------------------------------------------------
