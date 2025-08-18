@@ -284,7 +284,7 @@ if [ $kill_switch == "off" ]; then
     #has a bad PSK and others have a blocked mac or invalud username/password combo
     #both need to be constantly connecting so we trigger insights
     #------------------------------------------------------------
-    if [ $ssidpw_fail == "on" || $auth_fail == "on" ]; then
+    if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ]; then
      if [ $ssidpw_fail == "on" ]; then echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log; fi
      if [ $auth_fail == "on" ]; then echo Running Auth Failure | tee -a /usr/local/scripts/sim.log; fi
      rm /usr/local/scripts/vhcached.txt
