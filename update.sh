@@ -20,46 +20,19 @@ public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 #------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
-github=raw.githubusercontent.com
 if [ $public_repo == "on" ]; then
  #Using remote GitHub repo
- ping -c1 $github
-  if [ $? -eq 0 ]; then
-   echo Successful network connection to Github - updating scripts
-   cd ~
-   cd client-sim
-   git pull origin
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"dns_fail.txt" -O /tmp/dns_fail.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"kill_switch.txt" -O /tmp/kill_switch.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"websites.txt" -O /tmp/websites.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"downloads.txt" -O /tmp/downloads.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"simulation.sh" -O /tmp/simulation.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"startup.sh" -O /tmp/startup.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"ini-parser.sh" -O /tmp/ini-parser.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"sim-update.sh" -O /tmp/sim-update.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"update.sh" -O /tmp/update.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"vhconnect.sh" -O /tmp/vhconnect.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"sys_mon.sh" -O /tmp/sys_mon.tmp
-   sleep 1
-   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"configs/simulation.conf" -O /tmp/simulation.tmp
-   sleep 1
-   sudo chmod -R 777 /usr/local/scripts
-  else
-   echo Network connection failed to GitHub - skipping script updates
-  fi
- else
-  #Local repo defined in the conf file
-  smbclient $smb_location -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
+ cd ~
+ cd client-sim
+ git pull origin --ff-only
+ cp *.sh /usr/local/scripts/
+ cp *.txt /usr/local/scripts/
+ cd configs
+ cp simulation.conf /usr/local/scripts/simulation.conf
+ sudo chmod -R 777 /usr/local/scripts
+else
+ #Local repo defined in the conf file
+ smbclient $smb_location -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
 fi
 #------------------------------------------------------------
 #End Updating Scripts
@@ -109,3 +82,5 @@ echo Comment=Simulation Update | sudo tee -a /tmp/sim_update.desktop
 #Ubuntu/Debian with gnome
 echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /tmp/sim_update.desktop
 #End Log Viewer#------------------------------------------------------------
+cd /tmp
+sudo cp *.desktop /etc/xdg/autostart/
