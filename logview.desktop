@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Simulatio Log Viewer
+Comment=Simulation Script Startup
+#rasberrypi uses lxterminal
+#Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log
+#Ubuntu/Debian with gnome
+#Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log
+Exec=gnome-terminal --geometry=35x15+0+525 -- tail -f /usr/local/scripts/sim.log
