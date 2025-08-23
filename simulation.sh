@@ -220,12 +220,12 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
   nmcli radio wifi on
   sleep 10
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
-  if [ $site_based_ssid == "on" ]; then nmcli device wifi connect $wsite"-"$ssid password $ssidpw; fi
-  if [ $site_based_ssid != "on" ]; then nmcli device wifi connect $ssid password $ssidpw; fi
+  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   nmcli device wifi rescan
   sleep 5
-  if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
+  if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
    sudo ip link set $wladapter down
@@ -251,8 +251,8 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli connection up $ssid; fi
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
   sleep 5
 fi
 #------------------------------------------------------------
@@ -348,8 +348,8 @@ if [ $kill_switch == "off" ]; then
       sudo ip link set $wladapter up
       sleep 1
      fi
-     if [ $site_based_ssid != "on" ]; then nmcli connection up $ssid; fi
-     if [ $site_based_ssid == "on" ]; then nmcli connection up $wsite"-"$ssid; fi
+     if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
+     if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
      fi
      ping -c2 $inet_check
      if [ $? -eq 0 ]; then
