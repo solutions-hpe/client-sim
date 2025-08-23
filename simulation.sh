@@ -247,13 +247,13 @@ fi
 if [ $sim_load -lt $rn_sim_load ]; then
   echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
   echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
-  nmcli radio wifi off
+  #nmcli radio wifi off
   sleep $rn_offline_time
-  nmcli radio wifi on
-  sleep 5
-  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
-  sleep 5
+  #nmcli radio wifi on
+  #sleep 5
+  #if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  #if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
+  #sleep 5
 fi
 #------------------------------------------------------------
 #End Setting up simulation load
