@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.18
+version=.19
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -18,14 +18,15 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
+repo_branch=$(get_value 'simulation' 'branch')
 #------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 if [ $public_repo == "on" ]; then
  #Using remote GitHub repo
  cd ~
- git clone https://github.com/solutions-hpe/client-sim
+ git clone $repo_location
  cd client-sim
- git switch lrb
+ git switch $repo_branch
  git pull origin --ff-only
  sudo cp *.desktop /etc/xdg/autostart/
  sudo cp *.sh /usr/local/scripts/
