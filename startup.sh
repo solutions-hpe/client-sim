@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.30
+version=.31
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -81,9 +81,9 @@ if [ $rapid_update != "on" ]; then
 else
  echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
  echo Skipping update | tee -a /usr/local/scripts/sim.log
- sleep 60
- echo Waiting for system Startup
 fi
+echo Waiting for system Startup | tee -a /usr/local/scripts/sim.log
+sleep 60
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
