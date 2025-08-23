@@ -18,7 +18,7 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
-repo_branch=$(get_value 'simulation' 'branch')
+repo_branch=$(get_value 'simulation' 'repo_branch')
 #------------------------------------------------------------
 echo Updating Scripts | tee -a /usr/local/scripts/sim.log
 if [ $public_repo == "on" ]; then
