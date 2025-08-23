@@ -586,8 +586,8 @@ pkill -f firefox
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
-sudo ifconfig $eadapter down
-sudo ifconfig $wladapter down
+#sudo ifconfig $eadapter down
+#sudo ifconfig $wladapter down
 echo Sleeping for $rn_offlinetime seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -598,8 +598,8 @@ sleep $rn_offlinetime
 #Bringing all interfaces back up to call home/update scripts
 #------------------------------------------------------------
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-sudo ifconfig $eadapter up
-sudo ifconfig $wladapter up
+#sudo ifconfig $eadapter up
+#sudo ifconfig $wladapter up
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
