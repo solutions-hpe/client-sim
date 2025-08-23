@@ -5,4 +5,3 @@ Comment=Simulation Update
 #rasberrypi uses lxterminal
 #Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log
 #Ubuntu/Debian with gnome
-Exec=gnome-terminal -- bash -c /usr/local/scripts/update.sh
