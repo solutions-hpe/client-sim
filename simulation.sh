@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.86
+version=.87
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -30,6 +30,7 @@ vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
+ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -37,7 +38,6 @@ wsite=$(get_value $simulation_id 'wsite')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 ssid=$(get_value $simulation_id 'ssid')
 ssidpw=$(get_value $simulation_id 'ssidpw')
-ssidpw_fail=$(get_value $simulation_id 'ssidpw_fail')
 dhcp_fail=$(get_value $simulation_id 'dhcp_fail')
 dns_fail=$(get_value $simulation_id 'dns_fail')
 assoc_fail=$(get_value $simulation_id 'assoc_fail')
