@@ -26,6 +26,9 @@ if [ $public_repo == "on" ]; then
  ping -c1 $github
   if [ $? -eq 0 ]; then
    echo Successful network connection to Github - updating scripts
+   cd ~
+   cd client-sim
+   git status
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"dns_fail.txt" -O /tmp/dns_fail.tmp
    sleep 1
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 $repo_location"kill_switch.txt" -O /tmp/kill_switch.tmp
