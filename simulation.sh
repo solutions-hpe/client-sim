@@ -29,7 +29,7 @@ repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
-ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
+auth_fail=$(get_value 'simulation' 'auth_fail')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -105,6 +105,8 @@ tempvar=$(get_value $username 'www_traffic')
 if [[ -n ${tempvar} ]]; then www_traffic=$tempvar; fi
 tempvar=$(get_value $username 'ssidpw_fail')
 if [[ -n ${tempvar} ]]; then ssidpw_fail=$tempvar; fi
+tempvar=$(get_value $username 'auth_fail')
+if [[ -n ${tempvar} ]]; then auth_fail=$tempvar; fi
 #------------------------------------------------------------
 tempvar=$(get_value $username 'smb_address')
 if [[ -n ${tempvar} ]]; then smb_address=$tempvar; fi
