@@ -69,6 +69,16 @@ echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
+#Finding adapter names and setting usable variables for interfaces
+#When using a physical piece of hardware we want to diable the
+#interface not in use. So that we force the traffic out the interface
+#set int he simulation.conf
+#------------------------------------------------------------
+wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
+eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
