@@ -6,6 +6,17 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
+#------------------------------------------------------------
+#Finding adapter names and setting usable variables for interfaces
+#When using a physical piece of hardware we want to diable the
+#interface not in use. So that we force the traffic out the interface
+#set int he simulation.conf
+#------------------------------------------------------------
+wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
+eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
+#------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Settings read from the local config file
