@@ -195,6 +195,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on
  sudo ip link set $wladapter up
  sleep 1
 fi
+echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 sleep 60
 #------------------------------------------------------------
 #Connecting to VHServer
