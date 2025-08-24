@@ -195,8 +195,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on
  sudo ip link set $wladapter up
  sleep 1
 fi
-#------------------------------------------------------------
-#Checking for kill switch to stop simulation
+sleep 60
 #------------------------------------------------------------
 #Connecting to VHServer
 #Checking to see if google is reachable before 
@@ -229,11 +228,11 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
    if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
    if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   fi
-  #nmcli device wifi rescan
-  #sleep 5
-  ##if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  #if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
-  #echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+  nmcli device wifi rescan
+  sleep 5
+  if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
+  echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
    sudo ip link set $wladapter down
    sleep 1
