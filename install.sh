@@ -74,82 +74,31 @@ smbclient //nas/scripts -N -c 'lcd /usr/local/scripts/; cd /SIM/CONFIG/; prompt 
 /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
 #------------------------------------------------------------
 echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/simulation.sh -O /usr/local/scripts/simulation.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/startup.sh -O /usr/local/scripts/startup.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/ini-parser.sh -O /usr/local/scripts/ini-parser.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sim-update.sh -O /usr/local/scripts/sim-update.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/update.sh -O /usr/local/scripts/update.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/vhconnect.sh -O /usr/local/scripts/vhconnect.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/websites.txt -O /usr/local/scripts/websites.txt
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/dns_fail.txt -O /usr/local/scripts/dns_fail.txt
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/public_kill_switch.txt -O /usr/local/scripts/public_kill_switch.txt
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/sys_mon.sh -O /usr/local/scripts/sys_mon.sh
-sleep 1
-sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/downloads.txt -O /usr/local/scripts/downloads.txt
+cd ~
+git clone https://github.com/solutions-hpe/client-sim.git
+cd client-sim
+#switching the branch to the one designated in the simulation.conf file
+#copying startup files to autostart
+sudo cp *.desktop /etc/xdg/autostart/
+#copying shell scripts to the active script repo
+sudo mkdir /usr/local/scripts
+sudo cp *.sh /usr/local/scripts/
+#copying flat files for simulation to active script repo
+sudo cp *.txt /usr/local/scripts/
+#making all simulation scripts executable
+sudo chmod -R 777 /usr/local/scripts
 if [ -e "/usr/local/scripts/simulation.conf" ]; then
-  echo Local simulation config exists | tee -a /tmp/client-sim.log
+ echo Local simulation config exists | tee -a /tmp/client-sim.log
 else
-  echo Downloading simulation config | tee -a /tmp/client-sim.log
-  sudo wget https://raw.githubusercontent.com/solutions-hpe/client-sim/main/configs/sample.conf -O /usr/local/scripts/simulation.conf
+ #copying latest config file to active repository
+ echo Coying config from local repo | tee -a /tmp/client-sim.log
+ cd configs
+ sudo cp simulation.conf /usr/local/scripts/simulation.conf
 fi
 touch /usr/local/scripts/sim.log
 echo Installer Version $version | tee /usr/local/scripts/sim.log
 sudo chmod -R 777 /usr/local/scripts
 #------------------------------------------------------------
-echo Creating auto Start files | tee -a /tmp/client-sim.log
-#Creating Startup
-echo [Desktop Entry] | sudo tee /etc/xdg/autostart/startup.desktop
-echo Type=Application | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Name=StartUp | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/startup.desktop
-#rasberrypi uses lxterminal
-#echo Exec=lxterminal -e bash /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
-#Ubuntu/Debian with gnome
-#echo Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh | sudo tee -a /etc/xdg/autostart/startup.desktop
-echo Exec=gnome-terminal --geometry=103x15+1400+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot" | sudo tee -a /etc/xdg/autostart/startup.desktop
-#End Create Startup
-#------------------------------------------------------------
-#Create Log Viewer 
-echo [Desktop Entry] | sudo tee /etc/xdg/autostart/logview.desktop
-echo Type=Application | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Name=LogView | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/logview.desktop
-#rasberrypi uses lxterminal
-#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-#Ubuntu/Debian with gnome
-#echo Exec=gnome-terminal --geometry=20x15+0+477 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-echo Exec=gnome-terminal --geometry=34x15+0+525 -- tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/logview.desktop
-#End Log Viewer
-#------------------------------------------------------------
-#Create journalctl Viewer 
-echo [Desktop Entry] | sudo tee /etc/xdg/autostart/journalctl.desktop
-echo Type=Application | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-echo Name=JournalCtl | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-echo Comment=Simulation Script Startup | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-#rasberrypi uses lxterminal
-#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-#Ubuntu/Debian with gnome
-echo Exec=gnome-terminal --geometry=140x20+0+0 -- journalctl -f | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-#End Log Viewer#------------------------------------------------------------
-#Create journalctl Viewer 
-echo [Desktop Entry] | sudo tee /etc/xdg/autostart/sim_update.desktop
-echo Type=Application | sudo tee -a /etc/xdg/autostart/sim_update.desktop
-echo Name=Sim-Update | sudo tee -a /etc/xdg/autostart/sim_update.desktop
-echo Comment=Simulation Update | sudo tee -a /etc/xdg/autostart/sim_update.desktop
-#rasberrypi uses lxterminal
-#echo Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log | sudo tee -a /etc/xdg/autostart/journalctl.desktop
-#Ubuntu/Debian with gnome
-echo Exec=gnome-terminal -- bash -c /usr/local/scripts/sim_update.sh | sudo tee -a /etc/xdg/autostart/sim_update.desktop
-#End Log Viewer#------------------------------------------------------------
 echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
 rm -Rf 8821au-20210708
 git clone https://github.com/morrownr/8821au-20210708.git
