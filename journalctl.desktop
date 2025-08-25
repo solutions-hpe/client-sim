@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=JournalView
+Comment=Launch journalctl viewer
+#rasberrypi uses lxterminal
+#Exec=lxterminal -t SIM-LOG-VIEWER --geometry=80x20 -e tail -f /usr/local/scripts/sim.log
+Exec=gnome-terminal --geometry=140x20+0+0 -- journalctl -f

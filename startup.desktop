@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=StartUp
+Comment=Simulation Script Startup
+#rasberrypi uses lxterminal
+#Exec=lxterminal -e bash /usr/local/scripts/startup.sh
+#Ubuntu/Debian with gnome
+#Exec=gnome-terminal --geometry=104x15+1400+477 -- bash -c /usr/local/scripts/startup.sh
+Exec=gnome-terminal --geometry=103x15+1400+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
