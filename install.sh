@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.41
+version=.42
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 sudo apt install gnome-terminal -y
