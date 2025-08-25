@@ -37,20 +37,20 @@ sudo raspi-config nonint do_wifi_country US
 #Installing DKMS, DNSUtils, QEMU Agent, GIT, Net Tools
 #------------------------------------------------------------
 echo Running system updates | tee -a /tmp/client-sim.log
-sudo apt update
-sudo apt upgrade -y
-sudo apt remote sysstat -y
-sudo apt install git -y
-sudo apt install wget -y
-sudo apt install network-manager -y
-sudo apt install qemu-guest-agent -y
-sudo apt install net-tools -y
-sudo apt install smbclient -y
-sudo apt install dnsutils -y
-sudo apt install dkms -y
-sudo apt install iperf3 -y
-sudo apt install firefox-esr -y
-sudo apt autoremove -y
+sudo DEBIAN_FRONTEND=noninteractive apt update
+sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
+sudo DEBIAN_FRONTEND=noninteractive apt remote sysstat -y
+sudo DEBIAN_FRONTEND=noninteractive apt install git -y
+sudo DEBIAN_FRONTEND=noninteractive apt install wget -y
+sudo DEBIAN_FRONTEND=noninteractive apt install network-manager -y
+sudo DEBIAN_FRONTEND=noninteractive apt install qemu-guest-agent -y
+sudo DEBIAN_FRONTEND=noninteractive apt install net-tools -y
+sudo DEBIAN_FRONTEND=noninteractive apt install smbclient -y
+sudo DEBIAN_FRONTEND=noninteractive apt install dnsutils -y
+sudo DEBIAN_FRONTEND=noninteractive apt install dkms -y
+sudo DEBIAN_FRONTEND=noninteractive apt install iperf3 -y
+sudo DEBIAN_FRONTEND=noninteractive apt install firefox-esr -y
+sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
