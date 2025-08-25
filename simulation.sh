@@ -208,6 +208,9 @@ if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ]; then
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ sleep 60
+ if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+ if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
@@ -225,7 +228,10 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
   if [ $? -eq 0 ]; then
    echo Successful network connection | tee -a /usr/local/scripts/sim.log
   else
+   echo Network connection failed | tee -a /usr/local/scripts/sim.log
+   if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
    echo Connecting to Network | tee -a /usr/local/scripts/sim.log
+   sleep 60
    if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
    if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   fi
@@ -254,13 +260,13 @@ fi
 if [ $sim_load -lt $rn_sim_load ]; then
   echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
   echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
-  #nmcli radio wifi off
+  nmcli radio wifi off
   sleep $rn_offline_time
-  #nmcli radio wifi on
-  #sleep 5
-  #if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  #if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
-  #sleep 5
+  nmcli radio wifi on
+  sleep 5
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
+  sleep 5
 fi
 #------------------------------------------------------------
 #End Setting up simulation load
