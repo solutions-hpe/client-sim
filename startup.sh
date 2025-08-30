@@ -75,9 +75,9 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #interface not in use. So that we force the traffic out the interface
 #set int he simulation.conf
 #------------------------------------------------------------
-wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 sudo ifconfig $eadapter up
 sudo ifconfig $wladapter up
@@ -97,9 +97,9 @@ sleep 60
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
-wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+wladapter=$(ip a -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
