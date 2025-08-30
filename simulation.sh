@@ -12,9 +12,9 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #interface not in use. So that we force the traffic out the interface
 #set int he simulation.conf
 #------------------------------------------------------------
-wladapter=$(ifconfig -a | grep "wlx\|wlan" | cut -d ':' -f '1')
+wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ifconfig -a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ':' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo Parsing Config File | tee -a /usr/local/scripts/sim.log

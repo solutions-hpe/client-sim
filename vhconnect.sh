@@ -26,8 +26,8 @@ done
 #----------------------------------------------------------------
 #Checking the number of devices that are available
 #----------------------------------------------------------------
-if [ $sim_phy == "wireless" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep 802.11 | awk -F'[()]' '{print $2}'); fi
-if [ $sim_phy == "wired" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep AX88 | awk -F'[()]' '{print $2}'); fi
+if [ $sim_phy == "wireless" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep -e 802.11 -e ACLUSB-WIRELESS | awk -F'[()]' '{print $2}'); fi
+if [ $sim_phy == "wired" ]; then vhactive=$(cat /tmp/vhactive.txt | grep -e -- | grep -v In-use | grep -e AX88 -e ACLUSB-STATIC | awk -F'[()]' '{print $2}'); fi
 for r in $vhactive; do
   r_count=$((r_count+1))
 done
