@@ -516,25 +516,6 @@ if [ $kill_switch == "off" ]; then
       done
     fi
     #------------------------------------------------------------
-    #Running apt update & apt upgrade
-    #------------------------------------------------------------
-    echo Running Updates | tee -a /usr/local/scripts/sim.log
-    sudo apt update
-    sudo apt remove sysstat -y
-    sudo apt upgrade -y
-    sudo apt install git -y
-    sudo apt install wget -y
-    sudo apt install gnome-terminal -y
-    sudo apt install network-manager -y
-    sudo apt install qemu-guest-agent -y
-    sudo apt install net-tools -y
-    sudo apt install smbclient -y
-    sudo apt install dnsutils -y
-    sudo apt install dkms -y
-    sudo apt install iperf3 -y
-    sudo apt install firefox-esr -y
-    sudo apt autoremove -y
-    #------------------------------------------------------------
     #End Download Simulation
     #------------------------------------------------------------
     #Running DNS Fail simulation
@@ -595,7 +576,27 @@ pkill -f firefox
 #------------------------------------------------------------
 #End Kill switch Check 
 #------------------------------------------------------------
-#Bringing all interfaces down to make it look like the device is offline. 
+#------------------------------------------------------------
+#Running apt update & apt upgrade
+#------------------------------------------------------------
+echo Running Updates | tee -a /usr/local/scripts/sim.log
+sudo apt update
+sudo apt remove sysstat -y
+sudo apt upgrade -y
+sudo apt full-upgrade -y
+sudo apt install git -y
+sudo apt install wget -y
+sudo apt install gnome-terminal -y
+sudo apt install network-manager -y
+sudo apt install qemu-guest-agent -y
+sudo apt install net-tools -y
+sudo apt install smbclient -y
+sudo apt install dnsutils -y
+sudo apt install dkms -y
+sudo apt install iperf3 -y
+sudo apt install firefox-esr -y
+sudo apt autoremove -y
+#Bringing all interfaces down to make it look like the device is offline.
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
