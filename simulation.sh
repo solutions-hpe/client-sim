@@ -187,7 +187,7 @@ if [ $sim_phy == "ethernet" ]; then sudo sudo ip link set dev $wladapter down; f
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]     ; then
  echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
  sudo dhclient -r $wladapter
  sudo ip link set $wladapter down
@@ -207,7 +207,7 @@ sleep 60
 #------------------------------------------------------------
 inet_check=www.google.com
 ping -c2 $inet_check
-if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ]; then
+if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
@@ -222,7 +222,7 @@ fi
 #------------------------------------------------------------
 #Connecting to Network
 #------------------------------------------------------------
-if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
+if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
@@ -236,13 +236,13 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ]; then
    if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
    echo Connecting to Network | tee -a /usr/local/scripts/sim.log
    sleep 60
-   if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
-   if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
+   if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+   if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   fi
   nmcli device wifi rescan
   sleep 5
-  if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
+  if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
    echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
@@ -272,8 +272,8 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ]; then nmcli -w 180 connection up $ssid; fi
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
   sleep 5
 fi
 #------------------------------------------------------------
@@ -308,7 +308,7 @@ if [ $kill_switch == "off" ]; then
     #has a bad PSK and others have a blocked mac or invalud username/password combo
     #both need to be constantly connecting so we trigger insights
     #------------------------------------------------------------
-    if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ]; then
+    if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [ -n ${wladapter} ]; then
      if [ $ssidpw_fail == "on" ]; then echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log; fi
      if [ $auth_fail == "on" ]; then echo Running Auth Failure | tee -a /usr/local/scripts/sim.log; fi
      rm /usr/local/scripts/vhcached.txt
