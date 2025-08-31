@@ -111,6 +111,7 @@ else
  #End Connecting to VirtualHere Server
  #----------------------------------------------------------------
  echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
+ echo VHConnect | tee -a /usr/local/scripts/sim.log
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  #----------------------------------------------------------------
  sleep 30
@@ -123,8 +124,8 @@ else
  sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
  sleep 1
  sudo ip link set $wladapter up
- echo Sleeping for 5 Seconds - Enable/Disable | tee -a /usr/local/scripts/sim.log
- echo Waiting for Network - Enable/Disable | tee -a /usr/local/scripts/sim.log
+ echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
+ echo Waiting for Network | tee -a /usr/local/scripts/sim.log
  sleep 5
  sudo dhclient $wladapter &
  #----------------------------------------------------------------
