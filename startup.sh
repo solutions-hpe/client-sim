@@ -82,24 +82,17 @@ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
-if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
-echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [[ -n ${wladapter} ]]; then
- echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
- echo Wireless Adapter $wladapter
- sudo ip link set $wladapter down
- sleep 1
- sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
- sleep 1
- sudo ip link set $wladapter up
- sleep 1
-fi
+if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
+echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
+if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id; fi
+if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
+if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
+echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
 #------------------------------------------------------------
@@ -110,8 +103,6 @@ else
  echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
  echo Skipping update | tee -a /usr/local/scripts/sim.log
 fi
-echo Waiting for system Startup | tee -a /usr/local/scripts/sim.log
-sleep 60
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
@@ -124,7 +115,7 @@ fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
-cd /usr/local/scripts/ && sudo chmod +x *.sh
+cd /usr/local/scripts/ && sudo chmod +x *.sh &
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
