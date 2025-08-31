@@ -33,6 +33,10 @@ for r in $vhactive; do
 done
 echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
 echo Adapters in use by you $y_count | tee -a /usr/local/scripts/sim.log
+wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+if [[ -n ${wladapter} ]]; then
+ echo Adapter Found $wladapter | tee -a /usr/local/scripts/sim.log
+else
 if [ $r_count == 0 ] && [ $y_count != 1 ]; then
  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
@@ -66,7 +70,7 @@ else
    #Generating random number to connect to a random adapter
    #----------------------------------------------------------------
    echo No Cached VH Device found
-   echo finding avaiable adapter
+   echo Finding an avaiable adapter
    rn_vhactive=$((1 + RANDOM % $r_count))
    #----------------------------------------------------------------
    #If Client is connected to more than 1 device - disconnecting
@@ -84,14 +88,16 @@ else
    #----------------------------------------------------------------
    #Looping through records to find an available adapter
    #----------------------------------------------------------------
-   for r in $vhactive; do
-    r_count=$((r_count+1))
-    if [[ $r_count == $rn_vhactive ]]; then
-     vhserver_device=$r
-     echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
-     echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
-    fi
-   done
+   if [[ $y_count -ne 1 ]]; then
+    for r in $vhactive; do
+     r_count=$((r_count+1))
+     if [[ $r_count == $rn_vhactive ]]; then
+      vhserver_device=$r
+      echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
+      echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
+     fi
+    done
+   fi
    #----------------------------------------------------------------
    #End if VirtualHere cached value check
    #----------------------------------------------------------------
@@ -102,14 +108,14 @@ else
  #----------------------------------------------------------------
  #Connecting to VirtualHere Server
  #----------------------------------------------------------------
- echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
- #----------------------------------------------------------------	
- #Connecting to Adapter
- #----------------------------------------------------------------
- /usr/sbin/vhclientx86_64 -t "AUTO USE DEVICE PORT,$vhserver_device"
- #----------------------------------------------------------------
- #End Connecting to VirtualHere Server
- #----------------------------------------------------------------
+  echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
+  #----------------------------------------------------------------
+  #Connecting to Adapter
+  #----------------------------------------------------------------
+  /usr/sbin/vhclientx86_64 -t "AUTO USE DEVICE PORT,$vhserver_device"
+  #----------------------------------------------------------------
+  #End Connecting to VirtualHere Server
+  #----------------------------------------------------------------
  echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  #----------------------------------------------------------------
@@ -137,4 +143,5 @@ else
  #End if VirtualHere Server is enabled
  #----------------------------------------------------------------
  fi
+fi
 fi
