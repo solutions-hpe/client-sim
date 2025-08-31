@@ -183,8 +183,8 @@ if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
-if [ $sim_phy == "ethernet" ]; then sudo ifconfig $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ifconfig $eadapter down; fi
+if [ $sim_phy == "ethernet" ]; then sudo sudo ip link set dev $wladapter down; fi
+if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
@@ -599,8 +599,8 @@ pkill -f firefox
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
-#sudo ifconfig $eadapter down
-#sudo ifconfig $wladapter down
+sudo ip link set dev $eadapter down
+sudo ip link set dev $wladapter down
 echo Sleeping for $rn_offlinetime seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -611,8 +611,8 @@ sleep $rn_offlinetime
 #Bringing all interfaces back up to call home/update scripts
 #------------------------------------------------------------
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-#sudo ifconfig $eadapter up
-#sudo ifconfig $wladapter up
+sudo ip link set dev $eadapter up
+sudo ip link set dev $wladapter up
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script
