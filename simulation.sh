@@ -187,22 +187,6 @@ if [ $sim_phy == "ethernet" ]; then sudo sudo ip link set dev $wladapter down; f
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
- sudo dhclient -r $wladapter
- sudo nmcli device disconnect $wladapter
- sudo ip link set $wladapter down
- sleep 1
- echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
- sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
- sleep 1
- sudo ip link set $wladapter up
- echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
- echo Waiting for Network | tee -a /usr/local/scripts/sim.log
- sleep 5
- sudo dhclient $wladapter &
-fi
-echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-sleep 15
 #------------------------------------------------------------
 #Connecting to VHServer
 #Checking to see if the default gateway is reachable before
@@ -237,7 +221,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
    if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
    dfgw=$(ip route | grep -oP 'default via \K\S+')
    echo Connecting to Network | tee -a /usr/local/scripts/sim.log
-   sleep 15
+   sleep 5
    if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
    if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   fi
@@ -246,22 +230,8 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
   if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-   sudo dhclient -r $wladapter
-   sudo nmcli device disconnect $wladapter
-   sudo ip link set $wladapter down
-   sleep 1
-   echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-   sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-   sleep 1
-   sudo ip link set $wladapter up
-   echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
-   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-   sleep 5
-   sudo dhclient $wladapter &
-  fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  sleep 15
+  sleep 5
 fi
 #------------------------------------------------------------
 #End Connecting to Network
@@ -326,33 +296,9 @@ if [ $kill_switch == "off" ]; then
      sleep 5
      if [ $site_based_ssid == "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
      if [ $site_based_ssid != "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
-     sudo dhclient -r $wladapter
-     sudo nmcli device disconnect $wladapter
-     sudo ip link set $wladapter down
-     sleep 1
-     echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-     sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-     sleep 1
-     sudo ip link set $wladapter up
-     echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
-     echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-     sleep 5
-     sudo dhclient $wladapter &
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
-      sudo dhclient -r $wladapter
-      sudo nmcli device disconnect $wladapter
-      sudo ip link set $wladapter down
-      sleep 1
-      echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-      sleep 1
-      sudo ip link set $wladapter up
-      echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
-      echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-      sleep 5
-      sudo dhclient $wladapter &
       if [ $site_based_ssid == "on" ]; then nmcli -w 5 connection up $wsite"-"$ssid; fi
       if [ $site_based_ssid != "on" ]; then nmcli -w 5 connection up $ssid; fi
       sleep 5
@@ -376,18 +322,6 @@ if [ $kill_switch == "off" ]; then
      if [ $sim_phy == "wireless" ]; then
      if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
       echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-      sudo dhclient -r $wladapter
-      sudo nmcli device disconnect $wladapter
-      sudo ip link set $wladapter down
-      sleep 1
-      echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-      sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-      sleep 1
-      sudo ip link set $wladapter up
-      echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
-      echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-      sleep 5
-      sudo dhclient $wladapter &
      else
       echo No WLAN Adapter found | tee -a /usr/local/scripts/sim.log
       echo VHConnect Failed | tee -a /usr/local/scripts/sim.log
