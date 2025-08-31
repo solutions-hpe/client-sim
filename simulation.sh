@@ -369,7 +369,7 @@ if [ $kill_switch == "off" ]; then
      echo Network connection failed | tee -a /usr/local/scripts/sim.log
      echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
      if [ $sim_phy == "wireless" ]; then
-      if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
+      #if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
        #echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
        #sudo dhclient -r $wladapter
        #sudo ip link set $wladapter down
@@ -381,7 +381,7 @@ if [ $kill_switch == "off" ]; then
        #echo Waiting for Network | tee -a /usr/local/scripts/sim.log
        #sleep 5
        #sudo dhclient $wladapter &
-      fi
+      #fi
       if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
       if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
      fi
