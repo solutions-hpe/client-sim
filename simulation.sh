@@ -207,7 +207,7 @@ sleep 60
 #------------------------------------------------------------
 inet_check=www.google.com
 ping -c2 $inet_check
-if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
+if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
@@ -222,7 +222,7 @@ fi
 #------------------------------------------------------------
 #Connecting to Network
 #------------------------------------------------------------
-if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then
+if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
   sudo rfkill unblock wifi; sudo rfkill unblock all
   echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
   nmcli radio wifi on
@@ -272,8 +272,8 @@ if [ $sim_load -lt $rn_sim_load ]; then
   sleep $rn_offline_time
   nmcli radio wifi on
   sleep 5
-  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
-  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
+  if [ $site_based_ssid == "on" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+  if [ $site_based_ssid != "on" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then nmcli -w 180 connection up $ssid; fi
   sleep 5
 fi
 #------------------------------------------------------------
@@ -308,7 +308,7 @@ if [ $kill_switch == "off" ]; then
     #has a bad PSK and others have a blocked mac or invalud username/password combo
     #both need to be constantly connecting so we trigger insights
     #------------------------------------------------------------
-    if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [ -n ${wladapter} ]; then
+    if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
      if [ $ssidpw_fail == "on" ]; then echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log; fi
      if [ $auth_fail == "on" ]; then echo Running Auth Failure | tee -a /usr/local/scripts/sim.log; fi
      rm /usr/local/scripts/vhcached.txt
@@ -621,8 +621,8 @@ sudo apt autoremove -y
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
-sudo ip link set dev $eadapter down
-sudo ip link set dev $wladapter down
+if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
+if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
 echo Sleeping for $rn_offlinetime seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -633,8 +633,8 @@ sleep $rn_offlinetime
 #Bringing all interfaces back up to call home/update scripts
 #------------------------------------------------------------
 echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-sudo ip link set dev $eadapter up
-sudo ip link set dev $wladapter up
+if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
+if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; if
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Looping Script

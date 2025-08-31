@@ -83,7 +83,7 @@ eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
 if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-if [ ${#eadapter} -gt '0' ]; then sudo ip link set dev $eadapter up; fi
+if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
