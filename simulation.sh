@@ -575,7 +575,8 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     #End DNS Fail Simulation
     #------------------------------------------------------------
-    echo End of simulation sleeping for 5 seconds
+    echo End of simulation sleeping for 5 seconds | tee -a /usr/local/scripts/sim.log
+    echo Loop Iteration $z of 100 | tee -a /usr/local/scripts/sim.log
     sleep 5
     #------------------------------------------------------------
     #End of 100 Loop Count
