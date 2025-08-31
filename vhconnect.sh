@@ -114,6 +114,10 @@ else
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  #----------------------------------------------------------------
  sleep 30
+ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+ echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+ echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
+ sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
  #----------------------------------------------------------------
  #End if VirtualHere Server is enabled
  #----------------------------------------------------------------
