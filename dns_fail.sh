@@ -3,7 +3,18 @@ version=.01
 echo DNS Failure Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
+source '/usr/local/scripts/ini-parser.sh'
+process_ini_file '/usr/local/scripts/simulation.conf'
 dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
+dns_latency_1=$(get_value 'address' 'dns_latency_1')
+dns_latency_2=$(get_value 'address' 'dns_latency_2')
+dns_latency_3=$(get_value 'address' 'dns_latency_3')
+dns_bad_ip_1=$(get_value 'address' 'dns_bad_ip_1')
+dns_bad_ip_2=$(get_value 'address' 'dns_bad_ip_2')
+dns_bad_ip_3=$(get_value 'address' 'dns_bad_ip_3')
+dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
+dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
+dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
 for i in {1..10}; do
  for r in $dnsfile; do
   echo $(date) | tee -a /usr/local/scripts/sim.log
