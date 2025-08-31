@@ -118,6 +118,7 @@ else
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
   sudo dhclient -r $wladapter
+  sudo nmcli device disconnect $wladapter
   sudo ip link set $wladapter down
   sleep 1
   echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
