@@ -626,12 +626,12 @@ sudo apt autoremove -y
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
 if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
-echo Sleeping for $rn_offlinetime seconds
+echo Sleeping for $rn_offline_time seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Sleep for up to 4 hours to show the device left
 #------------------------------------------------------------
-sleep $rn_offlinetime
+sleep $rn_offline_time
 #------------------------------------------------------------
 #Bringing all interfaces back up to call home/update scripts
 #------------------------------------------------------------
