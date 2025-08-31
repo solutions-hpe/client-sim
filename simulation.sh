@@ -32,6 +32,7 @@ site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
 ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
+allow_offline=$(get_value 'simulation' 'allow_offline')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
