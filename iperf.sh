@@ -5,13 +5,6 @@ echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
-echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 echo iPerf Server: $iperf_server | tee -a /usr/local/scripts/sim.log
 echo iPerf Port: $rn_iperf_port | tee -a /usr/local/scripts/sim.log
 echo iPerf Time: $rn_iperf_time | tee -a /usr/local/scripts/sim.log
