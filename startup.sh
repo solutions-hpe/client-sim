@@ -79,10 +79,10 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-string_length=$wladapter
+string_length=${wladapter}
 echo $string_length
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
-string_length=$wladapter
+string_length=${wladapter}
 echo $string_length
 if [ -n ${wladapter} ]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 if [ -n ${eadapter} ]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
