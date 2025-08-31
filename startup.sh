@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.31
+version=.32
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -76,11 +76,11 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #set int he simulation.conf
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
+echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
-sudo ifconfig $eadapter up
-sudo ifconfig $wladapter up
+sudo ip link set dev $eadapter up
+sudo ip link set dev $wladapter up
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
