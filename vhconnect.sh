@@ -112,7 +112,7 @@ else
   #----------------------------------------------------------------
   #Connecting to Adapter
   #----------------------------------------------------------------
-  /usr/sbin/vhclientx86_64 -t "AUTO USE DEVICE PORT,$vhserver_device"
+  /usr/sbin/vhclientx86_64 -t "AUTO USE PORT,$vhserver_device"
   #----------------------------------------------------------------
   #End Connecting to VirtualHere Server
   #----------------------------------------------------------------
