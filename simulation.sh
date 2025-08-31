@@ -13,7 +13,7 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #set int he simulation.conf
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo WLAN Adapter name $wlandapter | tee -a /usr/local/scripts/sim.log
+echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
