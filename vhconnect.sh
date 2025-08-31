@@ -114,8 +114,8 @@ else
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
  #----------------------------------------------------------------
  sleep 30
+ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
  if [[ -n ${wladapter} ]]; then
-  wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
   sudo dhclient -r $wladapter
   sudo nmcli device disconnect $wladapter
