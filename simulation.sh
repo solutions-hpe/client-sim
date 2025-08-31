@@ -188,7 +188,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set 
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]     ; then
- echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
+ echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
  sudo dhclient -r $wladapter
  sudo ip link set $wladapter down
  sleep 1
@@ -245,7 +245,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]
   if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
-   echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
+   echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
    sudo dhclient -r $wladapter
    sudo ip link set $wladapter down
    sleep 1
@@ -336,7 +336,7 @@ if [ $kill_switch == "off" ]; then
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
-      echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
+      echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
       sudo dhclient -r $wladapter
       sleep 1
       sudo ip link set $wladapter down
@@ -372,7 +372,7 @@ if [ $kill_switch == "off" ]; then
      echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
      if [ $sim_phy == "wireless" ]; then
       if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
-       echo Releasing old DHCP Address - Network Connect | tee -a /usr/local/scripts/sim.log
+       echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
        sudo dhclient -r $wladapter
        sudo ip link set $wladapter down
        sleep 1
@@ -380,8 +380,8 @@ if [ $kill_switch == "off" ]; then
        sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
        sleep 1
        sudo ip link set $wladapter up
-       echo Sleeping for 5 Seconds - Network Connect | tee -a /usr/local/scripts/sim.log
-       echo Waiting for Network - Network Connect | tee -a /usr/local/scripts/sim.log
+       echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
+       echo Waiting for Network | tee -a /usr/local/scripts/sim.log
        sleep 5
        sudo dhclient $wladapter
       fi
