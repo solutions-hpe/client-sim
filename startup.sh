@@ -86,18 +86,6 @@ if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
-#Running Updates
-#------------------------------------------------------------
-if [ $rapid_update != "on" ]; then
- echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
- source '/usr/local/scripts/update.sh'
-else
- echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
- echo Skipping update | tee -a /usr/local/scripts/sim.log
-fi
-echo Waiting for system Startup | tee -a /usr/local/scripts/sim.log
-sleep 60
-#------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
@@ -112,6 +100,18 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [[ -n ${wladapter} ]]
  sudo ip link set $wladapter up
  sleep 1
 fi
+#------------------------------------------------------------
+#Running Updates
+#------------------------------------------------------------
+if [ $rapid_update != "on" ]; then
+ echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
+ source '/usr/local/scripts/update.sh'
+else
+ echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
+ echo Skipping update | tee -a /usr/local/scripts/sim.log
+fi
+echo Waiting for system Startup | tee -a /usr/local/scripts/sim.log
+sleep 60
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
