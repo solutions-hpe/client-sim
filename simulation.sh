@@ -189,7 +189,7 @@ mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]     ; then
  echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
- sudo dhclient -r $wladapter
+ sudo dhclient -k $wladapter
  sudo ip link set $wladapter down
  sleep 1
  echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
@@ -197,7 +197,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on
  sleep 1
  sudo ip link set $wladapter up
  sleep 5
- sudo dhclient $wladapter
+ sudo dhclient -n $wladapter
 fi
 echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 sleep 60
@@ -246,7 +246,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
   if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
    echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
-   sudo dhclient -r $wladapter
+   sudo dhclient -k $wladapter
    sudo ip link set $wladapter down
    sleep 1
    echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
@@ -254,7 +254,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [ -n ${wladapter} ]
    sleep 1
    sudo ip link set $wladapter up
    sleep 5
-   sudo dhclient $wladapter
+   sudo dhclient -n $wladapter
   fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
@@ -321,7 +321,7 @@ if [ $kill_switch == "off" ]; then
      sleep 5
      if [ $site_based_ssid == "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
      if [ $site_based_ssid != "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
-     sudo dhclient -r $wladapter
+     sudo dhclient -k $wladapter
      sleep 1
      sudo ip link set $wladapter down
      sleep 1
@@ -332,12 +332,12 @@ if [ $kill_switch == "off" ]; then
      echo Sleeping for 5 Seconds - SSIDPW Fail | tee -a /usr/local/scripts/sim.log
      echo Waiting for Network - SSIDPW Fail | tee -a /usr/local/scripts/sim.log
      sleep 5
-     sudo dhclient $wladapter
+     sudo dhclient -n $wladapter
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
-      sudo dhclient -r $wladapter
+      sudo dhclient -k $wladapter
       sleep 1
       sudo ip link set $wladapter down
       sleep 1
@@ -348,7 +348,7 @@ if [ $kill_switch == "off" ]; then
       echo Sleeping for 5 Seconds - Enable/Disable | tee -a /usr/local/scripts/sim.log
       echo Waiting for Network - Enable/Disable | tee -a /usr/local/scripts/sim.log
       sleep 5
-      sudo dhclient $wladapter
+      sudo dhclient -n $wladapter
       if [ $site_based_ssid == "on" ]; then nmcli -w 5 connection up $wsite"-"$ssid; fi
       if [ $site_based_ssid != "on" ]; then nmcli -w 5 connection up $ssid; fi
       sleep 5
@@ -373,7 +373,7 @@ if [ $kill_switch == "off" ]; then
      if [ $sim_phy == "wireless" ]; then
       if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ -n ${wladapter} ]; then
        echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
-       sudo dhclient -r $wladapter
+       sudo dhclient -k $wladapter
        sudo ip link set $wladapter down
        sleep 1
        echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
@@ -383,7 +383,7 @@ if [ $kill_switch == "off" ]; then
        echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
        echo Waiting for Network | tee -a /usr/local/scripts/sim.log
        sleep 5
-       sudo dhclient $wladapter
+       sudo dhclient -n $wladapter
       fi
       if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
       if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
