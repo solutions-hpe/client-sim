@@ -119,26 +119,26 @@ else
   echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   #----------------------------------------------------------------
-  sleep 30
-  wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-  if [[ -n ${wladapter} ]]; then
-   echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-   sudo dhclient -r $wladapter
-   sudo nmcli device disconnect $wladapter
-   sudo ip link set $wladapter down
-   sleep 1
-   echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-   sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
-   sleep 1
-   sudo ip link set $wladapter up
-   echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
-   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-   sleep 5
-   sudo dhclient $wladapter &
-  else
-   echo No WLAN Adapter found | tee -a /usr/local/scripts/sim.log
-   echo VHConnect Failed | tee -a /usr/local/scripts/sim.log
-  fi
+  #sleep 30
+  #wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+  #if [[ -n ${wladapter} ]]; then
+  # echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+  # sudo dhclient -r $wladapter
+  # sudo nmcli device disconnect $wladapter
+  # sudo ip link set $wladapter down
+  # sleep 1
+  # echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
+  # sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
+  # sleep 1
+  # sudo ip link set $wladapter up
+  # echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
+  # echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+  # sleep 5
+  # sudo dhclient $wladapter &
+  #else
+  # echo No WLAN Adapter found | tee -a /usr/local/scripts/sim.log
+  # echo VHConnect Failed | tee -a /usr/local/scripts/sim.log
+  #fi
   #----------------------------------------------------------------
   #End if VirtualHere Server is enabled
   #----------------------------------------------------------------
