@@ -117,7 +117,6 @@ else
  wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
  echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
  sudo dhclient -r $wladapter
- sleep 1
  sudo ip link set $wladapter down
  sleep 1
  echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
@@ -127,7 +126,7 @@ else
  echo Sleeping for 5 Seconds - Enable/Disable | tee -a /usr/local/scripts/sim.log
  echo Waiting for Network - Enable/Disable | tee -a /usr/local/scripts/sim.log
  sleep 5
- sudo dhclient $wladapter
+ sudo dhclient $wladapter &
  #----------------------------------------------------------------
  #End if VirtualHere Server is enabled
  #----------------------------------------------------------------
