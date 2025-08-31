@@ -255,8 +255,8 @@ fi
 #------------------------------------------------------------
 echo Kill Switch is $kill_switch | tee -a /usr/local/scripts/sim.log
 if [ $kill_switch == "off" ]; then
-  for z in {1..100}; do
-    #------------------------------------------------------------ 
+  for z in {1..5}; do
+    #------------------------------------------------------------
     #Logging Simulation
     #------------------------------------------------------------ 
     echo $(date) | tee -a /usr/local/scripts/sim.log
