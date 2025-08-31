@@ -87,9 +87,6 @@ if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/lo
 #------------------------------------------------------------
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
-echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id; fi
 if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
 echo -----------------------------| tee -a /usr/local/scripts/sim.log
