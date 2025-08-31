@@ -80,10 +80,10 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 var_length=${#wladapter}
-if [ $var_length -lt '1' ]; then unset wladapter; fi
+if [ $var_length -lt '1' ]; then echo test-lance; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
 var_length=${#eadapter}
-if [ $var_length -lt '1' ]; then unset eadapter; fi
+if [ $var_length -lt '1' ]; then echo test-lance; fi
 if [ -n ${wladapter} ]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 if [ -n ${eadapter} ]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
 if [ -n ${wladapter} ]; then sudo ip link set dev $wladapter up; fi
