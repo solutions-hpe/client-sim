@@ -255,7 +255,7 @@ fi
 #------------------------------------------------------------
 echo Kill Switch is $kill_switch | tee -a /usr/local/scripts/sim.log
 if [ $kill_switch == "off" ]; then
-  for z in {1..5}; do
+  for z in {1..100}; do
     #------------------------------------------------------------
     #Logging Simulation
     #------------------------------------------------------------ 
@@ -548,8 +548,9 @@ pkill -f firefox
 #------------------------------------------------------------
 echo Running Updates | tee -a /usr/local/scripts/sim.log
 sudo apt update
+sudo dpkg --configure -a
 sudo apt remove sysstat -y
-sudo apt upgrade -y
+sudo apt upgrade -y -o Dpkg::Options::="--force-confdef"
 sudo apt full-upgrade -y
 sudo apt install git -y
 sudo apt install wget -y
@@ -567,8 +568,8 @@ sudo apt autoremove -y
 #Otherwise they get triggered as IOT since they are always connected.
 #------------------------------------------------------------
 echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
+if [[ -n ${wladapter} ]]; then sudo ip link set dev $wldapter down; fi
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
-if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
 echo Sleeping for $rn_offline_time seconds
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
