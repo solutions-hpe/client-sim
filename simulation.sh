@@ -187,7 +187,7 @@ if [ $sim_phy == "ethernet" ]; then sudo sudo ip link set dev $wladapter down; f
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]     ; then
+#if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on" ]; then
  #echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
  #sudo dhclient -r $wladapter
  #sudo ip link set $wladapter down
@@ -198,7 +198,7 @@ if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ] && [ $ssidpw_fail != "on
  #sudo ip link set $wladapter up
  #sleep 5
  #sudo dhclient $wladapter &
-fi
+#fi
 echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 sleep 60
 #------------------------------------------------------------
