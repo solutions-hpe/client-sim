@@ -244,7 +244,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
   if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
   if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
   echo Waiting for Network | tee -a /usr/local/scripts/sim.log
-  if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
+  #if [ $sim_phy == "wireless" ] && [ $vh_server == "on" ]; then
    #echo Releasing old DHCP Address | tee -a /usr/local/scripts/sim.log
    #sudo dhclient -r $wladapter
    #sudo ip link set $wladapter down
@@ -255,7 +255,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
    #sudo ip link set $wladapter up
    #sleep 5
    #sudo dhclient $wladapter &
-  fi
+  #fi
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   sleep 15
 fi
