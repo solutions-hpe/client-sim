@@ -33,16 +33,16 @@ if [ $public_repo == "on" ]; then
  #updating the local repo with fast forward option
  git pull origin --ff-only
  #copying startup files to autostart
- sudo cp *.desktop /etc/xdg/autostart/
+ sudo cp *.desktop /etc/xdg/autostart/ &
  #copying shell scripts to the active script repo
- sudo cp *.sh /usr/local/scripts/
+ sudo cp *.sh /usr/local/scripts/ &
  #copying flat files for simulation to active script repo
  sudo cp *.txt /usr/local/scripts/
  cd configs
  #copying latest config file to active repository
- sudo cp simulation.conf /usr/local/scripts/simulation.conf
+ sudo cp simulation.conf /usr/local/scripts/simulation.conf &
  #making all simulation scripts executable
- sudo chmod -R 777 /usr/local/scripts
+ sudo chmod -R 777 /usr/local/scripts &
 else
  #Local repo defined in the conf file
  smbclient $smb_location -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
