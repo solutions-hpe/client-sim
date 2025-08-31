@@ -99,7 +99,7 @@ sleep 60
 #------------------------------------------------------------
 wladapter=$(ip a -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
-eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
 echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
