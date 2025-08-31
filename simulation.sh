@@ -426,7 +426,7 @@ if [ $kill_switch == "off" ]; then
     #Running iPerf simulation
     #------------------------------------------------------------
     if [ $iperf == "on" ]; then
-     source /usr/local/scripts/iperf.sh &
+     bash /usr/local/scripts/iperf.sh &
     fi
     #------------------------------------------------------------
     #End iPerf Simulation
@@ -435,7 +435,7 @@ if [ $kill_switch == "off" ]; then
     #Running download simulation
     #------------------------------------------------------------
     if [ $download == "on" ]; then
-     source /usr/local/scripts/download.sh &
+     bash /usr/local/scripts/download.sh &
     fi
     #------------------------------------------------------------
     #End Download Simulation
@@ -443,7 +443,7 @@ if [ $kill_switch == "off" ]; then
     #Running DNS Fail simulation
     #------------------------------------------------------------
     if [ $dns_fail == "on" ]; then
-     source /usr/local/scripts/dns_fail.sh &
+     bash /usr/local/scripts/dns_fail.sh &
     fi
     #------------------------------------------------------------
     #End DNS Fail Simulation
@@ -476,7 +476,7 @@ pkill -f firefox &
 #Running apt update & apt upgrade
 #------------------------------------------------------------
 echo Running Updates | tee -a /usr/local/scripts/sim.log
- source /usr/local/scripts/apt_update.sh &
+ bash /usr/local/scripts/apt_update.sh &
 if $allow_offline=yes; then
  #------------------------------------------------------------
  #Bringing all interfaces down to make it look like the device is offline.
