@@ -42,60 +42,60 @@ if [ $r_count == 0 ] && [ $y_count != 1 ]; then
 else
  if [ $vh_server == "on" ]; then
   if [ -e "/usr/local/scripts/vhcached.txt" ]; then
-  #----------------------------------------------------------------
-  #If Client is connected to more than 1 device - disconnecting
-  #----------------------------------------------------------------
-  if [[ $y_count -gt 1 ]]; then
-   echo Found multiple devices $y_count in-use
-   echo Clearing out all devices in-use
-   sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-   sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+   #----------------------------------------------------------------
+   #If Client is connected to more than 1 device - disconnecting
+   #----------------------------------------------------------------
+   if [[ $y_count -gt 1 ]]; then
+    echo Found multiple devices $y_count in-use
+    echo Clearing out all devices in-use
+    sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+    sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+   fi
+   #----------------------------------------------------------------
+   #Setting value to cached adapter
+   #This way the client is always using the same adapter
+   #Otherwise connectivity for clients will have gaps when the adapter changes in Central
+   #----------------------------------------------------------------
+   vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
+   echo Cached $vhserver_device
+   #----------------------------------------------------------------
+   #If VirtualHere cached value does not exist
+   #----------------------------------------------------------------
+  else
+   #----------------------------------------------------------------
+   #Generating random number to connect to a random adapter
+   #----------------------------------------------------------------
+   echo No Cached VH Device found
+   echo finding avaiable adapter
+   rn_vhactive=$((1 + RANDOM % $r_count))
+   #----------------------------------------------------------------
+   #If Client is connected to more than 1 device - disconnecting
+   #----------------------------------------------------------------
+   if [[ $y_count -gt 1 ]]; then
+    echo Found multiple devices in-use
+    echo Clearing out all devices in-use
+    sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+    sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+   fi
+   #----------------------------------------------------------------
+   #Resetting record counter for next loop
+   #----------------------------------------------------------------
+   r_count=0
+   #----------------------------------------------------------------
+   #Looping through records to find an available adapter
+   #----------------------------------------------------------------
+   for r in $vhactive; do
+    r_count=$((r_count+1))
+    if [[ $r_count == $rn_vhactive ]]; then
+     vhserver_device=$r
+     echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
+     echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
+    fi
+   done
+   #----------------------------------------------------------------
+   #End if VirtualHere cached value check
+   #----------------------------------------------------------------
   fi
-  #----------------------------------------------------------------
-  #Setting value to cached adapter
-  #This way the client is always using the same adapter
-  #Otherwise connectivity for clients will have gaps when the adapter changes in Central
-  #----------------------------------------------------------------
-  vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
-  echo Cached $vhserver_device
-  #----------------------------------------------------------------
-  #If VirtualHere cached value does not exist
-  #----------------------------------------------------------------
- else
- #----------------------------------------------------------------
- #Generating random number to connect to a random adapter
- #----------------------------------------------------------------
- echo No Cached VH Device found
- echo finding avaiable adapter
- rn_vhactive=$((1 + RANDOM % $r_count))
- #----------------------------------------------------------------
- #If Client is connected to more than 1 device - disconnecting
- #----------------------------------------------------------------
- if [[ $y_count -gt 1 ]]; then
-  echo Found multiple devices in-use
-  echo Clearing out all devices in-use
-  sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-  sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
- fi
- #----------------------------------------------------------------
- #Resetting record counter for next loop
- #----------------------------------------------------------------
- r_count=0
- #----------------------------------------------------------------
- #Looping through records to find an available adapter
- #----------------------------------------------------------------
- for r in $vhactive; do
-  r_count=$((r_count+1))
-  if [[ $r_count == $rn_vhactive ]]; then
-   vhserver_device=$r
-   echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
-   echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
-  fi
- done
- #----------------------------------------------------------------
- #End if VirtualHere cached value check
- #----------------------------------------------------------------
- fi
  #----------------------------------------------------------------
  #End Checking to see if there is a cache device to connect to
  #----------------------------------------------------------------
