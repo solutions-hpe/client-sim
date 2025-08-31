@@ -427,7 +427,7 @@ if [ $kill_switch == "off" ]; then
 	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 	  echo Website: $r | tee -a /usr/local/scripts/sim.log
 	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-          firefox --headless $r &
+      firefox --headless $r &
 	  www_traffic=off
 	fi
       done
@@ -451,7 +451,7 @@ if [ $kill_switch == "off" ]; then
       echo Ping Payload: $rn_ping_size | tee -a /usr/local/scripts/sim.log
       echo Ping Count: $rn | tee -a /usr/local/scripts/sim.log
       echo ------------------------------| tee -a /usr/local/scripts/sim.log
-      ping -c $rn $ping_address -s $rn_ping_size
+      ping -c $rn $ping_address -s $rn_ping_size &
     fi
     #------------------------------------------------------------
     #End Ping Simulation
