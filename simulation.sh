@@ -426,29 +426,7 @@ if [ $kill_switch == "off" ]; then
     #Running iPerf simulation
     #------------------------------------------------------------
     if [ $iperf == "on" ]; then
-      echo $(date) | tee -a /usr/local/scripts/sim.log
-      echo ------------------------------| tee -a /usr/local/scripts/sim.log
-      echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-      echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-      echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-      echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-      if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-      echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-      echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-      echo iPerf Server: $iperf_server | tee -a /usr/local/scripts/sim.log
-      echo iPerf Port: $rn_iperf_port | tee -a /usr/local/scripts/sim.log
-      echo iPerf Time: $rn_iperf_time | tee -a /usr/local/scripts/sim.log
-      echo Running iPerf simulation: | tee -a /usr/local/scripts/sim.log
-      echo ------------------------------| tee -a /usr/local/scripts/sim.log
-      iperf3 -c $iperf_server -p $rn_iperf_port -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 443 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 3260 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 2049 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 1194 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 3389 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 445 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 80 -b 1k -t $rn_iperf_time
-      iperf3 -c $iperf_server -p 1433 -b 1k -t $rn_iperf_time
+     source /usr/local/scripts/iperf.sh &
     fi
     #------------------------------------------------------------
     #End iPerf Simulation
@@ -457,29 +435,7 @@ if [ $kill_switch == "off" ]; then
     #Running download simulation
     #------------------------------------------------------------
     if [ $download == "on" ]; then
-      r_count=0
-      echo Running Download simulation
-      dlfile=$(cat /usr/local/scripts/downloads.txt)
-      for r in $dlfile; do r_count=$((r_count+1)); done
-      rn_dl=$((1 + RANDOM % $r_count))
-      r_count=0
-      for r in $dlfile; do
-	r_count=$((r_count+1))
-	if [[ $r_count == $rn_dl ]]; then
-	  sleep 1
-	  echo $(date) | tee -a /usr/local/scripts/sim.log
-	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-	  echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-	  echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-      echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-	  echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-	  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-	  echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
-	  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	  wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
-	fi
-      done
+     source /usr/local/scripts/download.sh &
     fi
     #------------------------------------------------------------
     #End Download Simulation
@@ -487,35 +443,7 @@ if [ $kill_switch == "off" ]; then
     #Running DNS Fail simulation
     #------------------------------------------------------------
     if [ $dns_fail == "on" ]; then
-      dnsfile=$(cat /usr/local/scripts/dns_fail.txt)
-      for i in {1..10}; do
-	   for r in $dnsfile; do
-	    echo $(date) | tee -a /usr/local/scripts/sim.log
-	    echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	    echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-	    echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-	    echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-        echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-	    if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-	    echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-	    echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-	    echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-	    echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
-	    echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
-	    echo $r | tee -a /usr/local/scripts/sim.log
-	    echo ------------------------------| tee -a /usr/local/scripts/sim.log
-	    dig @$dns_bad_record_1 $r &
-	    dig @$dns_bad_record_2 $r &
-	    dig @$dns_bad_record_3 $r &
-	    dig @$dns_bad_ip_1 $r &
-	    dig @$dns_bad_ip_2 $r &
-	    dig @$dns_bad_ip_3 $r &
-	    dig @$dns_latency_1 $r &
-	    dig @$dns_latency_2 $r &
-	    dig @$dns_latency_3 $r &
-	    sleep 5
-       done
-      done
+     source /usr/local/scripts/dns_fail.sh &
     fi
     #------------------------------------------------------------
     #End DNS Fail Simulation
@@ -540,7 +468,7 @@ fi
 #Killing Firefox simulation
 #------------------------------------------------------------
 echo Closing Firefox | tee -a /usr/local/scripts/sim.log
-pkill -f firefox
+pkill -f firefox &
 #------------------------------------------------------------
 #End Kill switch Check 
 #------------------------------------------------------------
@@ -548,23 +476,7 @@ pkill -f firefox
 #Running apt update & apt upgrade
 #------------------------------------------------------------
 echo Running Updates | tee -a /usr/local/scripts/sim.log
-sudo apt update
-sudo dpkg --configure -a
-sudo apt remove sysstat -y
-sudo apt upgrade -y -o Dpkg::Options::="--force-confdef"
-sudo apt full-upgrade -y
-sudo apt install git -y
-sudo apt install wget -y
-sudo apt install gnome-terminal -y
-sudo apt install network-manager -y
-sudo apt install qemu-guest-agent -y
-sudo apt install net-tools -y
-sudo apt install smbclient -y
-sudo apt install dnsutils -y
-sudo apt install dkms -y
-sudo apt install iperf3 -y
-sudo apt install firefox-esr -y
-sudo apt autoremove -y
+ source /usr/local/scripts/apt_update.sh &
 if $allow_offline=yes; then
  #------------------------------------------------------------
  #Bringing all interfaces down to make it look like the device is offline.
