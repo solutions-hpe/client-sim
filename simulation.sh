@@ -565,25 +565,28 @@ sudo apt install dkms -y
 sudo apt install iperf3 -y
 sudo apt install firefox-esr -y
 sudo apt autoremove -y
-#Bringing all interfaces down to make it look like the device is offline.
-#Otherwise they get triggered as IOT since they are always connected.
-#------------------------------------------------------------
-echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
-if [[ -n ${wladapter} ]]; then sudo ip link set dev $wldapter down; fi
-if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
-echo Sleeping for $rn_offline_time seconds
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
-#------------------------------------------------------------
-#Sleep for up to 4 hours to show the device left
-#------------------------------------------------------------
-sleep $rn_offline_time
-#------------------------------------------------------------
-#Bringing all interfaces back up to call home/update scripts
-#------------------------------------------------------------
-echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
-if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
-if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; if
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
+if $allow_offline=yes; then
+ #------------------------------------------------------------
+ #Bringing all interfaces down to make it look like the device is offline.
+ #Otherwise they get triggered as IOT since they are always connected.
+ #------------------------------------------------------------
+ echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
+ if [[ -n ${wladapter} ]]; then sudo ip link set dev $wldapter down; fi
+ if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
+ echo Sleeping for $rn_offline_time seconds
+ echo ------------------------------| tee -a /usr/local/scripts/sim.log
+ #------------------------------------------------------------
+ #Sleep for up to 4 hours to show the device left
+ #------------------------------------------------------------
+ sleep $rn_offline_time
+ #------------------------------------------------------------
+ #Bringing all interfaces back up to call home/update scripts
+ #------------------------------------------------------------
+ echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
+ if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
+ if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; if
+ echo ------------------------------| tee -a /usr/local/scripts/sim.log
+fi
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
