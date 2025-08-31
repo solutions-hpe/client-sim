@@ -15,12 +15,6 @@ for r in $dlfile; do
   sleep 1
   echo $(date) | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-  echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-  echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-  echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-  echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log
-  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
   echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
   wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log

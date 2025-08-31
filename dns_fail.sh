@@ -19,12 +19,6 @@ for i in {1..10}; do
  for r in $dnsfile; do
   echo $(date) | tee -a /usr/local/scripts/sim.log
   echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-  echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-  echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-  echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-  echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-  echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
   echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
   echo Running DNS Failure: | tee -a /usr/local/scripts/sim.log
   echo Simulation Iteration: $i | tee -a /usr/local/scripts/sim.log
