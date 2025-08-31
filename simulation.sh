@@ -203,7 +203,7 @@ echo Waiting for Network | tee -a /usr/local/scripts/sim.log
 sleep 60
 #------------------------------------------------------------
 #Connecting to VHServer
-#Checking to see if google is reachable before 
+#Checking to see if the default gateway is reachable before
 #------------------------------------------------------------
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
@@ -386,7 +386,7 @@ if [ $kill_switch == "off" ]; then
       if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
       if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
      fi
-     ping -c2 $inet_check
+     ping -c2 $dfgw
      if [ $? -eq 0 ]; then
       echo Successful network connection | tee -a /usr/local/scripts/sim.log
      else
