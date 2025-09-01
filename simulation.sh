@@ -212,9 +212,6 @@ fi
 #------------------------------------------------------------
 if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
  sudo rfkill unblock wifi; sudo rfkill unblock all
- echo Setting up WiFi Adapter | tee -a /usr/local/scripts/sim.log
- nmcli radio wifi on
- sleep 5
  ping -c2 $dfgw
  if [ $? -eq 0 ]; then
   echo Successful network connection | tee -a /usr/local/scripts/sim.log
