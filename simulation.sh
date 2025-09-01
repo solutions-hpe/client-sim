@@ -358,9 +358,6 @@ if [ $kill_switch == "off" ]; then
      if [[ $r_count == $rn_www ]]; then
       echo $(date) | tee -a /usr/local/scripts/sim.log
       echo ------------------------------| tee -a /usr/local/scripts/sim.log
-      echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-      echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-      echo Site: $wsite | tee -a /usr/local/scripts/sim.log
       if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
       echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
       echo Website: $r | tee -a /usr/local/scripts/sim.log
@@ -378,13 +375,6 @@ if [ $kill_switch == "off" ]; then
    if [ $ping_test == "on" ]; then
     echo $(date) | tee -a /usr/local/scripts/sim.log
     echo ------------------------------| tee -a /usr/local/scripts/sim.log
-    echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-    echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-    echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-    echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-    if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-    echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-    echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
     echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
     echo Ping Payload: $rn_ping_size | tee -a /usr/local/scripts/sim.log
     echo Ping Count: $rn | tee -a /usr/local/scripts/sim.log
