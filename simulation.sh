@@ -377,21 +377,21 @@ if [ $kill_switch == "off" ]; then
    #Running iPerf simulation
    #------------------------------------------------------------
    if [ $iperf == "on" ]; then
-    ./usr/local/scripts/iperf.sh &
+    /usr/local/scripts/iperf.sh &
     sleep 30
    fi
    #------------------------------------------------------------
    #Running download simulation
    #------------------------------------------------------------
    if [ $download == "on" ]; then
-    ./usr/local/scripts/download.sh &
+    /usr/local/scripts/download.sh &
     sleep 30
    fi
    #------------------------------------------------------------
    #Running DNS Fail simulation
    #------------------------------------------------------------
    if [ $dns_fail == "on" ]; then
-    ./usr/local/scripts/dns_fail.sh &
+    /usr/local/scripts/dns_fail.sh &
     sleep 30
    fi
    #------------------------------------------------------------
