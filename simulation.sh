@@ -145,7 +145,7 @@ echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-if [ $sim_phy == "wireless" ]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
+if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
 echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
 echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
@@ -199,6 +199,7 @@ if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+ sleep 15
  dfgw=$(ip route | grep -oP 'default via \K\S+')
  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
@@ -220,6 +221,7 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
  else
   echo Network connection failed | tee -a /usr/local/scripts/sim.log
   if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+  sleep 15
   dfgw=$(ip route | grep -oP 'default via \K\S+')
   echo Connecting to Network | tee -a /usr/local/scripts/sim.log
   sleep 5
@@ -300,6 +302,7 @@ if [ $kill_switch == "off" ]; then
     sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
     source '/usr/local/scripts/vhconnect.sh'
     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+    sleep 15
    fi
    if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
    if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
