@@ -294,15 +294,11 @@ if [ $kill_switch == "off" ]; then
    else
     echo Network connection failed | tee -a /usr/local/scripts/sim.log
     echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
-    rm /usr/local/scripts/vhcached.txt
-    sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-    sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-    source '/usr/local/scripts/vhconnect.sh'
+    if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
+    if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
     sleep 15
    fi
-   if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
-   if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
    ping -c2 $dfgw
    if [ $? -eq 0 ]; then
     echo Successful network connection | tee -a /usr/local/scripts/sim.log
