@@ -393,7 +393,7 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #Running download simulation
    #------------------------------------------------------------
-   if [ $download == "on" ];
+   if [ $download == "on" ]; then
     ./usr/local/scripts/download.sh &
     sleep 30
    fi
