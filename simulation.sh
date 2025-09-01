@@ -192,9 +192,11 @@ mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #Connecting to VHServer
 #Checking to see if the default gateway is reachable before
 #------------------------------------------------------------
+ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
-if [ $? -eq 0 ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
+if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
@@ -208,27 +210,6 @@ else
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
-#------------------------------------------------------------
-#------------------------------------------------------------
-#Connecting to Network
-#------------------------------------------------------------
-if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
- sudo rfkill unblock wifi; sudo rfkill unblock all
- ping -c2 $dfgw
- if [ $? -eq 0 ]; then
-  echo Successful network connection | tee -a /usr/local/scripts/sim.log
- else
-  echo Network connection failed | tee -a /usr/local/scripts/sim.log
-  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
-  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
-  sleep 15
-  dfgw=$(ip route | grep -oP 'default via \K\S+')
- fi
- echo ------------------------------| tee -a /usr/local/scripts/sim.log
-fi
-#------------------------------------------------------------
-#End Connecting to Network
-#------------------------------------------------------------
 #------------------------------------------------------------
 #Begin Setting up simulation load
 #------------------------------------------------------------
@@ -257,15 +238,20 @@ if [ $kill_switch == "off" ]; then
   #------------------------------------------------------------
   if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
    if [ $ssidpw_fail == "on" ]; then
-    echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
-    if [ $site_based_ssid == "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
-    if [ $site_based_ssid != "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
+    for i in {1..100}; do
+     echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
+     echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
+     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     if [ $site_based_ssid == "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+     if [ $site_based_ssid != "on" || $ssidpw_fail == "on" ]; then nmcli -w 5 device wifi connect $ssid password $ssidpw; fi
+    done
    fi
    if [ $auth_fail == "on" ]; then
     echo Running Auth Failure | tee -a /usr/local/scripts/sim.log
     for i in {1..100}; do
      echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
      echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
+     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      if [ $site_based_ssid == "on" ]; then nmcli -w 5 connection up $wsite"-"$ssid; fi
      if [ $site_based_ssid != "on" ]; then nmcli -w 5 connection up $ssid; fi
      sleep 5
@@ -290,11 +276,13 @@ if [ $kill_switch == "off" ]; then
     if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
     sleep 15
     wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+    sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
     if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
     if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
     sleep 15
    fi
+   dfgw=$(ip route | grep -oP 'default via \K\S+')
    ping -c2 $dfgw
    if [ $? -eq 0 ]; then
     echo Successful network connection | tee -a /usr/local/scripts/sim.log
