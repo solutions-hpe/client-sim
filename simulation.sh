@@ -200,6 +200,7 @@ else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
  sleep 15
+ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
  sleep 15
@@ -288,8 +289,9 @@ if [ $kill_switch == "off" ]; then
     echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
     if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
     sleep 15
-    if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
-    if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
+    wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+    if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+    if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
     sleep 15
    fi
