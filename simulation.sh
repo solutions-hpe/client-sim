@@ -200,9 +200,10 @@ else
  echo Network connection failed | tee -a /usr/local/scripts/sim.log
  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
  sleep 15
- dfgw=$(ip route | grep -oP 'default via \K\S+')
  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
+ sleep 15
+ dfgw=$(ip route | grep -oP 'default via \K\S+')
 fi
 #------------------------------------------------------------
 #End Connecting to VHServer
@@ -217,21 +218,12 @@ if [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} 
   echo Successful network connection | tee -a /usr/local/scripts/sim.log
  else
   echo Network connection failed | tee -a /usr/local/scripts/sim.log
-  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+  if [ $site_based_ssid == "on" ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
+  if [ $site_based_ssid != "on" ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
   sleep 15
   dfgw=$(ip route | grep -oP 'default via \K\S+')
-  echo Connecting to Network | tee -a /usr/local/scripts/sim.log
-  sleep 5
-  if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $wsite"-"$ssid password $ssidpw; fi
-  if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 device wifi connect $ssid password $ssidpw; fi
  fi
- nmcli device wifi rescan
- sleep 5
- if [ $site_based_ssid == "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
- if [ $site_based_ssid != "on" ] && [ -n ${wladapter} ]; then nmcli -w 180 connection up $ssid; fi
- echo Waiting for Network | tee -a /usr/local/scripts/sim.log
  echo ------------------------------| tee -a /usr/local/scripts/sim.log
- sleep 5
 fi
 #------------------------------------------------------------
 #End Connecting to Network
