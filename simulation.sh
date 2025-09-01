@@ -400,8 +400,10 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #Running DNS Fail simulation
    #------------------------------------------------------------
-   if [ $dns_fail == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/dns_fail.sh" &; fi
-   sleep 30
+   if [ $dns_fail == "on" ]; then
+    ./usr/local/scripts/dns_fail.sh &
+    sleep 30
+   fi
    #------------------------------------------------------------
    #End DNS Fail Simulation
    #------------------------------------------------------------
