@@ -294,6 +294,8 @@ if [ $kill_switch == "off" ]; then
    else
     echo Network connection failed | tee -a /usr/local/scripts/sim.log
     echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
+    if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+    sleep 15
     if [ $site_based_ssid != "on" ]; then nmcli -w 180 connection up $ssid; fi
     if [ $site_based_ssid == "on" ]; then nmcli -w 180 connection up $wsite"-"$ssid; fi
     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
