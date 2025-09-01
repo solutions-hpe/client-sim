@@ -387,21 +387,19 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Ping Simulation
    #------------------------------------------------------------
-   #------------------------------------------------------------
    #Running iPerf simulation
    #------------------------------------------------------------
-   if [ $iperf == "on" ]; then ./usr/local/scripts/iperf.sh &; fi
+   if [ $iperf == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/iperf.sh" &; fi
    sleep 30
-   #------------------------------------------------------------
    #------------------------------------------------------------
    #Running download simulation
    #------------------------------------------------------------
-   if [ $download == "on" ]; then ./usr/local/scripts/download.sh &; fi
+   if [ $download == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/download.sh" &; fi
    sleep 30
    #------------------------------------------------------------
    #Running DNS Fail simulation
    #------------------------------------------------------------
-   if [ $dns_fail == "on" ]; then ./usr/local/scripts/dns_fail.sh &; fi
+   if [ $dns_fail == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/dns_fail.sh" &; fi
    sleep 30
    #------------------------------------------------------------
    #End DNS Fail Simulation
