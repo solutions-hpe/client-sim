@@ -389,13 +389,17 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #Running iPerf simulation
    #------------------------------------------------------------
-   if [ $iperf == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/iperf.sh" &; fi
-   sleep 30
+   if [ $iperf == "on" ]; then
+    ./usr/local/scripts/iperf.sh &
+    sleep 30
+   fi
    #------------------------------------------------------------
    #Running download simulation
    #------------------------------------------------------------
-   if [ $download == "on" ]; then gnome-terminal -e "bash /usr/local/scripts/download.sh" &; fi
-   sleep 30
+   if [ $download == "on" ];
+    ./usr/local/scripts/download.sh &
+    sleep 30
+   fi
    #------------------------------------------------------------
    #Running DNS Fail simulation
    #------------------------------------------------------------
