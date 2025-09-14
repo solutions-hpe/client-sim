@@ -367,21 +367,21 @@ if [ $kill_switch == "off" ]; then
    #Running iPerf simulation
    #------------------------------------------------------------
    if [ $iperf == "on" ]; then
-    nohup /usr/local/scripts/iperf.sh &
+    nohup /usr/local/scripts/iperf.sh & > /tmp/nohup.log
     sleep 30
    fi
    #------------------------------------------------------------
    #Running download simulation
    #------------------------------------------------------------
    if [ $download == "on" ]; then
-    nohup /usr/local/scripts/download.sh &
+    nohup /usr/local/scripts/download.sh & > /tmp/nohup.log
     sleep 30
    fi
    #------------------------------------------------------------
    #Running DNS Fail simulation
    #------------------------------------------------------------
    if [ $dns_fail == "on" ]; then
-    nohup /usr/local/scripts/dns_fail.sh &
+    nohup /usr/local/scripts/dns_fail.sh & > /tmp/nohup.log
     sleep 30
    fi
    #------------------------------------------------------------
