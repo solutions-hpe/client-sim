@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.17
+version=.18
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
 #----------------------------------------------------------------
@@ -33,89 +33,115 @@ for r in $vhactive; do
 done
 echo VH Available Adapters $r_count | tee -a /usr/local/scripts/sim.log
 echo Adapters in use by you $y_count | tee -a /usr/local/scripts/sim.log
-if [ $r_count == 0 ] && [ $y_count != 1 ]; then
- echo No Available Adapters | tee -a /usr/local/scripts/sim.log
- echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
- echo Will retry after sleep | tee -a /usr/local/scripts/sim.log
- echo ------------------------------| tee -a /usr/local/scripts/sim.log
- sleep 300
+wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+if [[ -n ${wladapter} ]]; then
+ echo Adapter Found $wladapter | tee -a /usr/local/scripts/sim.log
 else
- if [ $vh_server == "on" ]; then
-  if [ -e "/usr/local/scripts/vhcached.txt" ]; then
-  #----------------------------------------------------------------
-  #If Client is connected to more than 1 device - disconnecting
-  #----------------------------------------------------------------
-  if [[ $y_count -gt 1 ]]; then
-   echo Found multiple devices $y_count in-use
-   echo Clearing out all devices in-use
-   sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-   sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-  fi
-  #----------------------------------------------------------------
-  #Setting value to cached adapter
-  #This way the client is always using the same adapter
-  #Otherwise connectivity for clients will have gaps when the adapter changes in Central
-  #----------------------------------------------------------------
-  vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
-  echo Cached $vhserver_device
-  #----------------------------------------------------------------
-  #If VirtualHere cached value does not exist
-  #----------------------------------------------------------------
+ if [ $r_count == 0 ] && [ $y_count != 1 ]; then
+  echo No Available Adapters | tee -a /usr/local/scripts/sim.log
+  echo Sleeping for 300 seconds | tee -a /usr/local/scripts/sim.log
+  echo Will retry after sleep | tee -a /usr/local/scripts/sim.log
+  echo ------------------------------| tee -a /usr/local/scripts/sim.log
+  sleep 300
  else
- #----------------------------------------------------------------
- #Generating random number to connect to a random adapter
- #----------------------------------------------------------------
- echo No Cached VH Device found
- echo finding avaiable adapter
- rn_vhactive=$((1 + RANDOM % $r_count))
- #----------------------------------------------------------------
- #If Client is connected to more than 1 device - disconnecting
- #----------------------------------------------------------------
- if [[ $y_count -gt 1 ]]; then
-  echo Found multiple devices in-use
-  echo Clearing out all devices in-use
-  sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-  sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
- fi
- #----------------------------------------------------------------
- #Resetting record counter for next loop
- #----------------------------------------------------------------
- r_count=0
- #----------------------------------------------------------------
- #Looping through records to find an available adapter
- #----------------------------------------------------------------
- for r in $vhactive; do
-  r_count=$((r_count+1))
-  if [[ $r_count == $rn_vhactive ]]; then
-   vhserver_device=$r
-   echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
-   echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
+  if [ $vh_server == "on" ]; then
+   if [ -e "/usr/local/scripts/vhcached.txt" ]; then
+    #----------------------------------------------------------------
+    #If Client is connected to more than 1 device - disconnecting
+    #----------------------------------------------------------------
+    if [[ $y_count -gt 1 ]]; then
+     echo Found multiple devices $y_count in-use
+     echo Clearing out all devices in-use
+     sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+     sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+    fi
+    #----------------------------------------------------------------
+    #Setting value to cached adapter
+    #This way the client is always using the same adapter
+    #Otherwise connectivity for clients will have gaps when the adapter changes in Central
+    #----------------------------------------------------------------
+    vhserver_device=$(cat /usr/local/scripts/vhcached.txt)
+    echo Cached $vhserver_device
+    #----------------------------------------------------------------
+    #If VirtualHere cached value does not exist
+    #----------------------------------------------------------------
+   else
+    #----------------------------------------------------------------
+    #Generating random number to connect to a random adapter
+    #----------------------------------------------------------------
+    echo No Cached VH Device found
+    echo Finding an avaiable adapter
+    rn_vhactive=$((1 + RANDOM % $r_count))
+    #----------------------------------------------------------------
+    #If Client is connected to more than 1 device - disconnecting
+    #----------------------------------------------------------------
+    if [[ $y_count -gt 1 ]]; then
+     echo Found multiple devices in-use
+     echo Clearing out all devices in-use
+     sudo /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+     sudo /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+    fi
+    #----------------------------------------------------------------
+    #Resetting record counter for next loop
+    #----------------------------------------------------------------
+    r_count=0
+    #----------------------------------------------------------------
+    #Looping through records to find an available adapter
+    #----------------------------------------------------------------
+    if [[ $y_count -ne 1 ]]; then
+     for r in $vhactive; do
+      r_count=$((r_count+1))
+      if [[ $r_count == $rn_vhactive ]]; then
+       vhserver_device=$r
+       echo New VH $vhserver_device | tee -a /usr/local/scripts/sim.log
+       echo $vhserver_device | tee /usr/local/scripts/vhcached.txt
+      fi
+     done
+    fi
+    #----------------------------------------------------------------
+    #End if VirtualHere cached value check
+    #----------------------------------------------------------------
+   fi
+  #----------------------------------------------------------------
+  #End Checking to see if there is a cache device to connect to
+  #----------------------------------------------------------------
+  #----------------------------------------------------------------
+  #Connecting to VirtualHere Server
+  #----------------------------------------------------------------
+  echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
+  #----------------------------------------------------------------
+  #Connecting to Adapter
+  #----------------------------------------------------------------
+  /usr/sbin/vhclientx86_64 -t "AUTO USE PORT,$vhserver_device"
+  #----------------------------------------------------------------
+  #End Connecting to VirtualHere Server
+  #----------------------------------------------------------------
+  echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
+  echo ------------------------------| tee -a /usr/local/scripts/sim.log
+  #----------------------------------------------------------------
+  #sleep 30
+  #wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+  #if [[ -n ${wladapter} ]]; then
+  # echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+  # sudo dhclient -r $wladapter
+  # sudo nmcli device disconnect $wladapter
+  # sudo ip link set $wladapter down
+  # sleep 1
+  # echo Changing MAC Address on $wladapter | tee -a /usr/local/scripts/sim.log
+  # sudo ip link set dev $wladapter address e8:4e:06:ac:$mac_id
+  # sleep 1
+  # sudo ip link set $wladapter up
+  # echo Sleeping for 5 Seconds | tee -a /usr/local/scripts/sim.log
+  # echo Waiting for Network | tee -a /usr/local/scripts/sim.log
+  # sleep 5
+  # sudo dhclient $wladapter &
+  #else
+  # echo No WLAN Adapter found | tee -a /usr/local/scripts/sim.log
+  # echo VHConnect Failed | tee -a /usr/local/scripts/sim.log
+  #fi
+  #----------------------------------------------------------------
+  #End if VirtualHere Server is enabled
+  #----------------------------------------------------------------
   fi
- done
- #----------------------------------------------------------------
- #End if VirtualHere cached value check
- #----------------------------------------------------------------
- fi
- #----------------------------------------------------------------
- #End Checking to see if there is a cache device to connect to
- #----------------------------------------------------------------
- #----------------------------------------------------------------
- #Connecting to VirtualHere Server
- #----------------------------------------------------------------
- echo Connecting to USB Adapter | tee -a /usr/local/scripts/sim.log
- #----------------------------------------------------------------	
- #Connecting to Adapter
- #----------------------------------------------------------------
- /usr/sbin/vhclientx86_64 -t "AUTO USE PORT,$vhserver_device"
- #----------------------------------------------------------------
- #End Connecting to VirtualHere Server
- #----------------------------------------------------------------
- echo Waiting for Adapter | tee -a /usr/local/scripts/sim.log
- echo ------------------------------| tee -a /usr/local/scripts/sim.log
- #----------------------------------------------------------------
- sleep 30
- #----------------------------------------------------------------
- #End if VirtualHere Server is enabled
- #----------------------------------------------------------------
  fi
 fi
