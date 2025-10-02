@@ -3,6 +3,10 @@ version=.17
 echo VHConnect Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date)
 #----------------------------------------------------------------
+#Connecting to Hub
+#----------------------------------------------------------------
+sudo /usr/sbin/vhclientx86_64 -t "MANUAL HUB ADD,$vh_hub"
+#----------------------------------------------------------------
 #Dumping Current Device List
 #----------------------------------------------------------------
 echo Getting VH device list

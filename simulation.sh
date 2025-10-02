@@ -47,6 +47,7 @@ ping_test=$(get_value $simulation_id 'ping_test')
 download=$(get_value $simulation_id 'download')
 iperf=$(get_value $simulation_id 'iperf')
 www_traffic=$(get_value $simulation_id 'www_traffic')
+vh_hub=$(get_value 'simulation' 'vh_hub')
 #------------------------------------------------------------
 #Simlation IP
 #------------------------------------------------------------
