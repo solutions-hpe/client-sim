@@ -72,8 +72,9 @@ if [ $syslog == "on" ]; then
   sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf || \
   sudo sed -i "/^\$IncludeConfig \/etc\/rsyslog\.d\/\*\.conf$/a *.*@${syslog_server}" /etc/rsyslog.conf
   #Adding the imfile modiule to rsyslog.conf before the imuxsock line
-  grep -Eq '^\s*(\$ModLoad\s+imfile|module\(load="imfile"\))' /etc/rsyslog.conf || \
-  sudo sed -i '/module(load="imuxsock")/i $ModLoad imfile' /etc/rsyslog.conf
+  if ! grep -Eq '^\s*(\$ModLoad\s+imfile|module\(load="imfile"\))' /etc/rsyslog.conf; then
+    sudo sed -i '/module(load="imuxsock")/i $ModLoad imfile' /etc/rsyslog.conf
+  fi
 else
  echo Skipping Syslog Server Update | tee -a /usr/local/scripts/sim.log
 fi
