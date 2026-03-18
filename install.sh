@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.42
+version=.43
 touch /tmp/client-sim.log
 echo Installer Version $version | tee /tmp/client-sim.log
 sudo apt install gnome-terminal -y
@@ -50,6 +50,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt install dnsutils -y
 sudo DEBIAN_FRONTEND=noninteractive apt install dkms -y
 sudo DEBIAN_FRONTEND=noninteractive apt install iperf3 -y
 sudo DEBIAN_FRONTEND=noninteractive apt install firefox-esr -y
+sudo DEBIAN_FRONTEND=noninteractive apt install rsyslog -y
 sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
@@ -78,6 +79,8 @@ cd ~
 git clone https://github.com/solutions-hpe/client-sim.git
 cd client-sim
 #switching the branch to the one designated in the simulation.conf file
+#Copying config file template for syslog messages of simulation
+sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
 #copying startup files to autostart
 sudo cp *.desktop /etc/xdg/autostart/
 #copying shell scripts to the active script repo
