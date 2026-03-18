@@ -52,6 +52,8 @@ repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 rapid_update=$(get_value 'simulation' 'rapid_update')
+syslog=$(get_value 'simulation' 'syslog')
+syslog_server=$(get_value 'address' 'syslog_server')
 tempvar=$(get_value $username 'repo_location')
 #------------------------------------------------------------
 #Checking to see if this device/user has an override
@@ -61,6 +63,14 @@ tempvar=$(get_value $username 'vh_server')
 if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
 tempvar=$(get_value $username 'sim_phy')
 if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
+#------------------------------------------------------------
+#Configuring Syslog Server
+#------------------------------------------------------------
+if [ $syslog == "on" ]; then
+  sed -i '/^\$IncludeConfig \/etc\/rsyslog\.d\/\*\.conf$/a *.* @$syslog_server' /etc/rsyslog.conf
+else
+ echo Skipping Syslog Server Update | tee -a /usr/local/scripts/sim.log
+fi
 #------------------------------------------------------------
 #Scheduling Reboot
 #------------------------------------------------------------
