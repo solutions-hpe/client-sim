@@ -67,7 +67,7 @@ if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 #Configuring Syslog Server
 #------------------------------------------------------------
 if [ $syslog == "on" ]; then
-  sed -i '/^\$IncludeConfig \/etc\/rsyslog\.d\/\*\.conf$/a *.* @$syslog_server' /etc/rsyslog.conf
+  sudo sed -i '/^\$IncludeConfig \/etc\/rsyslog\.d\/\*\.conf$/a *.* @$syslog_server' /etc/rsyslog.conf
 else
  echo Skipping Syslog Server Update | tee -a /usr/local/scripts/sim.log
 fi
