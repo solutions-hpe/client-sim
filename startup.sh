@@ -67,11 +67,18 @@ if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 #Configuring Syslog Server
 #------------------------------------------------------------
 if [ $syslog == "on" ]; then
-  #checking to see if there is a syslog server define with *.* already, if so replace it, if not add the line
-  grep -q '^\*\.\*@' /etc/rsyslog.conf && \
-  sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf || \
-  sudo sed -i "/^\$IncludeConfig \/etc\/rsyslog\.d\/\*\.conf$/a *.*@${syslog_server}" /etc/rsyslog.conf
-  #Adding the imfile modiule to rsyslog.conf before the imuxsock line
+  #Ensure the remote syslog line exists, replace if different
+  if grep -q '^\*\.\*@' /etc/rsyslog.conf; then
+    sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf
+  else
+    # Insert before imuxsock if no syslog line exists
+    sudo sed -i "/module(load=\"imuxsock\")/i *.*@${syslog_server}" /etc/rsyslog.conf
+  fi
+  #Add the comment line before the syslog line, if it doesn't exist
+  if ! grep -Fxq "#Syslog Server" /etc/rsyslog.conf; then
+    sudo sed -i "/\*\.\*@${syslog_server}/i #Syslog Server" /etc/rsyslog.conf
+  fi
+  #Ensure the imfile module exists before imuxsock
   if ! grep -Eq '^\s*(\$ModLoad\s+imfile|module\(load="imfile"\))' /etc/rsyslog.conf; then
     sudo sed -i '/module(load="imuxsock")/i $ModLoad imfile' /etc/rsyslog.conf
   fi
