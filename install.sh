@@ -96,6 +96,7 @@ if [ -e "/usr/local/scripts/simulation.conf" ]; then
 else
  #copying latest config file to active repository
  echo Coying config from local repo | tee -a /tmp/client-sim.log
+ cd ..
  cd configs
  sudo cp simulation.conf /usr/local/scripts/simulation.conf
 fi
