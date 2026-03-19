@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.01
+version=.02
 echo apt update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -19,4 +19,5 @@ sudo apt install dnsutils -y
 sudo apt install dkms -y
 sudo apt install iperf3 -y
 sudo apt install firefox-esr -y
+sudo apt install rsyslog -y
 sudo apt autoremove -y

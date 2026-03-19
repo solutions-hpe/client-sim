@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.32
+version=.33
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -52,6 +52,8 @@ repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 rapid_update=$(get_value 'simulation' 'rapid_update')
+syslog=$(get_value 'simulation' 'syslog')
+syslog_server=$(get_value 'address' 'syslog_server')
 tempvar=$(get_value $username 'repo_location')
 #------------------------------------------------------------
 #Checking to see if this device/user has an override
@@ -61,6 +63,28 @@ tempvar=$(get_value $username 'vh_server')
 if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
 tempvar=$(get_value $username 'sim_phy')
 if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
+#------------------------------------------------------------
+#Configuring Syslog Server
+#------------------------------------------------------------
+if [ $syslog == "on" ]; then
+  #Ensure the remote syslog line exists, replace if different
+  if grep -q '^\*\.\*@' /etc/rsyslog.conf; then
+    sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf
+  else
+    # Insert before imuxsock if no syslog line exists
+    sudo sed -i "/module(load=\"imuxsock\")/i *.*@${syslog_server}" /etc/rsyslog.conf
+  fi
+  #Add the comment line before the syslog line, if it doesn't exist
+  if ! grep -Fxq "#Syslog Server" /etc/rsyslog.conf; then
+    sudo sed -i "/\*\.\*@${syslog_server}/i #Syslog Server" /etc/rsyslog.conf
+  fi
+  #Ensure the imfile module exists before imuxsock
+  if ! grep -Eq '^\s*(\$ModLoad\s+imfile|module\(load="imfile"\))' /etc/rsyslog.conf; then
+    sudo sed -i '/module(load="imuxsock")/i $ModLoad imfile' /etc/rsyslog.conf
+  fi
+else
+ echo Skipping Syslog Server Update | tee -a /usr/local/scripts/sim.log
+fi
 #------------------------------------------------------------
 #Scheduling Reboot
 #------------------------------------------------------------
