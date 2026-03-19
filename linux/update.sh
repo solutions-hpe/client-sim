@@ -32,14 +32,16 @@ if [ $public_repo == "on" ]; then
  git switch $repo_branch
  #updating the local repo with fast forward option
  git pull origin --ff-only
+ cd linux
  #Copying config file template for syslog messages of simulation
-sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+ sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
  #copying startup files to autostart
  sudo cp *.desktop /etc/xdg/autostart/ &
  #copying shell scripts to the active script repo
  sudo cp *.sh /usr/local/scripts/ &
  #copying flat files for simulation to active script repo
  sudo cp *.txt /usr/local/scripts/
+ cd ..
  cd configs
  #copying latest config file to active repository
  sudo cp simulation.conf /usr/local/scripts/simulation.conf &
