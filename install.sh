@@ -78,6 +78,7 @@ echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
 cd ~
 git clone https://github.com/solutions-hpe/client-sim.git
 cd client-sim
+cd linux
 #switching the branch to the one designated in the simulation.conf file
 #Copying config file template for syslog messages of simulation
 sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
