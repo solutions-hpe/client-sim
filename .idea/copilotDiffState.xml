@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="/download (snapshot).sh">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="/download (snapshot).sh" />
+              <option name="originalContent" value="#!/bin/bash&#10;version=.01&#10;echo Download Script Version $version | tee -a /usr/local/scripts/sim.log&#10;echo $(date) | tee -a /usr/local/scripts/sim.log&#10;#------------------------------------------------------------&#10;r_count=0&#10;echo Running Download simulation&#10;dlfile=$(cat /usr/local/scripts/downloads.txt)&#10;for r in $dlfile; do r_count=$((r_count+1)); done&#10;rn_dl=$((1 + RANDOM % $r_count))&#10;r_count=0&#10;for r in $dlfile; do&#10; r_count=$((r_count+1))&#10; if [[ $r_count == $rn_dl ]]; then&#10;  sleep 1&#10;  echo $(date) | tee -a /usr/local/scripts/sim.log&#10;  echo ------------------------------| tee -a /usr/local/scripts/sim.log&#10;  echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log&#10;  echo ------------------------------| tee -a /usr/local/scripts/sim.log&#10;  wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log&#10; fi&#10;done&#10;" />
+              <option name="updatedContent" value="#!/bin/bash&#10;version=.01&#10;echo Download Script Version $version | tee -a /usr/local/scripts/sim.log&#10;echo $(date) | tee -a /usr/local/scripts/sim.log&#10;#------------------------------------------------------------&#10;r_count=0&#10;echo Running Download simulation&#10;dlfile=($(&lt; /usr/local/scripts/downloads.txt))&#10;r_count=${#dlfile[@]}&#10;rn_dl=$((RANDOM % r_count))&#10;url=${dlfile[rn_dl]}&#10;sleep 1&#10;echo $(date) | tee -a /usr/local/scripts/sim.log&#10;echo ------------------------------| tee -a /usr/local/scripts/sim.log&#10;echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log&#10;echo ------------------------------| tee -a /usr/local/scripts/sim.log&#10;wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp &quot;$url&quot; | tee -a /usr/local/scripts/sim.log" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
