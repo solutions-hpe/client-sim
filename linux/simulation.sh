@@ -89,6 +89,8 @@ echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
+echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
+echo VHServer: $vh_server | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
 if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
 echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
