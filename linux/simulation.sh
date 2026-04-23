@@ -132,7 +132,7 @@ if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
+#if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
