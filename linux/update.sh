@@ -30,6 +30,7 @@ if [ $public_repo == "on" ]; then
  cd client-sim
  git config --global http.lowSpeedLimit 1000
  git config --global http.lowSpeedTime 300
+ git config --global http.maxRequests 2
  git config pull.rebase true
  #switching the branch to the one designated in the simulation.conf file
  git switch $repo_branch
