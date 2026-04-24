@@ -72,13 +72,11 @@ apply_override() {
   local val=$(get_value $username "$var")
   [[ -n ${val} ]] && declare -g "$var=$val"
 }
-
 override_keys=(kill_switch sim_load public_repo repo_location vh_server site_based_ssid iperf_bw \
   wsite sim_phy ssid ssidpw dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail smb_address ping_address dns_latency_1 dns_latency_2 \
   dns_latency_3 dns_bad_ip_1 dns_bad_ip_2 dns_bad_ip_3 dns_bad_record_1 dns_bad_record_2 \
   dns_bad_record_3 vh_server_addr iperf_server)
-
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
@@ -128,36 +126,9 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-#if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
+if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
-#------------------------------------------------------------
-#Helper function for WiFi connections
-#------------------------------------------------------------
-connect_wifi() {
-  nmcli radio wifi off
-  nmcli radio wifi on
-  sleep $rn_offline_time
-  if [ $site_based_ssid == "on" ]; then
-    nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
-  else
-    nmcli -w $1 device wifi connect $ssid password $ssidpw
-  fi
-}
-#Helper function for connection management
-#------------------------------------------------------------
-manage_connection() {
-  local action=$1
-  local wait_time=$2
-  nmcli radio wifi off
-  nmcli radio wifi on
-  sleep $rn_offline_time
-  if [ $site_based_ssid == "on" ]; then
-    nmcli -w $wait_time connection $action $wsite"-"$ssid
-  else
-    nmcli -w $wait_time connection $action $ssid
-  fi
-}
 #------------------------------------------------------------
 #Connecting to VHServer
 #------------------------------------------------------------
@@ -310,17 +281,7 @@ if [ $kill_switch == "off" ]; then
    fi
    #------------------------------------------------------------
    #End Ping Simulation
-    #------------------------------------------------------------
-    #Helper function to run simulation scripts
-    #------------------------------------------------------------
-    run_simulation() {
-      local script=$1
-      local sleep_time=$2
-      if [ -f "/usr/local/scripts/$script" ]; then
-        nohup bash "/usr/local/scripts/$script" >> /usr/local/scripts/sim.log 2>&1 &
-        sleep $sleep_time
-      fi
-    }
+
     #Running iPerf simulation
     #------------------------------------------------------------
     if [ $iperf == "on" ]; then
@@ -403,3 +364,46 @@ fi
 #Looping Script
 #------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
+
+#------------------------------------------------------------
+#Functions
+#------------------------------------------------------------
+#WiFi connections
+#------------------------------------------------------------
+connect_wifi() {
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
+  if [ $site_based_ssid == "on" ]; then
+    nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
+  else
+    nmcli -w $1 device wifi connect $ssid password $ssidpw
+  fi
+}
+#------------------------------------------------------------
+#Connection management
+#------------------------------------------------------------
+manage_connection() {
+  local action=$1
+  local wait_time=$2
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
+  if [ $site_based_ssid == "on" ]; then
+    nmcli -w $wait_time connection $action $wsite"-"$ssid
+  else
+    nmcli -w $wait_time connection $action $ssid
+  fi
+}
+#------------------------------------------------------------
+#Run simulation scripts
+#------------------------------------------------------------
+run_simulation() {
+ local script=$1
+ local sleep_time=$2
+ if [ -f "/usr/local/scripts/$script" ]; then
+  nohup bash "/usr/local/scripts/$script" >> /usr/local/scripts/sim.log 2>&1 &
+  sleep $sleep_time
+ fi
+}
+#------------------------------------------------------------
