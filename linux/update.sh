@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.22
+version=.23
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
