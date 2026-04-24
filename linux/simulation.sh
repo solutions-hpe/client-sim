@@ -124,10 +124,6 @@ rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
-#Running update to either the cloud repo or local SMB repo
-#------------------------------------------------------------
-if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
-#------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
@@ -280,8 +276,8 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Connecting to Network
    #------------------------------------------------------------
-    #Running WWW Traffic Simulation
-    #------------------------------------------------------------
+   #Running WWW Traffic Simulation
+   #------------------------------------------------------------
     if [ $www_traffic == "on" ]; then
      echo Running WWW Traffic simulation
      wwwfile=($(< /usr/local/scripts/websites.txt))
@@ -323,7 +319,6 @@ if [ $kill_switch == "off" ]; then
         sleep $sleep_time
       fi
     }
-
     #Running iPerf simulation
     #------------------------------------------------------------
     if [ $iperf == "on" ]; then
@@ -345,6 +340,13 @@ if [ $kill_switch == "off" ]; then
    #End DNS Fail Simulation
    #------------------------------------------------------------
    echo End of simulation | tee -a /usr/local/scripts/sim.log
+   #------------------------------------------------------------
+   #Running update to either the cloud repo or local SMB repo
+   #------------------------------------------------------------
+   if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
+   #------------------------------------------------------------
+   #End Script Updates
+   #------------------------------------------------------------
    echo Sleeping for 5 seconds | tee -a /usr/local/scripts/sim.log
    echo Loop iteration $z of 100 | tee -a /usr/local/scripts/sim.log
    sleep 5
