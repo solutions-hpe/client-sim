@@ -90,7 +90,6 @@ echo Simulation Details: | tee -a /usr/local/scripts/sim.log
 echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
 echo Site: $wsite | tee -a /usr/local/scripts/sim.log
 echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
 echo VHServer: $vh_server | tee -a /usr/local/scripts/sim.log
 if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
 if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
@@ -180,7 +179,7 @@ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
-if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
+if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
   echo Network connection failed | tee -a /usr/local/scripts/sim.log
@@ -224,6 +223,7 @@ if [ $kill_switch == "off" ]; then
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
+      ssidpw=$(get_value $simulation_id 'ssidpw' + 123)
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       connect_wifi 5
