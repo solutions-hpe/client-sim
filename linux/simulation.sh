@@ -167,7 +167,7 @@ run_simulation() {
 #------------------------------------------------------------
 #Attempting WiFi connection
 #------------------------------------------------------------
-connect_wifi 5
+connect_wifi 10
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
@@ -230,7 +230,7 @@ if [ $kill_switch == "off" ]; then
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-      connect_wifi 5
+      connect_wifi 10
      done
     fi
     if [ $auth_fail == "on" ]; then
