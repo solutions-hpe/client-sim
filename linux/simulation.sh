@@ -223,7 +223,7 @@ if [ $kill_switch == "off" ]; then
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
-      ssidpw=$(get_value $simulation_id 'ssidpw' + 123)
+      ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       connect_wifi 5
