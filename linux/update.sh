@@ -28,6 +28,7 @@ if [ $public_repo == "on" ]; then
  #this will throw an error most of the time
  git clone $repo_location
  cd client-sim
+ git config pull.rebase true
  #switching the branch to the one designated in the simulation.conf file
  git switch $repo_branch
  #updating the local repo with fast forward option
