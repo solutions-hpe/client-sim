@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.23
+version=.24
 echo Update Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
@@ -28,6 +28,8 @@ if [ $public_repo == "on" ]; then
  #this will throw an error most of the time
  git clone $repo_location
  cd client-sim
+ git config --global http.lowSpeedLimit 1000
+ git config --global http.lowSpeedTime 60
  git config pull.rebase true
  #switching the branch to the one designated in the simulation.conf file
  git switch $repo_branch
