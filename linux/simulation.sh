@@ -165,6 +165,10 @@ run_simulation() {
  fi
 }
 #------------------------------------------------------------
+#Attempting WiFi connection
+#------------------------------------------------------------
+connect_wifi 5
+#------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
