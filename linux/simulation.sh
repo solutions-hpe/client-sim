@@ -241,6 +241,11 @@ if [ $kill_switch == "off" ]; then
      done
     fi
    #------------------------------------------------------------
+   #Resetting the WIFI Password so it can connect correctly for updates/maintenance
+   #------------------------------------------------------------
+   ssidpw=$(get_value $simulation_id 'ssidpw')
+   connect_wifi 5
+   #------------------------------------------------------------
    #End SSID Incorrect Password Simualtion or Auth Failure Simulation
    #------------------------------------------------------------
   else
