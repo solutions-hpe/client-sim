@@ -12,9 +12,6 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #interface not in use. So that we force the traffic out the interface
 #set int he simulation.conf
 #------------------------------------------------------------
-
-#------------------------------------------------------------
-
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
@@ -85,6 +82,8 @@ for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
 #------------------------------------------------------------
+#End User/Device Specific Overrides
+#------------------------------------------------------------
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Details: | tee -a /usr/local/scripts/sim.log
@@ -122,13 +121,10 @@ rn_sim_load=$((1 + RANDOM % 99))
 #------------------------------------------------------------
 #Getting username from hostname extraction
 #changing DHCP Client configuration to send the username as the hostname
-#Pure asthetics so the usernames in Central look good
+#Pure aesthetics so the usernames in Central look good
 #------------------------------------------------------------
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
-#Dumping Current Device List
-#------------------------------------------------------------
-
 #Functions
 #------------------------------------------------------------
 #WiFi connections
@@ -169,16 +165,16 @@ run_simulation() {
   sleep $sleep_time
  fi
 }
-
+#------------------------------------------------------------
+#Dumping Current Device List
+#------------------------------------------------------------
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
-#Connecting to VHServer
-#------------------------------------------------------------
-#Checking to see if the default gateway is reachable before
+#Checking to see if the default gateway is reachable
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
@@ -188,15 +184,19 @@ if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [ $ssidpw_fail != "on" ] && [[ 
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
 else
   echo Network connection failed | tee -a /usr/local/scripts/sim.log
+  #------------------------------------------------------------
+  #If VH is enabled then attempt to connect to VHServer
+  #------------------------------------------------------------
   if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+  #------------------------------------------------------------
+  #End Connecting to VHServer
+  #------------------------------------------------------------
   sleep 15
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   connect_wifi 180
   sleep 15
   dfgw=$(ip route | grep -oP 'default via \K\S+')
 fi
-#------------------------------------------------------------
-#End Connecting to VHServer
 #------------------------------------------------------------
 #Begin Setting up simulation load
 #------------------------------------------------------------
@@ -410,5 +410,3 @@ fi
 #Looping Script
 #------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
-
-
