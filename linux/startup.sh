@@ -93,7 +93,6 @@ echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
 shutdown -r $rn
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
-sleep 10
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
