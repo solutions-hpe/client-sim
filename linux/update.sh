@@ -32,7 +32,7 @@ if [ $public_repo == "on" ]; then
  #switching the branch to the one designated in the simulation.conf file
  git switch $repo_branch
  #updating the local repo with fast forward option
- git pull origin pull.rebase true
+ git pull --ff-only
  cd linux
  #Copying config file template for syslog messages of simulation
  sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
