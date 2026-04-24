@@ -135,29 +135,35 @@ mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #Helper function for WiFi connections
 #------------------------------------------------------------
 connect_wifi() {
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
   if [ $site_based_ssid == "on" ]; then
     nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
   else
     nmcli -w $1 device wifi connect $ssid password $ssidpw
   fi
 }
-
 #Helper function for connection management
 #------------------------------------------------------------
 manage_connection() {
   local action=$1
   local wait_time=$2
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
   if [ $site_based_ssid == "on" ]; then
     nmcli -w $wait_time connection $action $wsite"-"$ssid
   else
     nmcli -w $wait_time connection $action $ssid
   fi
 }
-
+#------------------------------------------------------------
 #Connecting to VHServer
+#------------------------------------------------------------
 #Checking to see if the default gateway is reachable before
 #------------------------------------------------------------
- wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
@@ -180,10 +186,6 @@ fi
 if [ $sim_load -lt $rn_sim_load ]; then
   echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
   echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
-  nmcli radio wifi off
-  sleep $rn_offline_time
-  nmcli radio wifi on
-  sleep 5
   if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
     manage_connection up 180
   fi
