@@ -12,6 +12,10 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #interface not in use. So that we force the traffic out the interface
 #set int he simulation.conf
 #------------------------------------------------------------
+
+#------------------------------------------------------------
+
+#------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
@@ -124,6 +128,48 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
+
+#Functions
+#------------------------------------------------------------
+#WiFi connections
+#------------------------------------------------------------
+connect_wifi() {
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
+  if [ $site_based_ssid == "on" ]; then
+    nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
+  else
+    nmcli -w $1 device wifi connect $ssid password $ssidpw
+  fi
+}
+#------------------------------------------------------------
+#Connection management
+#------------------------------------------------------------
+manage_connection() {
+  local action=$1
+  local wait_time=$2
+  nmcli radio wifi off
+  nmcli radio wifi on
+  sleep $rn_offline_time
+  if [ $site_based_ssid == "on" ]; then
+    nmcli -w $wait_time connection $action $wsite"-"$ssid
+  else
+    nmcli -w $wait_time connection $action $ssid
+  fi
+}
+#------------------------------------------------------------
+#Run simulation scripts
+#------------------------------------------------------------
+run_simulation() {
+ local script=$1
+ local sleep_time=$2
+ if [ -f "/usr/local/scripts/$script" ]; then
+  nohup bash "/usr/local/scripts/$script" >> /usr/local/scripts/sim.log 2>&1 &
+  sleep $sleep_time
+ fi
+}
+
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
@@ -365,45 +411,4 @@ fi
 #------------------------------------------------------------
 source /usr/local/scripts/simulation.sh
 
-#------------------------------------------------------------
-#Functions
-#------------------------------------------------------------
-#WiFi connections
-#------------------------------------------------------------
-connect_wifi() {
-  nmcli radio wifi off
-  nmcli radio wifi on
-  sleep $rn_offline_time
-  if [ $site_based_ssid == "on" ]; then
-    nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
-  else
-    nmcli -w $1 device wifi connect $ssid password $ssidpw
-  fi
-}
-#------------------------------------------------------------
-#Connection management
-#------------------------------------------------------------
-manage_connection() {
-  local action=$1
-  local wait_time=$2
-  nmcli radio wifi off
-  nmcli radio wifi on
-  sleep $rn_offline_time
-  if [ $site_based_ssid == "on" ]; then
-    nmcli -w $wait_time connection $action $wsite"-"$ssid
-  else
-    nmcli -w $wait_time connection $action $ssid
-  fi
-}
-#------------------------------------------------------------
-#Run simulation scripts
-#------------------------------------------------------------
-run_simulation() {
- local script=$1
- local sleep_time=$2
- if [ -f "/usr/local/scripts/$script" ]; then
-  nohup bash "/usr/local/scripts/$script" >> /usr/local/scripts/sim.log 2>&1 &
-  sleep $sleep_time
- fi
-}
-#------------------------------------------------------------
+
