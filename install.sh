@@ -114,11 +114,11 @@ git clone https://github.com/morrownr/rtw89
 rm -Rf 8814au
 git clone https://github.com/morrownr/8814au.git
 rm -Rf rtl8852cu-20240510
-git clone https://github.com/morrownr/rtl8852cu-20240510.git
+git clone https://github.com/morrownr/rtl8852cu-20251113.git
 rm -Rf 8812au-20210820
 git clone https://github.com/morrownr/8812au-20210820.git
 rm -Rf rtl8852bu-20240418
-git clone https://github.com/morrownr/rtl8852bu-20240418.git
+git clone https://github.com/morrownr/rtl8852bu-20250826.git
 rm -Rf rtl8812au
 git clone https://github.com/aircrack-ng/rtl8812au.git
 rm -Rf 88x2bu-20210702
