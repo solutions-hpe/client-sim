@@ -27,7 +27,10 @@ $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 "Parsing Config File" | Tee-Object -FilePath $logPath -Append
 
 $site_based_num = get_value 'simulation' 'site_based_num'
-$simulation_id = "s" + ($env:COMPUTERNAME[-$site_based_num..-1] -join '')
+# simulation_id is determined by taking the last $site_based_num digits of the hostname,
+# then selecting the first digit of those. This groups clients into sets of 10.
+# For example, with site_based_num=2, hostname "host-00010" -> last 2 digits "10" -> first digit "1" -> "s1"
+$simulation_id = "s" + ($env:COMPUTERNAME[-$site_based_num..-1] -join '')[0]
 $reboot_schedule = get_value 'simulation' 'reboot_schedule'
 $repo_location = get_value 'simulation' 'repo_location'
 $vh_server = get_value 'simulation' 'vh_server'
