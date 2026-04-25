@@ -43,6 +43,12 @@ if ($tempvar) { $vh_server = $tempvar }
 $tempvar = get_value $username 'sim_phy'
 if ($tempvar) { $sim_phy = $tempvar }
 
+# Debug: Check if config is loaded
+Write-Host "Config sections: $($global:iniConfig.Keys)"
+Write-Host "Kill switch: $(get_value 'simulation' 'kill_switch')"
+Write-Host "Site based num: $(get_value 'simulation' 'site_based_num')"
+Write-Host "Simulation ID: $simulation_id"
+
 # Configuring Syslog Server
 if ($syslog -eq "on") {
     wevtutil sl "System" /cm:enable /lf:"C:\Windows\System32\winevt\Logs\ForwardedEvents.evtx" /rt:false

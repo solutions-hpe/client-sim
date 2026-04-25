@@ -16,6 +16,14 @@ if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath 
 "Parsing Config File" | Tee-Object -FilePath $logPath -Append
 $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 
+# Debug: Check if config is loaded
+Write-Host "Config sections: $($global:iniConfig.Keys)"
+Write-Host "Kill switch: $(get_value 'simulation' 'kill_switch')"
+Write-Host "Simulation ID: $simulation_id"
+Write-Host "Wsite: $(get_value $simulation_id 'wsite')"
+Write-Host "Sim phy: $(get_value $simulation_id 'sim_phy')"
+Write-Host "DNS fail: $(get_value $simulation_id 'dns_fail')"
+
 # Global Simulation settings
 $kill_switch = get_value 'simulation' 'kill_switch'
 $rapid_update = get_value 'simulation' 'rapid_update'
