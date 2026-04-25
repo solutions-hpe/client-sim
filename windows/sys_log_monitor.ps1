@@ -1,28 +1,8 @@
 # PowerShell script to monitor system logs in a new window
 # Equivalent to journalctl -f in Linux
 
-# Open a new PowerShell window for monitoring with specific size and position
-Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
-# Set window size using mode command
-cmd /c 'mode con: cols=140 lines=20'
-$host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(140,20)
-Start-Sleep 1
-try {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetConsoleWindow();
-}
-'@
-    # Set window position (0,0 in pixels)
-    [Win32]::SetWindowPos([Win32]::GetConsoleWindow(), 0, 0, 0, 0, 0, 0x0040)
-} catch {
-    Write-Host "Failed to set window position: $_"
-}
+# Open a new Windows Terminal tab for monitoring with specific size and position
+Start-Process "wt.exe" -ArgumentList "new-tab", "--title", "System Log Monitor", "--size", "140,20", "--pos", "0,0", "powershell.exe", "-NoExit", "-Command", @"
 while (`$true) {
     Get-WinEvent -LogName System -MaxEvents 10 | Select-Object TimeCreated, LevelDisplayName, Message | Format-Table -AutoSize
     Start-Sleep 5

@@ -1,27 +1,5 @@
 # PowerShell script to monitor simulation logs in a new window
 # Equivalent to tail -f /usr/local/scripts/sim.log in Linux
 
-# Open a new PowerShell window for monitoring with specific size and position
-Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
-# Set window size using mode command
-cmd /c 'mode con: cols=35 lines=15'
-$host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(35,15)
-Start-Sleep 1
-try {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetConsoleWindow();
-}
-'@
-    # Set window position (0,525 in pixels)
-    [Win32]::SetWindowPos([Win32]::GetConsoleWindow(), 0, 0, 525, 0, 0, 0x0040)
-} catch {
-    Write-Host "Failed to set window position: $_"
-}
-Get-Content -Path 'C:\Scripts\sim.log' -Wait
-"@
+# Open a new Windows Terminal tab for monitoring with specific size and position
+Start-Process "wt.exe" -ArgumentList "new-tab", "--title", "Simulation Log Monitor", "--size", "35,15", "--pos", "0,525", "powershell.exe", "-NoExit", "-Command", "Get-Content -Path 'C:\Scripts\sim.log' -Wait"
