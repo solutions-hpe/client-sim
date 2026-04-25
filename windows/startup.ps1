@@ -1,7 +1,7 @@
 # PowerShell equivalent of startup.sh
 $version = "0.33"
 $logPath = "C:\Scripts\sim.log"
-"------------------------------" | Tee-Object -FilePath $logPath
+"------------------------------" | Tee-Object -FilePath $logPath -Append
 "Startup Script Version $version" | Tee-Object -FilePath $logPath -Append
 Get-Date | Tee-Object -FilePath $logPath -Append
 "------------------------------" | Tee-Object -FilePath $logPath -Append
