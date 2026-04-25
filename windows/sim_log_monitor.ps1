@@ -3,7 +3,11 @@
 
 # Open a new PowerShell window for monitoring with specific size and position
 Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
-Add-Type -TypeDefinition @'
+# Set window size using mode command
+cmd /c 'mode con: cols=35 lines=15'
+Start-Sleep 1
+try {
+    Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public class Win32 {
@@ -13,10 +17,10 @@ public class Win32 {
     public static extern IntPtr GetConsoleWindow();
 }
 '@
-# Set window size (35 columns x 15 rows, approximate pixels)
-`$host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(35,15)
-`$host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(35,100)
-# Set window position (0,525 in pixels)
-[Win32]::SetWindowPos([Win32]::GetConsoleWindow(), 0, 0, 525, 0, 0, 0x0040)
+    # Set window position (0,525 in pixels)
+    [Win32]::SetWindowPos([Win32]::GetConsoleWindow(), 0, 0, 525, 0, 0, 0x0040)
+} catch {
+    Write-Host "Failed to set window position: $_"
+}
 Get-Content -Path 'C:\Scripts\sim.log' -Wait
 "@
