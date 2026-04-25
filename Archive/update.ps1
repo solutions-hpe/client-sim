@@ -28,11 +28,11 @@ if ($public_repo -eq "on") {
         git switch $repo_branch
     }
 
-    # Copy files from windows folder to active script repo
-    Copy-Item "windows\*.ps1" "C:\Scripts\" -Force
-    Copy-Item "windows\*.txt" "C:\Scripts\" -Force
-    Copy-Item "windows\*.conf" "C:\Scripts\" -Force
-    Copy-Item "windows\*.xml" "C:\Scripts\" -Force
+    # Copy files from Archive folder to active script repo
+    Copy-Item "Archive\*.ps1" "C:\Scripts\" -Force
+    Copy-Item "Archive\*.txt" "C:\Scripts\" -Force
+    Copy-Item "Archive\*.conf" "C:\Scripts\" -Force
+    Copy-Item "Archive\*.xml" "C:\Scripts\" -Force
 
     # Copy simulation config
     Copy-Item "configs\simulation.conf" "C:\Scripts\simulation.conf" -Force
