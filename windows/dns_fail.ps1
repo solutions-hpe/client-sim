@@ -33,10 +33,7 @@ for ($i = 1; $i -le 10; $i++) {
         "------------------------------" | Tee-Object -FilePath $logPath -Append
 
         foreach ($server in ($bad_records + $bad_ips + $latencies)) {
-            Start-Job -ScriptBlock {
-                param($name, $srv)
-                try { Resolve-DnsName -Name $name -Server $srv -ErrorAction Stop } catch {}
-            } -ArgumentList $r, $server
+            Resolve-DnsName -Name $r -Server $server -TimeoutSeconds 1 -ErrorAction SilentlyContinue
         }
         Start-Sleep 5
     }
