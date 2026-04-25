@@ -5,6 +5,7 @@
 Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
 # Set window size using mode command
 cmd /c 'mode con: cols=35 lines=15'
+$host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(35,15)
 Start-Sleep 1
 try {
     Add-Type -TypeDefinition @'
