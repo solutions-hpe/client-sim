@@ -1,11 +1,64 @@
-# PowerShell equivalent of simulation.sh
-. .\ini-parser.ps1
-
-$version = "0.91"
+# PowerShell equivalent of startup.sh
+$version = "0.33"
 $logPath = "C:\Scripts\sim.log"
+"------------------------------" | Tee-Object -FilePath $logPath
+"Startup Script Version $version" | Tee-Object -FilePath $logPath -Append
 Get-Date | Tee-Object -FilePath $logPath -Append
 "------------------------------" | Tee-Object -FilePath $logPath -Append
-"Simulation Script Version $version" | Tee-Object -FilePath $logPath -Append
+
+# Check Logs Script
+Start-Job -ScriptBlock { . .\sys_mon.ps1 }
+
+# Verify key settings changed
+"Disabling screen blanking" | Tee-Object -FilePath $logPath -Append
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+# Windows equivalent for xset: already handled by powercfg
+
+# Figuring out username
+$username = $env:COMPUTERNAME.Split('-')[0]
+
+# Calling config parser
+"Reading Simulation Config File" | Tee-Object -FilePath $logPath -Append
+. .\ini-parser.ps1
+$global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
+
+"------------------------------" | Tee-Object -FilePath $logPath -Append
+"Parsing Config File" | Tee-Object -FilePath $logPath -Append
+
+$site_based_num = get_value 'simulation' 'site_based_num'
+$simulation_id = "s" + ($env:COMPUTERNAME[-$site_based_num..-1] -join '')
+$reboot_schedule = get_value 'simulation' 'reboot_schedule'
+$repo_location = get_value 'simulation' 'repo_location'
+$vh_server = get_value 'simulation' 'vh_server'
+$sim_phy = get_value $simulation_id 'sim_phy'
+$rapid_update = get_value 'simulation' 'rapid_update'
+$syslog = get_value 'simulation' 'syslog'
+$syslog_server = get_value 'address' 'syslog_server'
+
+$tempvar = get_value $username 'repo_location'
+if ($tempvar) { $repo_location = $tempvar }
+$tempvar = get_value $username 'vh_server'
+if ($tempvar) { $vh_server = $tempvar }
+$tempvar = get_value $username 'sim_phy'
+if ($tempvar) { $sim_phy = $tempvar }
+
+# Configuring Syslog Server
+if ($syslog -eq "on") {
+    wevtutil sl "System" /cm:enable /lf:"C:\Windows\System32\winevt\Logs\ForwardedEvents.evtx" /rt:false
+    # Add subscription (simplified)
+} else {
+    "Skipping Syslog Server Update" | Tee-Object -FilePath $logPath -Append
+}
+
+# Scheduling Reboot
+$rn = [int]$reboot_schedule + (Get-Random -Maximum 600)
+"Scheduling reboot $rn minutes" | Tee-Object -FilePath $logPath -Append
+shutdown /r /t ($rn * 60)
+
+# Bringing up all interfaces
+"Bringing up all interfaces online" | Tee-Object -FilePath $logPath -Append
+Get-NetAdapter | Enable-NetAdapter
 
 # Finding adapter names
 $wladapter = Get-NetAdapter | Where-Object { $_.Name -like "*wireless*" -or $_.Name -like "*wlan*" } | Select-Object -First 1 -ExpandProperty Name
@@ -13,75 +66,28 @@ if ($wladapter) { "WLAN Adapter name $wladapter" | Tee-Object -FilePath $logPath
 $eadapter = Get-NetAdapter | Where-Object { $_.Name -like "*ethernet*" -or $_.Name -like "*eth*" } | Select-Object -First 1 -ExpandProperty Name
 if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath -Append }
 
-"Parsing Config File" | Tee-Object -FilePath $logPath -Append
-$global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
+# Changing the MAC Address (Windows equivalent - requires admin and specific adapter)
+# Note: Changing MAC in Windows is more complex; skipping for now or use third-party tools
 
-# Global Simulation settings
-$kill_switch = get_value 'simulation' 'kill_switch'
-$rapid_update = get_value 'simulation' 'rapid_update'
-$sim_load = get_value 'simulation' 'sim_load'
-$public_repo = get_value 'simulation' 'public_repo'
-$repo_location = get_value 'simulation' 'repo_location'
-$vh_server = get_value 'simulation' 'vh_server'
-$site_based_ssid = get_value 'simulation' 'site_based_ssid'
-$iperf_bw = get_value 'simulation' 'iperf_bw'
-$auth_fail = get_value 'simulation' 'auth_fail'
-$ssidpw_fail = get_value 'simulation' 'ssidpw_fail'
-$allow_offline = get_value 'simulation' 'allow_offline'
+"-----------------------------" | Tee-Object -FilePath $logPath -Append
+# Running Updates
+"Updating Simulation from repo" | Tee-Object -FilePath $logPath -Append
+. .\update.ps1
 
-# Device Specific Simulation settings
-$wsite = get_value $simulation_id 'wsite'
-$sim_phy = get_value $simulation_id 'sim_phy'
-$ssid = get_value $simulation_id 'ssid'
-$ssidpw = get_value $simulation_id 'ssidpw'
-$dhcp_fail = get_value $simulation_id 'dhcp_fail'
-$dns_fail = get_value $simulation_id 'dns_fail'
-$assoc_fail = get_value $simulation_id 'assoc_fail'
-$port_flap = get_value $simulation_id 'port_flap'
-$ping_test = get_value $simulation_id 'ping_test'
-$download = get_value $simulation_id 'download'
-$iperf = get_value $simulation_id 'iperf'
-$www_traffic = get_value $simulation_id 'www_traffic'
-
-# Simulation IP
-$smb_address = get_value 'address' 'smb_address'
-$ping_address = get_value 'address' 'ping_address'
-$dns_latency_1 = get_value 'address' 'dns_latency_1'
-$dns_latency_2 = get_value 'address' 'dns_latency_2'
-$dns_latency_3 = get_value 'address' 'dns_latency_3'
-$dns_bad_ip_1 = get_value 'address' 'dns_bad_ip_1'
-$dns_bad_ip_2 = get_value 'address' 'dns_bad_ip_2'
-$dns_bad_ip_3 = get_value 'address' 'dns_bad_ip_3'
-$dns_bad_record_1 = get_value 'address' 'dns_bad_record_1'
-$dns_bad_record_2 = get_value 'address' 'dns_bad_record_2'
-$dns_bad_record_3 = get_value 'address' 'dns_bad_record_3'
-$vh_server_address = get_value 'address' 'vh_server_addr'
-$iperf_server = get_value 'address' 'iperf_server'
-
-# User/Device Specific Overrides
-function apply_override {
-    param([string]$var)
-    $val = get_value $username $var
-    if ($val) { Set-Variable -Name $var -Value $val -Scope Global }
+# Setting VirtualHere Server as a Daemon
+if ($vh_server -eq "on") {
+    "Setting VH to autostart" | Tee-Object -FilePath $logPath -Append
+    "Waiting for VH Client to start" | Tee-Object -FilePath $logPath -Append
+    # Start vhclientx86_64.exe as service or process
+    Start-Process -FilePath "vhclientx86_64.exe" -ArgumentList "-n" -NoNewWindow
+    Start-Sleep 5
 }
 
-$override_keys = @('kill_switch', 'sim_load', 'public_repo', 'repo_location', 'vh_server', 'site_based_ssid', 'iperf_bw', 'wsite', 'sim_phy', 'ssid', 'ssidpw', 'dhcp_fail', 'dns_fail', 'assoc_fail', 'port_flap', 'ping_test', 'download', 'iperf', 'www_traffic', 'ssidpw_fail', 'auth_fail', 'smb_address', 'ping_address', 'dns_latency_1', 'dns_latency_2', 'dns_latency_3', 'dns_bad_ip_1', 'dns_bad_ip_2', 'dns_bad_ip_3', 'dns_bad_record_1', 'dns_bad_record_2', 'dns_bad_record_3', 'vh_server_addr', 'iperf_server')
+# Setting Script Permissions
+"Setting Script Permissions" | Tee-Object -FilePath $logPath -Append
+"-----------------------------" | Tee-Object -FilePath $logPath -Append
+# In Windows, permissions are set via ACL, but assuming scripts are executable
 
-foreach ($key in $override_keys) {
-    apply_override $key
-}
-
-Get-Date | Tee-Object -FilePath $logPath -Append
-"------------------------------" | Tee-Object -FilePath $logPath -Append
-"Simulation Details:" | Tee-Object -FilePath $logPath -Append
-"Hostname: $env:COMPUTERNAME" | Tee-Object -FilePath $logPath -Append
-"Site: $wsite" | Tee-Object -FilePath $logPath -Append
-"Site Based SSID: $site_based_ssid" | Tee-Object -FilePath $logPath -Append
-"VHServer: $vh_server" | Tee-Object -FilePath $logPath -Append
-if ($vh_server -eq "off") { "Phy: $sim_phy" | Tee-Object -FilePath $logPath -Append }
-if ($sim_phy -eq "wireless" -and $wladapter) { "Adapter: $wladapter" | Tee-Object -FilePath $logPath -Append }
-"Simulation Load: $sim_load" | Tee-Object -FilePath $logPath -Append
-"Kill Switch: $kill_switch" | Tee-Object -FilePath $logPath -Append
-"DHCP Fail: $dhcp_fail" | Tee-Object -FilePath $logPath -Append
-"DNS Fail: $dns_fail" | Tee-Object -FilePath $logPath -Append
-"WWW Traffic: $www_traffic" | Tee-Object -FilePath $logPath -Append
+# Launching Simulation Script
+"Launching Simulation Script" | Tee-Object -FilePath $logPath -Append
+. .\simulation.ps1
