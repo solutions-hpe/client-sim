@@ -35,11 +35,11 @@ if ($public_repo -eq "on") {
     Push-Location configs
     Copy-Item "simulation.conf" "C:\Scripts\simulation.conf" -Force
     Pop-Location
-    $acl = Get-Acl "C:\Scripts"
-    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) }
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
-    $acl.AddAccessRule($rule)
-    Set-Acl "C:\Scripts" $acl
+    #$acl = Get-Acl "C:\Scripts"
+    #$acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) }
+    #$rule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+    #$acl.AddAccessRule($rule)
+    #Set-Acl "C:\Scripts" $acl
     Pop-Location
     Pop-Location
 } else {
