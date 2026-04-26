@@ -37,6 +37,7 @@ sudo raspi-config nonint do_wifi_country US
 #Installing DKMS, DNSUtils, QEMU Agent, GIT, Net Tools
 #------------------------------------------------------------
 echo Running system updates | tee -a /tmp/client-sim.log
+sudo dkpg --configure -a
 sudo DEBIAN_FRONTEND=noninteractive apt update
 sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
 sudo DEBIAN_FRONTEND=noninteractive apt install linux-headers-$(uname -r)
@@ -102,7 +103,6 @@ else
  sudo cp simulation.conf /usr/local/scripts/simulation.conf
 fi
 touch /usr/local/scripts/sim.log
-echo Installer Version $version | tee /usr/local/scripts/sim.log
 sudo chmod -R 777 /usr/local/scripts
 #------------------------------------------------------------
 #Checking to see if the device is Raspberry PI Hardware
