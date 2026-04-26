@@ -39,6 +39,7 @@ sudo raspi-config nonint do_wifi_country US
 echo Running system updates | tee -a /tmp/client-sim.log
 sudo DEBIAN_FRONTEND=noninteractive apt update
 sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
+sudo DEBIAN_FRONTEND=noninteractive apt install linux-headers-$(uname -r)
 sudo DEBIAN_FRONTEND=noninteractive apt remote sysstat -y
 sudo DEBIAN_FRONTEND=noninteractive apt install git -y
 sudo DEBIAN_FRONTEND=noninteractive apt install wget -y
