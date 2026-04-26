@@ -110,88 +110,90 @@ sudo chmod -R 777 /usr/local/scripts
 #------------------------------------------------------------
 if [ -f /proc/device-tree/model ]; then
   if tr -d '\0' < /proc/device-tree/model | grep -qi "raspberry pi"; then
-   echo "Running on Raspberry Pi"
-   echo "Skipping open source wifi driver install"
+   echo "Running on Raspberry Pi" | tee -a /tmp/client-sim.log
+   echo "Skipping open source wifi driver install" | tee -a /tmp/client-sim.log
   else
-   echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
-   rm -Rf 8821au-20210708
-   git clone https://github.com/morrownr/8821au-20210708.git
-   rm -Rf 8821cu-20210916
-   git clone https://github.com/morrownr/8821cu-20210916.git
-   rm -Rf rtw89
-   git clone https://github.com/morrownr/rtw89
-   rm -Rf 8814au
-   git clone https://github.com/morrownr/8814au.git
-   rm -Rf rtl8852cu-20251113
-   git clone https://github.com/morrownr/rtl8852cu-20251113.git
-   rm -Rf 8812au-20210820
-   git clone https://github.com/morrownr/8812au-20210820.git
-   rm -Rf rtl8852bu-20250826
-   git clone https://github.com/morrownr/rtl8852bu-20250826.git
-   rm -Rf rtl8812au
-   git clone https://github.com/aircrack-ng/rtl8812au.git
-   rm -Rf 88x2bu-20210702
-   git clone https://github.com/morrownr/88x2bu-20210702.git
-   rm -Rf rtl8852au
-   git clone https://github.com/lwfinger/rtl8852au.git
-   rm -Rf rtl8188eu
-   git clone https://github.com/lwfinger/rtl8188eu.git
-   rm -Rf rtl8723au
-   git clone https://github.com/lwfinger/rtl8723au.git
-   #------------------------------------------------------------
-   echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
-   echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
-   cd 8821au-20210708
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
-   cd 8821cu-20210916
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
-   cd 8814au
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
-   cd 8812au-20210820
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8852bu | tee -a /tmp/client-sim.log
-   cd rtl8852bu-20250826
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8852cu | tee -a /tmp/client-sim.log
-   cd rtl8852cu-20251113
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
-   cd 88x2bu-20210702
-   sudo ./install-driver.sh NoPrompt
-   cd ..
-   echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
-   cd rtl8188eu
-   sudo make all
-   sudo make install
-   sudo dkms add .
-   cd ..
-   echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
-   cd rtl8852au
-   sudo make all
-   sudo make install
-   sudo dkms add .
-   cd ..
-   echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
-   cd rtw89
-   sudo make all
-   sudo make install
-   sudo kdms add .
-   cd ..
-   echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
-   cd rtl8723au
-   sudo make all
-   sudo make install
-   sudo modprobe 8723au
-   sudo dkms add .
+    echo "Not running on Raspberry Pi" | tee -a /tmp/client-sim.log
+    echo "Installing open source wifi drivers for client simulation" | tee -a /tmp/client-sim.log
+    echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
+    rm -Rf 8821au-20210708
+    git clone https://github.com/morrownr/8821au-20210708.git
+    rm -Rf 8821cu-20210916
+    git clone https://github.com/morrownr/8821cu-20210916.git
+    rm -Rf rtw89
+    git clone https://github.com/morrownr/rtw89
+    rm -Rf 8814au
+    git clone https://github.com/morrownr/8814au.git
+    rm -Rf rtl8852cu-20251113
+    git clone https://github.com/morrownr/rtl8852cu-20251113.git
+    rm -Rf 8812au-20210820
+    git clone https://github.com/morrownr/8812au-20210820.git
+    rm -Rf rtl8852bu-20250826
+    git clone https://github.com/morrownr/rtl8852bu-20250826.git
+    rm -Rf rtl8812au
+    git clone https://github.com/aircrack-ng/rtl8812au.git
+    rm -Rf 88x2bu-20210702
+    git clone https://github.com/morrownr/88x2bu-20210702.git
+    rm -Rf rtl8852au
+    git clone https://github.com/lwfinger/rtl8852au.git
+    rm -Rf rtl8188eu
+    git clone https://github.com/lwfinger/rtl8188eu.git
+    rm -Rf rtl8723au
+    git clone https://github.com/lwfinger/rtl8723au.git
+    #------------------------------------------------------------
+    echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
+    echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
+    cd 8821au-20210708
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
+    cd 8821cu-20210916
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
+    cd 8814au
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
+    cd 8812au-20210820
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8852bu | tee -a /tmp/client-sim.log
+    cd rtl8852bu-20250826
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8852cu | tee -a /tmp/client-sim.log
+    cd rtl8852cu-20251113
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
+    cd 88x2bu-20210702
+    sudo ./install-driver.sh NoPrompt
+    cd ..
+    echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
+    cd rtl8188eu
+    sudo make all
+    sudo make install
+    sudo dkms add .
+    cd ..
+    echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
+    cd rtl8852au
+    sudo make all
+    sudo make install
+    sudo dkms add .
+    cd ..
+    echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
+    cd rtw89
+    sudo make all
+    sudo make install
+    sudo kdms add .
+    cd ..
+    echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
+    cd rtl8723au
+    sudo make all
+    sudo make install
+    sudo modprobe 8723au
+    sudo dkms add .
   fi
 fi
 #------------------------------------------------------------
