@@ -118,7 +118,7 @@ rm -Rf rtl8852cu-20251113
 git clone https://github.com/morrownr/rtl8852cu-20251113.git
 rm -Rf 8812au-20210820
 git clone https://github.com/morrownr/8812au-20210820.git
-rm -Rf rtl8852bu-20240418
+rm -Rf rtl8852bu-20250826
 git clone https://github.com/morrownr/rtl8852bu-20250826.git
 rm -Rf rtl8812au
 git clone https://github.com/aircrack-ng/rtl8812au.git
@@ -149,7 +149,7 @@ cd 8812au-20210820
 sudo ./install-driver.sh NoPrompt
 cd ..
 echo Installing Wireless Adapter 8852bu | tee -a /tmp/client-sim.log
-cd rtl8852bu-20240418
+cd rtl8852bu-20250826
 sudo ./install-driver.sh NoPrompt
 cd ..
 echo Installing Wireless Adapter 8852cu | tee -a /tmp/client-sim.log
