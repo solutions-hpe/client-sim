@@ -108,11 +108,10 @@ sudo chmod -R 777 /usr/local/scripts
 #Checking to see if the device is Raspberry PI Hardware
 # If yes then skip, if anything else then load all known open source drivers for WiFI
 #------------------------------------------------------------
-if [ -f /proc/device-tree/model ]; then
-  if tr -d '\0' < /proc/device-tree/model | grep -qi "raspberry pi"; then
+if grep -qi '^Hardware.*BCM' /proc/cpuinfo; then
    echo "Running on Raspberry Pi" | tee -a /tmp/client-sim.log
    echo "Skipping open source wifi driver install" | tee -a /tmp/client-sim.log
-  else
+else
     echo "Not running on Raspberry Pi" | tee -a /tmp/client-sim.log
     echo "Installing open source wifi drivers for client simulation" | tee -a /tmp/client-sim.log
     echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
@@ -194,7 +193,6 @@ if [ -f /proc/device-tree/model ]; then
     sudo make install
     sudo modprobe 8723au
     sudo dkms add .
-  fi
 fi
 #------------------------------------------------------------
 echo install is complete | tee -a /tmp/client-sim.log
