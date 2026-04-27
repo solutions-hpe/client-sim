@@ -208,4 +208,4 @@ if [ -r "$CPUINFO_FILE" ]; then
     fi
 fi
 #------------------------------------------------------------
-echo install is complete | tee -a /tmp/client-sim.log
+echo Install is complete | tee -a /tmp/client-sim.log
