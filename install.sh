@@ -54,7 +54,11 @@ sudo DEBIAN_FRONTEND=noninteractive apt install dkms -y
 sudo DEBIAN_FRONTEND=noninteractive apt install iperf3 -y
 sudo DEBIAN_FRONTEND=noninteractive apt install firefox-esr -y
 sudo DEBIAN_FRONTEND=noninteractive apt install rsyslog -y
+sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-pip
+sudo DEBIAN_FRONTEND=noninteractive apt install -y i2c-tools
+sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-smbus
 sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
+sudo pip3 install rpi-lcd
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
