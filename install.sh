@@ -21,6 +21,7 @@ sudo mkdir /usr/local/scripts
 #Without this - the logging screens at boot will not be pinned to the right x,y coordinates
 echo Disabling Wayland so gnome-terminal windows can be pinned | tee -a /tmp/client-sim.log
 sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
+sudo raspi-config nonint do_wayland 1
 #By default screen will blank and need to log back in after 5 minutes - disabling this as the client is running scripts
 echo Disabling screen blanking | tee -a /tmp/client-sim.log
 gsettings set org.gnome.desktop.session idle-delay 0
