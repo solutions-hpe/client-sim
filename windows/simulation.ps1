@@ -1,8 +1,9 @@
 # =========================================================
-# Simulation Network State Engine (Hardened Logging Pass)
+# Simulation Network State Engine (Full Hardened Build)
+# WPA2/WPA3 Auto Profile + Debug + Self-Healing
 # =========================================================
 
-$version = "2.7-state-engine-hardened"
+$version = "3.0-state-engine-full"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 
@@ -11,8 +12,12 @@ $maxLogSize = 10MB
 # -------------------------
 
 $script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
+
+# REQUIRED CONFIG VALUES
 $script:ssid    = $ssid
-$script:debug   = $true
+$script:ssidpw  = $ssidpw
+
+$script:debug = $true
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -23,9 +28,9 @@ $script:debug   = $true
 $script:State = "Init"
 $script:wifiFailCount = 0
 
-# -------------------------
+# =========================================================
 # LOGGING
-# -------------------------
+# =========================================================
 
 function Rotate-LogIfNeeded {
     if (Test-Path $logPath) {
@@ -49,24 +54,9 @@ function Debug($msg) {
     }
 }
 
-# -------------------------
-# DIAGNOSTICS
-# -------------------------
-
-function Show-WifiDiagnostics {
-
-    try {
-        $info = netsh wlan show interfaces
-
-        Debug "---- WiFi Interface Dump ----"
-        $info | ForEach-Object {
-            Debug ("{0}" -f $_)
-        }
-    }
-    catch {
-        Debug "Failed to read wlan interface"
-    }
-}
+# =========================================================
+# NETWORK CHECKS
+# =========================================================
 
 function Test-Network {
     try {
@@ -84,9 +74,9 @@ function Test-WifiConnected {
     }
 }
 
-# -------------------------
-# ADAPTERS
-# -------------------------
+# =========================================================
+# ADAPTER DETECTION
+# =========================================================
 
 function Detect-Adapters {
 
@@ -101,32 +91,141 @@ function Detect-Adapters {
     $script:wladapter = $wifi.Name
     $script:eadapter   = $eth.Name
 
-    Debug ("WiFi Adapter = {0}" -f $script:wladapter)
-    Debug ("Ethernet Adapter = {0}" -f $script:eadapter)
+    Debug ("WiFi Adapter: {0}" -f $script:wladapter)
+    Debug ("Ethernet Adapter: {0}" -f $script:eadapter)
 }
 
-# -------------------------
+# =========================================================
+# WIFI SECURITY DETECTION (OPTION A)
+# =========================================================
+
+function Get-WifiSecurityType {
+
+    try {
+        $scan = netsh wlan show networks mode=bssid
+
+        if ($scan -match "WPA3") { return "WPA3" }
+        if ($scan -match "WPA2") { return "WPA2" }
+        if ($scan -match "WPA")  { return "WPA" }
+
+        return "UNKNOWN"
+    }
+    catch {
+        return "UNKNOWN"
+    }
+}
+
+# =========================================================
+# WIFI PROFILE XML GENERATION
+# =========================================================
+
+function New-WifiProfileXml {
+    param(
+        [string]$ssid,
+        [string]$password,
+        [string]$securityType
+    )
+
+    $auth = "WPA2PSK"
+    $enc  = "AES"
+
+    switch ($securityType) {
+        "WPA3" {
+            $auth = "WPA2PSK"
+            $enc  = "AES"
+        }
+        "WPA" {
+            $auth = "WPAPSK"
+            $enc  = "TKIP"
+        }
+        default {
+            $auth = "WPA2PSK"
+            $enc  = "AES"
+        }
+    }
+
+@"
+<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>$ssid</name>
+
+    <SSIDConfig>
+        <SSID>
+            <name>$ssid</name>
+        </SSID>
+    </SSIDConfig>
+
+    <connectionType>ESS</connectionType>
+    <connectionMode>auto</connectionMode>
+
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>$auth</authentication>
+                <encryption>$enc</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>$password</keyMaterial>
+            </sharedKey>
+        </security>
+    </MSM>
+</WLANProfile>
+"@
+}
+
+# =========================================================
+# PROFILE INSTALL (TEMP FILE)
+# =========================================================
+
+function Install-WifiProfile {
+
+    $security = Get-WifiSecurityType
+    $tempFile = Join-Path $env:TEMP ("wifi_{0}.xml" -f $script:ssid)
+
+    try {
+        Debug ("Detected security type: {0}" -f $security)
+
+        $xml = New-WifiProfileXml -ssid $script:ssid -password $script:ssidpw -securityType $security
+        $xml | Set-Content -Path $tempFile -Encoding UTF8
+
+        Debug ("Writing temp profile: {0}" -f $tempFile)
+
+        $result = netsh wlan add profile filename="$tempFile" user=current 2>&1
+
+        Debug ("Profile import result: {0}" -f ($result -join " "))
+    }
+    finally {
+        if (Test-Path $tempFile) {
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            Debug "Temp Wi-Fi profile deleted"
+        }
+    }
+}
+
+# =========================================================
 # HARD ETHERNET LOCK
-# -------------------------
+# =========================================================
 
 function Enforce-EthernetLock {
 
     Detect-Adapters
 
     if ($script:wladapter) {
-        Debug "Disabling Wi-Fi adapter"
         Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
     }
 
     if ($script:eadapter) {
-        Debug "Enabling Ethernet adapter"
         Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
     }
 }
 
-# -------------------------
-# WIFI CONNECT
-# -------------------------
+# =========================================================
+# WIFI CONNECT (FULL SAFE FLOW)
+# =========================================================
 
 function Connect-Wifi {
 
@@ -135,7 +234,9 @@ function Connect-Wifi {
         return $false
     }
 
-    for ($i = 1; $i -le 3; $i++) {
+    Install-WifiProfile
+
+    for ($i = 1; $i -le 5; $i++) {
 
         Debug ("Wi-Fi attempt {0} -> SSID {1}" -f $i, $script:ssid)
 
@@ -144,12 +245,10 @@ function Connect-Wifi {
         Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
         Start-Sleep 5
 
-        $netshOutput = netsh wlan connect name="$script:ssid" 2>&1
-        Debug ("netsh output: {0}" -f ($netshOutput -join " "))
+        $output = & netsh wlan connect name="$script:ssid" 2>&1
+        Debug ("netsh output: {0}" -f ($output -join " "))
 
         Start-Sleep 6
-
-        Show-WifiDiagnostics
 
         if (Test-WifiConnected -and Test-Network) {
             Debug "Wi-Fi + Internet confirmed"
@@ -162,9 +261,9 @@ function Connect-Wifi {
     return $false
 }
 
-# -------------------------
+# =========================================================
 # STATE ACTIONS
-# -------------------------
+# =========================================================
 
 function Enter-WirelessState {
 
@@ -180,7 +279,7 @@ function Enter-WirelessState {
         $script:wifiFailCount = 0
     }
     else {
-        Log "STATE -> WiFiFailed -> Recovery"
+        Log "Wi-Fi failed -> Recovery"
         $script:State = "Recovery"
     }
 }
@@ -205,9 +304,9 @@ function Enter-RecoveryState {
     $script:State = "EthernetActive"
 }
 
-# -------------------------
+# =========================================================
 # STATE ENGINE
-# -------------------------
+# =========================================================
 
 function State-Engine {
 
@@ -260,9 +359,9 @@ function State-Engine {
     }
 }
 
-# -------------------------
+# =========================================================
 # MAIN LOOP
-# -------------------------
+# =========================================================
 
 Log "================================"
 Log ("State Engine {0}" -f $version)
@@ -276,7 +375,6 @@ while ($true) {
         State-Engine
 
         if ($script:State -eq "WirelessActive") {
-
             if (-not (Test-Network)) {
                 Log ("Cycle {0}: network unstable" -f $cycle)
             }
