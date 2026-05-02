@@ -1,8 +1,8 @@
 # -------------------------
-# Simulation Script (Strict Wireless Behavior)
+# Simulation Script (Verified Syntax)
 # -------------------------
 
-$version = "0.98"
+$version = "0.99"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 $script:RecoveryMode = $false
@@ -18,7 +18,8 @@ function Rotate-LogIfNeeded {
                 $content = Get-Content $logPath -Tail 5000
                 Set-Content -Path $logPath -Value $content
             }
-        } catch {}
+        } catch {
+        }
     }
 }
 
@@ -45,7 +46,8 @@ function Test-Network {
 
 function Test-WifiConnected {
     try {
-        return (netsh wlan show interfaces) -match "State\s*:\s*connected"
+        $out = netsh wlan show interfaces
+        return ($out -match "State\s*:\s*connected")
     } catch {
         return $false
     }
@@ -56,6 +58,7 @@ function Test-WifiConnected {
 # -------------------------
 
 function Detect-Adapters {
+
     $script:wladapter = Get-NetAdapter |
         Where-Object { $_.Name -match "wireless|wlan|wi-fi" } |
         Select-Object -First 1 -ExpandProperty Name
@@ -71,9 +74,8 @@ function Detect-Adapters {
 
 function Connect-Wifi {
 
-    if (-not $script:wladapter -or -not $ssid) {
-        return $false
-    }
+    if (-not $script:wladapter) { return $false }
+    if (-not $ssid) { return $false }
 
     for ($i = 1; $i -le 4; $i++) {
 
@@ -109,23 +111,38 @@ function Connect-Wifi {
 function Apply-WirelessMode {
 
     if (-not $script:wladapter) {
+
         Log "No Wi-Fi adapter → fallback to Ethernet"
-        Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+
+        if ($script:eadapter) {
+            Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        }
+
         $script:RecoveryMode = $true
         return
     }
 
-    Disable-NetAdapter -Name $script:eadapter -Confirm:$false -ErrorAction SilentlyContinue
+    if ($script:eadapter) {
+        Disable-NetAdapter -Name $script:eadapter -Confirm:$false -ErrorAction SilentlyContinue
+    }
 
-    if (-not (Connect-Wifi)) {
+    $wifiOK = Connect-Wifi
+
+    if (-not $wifiOK) {
 
         Log "Wi-Fi unavailable → enabling Ethernet + recovery mode"
 
-        Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        if ($script:eadapter) {
+            Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        }
 
         if (Test-Path ".\update.ps1") {
             Log "Running update.ps1"
-            try { . .\update.ps1 } catch {}
+            try {
+                . .\update.ps1
+            } catch {
+                Log "update.ps1 failed"
+            }
         }
 
         $script:RecoveryMode = $true
@@ -196,10 +213,13 @@ while ($true) {
         Log ("Cycle {0}: network unstable" -f $cycle)
     }
 
-    # 🔴 Only runs when NOT in recovery mode
-    foreach ($script in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
-        if (Test-Path $script) {
-            try { . .\$script } catch {}
+    foreach ($scriptName in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
+        if (Test-Path $scriptName) {
+            try {
+                . .\$scriptName
+            } catch {
+                Log ("Script {0} failed" -f $scriptName)
+            }
         }
     }
 
