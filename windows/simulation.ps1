@@ -46,6 +46,22 @@ function Connect-Wifi {
     Start-Sleep $waitTime
 }
 
+function Test-Network {
+    $gw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
+        Sort-Object RouteMetric |
+        Select-Object -First 1 -ExpandProperty NextHop
+
+    if ([string]::IsNullOrWhiteSpace($gw)) {
+        return $false
+    }
+
+    try {
+        return Test-Connection -ComputerName $gw -Count 2 -Quiet -ErrorAction SilentlyContinue
+    } catch {
+        return $false
+    }
+}
+
 Get-Date | Log
 "------------------------------" | Log
 "Simulation Script Version $version" | Log
@@ -60,66 +76,51 @@ if ([string]::IsNullOrWhiteSpace($hostname)) { $hostname = "UNKNOWN" }
 Log "Hostname: $hostname"
 
 $wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
-$eadapter = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
+$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
 
 if ($wladapter) { Log "WLAN Adapter name $wladapter" }
 if ($eadapter) { Log "Wired Adapter name $eadapter" }
 
-Log "Parsing Config File"
-
-$kill_switch = Get-SafeString (get_value 'simulation' 'kill_switch') "off"
-$rapid_update = Get-SafeString (get_value 'simulation' 'rapid_update') "off"
-$sim_load = Get-SafeInt (get_value 'simulation' 'sim_load') 100
-$vh_server = Get-SafeString (get_value 'simulation' 'vh_server') "off"
+$kill_switch   = Get-SafeString (get_value 'simulation' 'kill_switch') "off"
+$rapid_update  = Get-SafeString (get_value 'simulation' 'rapid_update') "off"
+$sim_load      = Get-SafeInt (get_value 'simulation' 'sim_load') 100
+$vh_server     = Get-SafeString (get_value 'simulation' 'vh_server') "off"
 $site_based_ssid = Get-SafeString (get_value 'simulation' 'site_based_ssid') "off"
-$ssidpw_fail = Get-SafeString (get_value 'simulation' 'ssidpw_fail') "off"
-$auth_fail = Get-SafeString (get_value 'simulation' 'auth_fail') "off"
-$dns_fail = Get-SafeString (get_value 'simulation' 'dns_fail') "off"
-$download = Get-SafeString (get_value 'simulation' 'download') "off"
-$iperf = Get-SafeString (get_value 'simulation' 'iperf') "off"
-$www_traffic = Get-SafeString (get_value 'simulation' 'www_traffic') "off"
+
+$ssidpw_fail   = Get-SafeString (get_value 'simulation' 'ssidpw_fail') "off"
+$auth_fail     = Get-SafeString (get_value 'simulation' 'auth_fail') "off"
+$dns_fail      = Get-SafeString (get_value 'simulation' 'dns_fail') "off"
+$download      = Get-SafeString (get_value 'simulation' 'download') "off"
+$iperf         = Get-SafeString (get_value 'simulation' 'iperf') "off"
+$www_traffic   = Get-SafeString (get_value 'simulation' 'www_traffic') "off"
 
 $wsite = Get-SafeString (get_value $simulation_id 'wsite')
 $sim_phy = Get-SafeString (get_value $simulation_id 'sim_phy') "wireless"
 $ssid = Get-SafeString (get_value $simulation_id 'ssid')
-$ssidpw = Get-SafeString (get_value $simulation_id 'ssidpw')
 
-$ping_address = Get-SafeString (get_value 'address' 'ping_address')
-$iperf_server = Get-SafeString (get_value 'address' 'iperf_server')
+Log "Parsing Config File"
 
-$dfgw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
-        Sort-Object RouteMetric |
-        Select-Object -First 1 -ExpandProperty NextHop
-
-Log "DEBUG: Default gateway = [$dfgw]"
-
-$network_ok = $false
-
-if ([string]::IsNullOrWhiteSpace($dfgw)) {
-    Log "No default gateway detected"
-    $network_ok = $false
-}
-else {
-    try {
-        $network_ok = Test-Connection -ComputerName $dfgw -Count 2 -Quiet -ErrorAction Stop
-    } catch {
-        Log "Gateway test failed: $($_.Exception.Message)"
-        $network_ok = $false
-    }
-}
+$network_ok = Test-Network
 
 if ($network_ok) {
     Log "Successful network connection"
 }
 else {
     Log "Network connection failed"
-    if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) { . .\vhconnect.ps1 }
+
+    if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
+        . .\vhconnect.ps1
+    }
+
     Connect-Wifi -waitTime 15
+
+    $network_ok = Test-Network
+    Log "Post-reconnect network state: $network_ok"
 }
 
-if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) { . .\update.ps1 }
-
-Log "Disabling unused interface"
+if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) {
+    . .\update.ps1
+}
 
 if ($sim_phy -eq "ethernet" -and $wladapter) {
     Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
@@ -135,8 +136,6 @@ if ($sim_load -lt $rn_sim_load) {
     Log "Simulation load under threshold"
     Start-Sleep (Get-Random -Minimum 1 -Maximum 10)
 }
-
-$kill_switch = Get-SafeString $kill_switch "off"
 
 Log "Kill Switch is $kill_switch"
 
@@ -168,24 +167,18 @@ if ($kill_switch -eq "off") {
             }
             else {
                 Log "Network connection failed"
-                if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) { . .\vhconnect.ps1 }
-                Connect-Wifi -waitTime 15
-            }
 
-            $dfgw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
-                    Sort-Object RouteMetric |
-                    Select-Object -First 1 -ExpandProperty NextHop
-
-            if (-not [string]::IsNullOrWhiteSpace($dfgw)) {
-                try {
-                    $network_ok = Test-Connection -ComputerName $dfgw -Count 2 -Quiet -ErrorAction SilentlyContinue
-                } catch {
-                    $network_ok = $false
+                if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
+                    . .\vhconnect.ps1
                 }
+
+                Connect-Wifi -waitTime 15
+
+                $network_ok = Test-Network
+                Log "Post-reconnect network state: $network_ok"
             }
-            else {
-                $network_ok = $false
-            }
+
+            $network_ok = Test-Network
 
             if (-not $network_ok) {
                 Log "Connection failed multiple times"
