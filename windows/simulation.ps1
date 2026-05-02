@@ -1,8 +1,8 @@
 # =========================================================
-# Simulation Network State Engine (Hard Ethernet Lock Fix)
+# Simulation Network State Engine (Debug Enabled Wi-Fi Fix)
 # =========================================================
 
-$version = "2.4-state-engine-ethernet-lock"
+$version = "2.6-state-engine-debug"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 
@@ -12,6 +12,9 @@ $maxLogSize = 10MB
 
 $script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
 $script:ssid    = $ssid
+$script:debug   = $true
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # -------------------------
 # STATE
@@ -41,9 +44,28 @@ function Log($msg) {
     $line | Tee-Object -FilePath $logPath -Append
 }
 
+function Debug($msg) {
+    if ($script:debug) {
+        Log ("[DEBUG] " + $msg)
+    }
+}
+
 # -------------------------
-# NETWORK CHECKS
+# DIAGNOSTICS
 # -------------------------
+
+function Show-WifiDiagnostics {
+
+    try {
+        $info = netsh wlan show interfaces
+
+        Debug "---- WiFi Interface Dump ----"
+        $info | ForEach-Object { Debug $_ }
+
+    } catch {
+        Debug "Failed to read wlan interface"
+    }
+}
 
 function Test-Network {
     try {
@@ -55,9 +77,10 @@ function Test-Network {
 
 function Test-WifiConnected {
     try {
-        (netsh wlan show interfaces) -match "State\s*:\s*connected"
+        $out = netsh wlan show interfaces
+        return ($out -match "State\s*:\s*connected")
     } catch {
-        $false
+        return $false
     }
 }
 
@@ -77,6 +100,9 @@ function Detect-Adapters {
 
     $script:wladapter = $wifi.Name
     $script:eadapter   = $eth.Name
+
+    Debug "WiFi Adapter = $($script:wladapter)"
+    Debug "Ethernet Adapter = $($script:eadapter)"
 }
 
 # -------------------------
@@ -88,10 +114,12 @@ function Enforce-EthernetLock {
     Detect-Adapters
 
     if ($script:wladapter) {
+        Debug "Disabling Wi-Fi adapter"
         Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
     }
 
     if ($script:eadapter) {
+        Debug "Enabling Ethernet adapter"
         Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
     }
 }
@@ -102,22 +130,36 @@ function Enforce-EthernetLock {
 
 function Connect-Wifi {
 
-    if (-not $script:wladapter) { return $false }
+    if (-not $script:wladapter) {
+        Debug "No Wi-Fi adapter found"
+        return $false
+    }
 
     for ($i = 1; $i -le 3; $i++) {
 
-        Log ("Wi-Fi attempt {0} → {1}" -f $i, $script:ssid)
+        Debug "Wi-Fi attempt $i connecting to SSID: $script:ssid"
 
         Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
         Start-Sleep 2
         Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
         Start-Sleep 5
 
-        netsh wlan connect name="$script:ssid" | Out-Null
+        $netshOutput = netsh wlan connect name="$script:ssid" 2>&1
+        Debug "netsh output: $netshOutput"
+
         Start-Sleep 6
 
+        Show-WifiDiagnostics
+
         if (Test-WifiConnected) {
-            return $true
+
+            if (Test-Network) {
+                Debug "Wi-Fi + Internet confirmed OK"
+                return $true
+            }
+            else {
+                Debug "Wi-Fi connected but NO internet"
+            }
         }
 
         Start-Sleep (5 * $i)
@@ -139,12 +181,12 @@ function Enter-WirelessState {
     }
 
     if (Connect-Wifi) {
-        Log "STATE → WirelessActive"
+        Log "STATE -> WirelessActive"
         $script:State = "WirelessActive"
         $script:wifiFailCount = 0
     }
     else {
-        Log "Wi-Fi failed → Recovery"
+        Log "Wi-Fi failed -> Recovery"
         $script:State = "Recovery"
     }
 }
@@ -153,7 +195,7 @@ function Enter-EthernetState {
 
     Enforce-EthernetLock
 
-    Log "STATE → EthernetActive"
+    Log "STATE -> EthernetActive"
     $script:State = "EthernetActive"
 }
 
@@ -165,7 +207,7 @@ function Enter-RecoveryState {
         Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
     }
 
-    Log "STATE → Recovery → Ethernet fallback"
+    Log "STATE -> Recovery -> Ethernet fallback"
     $script:State = "EthernetActive"
 }
 
@@ -178,7 +220,7 @@ function State-Engine {
     switch ($script:State) {
 
         "Init" {
-            Log "STATE → Init"
+            Log "STATE -> Init"
 
             if ($script:sim_phy -eq "wireless") {
                 Enter-WirelessState
@@ -191,7 +233,6 @@ function State-Engine {
         "WirelessActive" {
 
             if (Test-Network -and Test-WifiConnected) {
-                $script:wifiFailCount = 0
                 return
             }
 
@@ -200,20 +241,19 @@ function State-Engine {
             if ($script:wifiFailCount -le 5) {
 
                 $delay = [math]::Pow(2, $script:wifiFailCount)
-                Log ("Wireless retry {0}/5 → wait {1}s" -f $script:wifiFailCount, $delay)
+                Log "Wireless retry $script:wifiFailCount/5 -> wait ${delay}s"
 
                 Start-Sleep $delay
                 Connect-Wifi | Out-Null
                 return
             }
 
-            Log "Wireless failed → switching to Ethernet"
+            Log "Wireless failed after retries -> Ethernet failover"
             $script:State = "Recovery"
         }
 
         "EthernetActive" {
 
-            # HARD RULE: never attempt Wi-Fi in ethernet mode
             if ($script:sim_phy -eq "ethernet") {
                 Enforce-EthernetLock
             }
@@ -238,34 +278,20 @@ while ($true) {
 
     try {
 
-        if (Test-Path "C:\Scripts\kill.flag") {
-            Log "Kill switch activated"
-            break
-        }
-
         State-Engine
 
         if ($script:State -eq "WirelessActive") {
 
             if (-not (Test-Network)) {
-                Log ("Cycle {0}: unstable network" -f $cycle)
+                Log "Cycle $cycle: network unstable"
             }
-
-            foreach ($s in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
-                if (Test-Path $s) {
-                    try { & ".\$s" } catch {}
-                }
-            }
-        }
-        else {
-            Log ("Cycle {0}: state={1}" -f $cycle, $script:State)
         }
 
         Start-Sleep (Get-Random -Min 3 -Max 10)
         $cycle++
     }
     catch {
-        Log "FATAL ERROR → reset to Init"
+        Log "FATAL ERROR -> resetting state machine"
         Log $_.Exception.Message
         $script:State = "Init"
         $script:wifiFailCount = 0
