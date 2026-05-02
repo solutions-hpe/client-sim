@@ -26,11 +26,7 @@ function Parse-IniFile {
 
 function get_value {
     param([string]$section, [string]$key)
-    if ($global:iniConfig.ContainsKey($section) -and $global:iniConfig[$section].ContainsKey($key)) {
-        return $global:iniConfig[$section][$key]
-    } else {
-        return $null
-    }
+    return $global:iniConfig[$section][$key]
 }
 
-# To use: $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
+# To use: $global:iniConfig = Parse-IniFile 'path\to\file'

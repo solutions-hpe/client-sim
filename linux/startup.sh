@@ -20,6 +20,7 @@ xset s noblank
 xset -dpms
 xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
+sudo xrandr --output HDMI-1 --mode 1920x1080
 #------------------------------------------------------------
 #Figuring out username from hostname used to parse config
 #------------------------------------------------------------

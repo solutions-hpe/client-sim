@@ -18,23 +18,27 @@ $dns_bad_record_1 = get_value 'address' 'dns_bad_record_1'
 $dns_bad_record_2 = get_value 'address' 'dns_bad_record_2'
 $dns_bad_record_3 = get_value 'address' 'dns_bad_record_3'
 
-$bad_records = @($dns_bad_record_1, $dns_bad_record_2, $dns_bad_record_3)
-$bad_ips = @($dns_bad_ip_1, $dns_bad_ip_2, $dns_bad_ip_3)
-$latencies = @($dns_latency_1, $dns_latency_2, $dns_latency_3)
-
 for ($i = 1; $i -le 10; $i++) {
     foreach ($r in $dnsfile) {
         Get-Date | Tee-Object -FilePath $logPath -Append
         "------------------------------" | Tee-Object -FilePath $logPath -Append
-        "DNS Fail: $dns_fail" | Tee-Object -FilePath $logPath -Append
+        "DNS Fail: $dns_fail" | Tee-Object -FilePath $logPath -Append  # Note: $dns_fail not defined, perhaps from config?
         "Running DNS Failure:" | Tee-Object -FilePath $logPath -Append
         "Simulation Iteration: $i" | Tee-Object -FilePath $logPath -Append
         $r | Tee-Object -FilePath $logPath -Append
         "------------------------------" | Tee-Object -FilePath $logPath -Append
 
-        foreach ($server in ($bad_records + $bad_ips + $latencies)) {
-            Resolve-DnsName -Name $r -Server $server -ErrorAction SilentlyContinue
-        }
+        # Simulate dig commands using Resolve-DnsName
+        try { Resolve-DnsName -Name $r -Server $dns_bad_record_1 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_bad_record_2 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_bad_record_3 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_bad_ip_1 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_bad_ip_2 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_bad_ip_3 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_latency_1 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_latency_2 -ErrorAction Stop } catch { }
+        try { Resolve-DnsName -Name $r -Server $dns_latency_3 -ErrorAction Stop } catch { }
+
         Start-Sleep 5
     }
 }

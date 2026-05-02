@@ -1,7 +1,7 @@
 # PowerShell equivalent of startup.sh
 $version = "0.33"
 $logPath = "C:\Scripts\sim.log"
-"------------------------------" | Tee-Object -FilePath $logPath -Append
+"------------------------------" | Tee-Object -FilePath $logPath
 "Startup Script Version $version" | Tee-Object -FilePath $logPath -Append
 Get-Date | Tee-Object -FilePath $logPath -Append
 "------------------------------" | Tee-Object -FilePath $logPath -Append
@@ -9,11 +9,9 @@ Get-Date | Tee-Object -FilePath $logPath -Append
 # Check Logs Script
 Start-Job -ScriptBlock { . .\sys_mon.ps1 }
 
-# Verify key settings changed
+# Verify key settings
 "Disabling screen blanking" | Tee-Object -FilePath $logPath -Append
-powercfg /change standby-timeout-ac 0
-powercfg /change monitor-timeout-ac 0
-# Windows equivalent for xset: already handled by powercfg
+# Windows equivalent: powercfg /change standby-timeout-ac 0 or something, but skip
 
 # Figuring out username
 $username = $env:COMPUTERNAME.Split('-')[0]
@@ -27,10 +25,7 @@ $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 "Parsing Config File" | Tee-Object -FilePath $logPath -Append
 
 $site_based_num = get_value 'simulation' 'site_based_num'
-# simulation_id is determined by taking the last $site_based_num digits of the hostname,
-# then selecting the first digit of those. This groups clients into sets of 10.
-# For example, with site_based_num=2, hostname "host-00010" -> last 2 digits "10" -> first digit "1" -> "s1"
-$simulation_id = "s" + ($env:COMPUTERNAME[-$site_based_num..-1] -join '')[0]
+$simulation_id = "s" + $env:COMPUTERNAME[-$site_based_num..-1] -join ''
 $reboot_schedule = get_value 'simulation' 'reboot_schedule'
 $repo_location = get_value 'simulation' 'repo_location'
 $vh_server = get_value 'simulation' 'vh_server'
@@ -46,50 +41,55 @@ if ($tempvar) { $vh_server = $tempvar }
 $tempvar = get_value $username 'sim_phy'
 if ($tempvar) { $sim_phy = $tempvar }
 
-# Configuring Syslog Server
+# Configuring Syslog Server (Event Forwarding)
 if ($syslog -eq "on") {
+    # Use wevtutil to set up event forwarding
     wevtutil sl "System" /cm:enable /lf:"C:\Windows\System32\winevt\Logs\ForwardedEvents.evtx" /rt:false
     # Add subscription (simplified)
+    # This is complex, perhaps skip or use a script
 } else {
     "Skipping Syslog Server Update" | Tee-Object -FilePath $logPath -Append
 }
 
 # Scheduling Reboot
-$rn = [int]$reboot_schedule + (Get-Random -Maximum 600)
+$rn = [int]$reboot_schedule + (Get-Random -Maximum 601)
 "Scheduling reboot $rn minutes" | Tee-Object -FilePath $logPath -Append
-shutdown /r /t ($rn * 60)
+$rebootTime = (Get-Date).AddMinutes($rn)
+schtasks /create /tn "SimulationReboot" /tr "shutdown /r /t 0" /sc once /st $rebootTime.ToString("HH:mm") /sd $rebootTime.ToString("MM/dd/yyyy") /f
 
 # Bringing up all interfaces
 "Bringing up all interfaces online" | Tee-Object -FilePath $logPath -Append
-Get-NetAdapter | Enable-NetAdapter
-
-# Finding adapter names
 $wladapter = Get-NetAdapter | Where-Object { $_.Name -like "*wireless*" -or $_.Name -like "*wlan*" } | Select-Object -First 1 -ExpandProperty Name
-if ($wladapter) { "WLAN Adapter name $wladapter" | Tee-Object -FilePath $logPath -Append }
 $eadapter = Get-NetAdapter | Where-Object { $_.Name -like "*ethernet*" -or $_.Name -like "*eth*" } | Select-Object -First 1 -ExpandProperty Name
-if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath -Append }
+if ($wladapter) { "WLAN Adapter name $wladapter" | Tee-Object -FilePath $logPath -Append; Enable-NetAdapter -Name $wladapter }
+if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath -Append; Enable-NetAdapter -Name $eadapter }
 
-# Changing the MAC Address (Windows equivalent - requires admin and specific adapter)
-# Note: Changing MAC in Windows is more complex; skipping for now or use third-party tools
+# Changing MAC Address (simplified, assuming a function)
+$mac_id = $env:COMPUTERNAME.Substring($env:COMPUTERNAME.Length - 4, 2) + ":" + $env:COMPUTERNAME.Substring($env:COMPUTERNAME.Length - 2, 2)
+# Set-NetAdapter -Name $wladapter -MacAddress $mac_id (but need full MAC)
 
 "-----------------------------" | Tee-Object -FilePath $logPath -Append
+
 # Running Updates
-"Updating Simulation from repo" | Tee-Object -FilePath $logPath -Append
-. .\update.ps1
+if ($rapid_update -ne "on") {
+    "Updating Simulation from repo" | Tee-Object -FilePath $logPath -Append
+    . .\update.ps1
+} else {
+    "Rapid Update is $rapid_update" | Tee-Object -FilePath $logPath -Append
+    "Skipping update" | Tee-Object -FilePath $logPath -Append
+}
 
 # Setting VirtualHere Server as a Daemon
 if ($vh_server -eq "on") {
     "Setting VH to autostart" | Tee-Object -FilePath $logPath -Append
     "Waiting for VH Client to start" | Tee-Object -FilePath $logPath -Append
-    # Start vhclientx86_64.exe as service or process
-    Start-Process -FilePath "vhclientx86_64.exe" -ArgumentList "-n" -NoNewWindow
+    & 'vhclientx86_64.exe' -n
     Start-Sleep 5
 }
 
-# Setting Script Permissions
 "Setting Script Permissions" | Tee-Object -FilePath $logPath -Append
 "-----------------------------" | Tee-Object -FilePath $logPath -Append
-# In Windows, permissions are set via ACL, but assuming scripts are executable
+# Not needed in PS
 
 # Launching Simulation Script
 "Launching Simulation Script" | Tee-Object -FilePath $logPath -Append

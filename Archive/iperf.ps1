@@ -12,7 +12,12 @@ Get-Date | Tee-Object -FilePath $logPath -Append
 "Running iPerf simulation:" | Tee-Object -FilePath $logPath -Append
 "------------------------------" | Tee-Object -FilePath $logPath -Append
 
-$ports = @($rn_iperf_port, 443, 3260, 2049, 1194, 3389, 445, 80, 1433)
-foreach ($port in $ports) {
-    & 'iperf3.exe' -c $iperf_server -p $port -b 1k -t $rn_iperf_time
-}
+& 'iperf3.exe' -c $iperf_server -p $rn_iperf_port -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 443 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 3260 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 2049 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 1194 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 3389 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 445 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 80 -b 1k -t $rn_iperf_time
+& 'iperf3.exe' -c $iperf_server -p 1433 -b 1k -t $rn_iperf_time
