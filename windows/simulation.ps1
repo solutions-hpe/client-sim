@@ -21,17 +21,83 @@ function Get-SafeString($v, $default = "") {
     return [string]$v
 }
 
+function Test-Network {
+    $gw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
+        Sort-Object RouteMetric |
+        Select-Object -First 1 -ExpandProperty NextHop
+
+    if ([string]::IsNullOrWhiteSpace($gw)) { return $false }
+
+    try {
+        return Test-Connection -ComputerName $gw -Count 2 -Quiet -ErrorAction SilentlyContinue
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-NetworkSafety {
+
+    $wifiUp = if ($wladapter) {
+        (Get-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue).Status -eq "Up"
+    } else { $false }
+
+    $ethUp = if ($eadapter) {
+        (Get-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue).Status -eq "Up"
+    } else { $false }
+
+    if (-not $wifiUp -and -not $ethUp) {
+
+        Log "CRITICAL: No interfaces up — forcing recovery"
+
+        if ($wladapter) { Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue }
+        if ($eadapter)  { Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue }
+
+        Start-Sleep 5
+    }
+}
+
+function Apply-PhyMode {
+
+    if ($sim_phy -eq "ethernet") {
+
+        if ($eadapter) {
+            Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue
+        }
+
+        if ($wladapter) {
+            Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
+        }
+
+        Log "PHY MODE: Ethernet only"
+    }
+
+    elseif ($sim_phy -eq "wireless") {
+
+        if ($wladapter) {
+            Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+        }
+
+        Log "PHY MODE: Wireless primary (Ethernet available for recovery)"
+    }
+
+    Ensure-NetworkSafety
+}
+
 function Connect-Wifi {
+
     param (
         [int]$waitTime = 15,
         [int]$timeout = 30
     )
 
-    if ($wladapter) {
-        Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-        Start-Sleep 2
-        Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+    if (-not $wladapter) {
+        Log "Wi-Fi adapter missing, skipping Wi-Fi connect"
+        return
     }
+
+    Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
 
     Start-Sleep $waitTime
 
@@ -46,20 +112,61 @@ function Connect-Wifi {
     Start-Sleep $waitTime
 }
 
-function Test-Network {
-    $gw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
-        Sort-Object RouteMetric |
-        Select-Object -First 1 -ExpandProperty NextHop
+function Network-Controller {
 
-    if ([string]::IsNullOrWhiteSpace($gw)) {
+    param([switch]$ForceRecovery)
+
+    $network_ok = Test-Network
+
+    if ($network_ok) {
+        Log "Network OK"
+        return $true
+    }
+
+    Log "Network FAILED"
+
+    if ($ForceRecovery -or $sim_phy -eq "wireless") {
+
+        if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
+            . .\vhconnect.ps1
+        }
+
+        Log "Attempting Wi-Fi recovery"
+        Connect-Wifi -waitTime 15
+
+        $network_ok = Test-Network
+
+        if ($network_ok) {
+            Log "Recovery successful (Wi-Fi)"
+            return $true
+        }
+
+        if ($eadapter) {
+            Log "Wi-Fi failed — switching to Ethernet recovery"
+
+            if ($sim_phy -eq "wireless") {
+
+                if ($eadapter) { Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue }
+
+                if ($wladapter) {
+                    Disable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+                }
+            }
+
+            Start-Sleep 5
+            $network_ok = Test-Network
+
+            if ($network_ok) {
+                Log "Recovery successful (Ethernet)"
+                return $true
+            }
+        }
+
+        Log "Full recovery failed"
         return $false
     }
 
-    try {
-        return Test-Connection -ComputerName $gw -Count 2 -Quiet -ErrorAction SilentlyContinue
-    } catch {
-        return $false
-    }
+    return $false
 }
 
 Get-Date | Log
@@ -78,116 +185,44 @@ Log "Hostname: $hostname"
 $wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
 $eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
 
-if ($wladapter) { Log "WLAN Adapter name $wladapter" }
-if ($eadapter) { Log "Wired Adapter name $eadapter" }
+if ($wladapter) { Log "WLAN Adapter: $wladapter" }
+if ($eadapter)  { Log "Ethernet Adapter: $eadapter" }
 
-$kill_switch   = Get-SafeString (get_value 'simulation' 'kill_switch') "off"
-$rapid_update  = Get-SafeString (get_value 'simulation' 'rapid_update') "off"
-$sim_load      = Get-SafeInt (get_value 'simulation' 'sim_load') 100
-$vh_server     = Get-SafeString (get_value 'simulation' 'vh_server') "off"
+$kill_switch = Get-SafeString (get_value 'simulation' 'kill_switch') "off"
+$rapid_update = Get-SafeString (get_value 'simulation' 'rapid_update') "off"
+$sim_load = Get-SafeInt (get_value 'simulation' 'sim_load') 100
+$vh_server = Get-SafeString (get_value 'simulation' 'vh_server') "off"
 $site_based_ssid = Get-SafeString (get_value 'simulation' 'site_based_ssid') "off"
 
-$ssidpw_fail   = Get-SafeString (get_value 'simulation' 'ssidpw_fail') "off"
-$auth_fail     = Get-SafeString (get_value 'simulation' 'auth_fail') "off"
-$dns_fail      = Get-SafeString (get_value 'simulation' 'dns_fail') "off"
-$download      = Get-SafeString (get_value 'simulation' 'download') "off"
-$iperf         = Get-SafeString (get_value 'simulation' 'iperf') "off"
-$www_traffic   = Get-SafeString (get_value 'simulation' 'www_traffic') "off"
-
+$ssid = Get-SafeString (get_value $simulation_id 'ssid')
 $wsite = Get-SafeString (get_value $simulation_id 'wsite')
 $sim_phy = Get-SafeString (get_value $simulation_id 'sim_phy') "wireless"
-$ssid = Get-SafeString (get_value $simulation_id 'ssid')
 
-Log "Parsing Config File"
+Apply-PhyMode
 
-$network_ok = Test-Network
-
-if ($network_ok) {
-    Log "Successful network connection"
-}
-else {
-    Log "Network connection failed"
-
-    if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
-        . .\vhconnect.ps1
-    }
-
-    Connect-Wifi -waitTime 15
-
-    $network_ok = Test-Network
-    Log "Post-reconnect network state: $network_ok"
-}
+$network_ok = Network-Controller
 
 if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) {
     . .\update.ps1
 }
 
-if ($sim_phy -eq "ethernet" -and $wladapter) {
-    Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-}
-
-if ($sim_phy -eq "wireless" -and $vh_server -eq "off" -and $eadapter) {
-    Disable-NetAdapter -Name $eadapter -Confirm:$false -ErrorAction SilentlyContinue
-}
-
 $rn_sim_load = Get-Random -Minimum 1 -Maximum 100
 
 if ($sim_load -lt $rn_sim_load) {
-    Log "Simulation load under threshold"
+    Log "Simulation load low"
     Start-Sleep (Get-Random -Minimum 1 -Maximum 10)
 }
 
-Log "Kill Switch is $kill_switch"
+Log "Kill Switch: $kill_switch"
 
 if ($kill_switch -eq "off") {
 
     for ($z = 1; $z -le 100; $z++) {
 
-        if (($ssidpw_fail -eq "on" -or $auth_fail -eq "on") -and $wladapter) {
+        $network_ok = Network-Controller
 
-            if ($ssidpw_fail -eq "on" -and $ssid) {
-                for ($i = 1; $i -le 100; $i++) {
-                    Log "SSID Incorrect Password Simulation"
-                    Connect-Wifi -waitTime 5
-                }
-            }
-
-            if ($auth_fail -eq "on" -and $wladapter) {
-                for ($i = 1; $i -le 100; $i++) {
-                    Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-                    Start-Sleep 2
-                    Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
-                }
-            }
-        }
-        else {
-
-            if ($network_ok) {
-                Log "Successful network connection"
-            }
-            else {
-                Log "Network connection failed"
-
-                if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
-                    . .\vhconnect.ps1
-                }
-
-                Connect-Wifi -waitTime 15
-
-                $network_ok = Test-Network
-                Log "Post-reconnect network state: $network_ok"
-            }
-
-            $network_ok = Test-Network
-
-            if (-not $network_ok) {
-                Log "Connection failed multiple times"
-
-                if (Test-Path vhclientx86_64.exe) {
-                    & 'vhclientx86_64.exe' -t "STOP USING ALL LOCAL"
-                    & 'vhclientx86_64.exe' -t "AUTO USE CLEAR ALL"
-                }
-            }
+        if (-not $network_ok) {
+            Log "Controller recovery triggered"
         }
 
         if ($dns_fail -eq "on" -and (Test-Path .\dns_fail.ps1)) { . .\dns_fail.ps1 }
