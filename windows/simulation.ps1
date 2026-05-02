@@ -1,8 +1,8 @@
 # -------------------------
-# Simulation Script (Verified Syntax)
+# Simulation Script (Syntax Fixed)
 # -------------------------
 
-$version = "0.99"
+$version = "1.00"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 $script:RecoveryMode = $false
@@ -18,8 +18,7 @@ function Rotate-LogIfNeeded {
                 $content = Get-Content $logPath -Tail 5000
                 Set-Content -Path $logPath -Value $content
             }
-        } catch {
-        }
+        } catch {}
     }
 }
 
@@ -58,7 +57,6 @@ function Test-WifiConnected {
 # -------------------------
 
 function Detect-Adapters {
-
     $script:wladapter = Get-NetAdapter |
         Where-Object { $_.Name -match "wireless|wlan|wi-fi" } |
         Select-Object -First 1 -ExpandProperty Name
@@ -216,7 +214,7 @@ while ($true) {
     foreach ($scriptName in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
         if (Test-Path $scriptName) {
             try {
-                . .\$scriptName
+                & ".\$scriptName"
             } catch {
                 Log ("Script {0} failed" -f $scriptName)
             }
