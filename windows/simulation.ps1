@@ -1,11 +1,35 @@
 # -------------------------
-# Simulation Script (Infinite Loop - Safe)
+# Simulation Script (Infinite + Log Rotation)
 # -------------------------
 
-$version = "0.92"
+$version = "0.93"
 $logPath = "C:\Scripts\sim.log"
+$maxLogSize = 10MB   # 10 MB limit
+
+function Rotate-LogIfNeeded {
+
+    if (Test-Path $logPath) {
+        try {
+            $size = (Get-Item $logPath).Length
+
+            if ($size -ge $maxLogSize) {
+
+                # Keep last 50% of file
+                $content = Get-Content $logPath -Tail 5000
+
+                Set-Content -Path $logPath -Value $content
+
+            }
+        } catch {
+            # If rotation fails, don't crash simulation
+        }
+    }
+}
 
 function Log($msg) {
+
+    Rotate-LogIfNeeded
+
     $msg | Tee-Object -FilePath $logPath -Append
 }
 
@@ -46,7 +70,7 @@ $cycle = 1
 
 while ($true) {
 
-    # ---- Kill switch (file-based) ----
+    # ---- Kill switch ----
     if (Test-Path "C:\Scripts\kill.flag") {
         Log "Kill switch detected. Exiting simulation loop."
         break
@@ -58,7 +82,7 @@ while ($true) {
         Log ("Cycle {0}: network unstable" -f $cycle)
     }
 
-    # ---- Optional workload scripts (safe execution) ----
+    # ---- Optional scripts ----
     foreach ($script in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
         if (Test-Path $script) {
             try {
@@ -69,7 +93,6 @@ while ($true) {
         }
     }
 
-    # ---- Sleep control ----
     Start-Sleep (Get-Random -Minimum 3 -Maximum 10)
 
     $cycle++
