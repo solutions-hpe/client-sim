@@ -66,8 +66,6 @@ $dfgw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
         Sort-Object RouteMetric |
         Select-Object -First 1 -ExpandProperty NextHop
 
-Log "DEBUG: Default gateway = [$dfgw]"
-
 $network_ok = $false
 
 if ([string]::IsNullOrWhiteSpace($dfgw)) {
