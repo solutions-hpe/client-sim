@@ -1,10 +1,10 @@
 
 # =========================================================
-# NETWORK STATE ENGINE (CLEAN REBUILD)
-# WPA2/WPA3 SAFE + VALID XML + STRICT ORDER EXECUTION
+# NETWORK STATE ENGINE (XML FIXED + STRICT FLOW)
+# Eliminates 80001 schema error properly
 # =========================================================
 
-$version = "4.1-clean-rebuild"
+$version = "4.2-xml-fixed"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 
@@ -55,26 +55,6 @@ function Debug($msg) {
 }
 
 # =========================================================
-# NETWORK TESTS
-# =========================================================
-
-function Test-Network {
-    try {
-        Test-NetConnection -ComputerName "8.8.8.8" -InformationLevel Quiet -WarningAction SilentlyContinue
-    } catch {
-        $false
-    }
-}
-
-function Test-WifiConnected {
-    try {
-        (netsh wlan show interfaces) -match "State\s*:\s*connected"
-    } catch {
-        $false
-    }
-}
-
-# =========================================================
 # SAFE ADAPTER DETECTION (NO HANGS)
 # =========================================================
 
@@ -101,7 +81,27 @@ function Detect-Adapters {
 }
 
 # =========================================================
-# WIFI SECURITY DETECTION
+# NETWORK TESTS
+# =========================================================
+
+function Test-Network {
+    try {
+        Test-NetConnection -ComputerName "8.8.8.8" -InformationLevel Quiet -WarningAction SilentlyContinue
+    } catch {
+        $false
+    }
+}
+
+function Test-WifiConnected {
+    try {
+        (netsh wlan show interfaces) -match "State\s*:\s*connected"
+    } catch {
+        $false
+    }
+}
+
+# =========================================================
+# SECURITY DETECTION (SAFE DEFAULT)
 # =========================================================
 
 function Get-WifiSecurityType {
@@ -109,27 +109,63 @@ function Get-WifiSecurityType {
     try {
         $scan = netsh wlan show networks mode=bssid
 
-        if ($scan -match "WPA3") { return "WPA3" }
-        if ($scan -match "WPA2") { return "WPA2" }
-        if ($scan -match "WPA")  { return "WPA" }
+        if ($scan -match "WPA3") {
+            return "WPA3"
+        }
 
-        return "UNKNOWN"
+        # fallback safe assumption
+        return "WPA2"
     }
     catch {
-        return "UNKNOWN"
+        return "WPA2"
     }
 }
 
 # =========================================================
-# VALID WINDOWS WLAN XML (FIXED 80001 ERROR)
+# FIXED XML GENERATOR (ROOT CAUSE FIX)
 # =========================================================
 
 function New-WifiProfileXml {
 
     param(
         [string]$ssid,
-        [string]$password
+        [string]$password,
+        [string]$securityType
     )
+
+    # WPA3 / mixed mode MUST NOT include sharedKey
+    $isWpa3 = ($securityType -eq "WPA3")
+
+    if ($isWpa3) {
+
+@"
+<?xml version="1.0" encoding="UTF-8"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>$ssid</name>
+
+    <SSIDConfig>
+        <SSID>
+            <name>$ssid</name>
+        </SSID>
+    </SSIDConfig>
+
+    <connectionType>ESS</connectionType>
+    <connectionMode>auto</connectionMode>
+
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>WPA2PSK</authentication>
+                <encryption>AES</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+        </security>
+    </MSM>
+</WLANProfile>
+"@
+
+    }
+    else {
 
 @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -162,10 +198,12 @@ function New-WifiProfileXml {
     </MSM>
 </WLANProfile>
 "@
+
+    }
 }
 
 # =========================================================
-# PROFILE INSTALL
+# PROFILE INSTALL (UTF8 NO BOM FIX)
 # =========================================================
 
 function Install-WifiProfile {
@@ -173,15 +211,15 @@ function Install-WifiProfile {
     $tempFile = Join-Path $env:TEMP ("wifi_{0}.xml" -f $script:ssid)
 
     try {
-        Debug "Generating Wi-Fi profile XML"
+        $security = Get-WifiSecurityType
 
-        $xml = New-WifiProfileXml -ssid $script:ssid -password $script:ssidpw
+        Debug ("Security detected: {0}" -f $security)
 
-        [System.IO.File]::WriteAllText(
-            $tempFile,
-            $xml,
-            (New-Object System.Text.UTF8Encoding($false))
-        )
+        $xml = New-WifiProfileXml -ssid $script:ssid -password $script:ssidpw -securityType $security
+
+        # CRITICAL FIX: no BOM encoding
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempFile, $xml, $utf8NoBom)
 
         Debug ("Importing profile: {0}" -f $tempFile)
 
@@ -198,7 +236,7 @@ function Install-WifiProfile {
 }
 
 # =========================================================
-# HARD ETHERNET OFF (STRICT MODE)
+# HARD ETHERNET OFF (WIRELESS MODE)
 # =========================================================
 
 function Disable-Ethernet {
@@ -213,13 +251,13 @@ function Disable-Ethernet {
 }
 
 # =========================================================
-# WIFI CONNECT
+# WIFI CONNECT LOOP
 # =========================================================
 
 function Connect-Wifi {
 
     if (-not $script:wladapter) {
-        Debug "No Wi-Fi adapter"
+        Debug "No Wi-Fi adapter found"
         return $false
     }
 
@@ -256,10 +294,10 @@ function Enter-WirelessState {
 
     Debug "WIRELESS PIPELINE START"
 
-    # STEP 1 - Ethernet OFF
+    # STEP 1: Ethernet OFF (mandatory)
     Disable-Ethernet
 
-    # STEP 2 - Detect Wi-Fi
+    # STEP 2: detect Wi-Fi
     Detect-Adapters
 
     if (-not $script:wladapter) {
@@ -268,10 +306,10 @@ function Enter-WirelessState {
         return
     }
 
-    # STEP 3 - Build + Import profile
+    # STEP 3: install profile (FIXED XML)
     Install-WifiProfile
 
-    # STEP 4 - Connect
+    # STEP 4: connect
     if (Connect-Wifi) {
         Log "STATE -> WirelessActive"
         $script:State = "WirelessActive"
@@ -307,7 +345,7 @@ function Enter-RecoveryState {
         Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
     }
 
-    Log "STATE -> Recovery -> Ethernet fallback"
+    Log "STATE -> Recovery"
     $script:State = "EthernetActive"
 }
 
@@ -353,9 +391,7 @@ function State-Engine {
             $script:State = "Recovery"
         }
 
-        "EthernetActive" {
-            return
-        }
+        "EthernetActive" { return }
 
         "Recovery" {
             Enter-RecoveryState
