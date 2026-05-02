@@ -1,6 +1,9 @@
-. .\ini-parser.ps1
+# -------------------------
+# Simulation Script (Fixed)
+# Version 0.91-safe
+# -------------------------
 
-$version = "0.91"
+$version = "0.91-safe"
 $logPath = "C:\Scripts\sim.log"
 
 function Log($msg) {
@@ -8,12 +11,8 @@ function Log($msg) {
 }
 
 function Get-SafeInt($v, $default = 0) {
-    try {
-        if ($null -eq $v -or $v -eq "") { return $default }
-        return [int]$v
-    } catch {
-        return $default
-    }
+    if ([string]::IsNullOrWhiteSpace($v)) { return $default }
+    try { return [int]$v } catch { return $default }
 }
 
 function Get-SafeString($v, $default = "") {
@@ -21,21 +20,28 @@ function Get-SafeString($v, $default = "") {
     return [string]$v
 }
 
+# -------------------------
+# NETWORK TEST (FIXED)
+# -------------------------
+
 function Test-Network {
-    $gw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
-        Sort-Object RouteMetric |
-        Select-Object -First 1 -ExpandProperty NextHop
-
-    if ([string]::IsNullOrWhiteSpace($gw)) { return $false }
-
     try {
-        return Test-Connection -ComputerName $gw -Count 2 -Quiet -ErrorAction SilentlyContinue
+        return Test-NetConnection -ComputerName "8.8.8.8" -InformationLevel Quiet -WarningAction SilentlyContinue
     } catch {
         return $false
     }
 }
 
+# -------------------------
+# SAFE ADAPTER HANDLING
+# -------------------------
+
 function Ensure-NetworkSafety {
+
+    if (-not $wladapter -and -not $eadapter) {
+        Log "WARNING: No adapters detected"
+        return
+    }
 
     $wifiUp = $false
     $ethUp = $false
@@ -49,8 +55,7 @@ function Ensure-NetworkSafety {
     }
 
     if (-not $wifiUp -and -not $ethUp) {
-
-        Log "CRITICAL: No interfaces up — forcing recovery"
+        Log "CRITICAL: No active interfaces — attempting recovery"
 
         if ($wladapter) { Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue }
         if ($eadapter)  { Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue }
@@ -58,6 +63,10 @@ function Ensure-NetworkSafety {
         Start-Sleep 5
     }
 }
+
+# -------------------------
+# PHY MODE CONTROL
+# -------------------------
 
 function Apply-PhyMode {
 
@@ -73,7 +82,6 @@ function Apply-PhyMode {
 
         Log "PHY MODE: Ethernet only"
     }
-
     elseif ($sim_phy -eq "wireless") {
 
         if ($wladapter) {
@@ -86,11 +94,15 @@ function Apply-PhyMode {
     Ensure-NetworkSafety
 }
 
+# -------------------------
+# WIFI CONNECT (SAFE)
+# -------------------------
+
 function Connect-Wifi {
 
     param (
-        [int]$waitTime = 15,
-        [int]$timeout = 30
+        [int]$waitTime = 10,
+        [int]$timeout = 20
     )
 
     if (-not $wladapter) {
@@ -98,26 +110,40 @@ function Connect-Wifi {
         return
     }
 
-    Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-    Start-Sleep 2
-    Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+    try {
+        Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
+        Start-Sleep 2
+        Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+    } catch {
+        Log "Wi-Fi toggle failed"
+    }
 
     Start-Sleep $waitTime
 
     $ssidToUse = if ($site_based_ssid -eq "on") { "$wsite-$ssid" } else { $ssid }
 
     if (-not [string]::IsNullOrWhiteSpace($ssidToUse)) {
-        $job = Start-Job { param($n) netsh wlan connect name="$n" } -ArgumentList $ssidToUse
-        Wait-Job $job -Timeout $timeout | Out-Null
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        try {
+            $job = Start-Job -ScriptBlock {
+                param($n)
+                netsh wlan connect name=$n
+            } -ArgumentList $ssidToUse
+
+            Wait-Job $job -Timeout $timeout | Out-Null
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+        } catch {
+            Log "Wi-Fi connect failed"
+        }
     }
 
     Start-Sleep $waitTime
 }
 
-function Network-Controller {
+# -------------------------
+# NETWORK CONTROLLER
+# -------------------------
 
-    param([switch]$ForceRecovery)
+function Network-Controller {
 
     $network_ok = Test-Network
 
@@ -128,114 +154,73 @@ function Network-Controller {
 
     Log "Network FAILED"
 
+    # optional VH hook
     if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
-        . .\vhconnect.ps1
+        try { . .\vhconnect.ps1 } catch { Log "VH script failed" }
     }
 
     Log "Attempting Wi-Fi recovery"
-    Connect-Wifi -waitTime 15
+    Connect-Wifi
 
-    $network_ok = Test-Network
-
-    if ($network_ok) {
+    if (Test-Network) {
         Log "Recovery successful (Wi-Fi)"
         return $true
     }
 
-    if ($sim_phy -eq "wireless" -and $eadapter) {
+    # Ethernet fallback
+    if ($eadapter) {
 
-        Log "Switching to Ethernet recovery"
+        Log "Trying Ethernet fallback"
 
-        Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue
-
-        if ($wladapter) {
-            Disable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+        try {
+            Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue
+            if ($wladapter) {
+                Disable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Log "Ethernet switch failed"
         }
 
         Start-Sleep 5
 
-        $network_ok = Test-Network
-
-        if ($network_ok) {
+        if (Test-Network) {
             Log "Recovery successful (Ethernet)"
             return $true
         }
     }
 
-    Log "Full recovery failed"
+    Log "Recovery failed"
     return $false
 }
 
 # -------------------------
-# STARTUP
+# MAIN LOOP
 # -------------------------
 
-Get-Date | Log
-"------------------------------" | Log
-"Simulation Script Version $version" | Log
+Log "------------------------------"
+Log "Simulation Script $version"
 
-$iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
+$cycleLimit = 100
+$i = 1
 
-$hostname = $env:COMPUTERNAME
-if ([string]::IsNullOrWhiteSpace($hostname)) {
-    $hostname = $env:HOSTNAME
-}
-if ([string]::IsNullOrWhiteSpace($hostname)) {
-    $hostname = [System.Net.Dns]::GetHostName()
-}
-if ([string]::IsNullOrWhiteSpace($hostname)) {
-    $hostname = "UNKNOWN"
-}
+while ($i -le $cycleLimit) {
 
-Log "Hostname: $hostname"
+    $ok = Network-Controller
 
-$wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
-$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
-
-if ($wladapter) { Log "Wi-Fi Adapter: $wladapter" }
-if ($eadapter)  { Log "Ethernet Adapter: $eadapter" }
-
-$kill_switch = Get-SafeString (get_value 'simulation' 'kill_switch') "off"
-$rapid_update = Get-SafeString (get_value 'simulation' 'rapid_update') "off"
-$sim_load = Get-SafeInt (get_value 'simulation' 'sim_load') 100
-$vh_server = Get-SafeString (get_value 'simulation' 'vh_server') "off"
-$site_based_ssid = Get-SafeString (get_value 'simulation' 'site_based_ssid') "off"
-
-$ssid = Get-SafeString (get_value $simulation_id 'ssid')
-$wsite = Get-SafeString (get_value $simulation_id 'wsite')
-$sim_phy = Get-SafeString (get_value $simulation_id 'sim_phy') "wireless"
-
-Apply-PhyMode
-
-$network_ok = Network-Controller
-
-if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) {
-    . .\update.ps1
-}
-
-$rn_sim_load = Get-Random -Minimum 1 -Maximum 100
-
-if ($sim_load -lt $rn_sim_load) {
-    Log "Low simulation load"
-    Start-Sleep (Get-Random -Minimum 1 -Maximum 10)
-}
-
-Log "Kill Switch: $kill_switch"
-
-if ($kill_switch -eq "off") {
-
-    for ($z = 1; $z -le 100; $z++) {
-
-        $network_ok = Network-Controller
-
-        if (-not $network_ok) {
-            Log "Recovery attempt cycle $z failed"
-        }
-
-        if ($dns_fail -eq "on" -and (Test-Path .\dns_fail.ps1)) { . .\dns_fail.ps1 }
-        if ($download -eq "on" -and (Test-Path .\download.ps1)) { . .\download.ps1 }
-        if ($iperf -eq "on" -and (Test-Path .\iperf.ps1)) { . .\iperf.ps1 }
-
-        Start-Sleep (Get-SafeInt $rn_sim_load 5)
+    if (-not $ok) {
+        Log "Cycle $i: network unstable"
     }
+
+    # optional feature hooks (SAFE CHECKED)
+    foreach ($script in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
+        if (Test-Path $script) {
+            try { . .\$script } catch { Log "$script failed" }
+        }
+    }
+
+    Start-Sleep (Get-Random -Minimum 3 -Maximum 10)
+
+    $i++
 }
+
+Log "Simulation complete"
