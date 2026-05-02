@@ -66,7 +66,7 @@ if ($tempvar) { $kill_switch = $tempvar }
 Get-Date | Tee-Object -FilePath $logPath -Append
 "------------------------------" | Tee-Object -FilePath $logPath -Append
 "Simulation Details:" | Tee-Object -FilePath $logPath -Append
-"Hostname: $env:COMPUTERNAME" | Tee-Object -FilePath $logPath -Append
+"Hostname: $env:COMPUTERNAME"   | Tee-Object -FilePath $logPath -Append
 "Site: $wsite" | Tee-Object -FilePath $logPath -Append
 "Site Based SSID: $site_based_ssid" | Tee-Object -FilePath $logPath -Append
 if ($vh_server -eq "off") { "Phy: $sim_phy" | Tee-Object -FilePath $logPath -Append }
@@ -84,7 +84,7 @@ if ($sim_phy -eq "wireless" -and $wladapter) { "Adapter: $wladapter" | Tee-Objec
 Start-Sleep 5
 
 # Global kill switch
-$gkill_switch = Get-Content 'C:\Scripts\kill_switch.txt'
+$kill_switch = Get-Content 'C:\Scripts\kill_switch.txt'
 
 # Random numbers
 $rn = Get-Random -Minimum 1 -Maximum 61
