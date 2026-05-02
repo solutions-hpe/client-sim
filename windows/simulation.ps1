@@ -21,6 +21,31 @@ function Get-SafeString($v, $default = "") {
     return [string]$v
 }
 
+function Connect-Wifi {
+    param (
+        [int]$waitTime = 15,
+        [int]$timeout = 30
+    )
+
+    if ($wladapter) {
+        Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
+        Start-Sleep 2
+        Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
+    }
+
+    Start-Sleep $waitTime
+
+    $ssidToUse = if ($site_based_ssid -eq "on") { "$wsite-$ssid" } else { $ssid }
+
+    if (-not [string]::IsNullOrWhiteSpace($ssidToUse)) {
+        $job = Start-Job { param($n) netsh wlan connect name="$n" } -ArgumentList $ssidToUse
+        Wait-Job $job -Timeout $timeout | Out-Null
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+    }
+
+    Start-Sleep $waitTime
+}
+
 Get-Date | Log
 "------------------------------" | Log
 "Simulation Script Version $version" | Log
@@ -35,7 +60,7 @@ if ([string]::IsNullOrWhiteSpace($hostname)) { $hostname = "UNKNOWN" }
 Log "Hostname: $hostname"
 
 $wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
-$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
+$eadapter = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth|enp|eno|ens" } | Select-Object -First 1 -ExpandProperty Name
 
 if ($wladapter) { Log "WLAN Adapter name $wladapter" }
 if ($eadapter) { Log "Wired Adapter name $eadapter" }
@@ -66,6 +91,8 @@ $dfgw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
         Sort-Object RouteMetric |
         Select-Object -First 1 -ExpandProperty NextHop
 
+Log "DEBUG: Default gateway = [$dfgw]"
+
 $network_ok = $false
 
 if ([string]::IsNullOrWhiteSpace($dfgw)) {
@@ -86,26 +113,11 @@ if ($network_ok) {
 }
 else {
     Log "Network connection failed"
-
-    if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
-        . .\vhconnect.ps1
-    }
-
-    Start-Sleep 15
-
-    if ($site_based_ssid -eq "on" -and $ssid -and $wsite) {
-        netsh wlan connect name="$wsite-$ssid"
-    }
-    elseif ($ssid) {
-        netsh wlan connect name="$ssid"
-    }
-
-    Start-Sleep 15
+    if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) { . .\vhconnect.ps1 }
+    Connect-Wifi -waitTime 15
 }
 
-if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) {
-    . .\update.ps1
-}
+if ($rapid_update -eq "on" -and (Test-Path .\update.ps1)) { . .\update.ps1 }
 
 Log "Disabling unused interface"
 
@@ -137,12 +149,7 @@ if ($kill_switch -eq "off") {
             if ($ssidpw_fail -eq "on" -and $ssid) {
                 for ($i = 1; $i -le 100; $i++) {
                     Log "SSID Incorrect Password Simulation"
-                    if ($site_based_ssid -eq "on" -and $wsite) {
-                        netsh wlan connect name="$wsite-$ssid"
-                    }
-                    elseif ($ssid) {
-                        netsh wlan connect name="$ssid"
-                    }
+                    Connect-Wifi -waitTime 5
                 }
             }
 
@@ -161,21 +168,8 @@ if ($kill_switch -eq "off") {
             }
             else {
                 Log "Network connection failed"
-
-                if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) {
-                    . .\vhconnect.ps1
-                }
-
-                Start-Sleep 15
-
-                if ($site_based_ssid -eq "on" -and $ssid -and $wsite) {
-                    netsh wlan connect name="$wsite-$ssid"
-                }
-                elseif ($ssid) {
-                    netsh wlan connect name="$ssid"
-                }
-
-                Start-Sleep 15
+                if ($vh_server -eq "on" -and (Test-Path .\vhconnect.ps1)) { . .\vhconnect.ps1 }
+                Connect-Wifi -waitTime 15
             }
 
             $dfgw = Get-NetRoute -DestinationPrefix "0.0.0.0/0" |
@@ -183,7 +177,11 @@ if ($kill_switch -eq "off") {
                     Select-Object -First 1 -ExpandProperty NextHop
 
             if (-not [string]::IsNullOrWhiteSpace($dfgw)) {
-                $network_ok = Test-Connection -ComputerName $dfgw -Count 2 -Quiet -ErrorAction SilentlyContinue
+                try {
+                    $network_ok = Test-Connection -ComputerName $dfgw -Count 2 -Quiet -ErrorAction SilentlyContinue
+                } catch {
+                    $network_ok = $false
+                }
             }
             else {
                 $network_ok = $false
