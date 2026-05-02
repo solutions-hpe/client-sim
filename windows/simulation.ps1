@@ -1,13 +1,13 @@
 # -------------------------
-# Simulation Script (PHY FIX + Infinite + Log Rotation)
+# Simulation Script (Auto Re-Detect + Wi-Fi Recovery)
 # -------------------------
 
-$version = "0.94"
+$version = "0.97"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
 
 # -------------------------
-# LOGGING + ROTATION
+# LOGGING
 # -------------------------
 
 function Rotate-LogIfNeeded {
@@ -39,79 +39,136 @@ function Test-Network {
 }
 
 # -------------------------
+# WIFI STATUS CHECK
+# -------------------------
+
+function Test-WifiConnected {
+    try {
+        $output = netsh wlan show interfaces
+        return ($output -match "State\s*:\s*connected")
+    } catch {
+        return $false
+    }
+}
+
+# -------------------------
 # ADAPTER DETECTION
 # -------------------------
 
-$wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
-$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth" } | Select-Object -First 1 -ExpandProperty Name
+$script:wladapter = $null
+$script:eadapter = $null
 
-if ($wladapter) { Log ("Wi-Fi Adapter: {0}" -f $wladapter) }
-if ($eadapter)  { Log ("Ethernet Adapter: {0}" -f $eadapter) }
+function Detect-Adapters {
+
+    $oldWifi = $script:wladapter
+
+    $script:wladapter = Get-NetAdapter |
+        Where-Object { $_.Name -match "wireless|wlan|wi-fi" } |
+        Select-Object -First 1 -ExpandProperty Name
+
+    $script:eadapter = Get-NetAdapter |
+        Where-Object { $_.Name -match "ethernet|eth" } |
+        Select-Object -First 1 -ExpandProperty Name
+
+    if ($script:wladapter -and -not $oldWifi) {
+        Log ("Wi-Fi adapter detected: {0}" -f $script:wladapter)
+        return "wifi_added"
+    }
+
+    if (-not $script:wladapter -and $oldWifi) {
+        Log "Wi-Fi adapter lost"
+        return "wifi_removed"
+    }
+
+    return "no_change"
+}
 
 # -------------------------
-# WIFI CONNECT
+# WIFI CONNECT (RETRY + BACKOFF)
 # -------------------------
 
 function Connect-Wifi {
 
-    if (-not $wladapter) {
-        Log "No Wi-Fi adapter found"
-        return
+    if (-not $script:wladapter) {
+        Log "Wi-Fi adapter missing — cannot connect"
+        return $false
     }
 
-    try {
-        Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-        Start-Sleep 2
-        Enable-NetAdapter -Name $wladapter -ErrorAction SilentlyContinue
-    } catch {
-        Log "Wi-Fi reset failed"
+    if (-not $ssid) {
+        Log "SSID not defined"
+        return $false
     }
 
-    Start-Sleep 8
+    $maxAttempts = 4
+    $baseDelay = 5
 
-    if ($ssid) {
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+
+        Log ("Wi-Fi attempt {0} to connect to {1}" -f $attempt, $ssid)
+
+        try {
+            Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
+            Start-Sleep 2
+            Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
+        } catch {}
+
+        Start-Sleep 5
+
         try {
             netsh wlan connect name="$ssid" | Out-Null
-            Log ("Attempting Wi-Fi connection to {0}" -f $ssid)
-        } catch {
-            Log "Wi-Fi connection command failed"
+        } catch {}
+
+        Start-Sleep 6
+
+        if (Test-WifiConnected) {
+            Log "Wi-Fi connected successfully"
+            return $true
         }
+
+        $delay = [math]::Min($baseDelay * [math]::Pow(2, $attempt - 1), 60)
+        Log ("Wi-Fi retry in {0} seconds" -f $delay)
+        Start-Sleep $delay
     }
 
-    Start-Sleep 10
+    Log "Wi-Fi connection failed after retries"
+    return $false
 }
 
 # -------------------------
-# PHY MODE CONTROL (FIXED)
+# PHY MODE CONTROL
 # -------------------------
 
-function Apply-PhyMode {
+function Apply-WirelessMode {
 
-    if ($sim_phy -eq "wireless") {
+    if (-not $script:wladapter) {
+        Log "Wireless mode requested but no adapter — fallback to Ethernet"
 
-        Log "Applying Wireless mode"
-
-        if ($eadapter) {
-            try {
-                Disable-NetAdapter -Name $eadapter -Confirm:$false -ErrorAction SilentlyContinue
-                Log "Ethernet disabled"
-            } catch {}
+        if ($script:eadapter) {
+            Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
         }
 
-        Connect-Wifi
+        return
     }
 
-    elseif ($sim_phy -eq "ethernet") {
+    Log "Switching to Wireless mode"
 
-        Log "Applying Ethernet mode"
+    if ($script:eadapter) {
+        Disable-NetAdapter -Name $script:eadapter -Confirm:$false -ErrorAction SilentlyContinue
+    }
 
-        if ($eadapter) {
-            Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue
-        }
+    Connect-Wifi | Out-Null
+}
 
-        if ($wladapter) {
-            Disable-NetAdapter -Name $wladapter -Confirm:$false -ErrorAction SilentlyContinue
-        }
+function Apply-EthernetMode {
+
+    Log "Switching to Ethernet mode"
+
+    if ($script:eadapter) {
+        Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+    }
+
+    if ($script:wladapter) {
+        Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
     }
 }
 
@@ -121,9 +178,7 @@ function Apply-PhyMode {
 
 function Network-Controller {
 
-    $ok = Test-Network
-
-    if ($ok) {
+    if (Test-Network) {
         Log "Network OK"
         return $true
     }
@@ -131,11 +186,12 @@ function Network-Controller {
     Log "Network FAILED"
 
     if ($sim_phy -eq "wireless") {
-        Log "Attempting Wi-Fi recovery"
-        Connect-Wifi
+        Connect-Wifi | Out-Null
     }
-    elseif ($sim_phy -eq "ethernet" -and $eadapter) {
-        Enable-NetAdapter -Name $eadapter -ErrorAction SilentlyContinue
+    elseif ($sim_phy -eq "ethernet") {
+        if ($script:eadapter) {
+            Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        }
     }
 
     return $false
@@ -149,7 +205,15 @@ Log "------------------------------"
 Log ("Simulation Script {0}" -f $version)
 Log ("Start Time: {0}" -f (Get-Date))
 
-Apply-PhyMode
+# Initial detection
+Detect-Adapters | Out-Null
+
+# Initial mode apply
+if ($sim_phy -eq "wireless") {
+    Apply-WirelessMode
+} else {
+    Apply-EthernetMode
+}
 
 $cycle = 1
 
@@ -158,6 +222,19 @@ while ($true) {
     if (Test-Path "C:\Scripts\kill.flag") {
         Log "Kill switch detected. Exiting simulation loop."
         break
+    }
+
+    # 🔴 NEW: re-detect adapters every cycle
+    $change = Detect-Adapters
+
+    if ($sim_phy -eq "wireless" -and $change -eq "wifi_added") {
+        Log "Wi-Fi adapter restored — switching back to wireless"
+        Apply-WirelessMode
+    }
+
+    if ($sim_phy -eq "wireless" -and $change -eq "wifi_removed") {
+        Log "Wi-Fi lost — falling back to Ethernet"
+        Apply-EthernetMode
     }
 
     $network_ok = Network-Controller
