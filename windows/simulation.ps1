@@ -1,10 +1,18 @@
 # -------------------------
-# Simulation Script (Syntax Fixed)
+# Simulation Script (Stable Production Fix)
 # -------------------------
 
-$version = "1.00"
+$version = "1.01"
 $logPath = "C:\Scripts\sim.log"
 $maxLogSize = 10MB
+
+# -------------------------
+# SAFE DEFAULTS (CRITICAL FIX)
+# -------------------------
+
+$script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
+$script:ssid    = if ($ssid) { $ssid } else { "" }
+
 $script:RecoveryMode = $false
 
 # -------------------------
@@ -40,23 +48,23 @@ function Test-Network {
 }
 
 # -------------------------
-# WIFI STATUS
+# WIFI STATUS CHECK
 # -------------------------
 
 function Test-WifiConnected {
     try {
-        $out = netsh wlan show interfaces
-        return ($out -match "State\s*:\s*connected")
+        return (netsh wlan show interfaces) -match "State\s*:\s*connected"
     } catch {
         return $false
     }
 }
 
 # -------------------------
-# ADAPTER DETECTION
+# ADAPTER DETECTION (RE-RUN SAFE)
 # -------------------------
 
 function Detect-Adapters {
+
     $script:wladapter = Get-NetAdapter |
         Where-Object { $_.Name -match "wireless|wlan|wi-fi" } |
         Select-Object -First 1 -ExpandProperty Name
@@ -67,34 +75,40 @@ function Detect-Adapters {
 }
 
 # -------------------------
-# WIFI CONNECT
+# WIFI CONNECT (RETRY + BACKOFF)
 # -------------------------
 
 function Connect-Wifi {
 
-    if (-not $script:wladapter) { return $false }
-    if (-not $ssid) { return $false }
+    if (-not $script:wladapter -or -not $script:ssid) {
+        return $false
+    }
 
     for ($i = 1; $i -le 4; $i++) {
 
-        Log ("Wi-Fi attempt {0} to {1}" -f $i, $ssid)
+        Log ("Wi-Fi attempt {0} → {1}" -f $i, $script:ssid)
 
-        Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
-        Start-Sleep 2
-        Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
+        try {
+            Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
+            Start-Sleep 2
+            Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
+        } catch {}
 
         Start-Sleep 5
 
-        netsh wlan connect name="$ssid" | Out-Null
+        try {
+            netsh wlan connect name="$script:ssid" | Out-Null
+        } catch {}
+
         Start-Sleep 6
 
         if (Test-WifiConnected) {
-            Log "Wi-Fi connected"
+            Log "Wi-Fi connected successfully"
             return $true
         }
 
         $delay = [math]::Min(5 * [math]::Pow(2, $i - 1), 60)
-        Log ("Retrying in {0}s" -f $delay)
+        Log ("Retrying Wi-Fi in {0}s" -f $delay)
         Start-Sleep $delay
     }
 
@@ -107,6 +121,8 @@ function Connect-Wifi {
 # -------------------------
 
 function Apply-WirelessMode {
+
+    Detect-Adapters
 
     if (-not $script:wladapter) {
 
@@ -128,7 +144,7 @@ function Apply-WirelessMode {
 
     if (-not $wifiOK) {
 
-        Log "Wi-Fi unavailable → enabling Ethernet + recovery mode"
+        Log "Wi-Fi failed → enabling Ethernet + recovery mode"
 
         if ($script:eadapter) {
             Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
@@ -136,11 +152,7 @@ function Apply-WirelessMode {
 
         if (Test-Path ".\update.ps1") {
             Log "Running update.ps1"
-            try {
-                . .\update.ps1
-            } catch {
-                Log "update.ps1 failed"
-            }
+            try { & ".\update.ps1" } catch { Log "update.ps1 failed" }
         }
 
         $script:RecoveryMode = $true
@@ -159,7 +171,7 @@ function Network-Controller {
     if (Test-Network) {
 
         if ($script:RecoveryMode) {
-            Log "Network restored — exiting recovery mode"
+            Log "Network restored → exiting recovery mode"
         }
 
         $script:RecoveryMode = $false
@@ -168,7 +180,7 @@ function Network-Controller {
 
     Log "Network FAILED"
 
-    if ($sim_phy -eq "wireless") {
+    if ($script:sim_phy -eq "wireless") {
         Apply-WirelessMode
     }
 
@@ -176,14 +188,19 @@ function Network-Controller {
 }
 
 # -------------------------
-# MAIN LOOP
+# INITIALIZATION
 # -------------------------
 
 Log "------------------------------"
 Log ("Simulation Script {0}" -f $version)
+Log ("Start Time: {0}" -f (Get-Date))
 
 Detect-Adapters
 Apply-WirelessMode
+
+# -------------------------
+# MAIN LOOP (INFINITE)
+# -------------------------
 
 $cycle = 1
 
@@ -198,9 +215,10 @@ while ($true) {
 
     $network_ok = Network-Controller
 
+    # Recovery mode = NO simulation allowed
     if ($script:RecoveryMode) {
 
-        Log ("Cycle {0}: recovery mode active — skipping simulations" -f $cycle)
+        Log ("Cycle {0}: recovery mode active (skipping simulation)" -f $cycle)
 
         Start-Sleep 15
         $cycle++
@@ -211,12 +229,14 @@ while ($true) {
         Log ("Cycle {0}: network unstable" -f $cycle)
     }
 
+    # Simulation workloads ONLY when healthy
     foreach ($scriptName in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
+
         if (Test-Path $scriptName) {
             try {
                 & ".\$scriptName"
             } catch {
-                Log ("Script {0} failed" -f $scriptName)
+                Log ("Script failed: {0}" -f $scriptName)
             }
         }
     }
