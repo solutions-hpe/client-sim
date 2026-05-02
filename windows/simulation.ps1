@@ -1,20 +1,17 @@
-$version = "0.91-safe"
+# -------------------------
+# Simulation Script (Infinite Loop - Safe)
+# -------------------------
+
+$version = "0.92"
 $logPath = "C:\Scripts\sim.log"
 
 function Log($msg) {
     $msg | Tee-Object -FilePath $logPath -Append
 }
 
-function Safe($msg, $args) {
-    if ($args -ne $null) {
-        return ($msg -f $args)
-    }
-    return $msg
-}
-
 function Test-Network {
     try {
-        return Test-NetConnection -ComputerName "8.8.8.8" -InformationLevel Quiet
+        return Test-NetConnection -ComputerName "8.8.8.8" -InformationLevel Quiet -WarningAction SilentlyContinue
     } catch {
         return $false
     }
@@ -34,26 +31,48 @@ function Network-Controller {
     }
 
     Log "Network FAILED"
-
     return $false
 }
 
 # -------------------------
-# MAIN LOOP
+# MAIN LOOP (INFINITE)
 # -------------------------
 
 Log "------------------------------"
 Log ("Simulation Script {0}" -f $version)
+Log ("Start Time: {0}" -f (Get-Date))
 
-for ($i = 1; $i -le 100; $i++) {
+$cycle = 1
+
+while ($true) {
+
+    # ---- Kill switch (file-based) ----
+    if (Test-Path "C:\Scripts\kill.flag") {
+        Log "Kill switch detected. Exiting simulation loop."
+        break
+    }
 
     $network_ok = Network-Controller
 
     if (-not $network_ok) {
-        Log ("cycle {0}: network unstable" -f $i)
+        Log ("Cycle {0}: network unstable" -f $cycle)
     }
 
-    Start-Sleep (Get-Random -Minimum 2 -Maximum 8)
+    # ---- Optional workload scripts (safe execution) ----
+    foreach ($script in @("dns_fail.ps1","download.ps1","iperf.ps1")) {
+        if (Test-Path $script) {
+            try {
+                . .\$script
+            } catch {
+                Log ("Script {0} failed: {1}" -f $script, $_.Exception.Message)
+            }
+        }
+    }
+
+    # ---- Sleep control ----
+    Start-Sleep (Get-Random -Minimum 3 -Maximum 10)
+
+    $cycle++
 }
 
-Log "Simulation complete"
+Log "Simulation stopped"
