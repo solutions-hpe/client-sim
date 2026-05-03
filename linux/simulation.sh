@@ -84,8 +84,6 @@ override_keys=(kill_switch sim_load public_repo repo_location vh_server site_bas
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
-#Global Variable Export Disable
-set +a
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------
@@ -122,6 +120,8 @@ rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
 rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
+#Global Variable Export Disable
+set +a
 #------------------------------------------------------------
 #Getting username from hostname extraction
 #changing DHCP Client configuration to send the username as the hostname
@@ -257,8 +257,9 @@ echo Ping the Default Gateway | tee -a $log
 ping -c2 $dfgw
 if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection - Pre-Simulation | tee -a $log
+ echo In Pre-Simulation | tee -a $log
 else
-  echo Network connection failed - Pre-Simulation | tee -a $log
+  echo Network connection failed | tee -a $log
   echo In Pre-Simulation | tee -a $log
   #------------------------------------------------------------
   #If VH is enabled then attempt to connect to VHServer
