@@ -130,62 +130,6 @@ set +a
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Functions
-
-#------------------------------------------------------------
-# Live Status Dashboard
-#------------------------------------------------------------
-
-draw_status() {
-  clear
-
-  echo "================ SIMULATION DASHBOARD ================"
-  echo "Time: $(date)"
-  echo "Hostname: $HOSTNAME"
-  echo "Site: $wsite"
-  echo "-----------------------------------------------------"
-
-  # WiFi status
-  current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
-
-  if [[ -n "$current_ssid" ]]; then
-    echo "WiFi: CONNECTED ($current_ssid)"
-  else
-    echo "WiFi: DISCONNECTED"
-  fi
-
-  # Gateway status
-  dfgw=$(ip route | grep -oP 'default via \K\S+')
-
-  if [[ -n "$dfgw" ]]; then
-    if ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
-      echo "Gateway: ONLINE ($dfgw)"
-    else
-      echo "Gateway: OFFLINE ($dfgw)"
-    fi
-  else
-    echo "Gateway: NOT FOUND"
-  fi
-
-  echo "-----------------------------------------------------"
-
-  # Active simulations
-  echo "Active Simulations:"
-
-  for s in www_traffic.sh ping_test.sh iperf.sh download.sh dns_fail.sh; do
-    if pgrep -f "$s" >/dev/null; then
-      echo "  [RUNNING] $s"
-    else
-      echo "  [STOPPED]  $s"
-    fi
-  done
-
-  echo "-----------------------------------------------------"
-  echo "Kill Switch: $kill_switch"
-  echo "Simulation Load: $sim_load"
-  echo "====================================================="
-}
-
-
 #------------------------------------------------------------
 wait_for_ssid() {
   local target_ssid="$1"
@@ -287,16 +231,6 @@ run_simulation() {
   sleep $sleep_time
  fi
 }
-#------------------------------------------------------------
-#Draw Dashboard
-#------------------------------------------------------------
-(
-while true; do
-  draw_status
-  sleep 2
-done
-) &
-STATUS_PID=$!
 #------------------------------------------------------------
 #Attempting WiFi connection
 #------------------------------------------------------------

@@ -6,7 +6,7 @@
 
 log="/usr/local/scripts/sim.log"
 
-refresh_rate=2
+refresh_rate=5
 
 #------------------------------------------------------------
 # Helper: get WiFi status
