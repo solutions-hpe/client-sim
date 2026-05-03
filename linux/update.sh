@@ -72,8 +72,6 @@ if [[ "$public_repo" == "on" ]]; then
 
         echo "Updating repository..." | tee -a "$LOG_FILE"
         git reset --hard "origin/$repo_branch"
-        git pull --ff-only
-
         # -------- linux section guarded --------
         if cd linux; then
 
