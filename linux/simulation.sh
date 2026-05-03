@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.92
+version=.93
 echo $(date) | tee -a /usr/local/scripts/sim.log
 echo ------------------------------| tee -a /usr/local/scripts/sim.log
 echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
@@ -221,7 +221,7 @@ connect_wifi
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
-echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
+echo Disabling unused interface
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
 echo Generating MAC address | tee -a /usr/local/scripts/sim.log
