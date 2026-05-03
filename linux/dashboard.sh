@@ -58,13 +58,13 @@ while true; do
   echo "Hostname:    $HOSTNAME"
   echo "WiFi Status: $(get_wifi_status)"
   echo "Gateway:     $(get_gateway_status)"
-  echo "------------------------------------------------------"
+  echo "--------------------------------------------------"
   echo "Active Simulations:"
   get_sim_status
-  echo "------------------------------------------------------"
+  echo "--------------------------------------------------"
   # Optional: show last log lines (helps debugging)
   echo "Last Log Entries:"
   tail -n 5 "$log" 2>/dev/null
-  echo "======================================================"
+  echo "=================================================="
   sleep "$refresh_rate"
 done
