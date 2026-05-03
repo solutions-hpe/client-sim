@@ -184,14 +184,19 @@ connect_wifi 30
 echo Disabling unused interface | tee -a /usr/local/scripts/sim.log
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
+echo Generating MAC address | tee -a /usr/local/scripts/sim.log
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
 #Checking to see if the default gateway is reachable
 #------------------------------------------------------------
+echo Finding WLAN Adapter | tee -a /usr/local/scripts/sim.log
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+echo Unblocking WiFi / RFKill| tee -a /usr/local/scripts/sim.log
 sudo rfkill unblock wifi; sudo rfkill unblock all
+echo Getting Default Gateway | tee -a /usr/local/scripts/sim.log
 dfgw=$(ip route | grep -oP 'default via \K\S+')
+echo Ping the Default Gateway | tee -a /usr/local/scripts/sim.log
 ping -c2 $dfgw
 if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a /usr/local/scripts/sim.log
