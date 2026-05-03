@@ -182,6 +182,12 @@ connect_wifi() {
   else
     target_ssid="$ssid"
   fi
+  # --- NEW: check current connection ---
+  current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
+  if [ "$current_ssid" == "$target_ssid" ]; then
+    echo "Already connected to $target_ssid — skipping"
+    return 0
+  fi
   wait_for_ssid "$target_ssid" || return 1
   echo "Attempting to connect to $target_ssid"
   nmcli device wifi connect "$target_ssid" password "$ssidpw"
@@ -199,6 +205,12 @@ manage_connection() {
     target_ssid="$wsite-$ssid"
   else
     target_ssid="$ssid"
+  fi
+  # --- NEW check ---
+  current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
+  if [ "$current_ssid" == "$target_ssid" ] && [ "$action" == "up" ]; then
+    echo "Already connected to $target_ssid — skipping bring-up"
+    return 0
   fi
   wait_for_ssid "$target_ssid" || return 1
   echo "Attempting to $action connection: $target_ssid"
