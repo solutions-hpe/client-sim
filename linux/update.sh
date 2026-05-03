@@ -1,6 +1,6 @@
 #!/bin/bash
 
-version=.26
+version=.27
 LOG_FILE="/usr/local/scripts/sim.log"
 
 echo "Update Script Version $version" | tee -a "$LOG_FILE"
@@ -77,7 +77,7 @@ if [[ "$public_repo" == "on" ]]; then
 
             echo "Copying rsyslog config..." | tee -a "$LOG_FILE"
             if [[ -f "10-rsyslog.conf" ]]; then
-                sudo cp -v 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+                sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
             else
                 echo "No rsyslog config file found" | tee -a "$LOG_FILE"
             fi
@@ -85,7 +85,7 @@ if [[ "$public_repo" == "on" ]]; then
             echo "Copying desktop startup files..." | tee -a "$LOG_FILE"
             desktop_files=( *.desktop )
             if (( ${#desktop_files[@]} )); then
-                sudo cp -v "${desktop_files[@]}" /etc/xdg/autostart/
+                sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
             else
                 echo "No .desktop files found to copy" | tee -a "$LOG_FILE"
             fi
@@ -93,7 +93,7 @@ if [[ "$public_repo" == "on" ]]; then
             echo "Copying shell scripts..." | tee -a "$LOG_FILE"
             sh_files=( *.sh )
             if (( ${#sh_files[@]} )); then
-                sudo cp -v "${sh_files[@]}" /usr/local/scripts/
+                sudo cp "${sh_files[@]}" /usr/local/scripts/
             else
                 echo "No .sh files found to copy" | tee -a "$LOG_FILE"
             fi
@@ -101,7 +101,7 @@ if [[ "$public_repo" == "on" ]]; then
             echo "Copying text files..." | tee -a "$LOG_FILE"
             txt_files=( *.txt )
             if (( ${#txt_files[@]} )); then
-                sudo cp -v "${txt_files[@]}" /usr/local/scripts/
+                sudo cp "${txt_files[@]}" /usr/local/scripts/
             else
                 echo "No .txt files found to copy" | tee -a "$LOG_FILE"
             fi
