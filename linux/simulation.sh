@@ -195,7 +195,7 @@ run_simulation() {
 #------------------------------------------------------------
 #Attempting WiFi connection
 #------------------------------------------------------------
-connect_wifi 30
+connect_wifi
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
@@ -229,7 +229,7 @@ else
   #------------------------------------------------------------
   sleep 15
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-  connect_wifi 180
+  connect_wifi
   sleep 15
   dfgw=$(ip route | grep -oP 'default via \K\S+')
 fi
@@ -263,7 +263,7 @@ if [ $kill_switch == "off" ]; then
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
       echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-      connect_wifi 10
+      connect_wifi
      done
     fi
     if [ $auth_fail == "on" ]; then
@@ -281,7 +281,7 @@ if [ $kill_switch == "off" ]; then
    #Resetting the WIFI Password so it can connect correctly for updates/maintenance
    #------------------------------------------------------------
    ssidpw=$(get_value $simulation_id 'ssidpw')
-   connect_wifi 10
+   connect_wifi
    #------------------------------------------------------------
    #End SSID Incorrect Password Simualtion or Auth Failure Simulation
    #------------------------------------------------------------
@@ -300,7 +300,7 @@ if [ $kill_switch == "off" ]; then
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-     connect_wifi 180
+     connect_wifi
      echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
      sleep 15
     fi
