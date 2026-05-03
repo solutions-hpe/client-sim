@@ -28,7 +28,7 @@ for i in {1..10}; do
    echo $r | tee -a /usr/local/scripts/sim.log
    echo ------------------------------| tee -a /usr/local/scripts/sim.log
    for server in "${bad_records[@]}" "${bad_ips[@]}" "${latencies[@]}"; do
-     dig @$server $r &
+     dig @$server $r
    done
    sleep 5
   done
