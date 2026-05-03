@@ -2,49 +2,42 @@
 
 version=.27
 LOG_FILE="/usr/local/scripts/sim.log"
-
 echo "Update Script Version $version" | tee -a "$LOG_FILE"
 echo "$(date)" | tee -a "$LOG_FILE"
-
 echo "Reading Simulation Config File" | tee -a "$LOG_FILE"
-
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
-
+#------------------------------------------------------------
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
-
+#------------------------------------------------------------
 echo "Updating Scripts" | tee -a "$LOG_FILE"
-
 if [[ "$public_repo" == "on" ]]; then
     echo "Using remote GitHub repo" | tee -a "$LOG_FILE"
-
     cd ~ || echo "WARNING: Failed to cd to home directory" | tee -a "$LOG_FILE"
-
     repo_dir="client-sim"
     shopt -s nullglob
-
     if [[ -d "$repo_dir" && ! -d "$repo_dir/.git" ]]; then
         echo "Directory exists but is not a git repo. Removing..." | tee -a "$LOG_FILE"
         rm -rf "$repo_dir"
     fi
-
     if [[ ! -d "$repo_dir" ]]; then
         echo "Cloning repository..." | tee -a "$LOG_FILE"
         git clone "$repo_location" "$repo_dir" || echo "ERROR: Clone failed" | tee -a "$LOG_FILE"
     else
         echo "Repository already exists, skipping clone" | tee -a "$LOG_FILE"
     fi
-
+    #------------------------------------------------------------
+    #Checking to see if the URL is mis-matched
     if cd "$repo_dir"; then
-
         current_remote=$(git remote get-url origin 2>/dev/null || echo "")
         if [[ "$current_remote" != "$repo_location" ]]; then
             echo "Remote URL mismatch. Fixing..." | tee -a "$LOG_FILE"
             git remote set-url origin "$repo_location"
         fi
-
+        #------------------------------------------------------------
+        #Checking to see if the repo is corrupted
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             echo "Repo appears corrupted. Re-cloning..." | tee -a "$LOG_FILE"
             cd ~
@@ -52,7 +45,6 @@ if [[ "$public_repo" == "on" ]]; then
             git clone "$repo_location" "$repo_dir"
             cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$LOG_FILE"
         fi
-
         git config http.lowSpeedLimit 100
         git config http.lowSpeedTime 30
         git config http.maxRequests 2
@@ -69,7 +61,8 @@ if [[ "$public_repo" == "on" ]]; then
         else
             echo "ERROR: Branch '$repo_branch' not found" | tee -a "$LOG_FILE"
         fi
-
+        #------------------------------------------------------------
+        #Updating the Repository based on the Branch configured in simulation.conf
         echo "Updating repository..." | tee -a "$LOG_FILE"
         git reset --hard "origin/$repo_branch"
         # -------- linux section guarded --------
