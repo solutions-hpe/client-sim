@@ -343,35 +343,35 @@ if [ $kill_switch == "off" ]; then
      connect_wifi
      echo WLAN Adapter name $wladapter | tee -a $log
      sleep 15
+     ping -c2 $dfgw
+     if [ $? -eq 0 ]; then
+      echo Successful network connection - After Adapter Reset | tee -a $log
+     else
+     echo Connection failed muiltiple times | tee -a $log
+     echo Resetting configuration | tee -a $log
+     echo Purging VHConfig | tee -a $log
+     #------------------------------------------------------------
+     #Running API to VHClient to disconnect all clients this device is connecting to
+     #When a device ID changes on VH the client can think it should connect to multiple devices
+     #------------------------------------------------------------
+     /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
+     /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
+     #------------------------------------------------------------
+     #VHCached.txt will hold the server and device ID from VH so we use the same device every time
+     #In the case when a device ID Changes, puring this setting will make sure a new device is captured
+     #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
+     #changes occur in the environment. This is a workaround just for when the IDs change.
+     #------------------------------------------------------------
+     rm -f /usr/local/scripts/vhcached.txt
+     #------------------------------------------------------------
+     #Cleaning up old network connection profiles
+     #------------------------------------------------------------
+     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     #------------------------------------------------------------
+     #Looping Script - Network Connectivity Failed
+     #------------------------------------------------------------
+     source /usr/local/scripts/simulation.sh
     fi
-    ping -c2 $dfgw
-    if [ $? -eq 0 ]; then
-     echo Successful network connection - After Adapter Reset | tee -a $log
-    else
-    echo Connection failed muiltiple times | tee -a $log
-    echo Resetting configuration | tee -a $log
-    echo Purging VHConfig | tee -a $log
-    #------------------------------------------------------------
-    #Running API to VHClient to disconnect all clients this device is connecting to
-    #When a device ID changes on VH the client can think it should connect to multiple devices
-    #------------------------------------------------------------
-    /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-    /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-    #------------------------------------------------------------
-    #VHCached.txt will hold the server and device ID from VH so we use the same device every time
-    #In the case when a device ID Changes, puring this setting will make sure a new device is captured
-    #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-    #changes occur in the environment. This is a workaround just for when the IDs change.
-    #------------------------------------------------------------
-    rm -f /usr/local/scripts/vhcached.txt
-    #------------------------------------------------------------
-    #Cleaning up old network connection profiles
-    #------------------------------------------------------------
-    sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-    #------------------------------------------------------------
-    #Looping Script - Network Connectivity Failed
-    #------------------------------------------------------------
-    source /usr/local/scripts/simulation.sh
    fi
    #------------------------------------------------------------
    #End Connecting to Network
