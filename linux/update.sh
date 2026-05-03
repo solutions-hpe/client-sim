@@ -1,6 +1,6 @@
 #!/bin/bash
 
-version=.27
+version=.28
 LOG_FILE="/usr/local/scripts/sim.log"
 echo "Update Script Version $version" | tee -a "$LOG_FILE"
 echo "$(date)" | tee -a "$LOG_FILE"
