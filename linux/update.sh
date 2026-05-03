@@ -38,13 +38,36 @@ if [ $public_repo == "on" ]; then
  git pull --ff-only
  cd linux
  #Copying config file template for syslog messages of simulation
- sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+ echo "Copying rsyslog config..."
+ if [[ -f "10-rsyslog.conf" ]]; then
+  sudo cp -v 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+ else
+  echo "No rsyslog config file found"
+ fi
  #copying startup files to autostart
- sudo cp *.desktop /etc/xdg/autostart/
+ echo "Copying desktop startup files..."
+ desktop_files=( *.desktop )
+ if (( ${#desktop_files[@]} )); then
+  sudo cp -v "${desktop_files[@]}" /etc/xdg/autostart/
+ else
+  echo "No .desktop files found to copy"
+ fi
  #copying shell scripts to the active script repo
- sudo cp *.sh /usr/local/scripts/
+ echo "Copying shell scripts..."
+ sh_files=( *.sh )
+ if (( ${#sh_files[@]} )); then
+  sudo cp -v "${sh_files[@]}" /usr/local/scripts/
+ else
+  echo "No .sh files found to copy"
+ fi
  #copying flat files for simulation to active script repo
- sudo cp *.txt /usr/local/scripts/
+ echo "Copying text files..."
+ txt_files=( *.txt )
+ if (( ${#txt_files[@]} )); then
+  sudo cp -v "${txt_files[@]}" /usr/local/scripts/
+ else
+  echo "No .txt files found to copy"
+ fi
  cd ..
  cd configs
  #copying latest config file to active repository
