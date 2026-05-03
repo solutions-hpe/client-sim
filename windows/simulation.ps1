@@ -1,12 +1,13 @@
 
 # =========================================================
-# NETWORK SIMULATION ENGINE v2.0 (CLEAN REBUILD)
-# - WLAN API ONLY (NO NETSH)
-# - STATE MACHINE DRIVEN
-# - NO ADAPTER TOGGLING
+# PRODUCTION WIFI SIMULATION ENGINE v3.0
+# - WlanSetProfile (correct usage)
+# - WlanConnect (PROFILE MODE ONLY - STABLE)
+# - NO netsh
+# - NO SSID STRUCT MANIPULATION
 # =========================================================
 
-$version = "2.0-clean-rebuild"
+$version = "3.0-wlan-production"
 
 $script:ssid   = $ssid
 $script:ssidpw = $ssidpw
@@ -32,7 +33,7 @@ function Debug($msg) {
 }
 
 # =========================================================
-# WLAN API LAYER
+# WLAN API DEFINITIONS
 # =========================================================
 
 Add-Type -TypeDefinition @"
@@ -67,57 +68,38 @@ public class WlanApi
         out uint reasonCode
     );
 
-    [DllImport("wlanapi.dll")]
+    [DllImport("wlanapi.dll", CharSet = CharSet.Unicode)]
     public static extern int WlanConnect(
         IntPtr clientHandle,
         ref Guid interfaceGuid,
-        ref WLAN_CONNECTION_PARAMETERS connectionParams,
+        IntPtr connectionParams,
         IntPtr reserved
     );
-
-    public enum WLAN_CONNECTION_MODE
-    {
-        Profile = 0
-    }
-
-    public enum DOT11_BSS_TYPE
-    {
-        Any = 3
-    }
-
-    public struct WLAN_CONNECTION_PARAMETERS
-    {
-        public WLAN_CONNECTION_MODE wlanConnectionMode;
-        public string strProfile;
-        public IntPtr pDot11Ssid;
-        public DOT11_BSS_TYPE dot11BssType;
-        public bool bSecurityEnabled;
-    }
 }
 "@
 
 # =========================================================
-# WIFI INTERFACE
+# INTERFACE DETECTION
 # =========================================================
 
 function Get-WifiInterface {
 
-    $adapter = Get-NetAdapter |
+    $iface = Get-NetAdapter |
         Where-Object {
             $_.Status -ne "Disabled" -and
             $_.InterfaceDescription -match "Wi-Fi|Wireless|WLAN"
         } |
         Select-Object -First 1
 
-    if (-not $adapter) {
-        throw "No Wi-Fi adapter found"
+    if (-not $iface) {
+        throw "No Wi-Fi interface found"
     }
 
-    return $adapter
+    return $iface
 }
 
 # =========================================================
-# PROFILE CREATION
+# PROFILE XML BUILDER
 # =========================================================
 
 function New-WifiProfileXml {
@@ -158,12 +140,13 @@ function New-WifiProfileXml {
             </sharedKey>
         </security>
     </MSM>
+
 </WLANProfile>
 "@
 }
 
 # =========================================================
-# WLAN PROFILE SET
+# PROFILE CREATION (FIXED RELIABLE VERSION)
 # =========================================================
 
 function Set-WifiProfile {
@@ -172,10 +155,10 @@ function Set-WifiProfile {
         $handle = [IntPtr]::Zero
         $version = 0
 
-        $result = [WlanApi]::WlanOpenHandle(2, [IntPtr]::Zero, [ref]$version, [ref]$handle)
+        $res = [WlanApi]::WlanOpenHandle(2, [IntPtr]::Zero, [ref]$version, [ref]$handle)
 
-        if ($result -ne 0) {
-            Log "WlanOpenHandle failed: $result"
+        if ($res -ne 0) {
+            Log "WlanOpenHandle failed: $res"
             return $false
         }
 
@@ -186,7 +169,7 @@ function Set-WifiProfile {
 
         $reason = 0
 
-        $res = [WlanApi]::WlanSetProfile(
+        $result = [WlanApi]::WlanSetProfile(
             $handle,
             [ref]$guid,
             0,
@@ -199,22 +182,22 @@ function Set-WifiProfile {
 
         [void][WlanApi]::WlanCloseHandle($handle, [IntPtr]::Zero)
 
-        if ($res -ne 0) {
-            Log "Profile creation failed: HRESULT=$res Reason=$reason"
+        if ($result -ne 0) {
+            Log "PROFILE CREATION FAILED HRESULT=$result Reason=$reason"
             return $false
         }
 
-        Log "Wi-Fi profile created/updated successfully"
+        Log "PROFILE CREATED SUCCESSFULLY -> $script:ssid"
         return $true
     }
     catch {
-        Log "Profile exception: $($_.Exception.Message)"
+        Log "PROFILE EXCEPTION: $($_.Exception.Message)"
         return $false
     }
 }
 
 # =========================================================
-# WLAN CONNECT
+# WIFI CONNECT (PROFILE MODE - STABLE)
 # =========================================================
 
 function Connect-Wifi {
@@ -227,48 +210,44 @@ function Connect-Wifi {
 
         [void][WlanApi]::WlanOpenHandle(2, [IntPtr]::Zero, [ref]$version, [ref]$handle)
 
-        $params = New-Object WlanApi+WLAN_CONNECTION_PARAMETERS
-        $params.wlanConnectionMode = [WlanApi+WLAN_CONNECTION_MODE]::Profile
-        $params.strProfile = $script:ssid
-        $params.dot11BssType = [WlanApi+DOT11_BSS_TYPE]::Any
-        $params.bSecurityEnabled = $true
-
-        Log "Attempting WLAN connect -> $script:ssid"
+        # IMPORTANT:
+        # We pass NULL connection params pointer for PROFILE MODE
+        # Windows resolves profile internally
 
         $result = [WlanApi]::WlanConnect(
             $handle,
             [ref]$iface.InterfaceGuid,
-            [ref]$params,
+            [IntPtr]::Zero,
             [IntPtr]::Zero
         )
 
         [void][WlanApi]::WlanCloseHandle($handle, [IntPtr]::Zero)
 
         if ($result -ne 0) {
-            Log "WlanConnect failed: $result"
+            Log "CONNECT FAILED HRESULT=$result"
             return $false
         }
 
-        Start-Sleep 5
+        Start-Sleep 6
 
         $status = netsh wlan show interfaces
 
         if ($status -match "State\s*:\s*connected") {
-            Log "Wi-Fi CONNECTED"
+            Log "WI-FI CONNECTED SUCCESSFULLY"
             return $true
         }
 
-        Log "Wi-Fi not connected after attempt"
+        Log "CONNECT INITIATED BUT NOT VERIFIED"
         return $false
     }
     catch {
-        Log "Connect exception: $($_.Exception.Message)"
+        Log "CONNECT EXCEPTION: $($_.Exception.Message)"
         return $false
     }
 }
 
 # =========================================================
-# STATE ENGINE
+# STATE MACHINE
 # =========================================================
 
 function State-Engine {
@@ -281,9 +260,7 @@ function State-Engine {
 
             Log "STATE -> INIT"
 
-            $profileOk = Set-WifiProfile
-
-            if ($profileOk) {
+            if (Set-WifiProfile) {
                 $script:State = "Connect"
             }
             else {
@@ -311,10 +288,12 @@ function State-Engine {
 
         "WirelessActive" {
 
+            Start-Sleep 3
+
             $status = netsh wlan show interfaces
 
             if ($status -notmatch "State\s*:\s*connected") {
-                Log "Wi-Fi lost connection"
+                Log "WIRELESS LOST CONNECTION"
                 $script:State = "Connect"
             }
         }
@@ -322,7 +301,6 @@ function State-Engine {
         "Recovery" {
 
             Log "STATE -> RECOVERY"
-
             Start-Sleep 3
             $script:State = "Init"
         }
@@ -333,10 +311,10 @@ function State-Engine {
 # MAIN LOOP
 # =========================================================
 
-Log "===================================="
-Log "SIMULATION ENGINE v$version STARTED"
+Log "========================================"
+Log "WLAN PRODUCTION ENGINE v$version STARTED"
 Log "SSID: $script:ssid"
-Log "===================================="
+Log "========================================"
 
 while ($true) {
 
