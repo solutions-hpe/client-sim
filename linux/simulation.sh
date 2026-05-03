@@ -130,12 +130,16 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 connect_wifi() {
   nmcli radio wifi off
+  echo Turning off WiFi Adapter | tee -a /usr/local/scripts/sim.log
   sleep 5
   nmcli radio wifi on
+  echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
   sleep 30
   if [ $site_based_ssid == "on" ]; then
+    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
   else
+    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $1 device wifi connect $ssid password $ssidpw
   fi
 }
@@ -146,12 +150,16 @@ manage_connection() {
   local action=$1
   local wait_time=$2
   nmcli radio wifi off
+  echo Turning off WiFi Adapter | tee -a /usr/local/scripts/sim.log
   sleep 5
   nmcli radio wifi on
+  echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
   sleep 30
   if [ $site_based_ssid == "on" ]; then
+    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $wait_time connection $action $wsite"-"$ssid
   else
+    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $wait_time connection $action $ssid
   fi
 }
