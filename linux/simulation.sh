@@ -293,7 +293,7 @@ if [ $kill_switch == "off" ]; then
     #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
     #changes occur in the environment. This is a workaround just for when the IDs change.
     #------------------------------------------------------------
-    rm /usr/local/scripts/vhcached.txt
+    rm -f /usr/local/scripts/vhcached.txt
     #------------------------------------------------------------
     #Cleaning up old network connection profiles
     #------------------------------------------------------------
