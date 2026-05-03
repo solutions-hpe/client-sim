@@ -126,22 +126,44 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 #Functions
 #------------------------------------------------------------
+wait_for_ssid() {
+  local target_ssid="$1"
+  local timeout=60
+  local interval=3
+  local elapsed=0
+
+  echo "Scanning for SSID: $target_ssid"
+
+  while [ $elapsed -lt $timeout ]; do
+    if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
+      echo "SSID found: $target_ssid"
+      return 0
+    fi
+
+    sleep $interval
+    elapsed=$((elapsed + interval))
+  done
+
+  echo "ERROR: SSID '$target_ssid' not found after $timeout seconds"
+  return 1
+}
+#------------------------------------------------------------
 #WiFi connections
 #------------------------------------------------------------
 connect_wifi() {
   nmcli radio wifi off
-  echo Turning off WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 5
+  echo "Turning off WiFi Adapter"
+  sleep 3
   nmcli radio wifi on
-  echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 15
-  if [ $site_based_ssid == "on" ]; then
-    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
-    nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
+  echo "Turning on WiFi Adapter"
+  if [ "$site_based_ssid" == "on" ]; then
+    target_ssid="$wsite-$ssid"
   else
-    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
-    nmcli -w $1 device wifi connect $ssid password $ssidpw
+    target_ssid="$ssid"
   fi
+  wait_for_ssid "$target_ssid" || return 1
+  echo "Attempting to connect to $target_ssid"
+  nmcli device wifi connect "$target_ssid" password "$ssidpw"
 }
 #------------------------------------------------------------
 #Connection management
@@ -150,18 +172,18 @@ manage_connection() {
   local action=$1
   local wait_time=$2
   nmcli radio wifi off
-  echo Turning off WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 5
+  echo "Turning off WiFi Adapter"
+  sleep 3
   nmcli radio wifi on
-  echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 15
-  if [ $site_based_ssid == "on" ]; then
-    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
-    nmcli -w $wait_time connection $action $wsite"-"$ssid
+  echo "Turning on WiFi Adapter"
+  if [ "$site_based_ssid" == "on" ]; then
+    target_ssid="$wsite-$ssid"
   else
-    echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
-    nmcli -w $wait_time connection $action $ssid
+    target_ssid="$ssid"
   fi
+  wait_for_ssid "$target_ssid" || return 1
+  echo "Attempting to $action connection: $target_ssid"
+  nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
 #------------------------------------------------------------
 #Run simulation scripts
@@ -192,7 +214,7 @@ mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
 echo Finding WLAN Adapter | tee -a /usr/local/scripts/sim.log
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo Unblocking WiFi / RFKill| tee -a /usr/local/scripts/sim.log
+echo Unblocking WiFi / RFKill | tee -a /usr/local/scripts/sim.log
 sudo rfkill unblock wifi & disown
 echo Getting Default Gateway | tee -a /usr/local/scripts/sim.log
 dfgw=$(ip route | grep -oP 'default via \K\S+')
