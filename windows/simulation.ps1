@@ -1,9 +1,9 @@
 
 # =========================================================
-# Simulation Network State Engine (Stable / No Stall)
+# Simulation Network State Engine (NO HANG VERSION)
 # =========================================================
 
-$version = "7.2-stable"
+$version = "7.3-nohang"
 $logPath = "C:\Scripts\sim.log"
 
 $script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
@@ -29,41 +29,27 @@ function Debug($msg) {
 }
 
 # -------------------------
-# SAFE ADAPTER DETECTION (CACHED)
+# ADAPTER DETECTION
 # -------------------------
 
 function Detect-Adapters {
 
-    if ($script:wladapter -and $script:eadapter) {
-        return
-    }
+    if ($script:wladapter -and $script:eadapter) { return }
 
-    Debug "Detecting adapters..."
+    $adapters = netsh interface show interface
 
-    try {
-        $adapters = Get-NetAdapter -ErrorAction SilentlyContinue
+    $wifi = ($adapters | Select-String "Wi-Fi|Wireless|WLAN").ToString().Split()[-1]
+    $eth  = ($adapters | Select-String "Ethernet").ToString().Split()[-1]
 
-        $wifi = $adapters | Where-Object {
-            $_.Name -match "Wi-Fi|WLAN|Wireless"
-        } | Select-Object -First 1
+    $script:wladapter = $wifi
+    $script:eadapter  = $eth
 
-        $eth = $adapters | Where-Object {
-            $_.Name -match "Ethernet|eth"
-        } | Select-Object -First 1
-
-        $script:wladapter = if ($wifi) { $wifi.Name } else { $null }
-        $script:eadapter  = if ($eth)  { $eth.Name }  else { $null }
-
-        Debug "WiFi Adapter: $script:wladapter"
-        Debug "Ethernet Adapter: $script:eadapter"
-    }
-    catch {
-        Debug "Adapter detection failed"
-    }
+    Debug "WiFi Adapter: $script:wladapter"
+    Debug "Ethernet Adapter: $script:eadapter"
 }
 
 # -------------------------
-# HEX CONVERSION (SAFE)
+# HEX
 # -------------------------
 
 function Convert-SSIDToHex {
@@ -89,7 +75,7 @@ function Test-WifiConnected {
 }
 
 # -------------------------
-# PROFILE CREATION
+# PROFILE
 # -------------------------
 
 function Install-WifiProfile {
@@ -137,27 +123,25 @@ function Install-WifiProfile {
 }
 
 # -------------------------
-# CONNECT LOGIC (LESS AGGRESSIVE)
+# CONNECT
 # -------------------------
 
 function Connect-Wifi {
-
-    if (-not $script:wladapter) { return $false }
 
     for ($i = 1; $i -le 5; $i++) {
 
         Debug "Wi-Fi attempt $i"
 
-        if ($i -eq 1) {
-            Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
+        if ($i -eq 1 -and $script:wladapter) {
+            netsh interface set interface name="$script:wladapter" admin=disabled
             Start-Sleep 2
-            Enable-NetAdapter -Name $script:wladapter -ErrorAction SilentlyContinue
+            netsh interface set interface name="$script:wladapter" admin=enabled
             Start-Sleep 5
         }
 
         Install-WifiProfile
 
-        netsh wlan connect name="$script:ssid" ssid="$script:ssid" | Out-Null
+        netsh wlan connect name="$script:ssid" | Out-Null
 
         Start-Sleep 6
 
@@ -182,7 +166,7 @@ function Enter-WirelessState {
 
     if ($script:eadapter) {
         Debug "Disabling Ethernet"
-        Disable-NetAdapter -Name $script:eadapter -Confirm:$false -ErrorAction SilentlyContinue
+        netsh interface set interface name="$script:eadapter" admin=disabled
     }
 
     if (Connect-Wifi) {
@@ -200,11 +184,11 @@ function Enter-EthernetState {
     Detect-Adapters
 
     if ($script:eadapter) {
-        Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        netsh interface set interface name="$script:eadapter" admin=enabled
     }
 
     if ($script:wladapter) {
-        Disable-NetAdapter -Name $script:wladapter -Confirm:$false -ErrorAction SilentlyContinue
+        netsh interface set interface name="$script:wladapter" admin=disabled
     }
 
     Log "STATE -> EthernetActive"
@@ -216,7 +200,7 @@ function Enter-RecoveryState {
     Log "STATE -> Recovery"
 
     if ($script:eadapter) {
-        Enable-NetAdapter -Name $script:eadapter -ErrorAction SilentlyContinue
+        netsh interface set interface name="$script:eadapter" admin=enabled
     }
 
     Start-Sleep 5
