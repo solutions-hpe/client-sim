@@ -1,19 +1,12 @@
 
 # =========================================================
-# NETWORK SIMULATION CORE ENGINE (CLEAN RESTART)
+# NETWORK SIMULATION CORE (FIXED STATE CONSISTENCY)
 # =========================================================
 
-$version = "1.0-core"
-
-# -------------------------
-# CONFIG
-# -------------------------
-
-$script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
+$version = "1.1-fixed-state"
 
 $script:State = "Init"
 $script:cycle = 0
-
 $script:failCount = 0
 $script:maxRetries = 5
 
@@ -24,107 +17,119 @@ $script:maxRetries = 5
 $logPath = "C:\Scripts\sim.log"
 
 function Log($msg) {
-    $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg
-    $line | Tee-Object -FilePath $logPath -Append
-}
-
-function Debug($msg) {
-    Log "[DEBUG] $msg"
+    "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg |
+        Tee-Object -FilePath $logPath -Append
 }
 
 # -------------------------
-# SIMULATION MODEL
+# SIMULATION OF NETWORK QUALITY
 # -------------------------
-# This replaces ALL real networking
 
-function Get-NetworkSnapshot {
+function Get-NetworkHealth {
 
-    if ($script:sim_phy -eq "ethernet") {
-        return @{
-            Link = "Ethernet"
-            Up   = $true
-            Latency = 1
-        }
-    }
-
-    # wireless simulation behavior
     $roll = Get-Random -Minimum 1 -Maximum 100
 
-    if ($roll -le 75) {
-        return @{
-            Link = "WiFi"
-            Up   = $true
-            Latency = Get-Random -Minimum 10 -Maximum 60
-        }
-    }
-    elseif ($roll -le 90) {
-        return @{
-            Link = "WiFi"
-            Up   = $false
-            Latency = 0
-        }
-    }
-    else {
-        return @{
-            Link = "WiFi"
-            Up   = $false
-            Latency = 0
-        }
-    }
-}
-
-function Test-SimulatedInternet {
-    $net = Get-NetworkSnapshot
-
-    Debug "LINK=$($net.Link) UP=$($net.Up) LATENCY=$($net.Latency)ms"
-
-    return $net.Up
+    return ($roll -le 75)
 }
 
 # -------------------------
-# STATE MACHINE
+# WIFI EXECUTOR (REAL WORLD BUT SAFE)
+# -------------------------
+
+function Invoke-WifiConnect {
+
+    param(
+        [string]$ssid
+    )
+
+    try {
+        Log "Attempting Wi-Fi connect to $ssid"
+
+        # NOTE: we DO NOT assume success
+        $job = Start-Job -ScriptBlock {
+            param($s)
+            netsh wlan connect name="$s" ssid="$s"
+        } -ArgumentList $ssid
+
+        if (Wait-Job $job -Timeout 8) {
+            Receive-Job $job | Out-Null
+            Remove-Job $job | Out-Null
+            return $true
+        }
+        else {
+            Stop-Job $job | Out-Null
+            Remove-Job $job | Out-Null
+            Log "Wi-Fi connect timeout"
+            return $false
+        }
+    }
+    catch {
+        Log "Wi-Fi connect error: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# -------------------------
+# STATE ENGINE
 # -------------------------
 
 function Enter-Init {
 
     Log "STATE -> INIT"
 
-    $script:cycle = 0
     $script:failCount = 0
 
-    if ($script:sim_phy -eq "wireless") {
-        $script:State = "WirelessActive"
+    if ($script:sim_phy -eq "ethernet") {
+        $script:State = "Ethernet"
     }
     else {
-        $script:State = "EthernetActive"
+        $script:State = "WiFiConnect"
     }
 }
 
-function Enter-Wireless {
+function Enter-WiFiConnect {
 
-    Log "STATE -> WirelessActive"
+    Log "STATE -> WiFiConnect"
 
-    if (Test-SimulatedInternet) {
-        $script:State = "WirelessOK"
-        $script:failCount = 0
+    $ok = Invoke-WifiConnect -ssid $script:ssid
+
+    if ($ok) {
+        $script:State = "WirelessActive"
     }
     else {
-        $script:State = "WirelessFail"
+        $script:State = "Recovery"
+    }
+}
+
+function Enter-WirelessActive {
+
+    $healthy = Get-NetworkHealth
+
+    if ($healthy) {
+        Log "Wireless OK"
+    }
+    else {
+        $script:failCount++
+        Log "Wireless FAIL #$script:failCount"
+
+        if ($script:failCount -ge $script:maxRetries) {
+            $script:State = "Recovery"
+        }
+        else {
+            $script:State = "WiFiConnect"
+        }
     }
 }
 
 function Enter-Ethernet {
 
-    Log "STATE -> EthernetActive"
-
-    $script:State = "EthernetOK"
+    Log "Ethernet ACTIVE (simulated)"
 }
 
 function Enter-Recovery {
 
-    Log "STATE -> Recovery"
-
-    Start-Sleep 1
+    Log "STATE -> RECOVERY"
+    Start-Sleep 2
     $script:State = "Init"
 }
 
@@ -142,38 +147,16 @@ function State-Engine {
             Enter-Init
         }
 
+        "WiFiConnect" {
+            Enter-WiFiConnect
+        }
+
         "WirelessActive" {
-            Enter-Wireless
+            Enter-WirelessActive
         }
 
-        "EthernetActive" {
+        "Ethernet" {
             Enter-Ethernet
-        }
-
-        "WirelessOK" {
-
-            if (-not (Test-SimulatedInternet)) {
-
-                $script:failCount++
-
-                Log "WiFi failure #$script:failCount"
-
-                if ($script:failCount -ge $script:maxRetries) {
-                    $script:State = "Recovery"
-                }
-                else {
-                    Start-Sleep ($script:failCount * 2)
-                    $script:State = "WirelessActive"
-                }
-            }
-        }
-
-        "WirelessFail" {
-            $script:State = "Recovery"
-        }
-
-        "EthernetOK" {
-            # stable state
         }
 
         "Recovery" {
@@ -186,13 +169,9 @@ function State-Engine {
 # MAIN LOOP
 # -------------------------
 
-Log "===================================="
-Log "NETWORK SIMULATION CORE STARTED"
-Log ("Version: {0}" -f $version)
-Log "===================================="
+Log "ENGINE STARTED v$version"
 
 while ($true) {
-
     try {
         State-Engine
         Start-Sleep (Get-Random -Minimum 1 -Maximum 3)
