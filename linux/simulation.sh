@@ -383,6 +383,7 @@ if [ $kill_switch == "off" ]; then
    if [ "$www_traffic" == "on" ]; then
     if ! pgrep -f "www_traffic.sh" >/dev/null; then
      run_simulation "www_traffic.sh" 30
+     www_traffic="off"
     fi
    fi
    if [ "$ping_test" == "on" ]; then
@@ -404,6 +405,12 @@ if [ $kill_switch == "off" ]; then
     if ! pgrep -f "dns_fail.sh" >/dev/null; then
      run_simulation "dns_fail.sh" 30
     fi
+   fi
+   sleep 30
+   if (( z % 10 == 0 )); then
+    echo Closing Firefox | tee -a "$log"
+    pkill -f firefox
+    www_traffic="on"
    fi
    echo End of simulation | tee -a $log
    #------------------------------------------------------------
