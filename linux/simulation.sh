@@ -1,8 +1,9 @@
 #!/bin/bash
 version=.93
-echo $(date) | tee -a /usr/local/scripts/sim.log
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
-echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
+log="/usr/local/scripts/sim.log"
+echo $(date) | tee -a $log
+echo ------------------------------| tee -a $log
+echo Simulation Script Version $version | tee -a $log
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
@@ -14,11 +15,11 @@ echo Simulation Script Version $version | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
+if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a $log; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
-if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
+if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a $log; fi
 #------------------------------------------------------------
-echo Parsing Config File | tee -a /usr/local/scripts/sim.log
+echo Parsing Config File | tee -a $log
 #------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
@@ -84,25 +85,25 @@ done
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------
-echo $(date) | tee -a /usr/local/scripts/sim.log
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
-echo Simulation Details: | tee -a /usr/local/scripts/sim.log
-echo Hostname: $HOSTNAME | tee -a /usr/local/scripts/sim.log
-echo Site: $wsite | tee -a /usr/local/scripts/sim.log
-echo Site Based SSID: $site_based_ssid | tee -a /usr/local/scripts/sim.log
-echo VHServer: $vh_server | tee -a /usr/local/scripts/sim.log
-if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a /usr/local/scripts/sim.log; fi
-echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-echo Kill Switch: $kill_switch | tee -a /usr/local/scripts/sim.log
-echo DHCP Fail: $dhcp_fail | tee -a /usr/local/scripts/sim.log
-echo DNS Fail: $dns_fail | tee -a /usr/local/scripts/sim.log
-echo WWW Traffic: $www_traffic | tee -a /usr/local/scripts/sim.log
-echo iPerf: $iperf | tee -a /usr/local/scripts/sim.log
-echo Download: $download | tee -a /usr/local/scripts/sim.log
-echo Port Flap: $port_flap | tee -a /usr/local/scripts/sim.log
-echo Incorrect SSID PW: $ssidpw_fail | tee -a /usr/local/scripts/sim.log
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
+echo $(date) | tee -a $log
+echo ------------------------------| tee -a $log
+echo Simulation Details: | tee -a $log
+echo Hostname: $HOSTNAME | tee -a $log
+echo Site: $wsite | tee -a $log
+echo Site Based SSID: $site_based_ssid | tee -a $log
+echo VHServer: $vh_server | tee -a $log
+if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a $log; fi
+if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a $log; fi
+echo Simulation Load: $sim_load | tee -a $log
+echo Kill Switch: $kill_switch | tee -a $log
+echo DHCP Fail: $dhcp_fail | tee -a $log
+echo DNS Fail: $dns_fail | tee -a $log
+echo WWW Traffic: $www_traffic | tee -a $log
+echo iPerf: $iperf | tee -a $log
+echo Download: $download | tee -a $log
+echo Port Flap: $port_flap | tee -a $log
+echo Incorrect SSID PW: $ssidpw_fail | tee -a $log
+echo ------------------------------| tee -a $log
 sleep 5
 #------------------------------------------------------------
 #Checking global kill switch config
@@ -210,7 +211,7 @@ run_simulation() {
  local script=$1
  local sleep_time=$2
  if [ -f "/usr/local/scripts/$script" ]; then
-  nohup bash "/usr/local/scripts/$script" >> /usr/local/scripts/sim.log 2>&1 &
+  nohup bash "/usr/local/scripts/$script" >> $log 2>&1 &
   sleep $sleep_time
  fi
 }
@@ -224,24 +225,24 @@ connect_wifi
 echo Disabling unused interface
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
-echo Generating MAC address | tee -a /usr/local/scripts/sim.log
+echo Generating MAC address | tee -a $log
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
 #Checking to see if the default gateway is reachable
 #------------------------------------------------------------
-echo Finding WLAN Adapter | tee -a /usr/local/scripts/sim.log
+echo Finding WLAN Adapter | tee -a $log
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo Unblocking WiFi / RFKill | tee -a /usr/local/scripts/sim.log
+echo Unblocking WiFi / RFKill | tee -a $log
 sudo rfkill unblock wifi & disown
-echo Getting Default Gateway | tee -a /usr/local/scripts/sim.log
+echo Getting Default Gateway | tee -a $log
 dfgw=$(ip route | grep -oP 'default via \K\S+')
-echo Ping the Default Gateway | tee -a /usr/local/scripts/sim.log
+echo Ping the Default Gateway | tee -a $log
 ping -c2 $dfgw
 if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
- echo Successful network connection | tee -a /usr/local/scripts/sim.log
+ echo Successful network connection | tee -a $log
 else
-  echo Network connection failed | tee -a /usr/local/scripts/sim.log
+  echo Network connection failed | tee -a $log
   #------------------------------------------------------------
   #If VH is enabled then attempt to connect to VHServer
   #------------------------------------------------------------
@@ -259,8 +260,8 @@ fi
 #Begin Setting up simulation load
 #------------------------------------------------------------
 if [ $sim_load -lt $rn_sim_load ]; then
-  echo Simulation load under threshold | tee -a /usr/local/scripts/sim.log
-  echo Skipping Simulations but staying associated | tee -a /usr/local/scripts/sim.log
+  echo Simulation load under threshold | tee -a $log
+  echo Skipping Simulations but staying associated | tee -a $log
   if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
     manage_connection up 180
   fi
@@ -269,7 +270,7 @@ fi
 #------------------------------------------------------------
 #End Setting up simulation load
 #------------------------------------------------------------
-echo Kill Switch is $kill_switch | tee -a /usr/local/scripts/sim.log
+echo Kill Switch is $kill_switch | tee -a $log
 if [ $kill_switch == "off" ]; then
  for z in {1..100}; do
   #------------------------------------------------------------
@@ -281,18 +282,18 @@ if [ $kill_switch == "off" ]; then
   if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
-      echo Running SSID Incorrect Password | tee -a /usr/local/scripts/sim.log
+      echo Running SSID Incorrect Password | tee -a $log
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
-      echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
+      echo Iteration $i of 100 | tee -a $log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       connect_wifi
      done
     fi
     if [ $auth_fail == "on" ]; then
-     echo Running Auth Failure | tee -a /usr/local/scripts/sim.log
+     echo Running Auth Failure | tee -a $log
      for i in {1..100}; do
-      echo Enable/Disable WLAN interface | tee -a /usr/local/scripts/sim.log
-      echo Iteration $i of 100 | tee -a /usr/local/scripts/sim.log
+      echo Enable/Disable WLAN interface | tee -a $log
+      echo Iteration $i of 100 | tee -a $log
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       manage_connection up 5
       sleep 5
@@ -314,26 +315,26 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    ping -c2 $dfgw
    if [ $? -eq 0 ]; then
-    echo Successful network connection | tee -a /usr/local/scripts/sim.log
+    echo Successful network connection | tee -a $log
     else
-     echo Network connection failed | tee -a /usr/local/scripts/sim.log
-     echo Attempting to reset adapter | tee -a /usr/local/scripts/sim.log
+     echo Network connection failed | tee -a $log
+     echo Attempting to reset adapter | tee -a $log
      if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      connect_wifi
-     echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log
+     echo WLAN Adapter name $wladapter | tee -a $log
      sleep 15
     fi
     dfgw=$(ip route | grep -oP 'default via \K\S+')
     ping -c2 $dfgw
     if [ $? -eq 0 ]; then
-     echo Successful network connection | tee -a /usr/local/scripts/sim.log
+     echo Successful network connection | tee -a $log
     else
-    echo Connection failed muiltiple times | tee -a /usr/local/scripts/sim.log
-    echo Resetting configuration | tee -a /usr/local/scripts/sim.log
-    echo Purging VHConfig | tee -a /usr/local/scripts/sim.log
+    echo Connection failed muiltiple times | tee -a $log
+    echo Resetting configuration | tee -a $log
+    echo Purging VHConfig | tee -a $log
     #------------------------------------------------------------
     #Running API to VHClient to disconnect all clients this device is connecting to
     #When a device ID changes on VH the client can think it should connect to multiple devices
@@ -359,60 +360,21 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Connecting to Network
    #------------------------------------------------------------
-   #Running WWW Traffic Simulation
-   #------------------------------------------------------------
     if [ $www_traffic == "on" ]; then
-     echo Running WWW Traffic simulation
-     wwwfile=($(< /usr/local/scripts/websites.txt))
-     rn_www=$((RANDOM % ${#wwwfile[@]}))
-     url="${wwwfile[$rn_www]}"
-     echo $(date) | tee -a /usr/local/scripts/sim.log
-     echo ------------------------------| tee -a /usr/local/scripts/sim.log
-     if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a /usr/local/scripts/sim.log; fi
-     echo Simulation Load: $sim_load | tee -a /usr/local/scripts/sim.log
-     echo Website: $url | tee -a /usr/local/scripts/sim.log
-     echo ------------------------------| tee -a /usr/local/scripts/sim.log
-     firefox --headless $url &
-     www_traffic=off
+     run_simulation "www_traffic.sh" 30
     fi
-   #------------------------------------------------------------
-   #End WWW Traffic Simulation
-   #------------------------------------------------------------
-   #Running ping simulation
-   #------------------------------------------------------------
-   if [ $ping_test == "on" ]; then
-    echo $(date) | tee -a /usr/local/scripts/sim.log
-    echo ------------------------------| tee -a /usr/local/scripts/sim.log
-    echo Ping Address: $ping_address | tee -a /usr/local/scripts/sim.log
-    echo Ping Payload: $rn_ping_size | tee -a /usr/local/scripts/sim.log
-    echo Ping Count: $rn | tee -a /usr/local/scripts/sim.log
-    echo ------------------------------| tee -a /usr/local/scripts/sim.log
-    ping -c $rn $ping_address -s $rn_ping_size
-   fi
-   #------------------------------------------------------------
-   #End Ping Simulation
-
-    #Running iPerf simulation
-    #------------------------------------------------------------
+    if [ $ping_test == "on" ]; then
+     run_simulation "ping_test.sh" 30
     if [ $iperf == "on" ]; then
      run_simulation "iperf.sh" 30
     fi
-    #------------------------------------------------------------
-    #Running download simulation
-    #------------------------------------------------------------
     if [ $download == "on" ]; then
      run_simulation "download.sh" 30
     fi
-    #------------------------------------------------------------
-    #Running DNS Fail simulation
-    #------------------------------------------------------------
     if [ $dns_fail == "on" ]; then
      run_simulation "dns_fail.sh" 30
     fi
-   #------------------------------------------------------------
-   #End DNS Fail Simulation
-   #------------------------------------------------------------
-   echo End of simulation | tee -a /usr/local/scripts/sim.log
+   echo End of simulation | tee -a $log
    #------------------------------------------------------------
    #Running update to either the cloud repo or local SMB repo
    #------------------------------------------------------------
@@ -420,8 +382,8 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Script Updates
    #------------------------------------------------------------
-   echo Sleeping for 5 seconds | tee -a /usr/local/scripts/sim.log
-   echo Loop iteration $z of 100 | tee -a /usr/local/scripts/sim.log
+   echo Sleeping for 5 seconds | tee -a $log
+   echo Loop iteration $z of 100 | tee -a $log
    sleep 5
    #------------------------------------------------------------
    #End of 100 Loop Count
@@ -438,7 +400,7 @@ fi
 #------------------------------------------------------------
 #Killing Firefox simulation
 #------------------------------------------------------------
-echo Closing Firefox | tee -a /usr/local/scripts/sim.log
+echo Closing Firefox | tee -a $log
 pkill -f firefox &
 #------------------------------------------------------------
 #End Kill switch Check 
@@ -446,18 +408,18 @@ pkill -f firefox &
 #------------------------------------------------------------
 #Running apt update & apt upgrade
 #------------------------------------------------------------
-echo Running Updates | tee -a /usr/local/scripts/sim.log
+echo Running Updates | tee -a $log
 bash /usr/local/scripts/apt_update.sh &
 if [ $allow_offline == "yes" ]; then
   #------------------------------------------------------------
   #Bringing all interfaces down to make it look like the device is offline.
   #Otherwise they get triggered as IOT since they are always connected.
   #------------------------------------------------------------
-  echo Bringing all interfaces down | tee -a /usr/local/scripts/sim.log
+  echo Bringing all interfaces down | tee -a $log
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
   echo Sleeping for $rn_offline_time seconds
-  echo ------------------------------| tee -a /usr/local/scripts/sim.log
+  echo ------------------------------| tee -a $log
   #------------------------------------------------------------
   #Sleep for up to 4 hours to show the device left
   #------------------------------------------------------------
@@ -465,10 +427,10 @@ if [ $allow_offline == "yes" ]; then
   #------------------------------------------------------------
   #Bringing all interfaces back up to call home/update scripts
   #------------------------------------------------------------
-  echo Bringing all interfaces online | tee -a /usr/local/scripts/sim.log
+  echo Bringing all interfaces online | tee -a $log
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-  echo ------------------------------| tee -a /usr/local/scripts/sim.log
+  echo ------------------------------| tee -a $log
 fi
 #------------------------------------------------------------
 #Looping Script
