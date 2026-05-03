@@ -131,19 +131,15 @@ wait_for_ssid() {
   local timeout=60
   local interval=3
   local elapsed=0
-
   echo "Scanning for SSID: $target_ssid"
-
   while [ $elapsed -lt $timeout ]; do
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
       echo "SSID found: $target_ssid"
       return 0
     fi
-
     sleep $interval
     elapsed=$((elapsed + interval))
   done
-
   echo "ERROR: SSID '$target_ssid' not found after $timeout seconds"
   return 1
 }
