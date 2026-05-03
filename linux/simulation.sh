@@ -259,6 +259,7 @@ if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection - Pre-Simulation | tee -a $log
 else
   echo Network connection failed - Pre-Simulation | tee -a $log
+  echo In Pre-Simulation | tee -a $log
   #------------------------------------------------------------
   #If VH is enabled then attempt to connect to VHServer
   #------------------------------------------------------------
@@ -332,9 +333,11 @@ if [ $kill_switch == "off" ]; then
    dfgw=$(ip route | grep -oP 'default via \K\S+')
    ping -c2 $dfgw
    if [ $? -eq 0 ]; then
-    echo Successful network connection - Simulation Loop | tee -a $log
+    echo Successful network connection | tee -a $log
+    echo In Simulation Loop | tee -a $log
     else
-     echo Network connection failed - Simulation Loop | tee -a $log
+     echo Network connection failed | tee -a $log
+     echo In Simulation Loop | tee -a $log
      echo Attempting to reset adapter | tee -a $log
      if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
      sleep 15
@@ -345,7 +348,8 @@ if [ $kill_switch == "off" ]; then
      sleep 15
      ping -c2 $dfgw
      if [ $? -eq 0 ]; then
-      echo Successful network connection - After Adapter Reset | tee -a $log
+      echo Successful network connection | tee -a $log
+      echo After Adapter Reset | tee -a $log
      else
      echo Connection failed muiltiple times | tee -a $log
      echo Resetting configuration | tee -a $log
