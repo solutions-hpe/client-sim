@@ -1,202 +1,110 @@
 
 # =========================================================
-# Simulation Network Engine (DEEP DEBUG / HANG TRACE)
+# TRUE NETWORK SIMULATION ENGINE (NO OS TOGGLE)
 # =========================================================
 
-$version = "7.4-debug-trace"
-$logPath = "C:\Scripts\sim.log"
-
-$script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
+$version = "8.0-simulation-only"
 
 $script:ssid   = $ssid
 $script:ssidpw = $ssidpw
+$script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
+
+# -------------------------
+# SIMULATION STATE
+# -------------------------
 
 $script:State = "Init"
+$script:cycle = 0
 $script:wifiFailCount = 0
-$script:debug = $true
 
 # -------------------------
 # LOGGING
 # -------------------------
 
 function Log($msg) {
-    $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg
-    $line | Tee-Object -FilePath $logPath -Append
+    "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg |
+        Tee-Object -FilePath "C:\Scripts\sim.log" -Append
 }
 
 function Debug($msg) {
-    if ($script:debug) { Log "[DEBUG] $msg" }
+    Log "[DEBUG] $msg"
 }
 
 # -------------------------
-# TIMING WRAPPER (CRITICAL)
+# "VIRTUAL NETWORK MODEL"
 # -------------------------
 
-function Invoke-Traced {
-    param(
-        [string]$Label,
-        [scriptblock]$Action
-    )
+function Get-VirtualNetworkState {
 
-    Debug "START: $Label"
-    $t0 = Get-Date
+    # This simulates real-world randomness instead of hardware control
 
-    try {
-        & $Action
-    }
-    catch {
-        Log "ERROR in $Label : $($_.Exception.Message)"
+    if ($script:sim_phy -eq "ethernet") {
+        return @{
+            Link     = "Ethernet"
+            Connected = $true
+            Latency   = 1
+        }
     }
 
-    $t1 = Get-Date
-    Debug "END: $Label (took $([math]::Round(($t1-$t0).TotalSeconds,2))s)"
-}
+    # wireless simulation model
+    $rand = Get-Random -Minimum 1 -Maximum 100
 
-# -------------------------
-# RAW ADAPTER DUMP
-# -------------------------
-
-function Dump-Interfaces {
-
-    Debug "Dumping interfaces (netsh)"
-
-    $out = netsh interface show interface 2>&1
-
-    foreach ($line in $out) {
-        Debug "IFACE: $line"
+    if ($rand -lt 70) {
+        return @{
+            Link      = "WiFi"
+            Connected = $true
+            Latency   = (Get-Random -Minimum 10 -Maximum 80)
+        }
     }
-}
-
-# -------------------------
-# SAFE ADAPTER DETECTION
-# -------------------------
-
-function Detect-Adapters {
-
-    Dump-Interfaces
-
-    $out = netsh interface show interface
-
-    $wifiLine = $out | Where-Object { $_ -match "Wi-Fi|Wireless|WLAN" } | Select-Object -First 1
-    $ethLine  = $out | Where-Object { $_ -match "Ethernet" } | Select-Object -First 1
-
-    if ($wifiLine) {
-        $script:wladapter = ($wifiLine -split '\s+')[-1]
-    }
-
-    if ($ethLine) {
-        $script:eadapter = ($ethLine -split '\s+')[-1]
-    }
-
-    Debug "WiFi Adapter parsed: $script:wladapter"
-    Debug "Ethernet Adapter parsed: $script:eadapter"
-}
-
-# -------------------------
-# NETWORK CHECKS
-# -------------------------
-
-function Test-Internet {
-    Test-NetConnection 8.8.8.8 -InformationLevel Quiet -WarningAction SilentlyContinue
-}
-
-function Test-WifiConnected {
-    (netsh wlan show interfaces) -match "State\s*:\s*connected"
-}
-
-# -------------------------
-# SAFE NETSH EXECUTION (TIMEOUT GUARD)
-# -------------------------
-
-function Run-Netsh {
-    param(
-        [string]$cmd,
-        [int]$timeoutSec = 5
-    )
-
-    $job = Start-Job -ScriptBlock {
-        param($c)
-        netsh $c
-    } -ArgumentList $cmd
-
-    if (Wait-Job $job -Timeout $timeoutSec) {
-        Receive-Job $job
+    elseif ($rand -lt 85) {
+        return @{
+            Link      = "WiFi"
+            Connected = $false
+            Latency   = 0
+        }
     }
     else {
-        Log "TIMEOUT: netsh $cmd"
-        Stop-Job $job | Out-Null
+        return @{
+            Link      = "WiFi"
+            Connected = $false
+            Latency   = 0
+        }
     }
-
-    Remove-Job $job -Force | Out-Null
 }
 
 # -------------------------
-# WIFI PROFILE
+# SIMULATED CONNECT LOGIC
 # -------------------------
 
-function Install-WifiProfile {
+function Test-SimulatedInternet {
 
-    $xml = @"
-<?xml version="1.0"?>
-<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-    <name>$script:ssid</name>
-    <SSIDConfig>
-        <SSID>
-            <name>$script:ssid</name>
-        </SSID>
-    </SSIDConfig>
-    <connectionType>ESS</connectionType>
-    <connectionMode>auto</connectionMode>
-    <MSM>
-        <security>
-            <authEncryption>
-                <authentication>WPA2PSK</authentication>
-                <encryption>AES</encryption>
-                <useOneX>false</useOneX>
-                <transitionMode xmlns="http://www.microsoft.com/networking/WLAN/profile/v4">true</transitionMode>
-            </authEncryption>
-            <sharedKey>
-                <keyType>passPhrase</keyType>
-                <protected>false</protected>
-                <keyMaterial>$script:ssidpw</keyMaterial>
-            </sharedKey>
-        </security>
-    </MSM>
-</WLANProfile>
-"@
+    $state = Get-VirtualNetworkState
 
-    $file = "$env:TEMP\wifi.xml"
+    Debug "SIM LINK: $($state.Link) CONNECTED: $($state.Connected) LATENCY: $($state.Latency)ms"
 
-    [System.IO.File]::WriteAllText($file, $xml, (New-Object System.Text.UTF8Encoding($false)))
-
-    Invoke-Traced "Delete Profile" { netsh wlan delete profile name="$script:ssid" | Out-Null }
-    Invoke-Traced "Add Profile"    { netsh wlan add profile filename="$file" user=current }
-
-    Remove-Item $file -Force -ErrorAction SilentlyContinue
+    return $state.Connected
 }
 
 # -------------------------
-# CONNECT
+# SIMULATED WIFI CONNECT
 # -------------------------
 
-function Connect-Wifi {
+function Simulate-WifiConnect {
 
     for ($i = 1; $i -le 5; $i++) {
 
-        Log "CONNECT ATTEMPT $i"
+        Debug "CONNECT ATTEMPT $i to SSID $script:ssid"
 
-        Invoke-Traced "Connect WiFi" {
-            netsh wlan connect name="$script:ssid" ssid="$script:ssid"
-        }
+        Start-Sleep (Get-Random -Minimum 1 -Maximum 3)
 
-        Start-Sleep 5
-
-        if (Test-WifiConnected) {
-            Log "Wi-Fi connected"
+        if (Test-SimulatedInternet) {
+            Log "SIMULATION: Wi-Fi CONNECTED"
             return $true
         }
 
-        Start-Sleep (2 * $i)
+        $backoff = 2 * $i
+        Debug "Retry backoff $backoff sec"
+        Start-Sleep $backoff
     }
 
     return $false
@@ -206,35 +114,45 @@ function Connect-Wifi {
 # STATE HANDLERS
 # -------------------------
 
-function Enter-WirelessState {
+function Enter-Init {
 
-    Invoke-Traced "Detect Adapters" { Detect-Adapters }
+    Log "STATE -> INIT"
 
-    if ($script:eadapter) {
-        Invoke-Traced "Disable Ethernet" {
-            netsh interface set interface name="$script:eadapter" admin=disabled
-        }
-    }
+    $script:cycle = 0
+    $script:wifiFailCount = 0
 
-    if (Connect-Wifi) {
+    if ($script:sim_phy -eq "wireless") {
         $script:State = "WirelessActive"
+    }
+    else {
+        $script:State = "EthernetActive"
+    }
+}
+
+function Enter-Wireless {
+
+    Log "STATE -> WirelessActive"
+
+    if (Simulate-WifiConnect) {
+        $script:State = "WirelessActive_OK"
     }
     else {
         $script:State = "Recovery"
     }
 }
 
-function Enter-RecoveryState {
+function Enter-Ethernet {
 
-    Log "RECOVERY"
+    Log "STATE -> EthernetActive (SIM)"
 
-    if ($script:eadapter) {
-        Invoke-Traced "Enable Ethernet" {
-            netsh interface set interface name="$script:eadapter" admin=enabled
-        }
-    }
+    $script:State = "EthernetActive_OK"
+}
 
-    Start-Sleep 5
+function Enter-Recovery {
+
+    Log "STATE -> Recovery"
+
+    Start-Sleep 2
     $script:State = "Init"
 }
 
@@ -244,25 +162,45 @@ function Enter-RecoveryState {
 
 function State-Engine {
 
+    $script:cycle++
+
     switch ($script:State) {
 
         "Init" {
-            Log "STATE INIT"
-
-            if ($script:sim_phy -eq "wireless") {
-                Enter-WirelessState
-            }
+            Enter-Init
         }
 
         "WirelessActive" {
-            if (-not (Test-Internet)) {
-                Log "Lost internet"
-                $script:State = "Recovery"
+            Enter-Wireless
+        }
+
+        "EthernetActive" {
+            Enter-Ethernet
+        }
+
+        "WirelessActive_OK" {
+
+            if (-not (Test-SimulatedInternet)) {
+
+                $script:wifiFailCount++
+
+                Log "WiFi failure #$script:wifiFailCount"
+
+                if ($script:wifiFailCount -ge 5) {
+                    $script:State = "Recovery"
+                }
+                else {
+                    Start-Sleep (2 * $script:wifiFailCount)
+                }
             }
         }
 
+        "EthernetActive_OK" {
+            # stable state, do nothing
+        }
+
         "Recovery" {
-            Enter-RecoveryState
+            Enter-Recovery
         }
     }
 }
@@ -271,14 +209,18 @@ function State-Engine {
 # MAIN LOOP
 # -------------------------
 
-Log "ENGINE $version"
+Log "================================"
+Log "TRUE SIMULATION ENGINE STARTED"
+Log ("Version: {0}" -f $version)
 
 while ($true) {
+
     try {
         State-Engine
-        Start-Sleep 5
+        Start-Sleep (Get-Random -Minimum 2 -Maximum 5)
     }
     catch {
-        Log $_.Exception.Message
+        Log "ERROR: $($_.Exception.Message)"
+        $script:State = "Recovery"
     }
 }
