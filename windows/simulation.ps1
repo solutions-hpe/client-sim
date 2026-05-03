@@ -1,9 +1,9 @@
 
 # =========================================================
-# Simulation Network State Engine (NO HANG VERSION)
+# Simulation Network Engine (DEEP DEBUG / HANG TRACE)
 # =========================================================
 
-$version = "7.3-nohang"
+$version = "7.4-debug-trace"
 $logPath = "C:\Scripts\sim.log"
 
 $script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
@@ -29,41 +29,71 @@ function Debug($msg) {
 }
 
 # -------------------------
-# ADAPTER DETECTION
+# TIMING WRAPPER (CRITICAL)
+# -------------------------
+
+function Invoke-Traced {
+    param(
+        [string]$Label,
+        [scriptblock]$Action
+    )
+
+    Debug "START: $Label"
+    $t0 = Get-Date
+
+    try {
+        & $Action
+    }
+    catch {
+        Log "ERROR in $Label : $($_.Exception.Message)"
+    }
+
+    $t1 = Get-Date
+    Debug "END: $Label (took $([math]::Round(($t1-$t0).TotalSeconds,2))s)"
+}
+
+# -------------------------
+# RAW ADAPTER DUMP
+# -------------------------
+
+function Dump-Interfaces {
+
+    Debug "Dumping interfaces (netsh)"
+
+    $out = netsh interface show interface 2>&1
+
+    foreach ($line in $out) {
+        Debug "IFACE: $line"
+    }
+}
+
+# -------------------------
+# SAFE ADAPTER DETECTION
 # -------------------------
 
 function Detect-Adapters {
 
-    if ($script:wladapter -and $script:eadapter) { return }
+    Dump-Interfaces
 
-    $adapters = netsh interface show interface
+    $out = netsh interface show interface
 
-    $wifi = ($adapters | Select-String "Wi-Fi|Wireless|WLAN").ToString().Split()[-1]
-    $eth  = ($adapters | Select-String "Ethernet").ToString().Split()[-1]
+    $wifiLine = $out | Where-Object { $_ -match "Wi-Fi|Wireless|WLAN" } | Select-Object -First 1
+    $ethLine  = $out | Where-Object { $_ -match "Ethernet" } | Select-Object -First 1
 
-    $script:wladapter = $wifi
-    $script:eadapter  = $eth
+    if ($wifiLine) {
+        $script:wladapter = ($wifiLine -split '\s+')[-1]
+    }
 
-    Debug "WiFi Adapter: $script:wladapter"
-    Debug "Ethernet Adapter: $script:eadapter"
+    if ($ethLine) {
+        $script:eadapter = ($ethLine -split '\s+')[-1]
+    }
+
+    Debug "WiFi Adapter parsed: $script:wladapter"
+    Debug "Ethernet Adapter parsed: $script:eadapter"
 }
 
 # -------------------------
-# HEX
-# -------------------------
-
-function Convert-SSIDToHex {
-    param ($ssid)
-
-    if ([string]::IsNullOrWhiteSpace($ssid)) { return "" }
-
-    return ($ssid.ToCharArray() | ForEach-Object {
-        "{0:X2}" -f [int][char]$_
-    }) -join ''
-}
-
-# -------------------------
-# NETWORK TESTS
+# NETWORK CHECKS
 # -------------------------
 
 function Test-Internet {
@@ -75,12 +105,36 @@ function Test-WifiConnected {
 }
 
 # -------------------------
-# PROFILE
+# SAFE NETSH EXECUTION (TIMEOUT GUARD)
+# -------------------------
+
+function Run-Netsh {
+    param(
+        [string]$cmd,
+        [int]$timeoutSec = 5
+    )
+
+    $job = Start-Job -ScriptBlock {
+        param($c)
+        netsh $c
+    } -ArgumentList $cmd
+
+    if (Wait-Job $job -Timeout $timeoutSec) {
+        Receive-Job $job
+    }
+    else {
+        Log "TIMEOUT: netsh $cmd"
+        Stop-Job $job | Out-Null
+    }
+
+    Remove-Job $job -Force | Out-Null
+}
+
+# -------------------------
+# WIFI PROFILE
 # -------------------------
 
 function Install-WifiProfile {
-
-    $hex = Convert-SSIDToHex $script:ssid
 
     $xml = @"
 <?xml version="1.0"?>
@@ -88,7 +142,6 @@ function Install-WifiProfile {
     <name>$script:ssid</name>
     <SSIDConfig>
         <SSID>
-            <hex>$hex</hex>
             <name>$script:ssid</name>
         </SSID>
     </SSIDConfig>
@@ -116,8 +169,8 @@ function Install-WifiProfile {
 
     [System.IO.File]::WriteAllText($file, $xml, (New-Object System.Text.UTF8Encoding($false)))
 
-    netsh wlan delete profile name="$script:ssid" | Out-Null
-    netsh wlan add profile filename="$file" user=current | Out-Null
+    Invoke-Traced "Delete Profile" { netsh wlan delete profile name="$script:ssid" | Out-Null }
+    Invoke-Traced "Add Profile"    { netsh wlan add profile filename="$file" user=current }
 
     Remove-Item $file -Force -ErrorAction SilentlyContinue
 }
@@ -130,81 +183,58 @@ function Connect-Wifi {
 
     for ($i = 1; $i -le 5; $i++) {
 
-        Debug "Wi-Fi attempt $i"
+        Log "CONNECT ATTEMPT $i"
 
-        if ($i -eq 1 -and $script:wladapter) {
-            netsh interface set interface name="$script:wladapter" admin=disabled
-            Start-Sleep 2
-            netsh interface set interface name="$script:wladapter" admin=enabled
-            Start-Sleep 5
+        Invoke-Traced "Connect WiFi" {
+            netsh wlan connect name="$script:ssid" ssid="$script:ssid"
         }
 
-        Install-WifiProfile
+        Start-Sleep 5
 
-        netsh wlan connect name="$script:ssid" | Out-Null
-
-        Start-Sleep 6
-
-        if (Test-WifiConnected -and Test-Internet) {
+        if (Test-WifiConnected) {
             Log "Wi-Fi connected"
             return $true
         }
 
-        Start-Sleep (3 * $i)
+        Start-Sleep (2 * $i)
     }
 
     return $false
 }
 
 # -------------------------
-# STATES
+# STATE HANDLERS
 # -------------------------
 
 function Enter-WirelessState {
 
-    Detect-Adapters
+    Invoke-Traced "Detect Adapters" { Detect-Adapters }
 
     if ($script:eadapter) {
-        Debug "Disabling Ethernet"
-        netsh interface set interface name="$script:eadapter" admin=disabled
+        Invoke-Traced "Disable Ethernet" {
+            netsh interface set interface name="$script:eadapter" admin=disabled
+        }
     }
 
     if (Connect-Wifi) {
-        Log "STATE -> WirelessActive"
         $script:State = "WirelessActive"
     }
     else {
-        Log "Wi-Fi failed -> Recovery"
         $script:State = "Recovery"
     }
 }
 
-function Enter-EthernetState {
-
-    Detect-Adapters
-
-    if ($script:eadapter) {
-        netsh interface set interface name="$script:eadapter" admin=enabled
-    }
-
-    if ($script:wladapter) {
-        netsh interface set interface name="$script:wladapter" admin=disabled
-    }
-
-    Log "STATE -> EthernetActive"
-    $script:State = "EthernetActive"
-}
-
 function Enter-RecoveryState {
 
-    Log "STATE -> Recovery"
+    Log "RECOVERY"
 
     if ($script:eadapter) {
-        netsh interface set interface name="$script:eadapter" admin=enabled
+        Invoke-Traced "Enable Ethernet" {
+            netsh interface set interface name="$script:eadapter" admin=enabled
+        }
     }
 
     Start-Sleep 5
-
     $script:State = "Init"
 }
 
@@ -217,25 +247,16 @@ function State-Engine {
     switch ($script:State) {
 
         "Init" {
-            Log "STATE -> Init"
+            Log "STATE INIT"
 
             if ($script:sim_phy -eq "wireless") {
                 Enter-WirelessState
-            } else {
-                Enter-EthernetState
             }
         }
 
         "WirelessActive" {
-            if (Test-Internet -and Test-WifiConnected) { return }
-
-            $script:wifiFailCount++
-
-            if ($script:wifiFailCount -le 5) {
-                Log "Retry $script:wifiFailCount"
-                Enter-WirelessState
-            }
-            else {
+            if (-not (Test-Internet)) {
+                Log "Lost internet"
                 $script:State = "Recovery"
             }
         }
@@ -250,7 +271,7 @@ function State-Engine {
 # MAIN LOOP
 # -------------------------
 
-Log "Engine $version"
+Log "ENGINE $version"
 
 while ($true) {
     try {
@@ -259,6 +280,5 @@ while ($true) {
     }
     catch {
         Log $_.Exception.Message
-        Start-Sleep 5
     }
 }
