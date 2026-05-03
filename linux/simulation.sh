@@ -134,7 +134,7 @@ connect_wifi() {
   sleep 5
   nmcli radio wifi on
   echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 10
+  sleep 15
   if [ $site_based_ssid == "on" ]; then
     echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
@@ -154,7 +154,7 @@ manage_connection() {
   sleep 5
   nmcli radio wifi on
   echo Turning on WiFi Adapter | tee -a /usr/local/scripts/sim.log
-  sleep 10
+  sleep 15
   if [ $site_based_ssid == "on" ]; then
     echo Attemping to Connect to WiFi | tee -a /usr/local/scripts/sim.log
     nmcli -w $wait_time connection $action $wsite"-"$ssid
