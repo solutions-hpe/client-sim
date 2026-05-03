@@ -130,8 +130,9 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 connect_wifi() {
   nmcli radio wifi off
+  sleep 5
   nmcli radio wifi on
-  sleep 15
+  sleep 30
   if [ $site_based_ssid == "on" ]; then
     nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
   else
@@ -145,8 +146,9 @@ manage_connection() {
   local action=$1
   local wait_time=$2
   nmcli radio wifi off
+  sleep 5
   nmcli radio wifi on
-  sleep 15
+  sleep 30
   if [ $site_based_ssid == "on" ]; then
     nmcli -w $wait_time connection $action $wsite"-"$ssid
   else
