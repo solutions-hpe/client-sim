@@ -53,8 +53,8 @@ if [[ "$public_repo" == "on" ]]; then
             cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$LOG_FILE"
         fi
 
-        git config http.lowSpeedLimit 1000
-        git config http.lowSpeedTime 300
+        git config http.lowSpeedLimit 100
+        git config http.lowSpeedTime 30
         git config http.maxRequests 2
         git config pull.rebase true
 
