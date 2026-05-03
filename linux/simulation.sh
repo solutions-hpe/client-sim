@@ -24,6 +24,8 @@ echo Parsing Config File | tee -a $log
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
+#Global Variable Export Enable
+set -a
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
@@ -82,6 +84,8 @@ override_keys=(kill_switch sim_load public_repo repo_location vh_server site_bas
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
+#Global Variable Export Disable
+set +a
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------

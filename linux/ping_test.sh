@@ -1,6 +1,7 @@
 #!/bin/bash
-version=.01
+version=.02
 log="/usr/local/scripts/sim.log"
+
 echo Ping Test Script Version $version | tee -a "$log"
 echo "$(date)" | tee -a "$log"
 echo "------------------------------" | tee -a "$log"
