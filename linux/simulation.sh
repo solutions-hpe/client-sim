@@ -147,17 +147,26 @@ wait_for_ssid() {
 #WiFi connections
 #------------------------------------------------------------
 connect_wifi() {
-  nmcli radio wifi off
-  echo "Turning off WiFi Adapter"
-  sleep 3
+  # Ensure WiFi is on (no forced reset)
   nmcli radio wifi on
-  echo "Turning on WiFi Adapter"
+  echo "Ensuring WiFi Adapter is ON"
+  sleep 2
   if [ "$site_based_ssid" == "on" ]; then
     target_ssid="$wsite-$ssid"
   else
     target_ssid="$ssid"
   fi
-  wait_for_ssid "$target_ssid" || return 1
+  # First attempt (no reset)
+  wait_for_ssid "$target_ssid"
+  if [ $? -ne 0 ]; then
+    echo "SSID not found, resetting WiFi adapter..."
+    nmcli radio wifi off
+    sleep 3
+    nmcli radio wifi on
+    sleep 2
+    # Second (final) attempt
+    wait_for_ssid "$target_ssid" || return 1
+  fi
   echo "Attempting to connect to $target_ssid"
   nmcli device wifi connect "$target_ssid" password "$ssidpw"
 }
@@ -167,17 +176,25 @@ connect_wifi() {
 manage_connection() {
   local action=$1
   local wait_time=$2
-  nmcli radio wifi off
-  echo "Turning off WiFi Adapter"
-  sleep 3
   nmcli radio wifi on
-  echo "Turning on WiFi Adapter"
+  echo "Ensuring WiFi Adapter is ON"
+  sleep 2
   if [ "$site_based_ssid" == "on" ]; then
     target_ssid="$wsite-$ssid"
   else
     target_ssid="$ssid"
   fi
-  wait_for_ssid "$target_ssid" || return 1
+  # First attempt
+  wait_for_ssid "$target_ssid"
+  if [ $? -ne 0 ]; then
+    echo "SSID not found, resetting WiFi adapter..."
+    nmcli radio wifi off
+    sleep 3
+    nmcli radio wifi on
+    sleep 2
+    # Final attempt
+    wait_for_ssid "$target_ssid" || return 1
+  fi
   echo "Attempting to $action connection: $target_ssid"
   nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
