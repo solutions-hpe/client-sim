@@ -193,7 +193,7 @@ mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 echo Finding WLAN Adapter | tee -a /usr/local/scripts/sim.log
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 echo Unblocking WiFi / RFKill| tee -a /usr/local/scripts/sim.log
-sudo rfkill unblock wifi; sudo rfkill unblock all
+sudo rfkill unblock wifi & disown
 echo Getting Default Gateway | tee -a /usr/local/scripts/sim.log
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 echo Ping the Default Gateway | tee -a /usr/local/scripts/sim.log
