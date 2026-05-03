@@ -1,24 +1,31 @@
 
 # =========================================================
-# HYBRID NETWORK ENGINE (SAFE REAL WIFI + SIM LOGIC)
+# NETWORK SIMULATION CORE ENGINE (CLEAN RESTART)
 # =========================================================
 
-$version = "8.1-hybrid-safe"
+$version = "1.0-core"
 
-$script:ssid   = $ssid
-$script:ssidpw = $ssidpw
+# -------------------------
+# CONFIG
+# -------------------------
+
+$script:sim_phy = if ($sim_phy) { $sim_phy } else { "wireless" }
 
 $script:State = "Init"
-$script:wifiFailCount = 0
 $script:cycle = 0
+
+$script:failCount = 0
+$script:maxRetries = 5
 
 # -------------------------
 # LOGGING
 # -------------------------
 
+$logPath = "C:\Scripts\sim.log"
+
 function Log($msg) {
-    "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg |
-        Tee-Object -FilePath "C:\Scripts\sim.log" -Append
+    $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg
+    $line | Tee-Object -FilePath $logPath -Append
 }
 
 function Debug($msg) {
@@ -26,107 +33,103 @@ function Debug($msg) {
 }
 
 # -------------------------
-# HEX SSID
+# SIMULATION MODEL
 # -------------------------
+# This replaces ALL real networking
 
-function Convert-SSIDToHex {
-    param ($ssid)
+function Get-NetworkSnapshot {
 
-    if ([string]::IsNullOrWhiteSpace($ssid)) { return "" }
-
-    ($ssid.ToCharArray() | ForEach-Object {
-        "{0:X2}" -f [int][char]$_
-    }) -join ''
-}
-
-# -------------------------
-# WIFI PROFILE CREATION (RESTORED)
-# -------------------------
-
-function Install-WifiProfile {
-
-    Debug "Creating Wi-Fi profile"
-
-    $hex = Convert-SSIDToHex $script:ssid
-
-    $xml = @"
-<?xml version="1.0"?>
-<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-    <name>$script:ssid</name>
-
-    <SSIDConfig>
-        <SSID>
-            <hex>$hex</hex>
-            <name>$script:ssid</name>
-        </SSID>
-    </SSIDConfig>
-
-    <connectionType>ESS</connectionType>
-    <connectionMode>auto</connectionMode>
-
-    <MSM>
-        <security>
-            <authEncryption>
-                <authentication>WPA2PSK</authentication>
-                <encryption>AES</encryption>
-                <useOneX>false</useOneX>
-                <transitionMode xmlns="http://www.microsoft.com/networking/WLAN/profile/v4">true</transitionMode>
-            </authEncryption>
-
-            <sharedKey>
-                <keyType>passPhrase</keyType>
-                <protected>false</protected>
-                <keyMaterial>$script:ssidpw</keyMaterial>
-            </sharedKey>
-        </security>
-    </MSM>
-</WLANProfile>
-"@
-
-    $file = "$env:TEMP\wifi.xml"
-
-    [System.IO.File]::WriteAllText($file, $xml, (New-Object System.Text.UTF8Encoding($false)))
-
-    $result = netsh wlan delete profile name="$script:ssid" 2>&1
-    Debug $result
-
-    $result = netsh wlan add profile filename="$file" user=current 2>&1
-    Debug $result
-
-    Remove-Item $file -Force -ErrorAction SilentlyContinue
-}
-
-# -------------------------
-# WIFI CONNECT (SAFE, NO ADAPTER TOGGLING)
-# -------------------------
-
-function Connect-Wifi {
-
-    Install-WifiProfile
-
-    for ($i = 1; $i -le 5; $i++) {
-
-        Debug "Connect attempt $i"
-
-        netsh wlan connect name="$script:ssid" ssid="$script:ssid" | Out-Null
-
-        Start-Sleep 5
-
-        $status = netsh wlan show interfaces
-
-        if ($status -match "State\s*:\s*connected") {
-            Log "Wi-Fi CONNECTED"
-            return $true
+    if ($script:sim_phy -eq "ethernet") {
+        return @{
+            Link = "Ethernet"
+            Up   = $true
+            Latency = 1
         }
-
-        Start-Sleep (2 * $i)
     }
 
-    return $false
+    # wireless simulation behavior
+    $roll = Get-Random -Minimum 1 -Maximum 100
+
+    if ($roll -le 75) {
+        return @{
+            Link = "WiFi"
+            Up   = $true
+            Latency = Get-Random -Minimum 10 -Maximum 60
+        }
+    }
+    elseif ($roll -le 90) {
+        return @{
+            Link = "WiFi"
+            Up   = $false
+            Latency = 0
+        }
+    }
+    else {
+        return @{
+            Link = "WiFi"
+            Up   = $false
+            Latency = 0
+        }
+    }
+}
+
+function Test-SimulatedInternet {
+    $net = Get-NetworkSnapshot
+
+    Debug "LINK=$($net.Link) UP=$($net.Up) LATENCY=$($net.Latency)ms"
+
+    return $net.Up
 }
 
 # -------------------------
 # STATE MACHINE
+# -------------------------
+
+function Enter-Init {
+
+    Log "STATE -> INIT"
+
+    $script:cycle = 0
+    $script:failCount = 0
+
+    if ($script:sim_phy -eq "wireless") {
+        $script:State = "WirelessActive"
+    }
+    else {
+        $script:State = "EthernetActive"
+    }
+}
+
+function Enter-Wireless {
+
+    Log "STATE -> WirelessActive"
+
+    if (Test-SimulatedInternet) {
+        $script:State = "WirelessOK"
+        $script:failCount = 0
+    }
+    else {
+        $script:State = "WirelessFail"
+    }
+}
+
+function Enter-Ethernet {
+
+    Log "STATE -> EthernetActive"
+
+    $script:State = "EthernetOK"
+}
+
+function Enter-Recovery {
+
+    Log "STATE -> Recovery"
+
+    Start-Sleep 1
+    $script:State = "Init"
+}
+
+# -------------------------
+# ENGINE
 # -------------------------
 
 function State-Engine {
@@ -136,42 +139,45 @@ function State-Engine {
     switch ($script:State) {
 
         "Init" {
-            Log "STATE -> Init"
-
-            if (Connect-Wifi) {
-                $script:State = "WirelessActive"
-            }
-            else {
-                $script:State = "Recovery"
-            }
+            Enter-Init
         }
 
         "WirelessActive" {
+            Enter-Wireless
+        }
 
-            $status = netsh wlan show interfaces
+        "EthernetActive" {
+            Enter-Ethernet
+        }
 
-            if ($status -notmatch "State\s*:\s*connected") {
+        "WirelessOK" {
 
-                $script:wifiFailCount++
+            if (-not (Test-SimulatedInternet)) {
 
-                Log "Wi-Fi lost ($script:wifiFailCount)"
+                $script:failCount++
 
-                if ($script:wifiFailCount -ge 5) {
+                Log "WiFi failure #$script:failCount"
+
+                if ($script:failCount -ge $script:maxRetries) {
                     $script:State = "Recovery"
                 }
                 else {
-                    Start-Sleep (2 * $script:wifiFailCount)
-                    Connect-Wifi | Out-Null
+                    Start-Sleep ($script:failCount * 2)
+                    $script:State = "WirelessActive"
                 }
             }
         }
 
+        "WirelessFail" {
+            $script:State = "Recovery"
+        }
+
+        "EthernetOK" {
+            # stable state
+        }
+
         "Recovery" {
-
-            Log "Recovery -> retry cycle"
-            Start-Sleep 5
-
-            $script:State = "Init"
+            Enter-Recovery
         }
     }
 }
@@ -180,12 +186,16 @@ function State-Engine {
 # MAIN LOOP
 # -------------------------
 
-Log "HYBRID ENGINE STARTED ($version)"
+Log "===================================="
+Log "NETWORK SIMULATION CORE STARTED"
+Log ("Version: {0}" -f $version)
+Log "===================================="
 
 while ($true) {
+
     try {
         State-Engine
-        Start-Sleep (Get-Random -Minimum 2 -Maximum 5)
+        Start-Sleep (Get-Random -Minimum 1 -Maximum 3)
     }
     catch {
         Log "ERROR: $($_.Exception.Message)"
