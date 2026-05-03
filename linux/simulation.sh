@@ -360,20 +360,11 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Connecting to Network
    #------------------------------------------------------------
-    if [ $www_traffic == "on" ]; then
-     run_simulation "www_traffic.sh" 30
-    fi
-    if [ $ping_test == "on" ]; then
-     run_simulation "ping_test.sh" 30
-    if [ $iperf == "on" ]; then
-     run_simulation "iperf.sh" 30
-    fi
-    if [ $download == "on" ]; then
-     run_simulation "download.sh" 30
-    fi
-    if [ $dns_fail == "on" ]; then
-     run_simulation "dns_fail.sh" 30
-    fi
+    if [ $www_traffic == "on" ]; then run_simulation "www_traffic.sh" 30
+    if [ $ping_test == "on" ]; then run_simulation "ping_test.sh" 30
+    if [ $iperf == "on" ]; then run_simulation "iperf.sh" 30
+    if [ $download == "on" ]; then run_simulation "download.sh" 30
+    if [ $dns_fail == "on" ]; then run_simulation "dns_fail.sh" 30
    echo End of simulation | tee -a $log
    #------------------------------------------------------------
    #Running update to either the cloud repo or local SMB repo
