@@ -132,22 +132,47 @@ wait_for_ssid() {
   local interval=3
   local elapsed=0
   echo "Scanning for SSID: $target_ssid"
-  while [ $elapsed -lt $timeout ]; do
+  # First scan phase
+  while [ "$elapsed" -lt "$timeout" ]; do
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
       echo "SSID found: $target_ssid"
       return 0
     fi
-    sleep $interval
+    sleep "$interval"
     elapsed=$((elapsed + interval))
   done
-  echo "ERROR: SSID '$target_ssid' not found after $timeout seconds"
+  echo "SSID not found after $timeout seconds, attempting rescan..."
+  # Force rescan
+  nmcli device wifi rescan >/dev/null 2>&1
+  sleep 2
+  if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
+    echo "SSID found after rescan: $target_ssid"
+    return 0
+  fi
+  echo "SSID still not found, resetting WiFi adapter..."
+  # Toggle WiFi ONLY now
+  nmcli radio wifi off
+  sleep 3
+  nmcli radio wifi on
+  sleep 2
+  # Final attempt after reset
+  elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    nmcli device wifi rescan >/dev/null 2>&1
+    if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
+      echo "SSID found after WiFi reset: $target_ssid"
+      return 0
+    fi
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+  echo "ERROR: SSID '$target_ssid' not found after rescan and WiFi reset"
   return 1
 }
 #------------------------------------------------------------
 #WiFi connections
 #------------------------------------------------------------
 connect_wifi() {
-  # Ensure WiFi is on (no forced reset)
   nmcli radio wifi on
   echo "Ensuring WiFi Adapter is ON"
   sleep 2
@@ -156,17 +181,7 @@ connect_wifi() {
   else
     target_ssid="$ssid"
   fi
-  # First attempt (no reset)
-  wait_for_ssid "$target_ssid"
-  if [ $? -ne 0 ]; then
-    echo "SSID not found, resetting WiFi adapter..."
-    nmcli radio wifi off
-    sleep 3
-    nmcli radio wifi on
-    sleep 2
-    # Second (final) attempt
-    wait_for_ssid "$target_ssid" || return 1
-  fi
+  wait_for_ssid "$target_ssid" || return 1
   echo "Attempting to connect to $target_ssid"
   nmcli device wifi connect "$target_ssid" password "$ssidpw"
 }
@@ -184,17 +199,7 @@ manage_connection() {
   else
     target_ssid="$ssid"
   fi
-  # First attempt
-  wait_for_ssid "$target_ssid"
-  if [ $? -ne 0 ]; then
-    echo "SSID not found, resetting WiFi adapter..."
-    nmcli radio wifi off
-    sleep 3
-    nmcli radio wifi on
-    sleep 2
-    # Final attempt
-    wait_for_ssid "$target_ssid" || return 1
-  fi
+  wait_for_ssid "$target_ssid" || return 1
   echo "Attempting to $action connection: $target_ssid"
   nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
