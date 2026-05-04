@@ -99,17 +99,13 @@ get_gateway_status() {
 # Helper: simulation process status
 #------------------------------------------------------------
 get_sim_status() {
-  for s in \
-    www_traffic.sh \
-    ping_test.sh \
-    iperf.sh \
-    download.sh \
-    dns_fail.sh
-  do
-    if pgrep -f "$s" >/dev/null 2>&1; then
-      echo "[RUNNING] $s"
+  for s in /usr/local/scripts/*.sh; do
+    script_name=$(basename "$s")
+
+    if pgrep -f "$script_name" >/dev/null 2>&1; then
+      echo "[RUNNING] $script_name"
     else
-      echo "[STOPPED]  $s"
+      echo "[STOPPED]  $script_name"
     fi
   done
 }
