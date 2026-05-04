@@ -8,6 +8,7 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 log="/usr/local/scripts/sim.log"
 refresh_rate=5
+site_based_num=$(get_value 'simulation' 'site_based_num')
 simulation_id=s
 simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 kill_switch=$(get_value 'simulation' 'kill_switch')
@@ -126,11 +127,11 @@ while true; do
   echo "Simulation Details:"
   echo "Site: $wsite"
   echo "Site Based SSID: $site_based_ssid"
-  echo "VHServer: $vh_server"
   if [ $vh_server == "off" ]; then echo "Phy: $sim_phy"; fi
   if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo "Adapter: $wladapter"; fi
   echo "Simulation Load: $sim_load"
   declare -A sim_flags=(
+   ["VHServer"]="$vh_server"
    ["Kill Switch"]="$kill_switch"
    ["DHCP Fail"]="$dhcp_fail"
    ["DNS Fail"]="$dns_fail"
