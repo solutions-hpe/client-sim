@@ -11,19 +11,19 @@ public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
 #------------------------------------------------------------
-echo "Updating Scripts" | tee -a "$debug"
+echo "Updating Scripts" | tee -a "$debug" "$log"
 if [[ "$public_repo" == "on" ]]; then
     echo "Using remote GitHub repo" | tee -a "$debug"
     cd ~ || echo "WARNING: Failed to cd to home directory" | tee -a "$debug"
     repo_dir="client-sim"
     shopt -s nullglob
     if [[ -d "$repo_dir" && ! -d "$repo_dir/.git" ]]; then
-        echo "Directory exists but is not a git repo. Removing..." | tee -a "$debug"
+        echo "Directory exists but is not a git repo. Removing directory" | tee -a "$debug"
         rm -rf "$repo_dir"
     fi
     if [[ ! -d "$repo_dir" ]]; then
         echo "Cloning repository..." | tee -a "$debug"
-        git clone "$repo_location" "$repo_dir" || echo "ERROR: Clone failed" | tee -a "$debug"
+        git clone "$repo_location" "$repo_dir" || echo "ERROR: Clone failed" | tee -a "$debug" "$log"
     else
         echo "Repository already exists, skipping clone" | tee -a "$debug"
     fi
@@ -32,17 +32,17 @@ if [[ "$public_repo" == "on" ]]; then
     if cd "$repo_dir"; then
         current_remote=$(git remote get-url origin 2>/dev/null || echo "")
         if [[ "$current_remote" != "$repo_location" ]]; then
-            echo "Remote URL mismatch. Fixing..." | tee -a "$debug"
+            echo "Remote URL mismatch. Fixing..." | tee -a "$debug" "$log"
             git remote set-url origin "$repo_location"
         fi
         #------------------------------------------------------------
         #Checking to see if the repo is corrupted
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            echo "Repo appears corrupted. Re-cloning..." | tee -a "$debug"
+            echo "Repo appears corrupted. Re-cloning..." | tee -a "$debug" "$log"
             cd ~
             rm -rf "$repo_dir"
             git clone "$repo_location" "$repo_dir"
-            cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$debug"
+            cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$debug" "$log"
         fi
         git config --global http.connectTimeout 5
         git config http.lowSpeedLimit 100
@@ -57,7 +57,7 @@ if [[ "$public_repo" == "on" ]]; then
             echo "Creating branch: $repo_branch" | tee -a "$debug"
             git switch -c "$repo_branch" "origin/$repo_branch"
         else
-            echo "ERROR: Branch '$repo_branch' not found" | tee -a "$debug"
+            echo "ERROR: Branch '$repo_branch' not found" | tee -a "$debug" "$log"
         fi
         #------------------------------------------------------------
         #Updating the Repository based on the Branch configured in simulation.conf
@@ -68,28 +68,28 @@ if [[ "$public_repo" == "on" ]]; then
             if [[ -f "10-rsyslog.conf" ]]; then
                 sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
             else
-                echo "No rsyslog config file found" | tee -a "$debug"
+                echo "No rsyslog config file found" | tee -a "$debug" "$log"
             fi
             echo "Copying desktop startup files..." | tee -a "$debug"
             desktop_files=( *.desktop )
             if (( ${#desktop_files[@]} )); then
                 sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
             else
-                echo "No .desktop files found to copy" | tee -a "$debug"
+                echo "No .desktop files found to copy" | tee -a "$debug" "$log"
             fi
             echo "Copying shell scripts..." | tee -a "$debug"
             sh_files=( *.sh )
             if (( ${#sh_files[@]} )); then
                 sudo cp "${sh_files[@]}" /usr/local/scripts/
             else
-                echo "No .sh files found to copy" | tee -a "$debug"
+                echo "No .sh files found to copy" | tee -a "$debug" "$log"
             fi
             echo "Copying text files..." | tee -a "$debug"
             txt_files=( *.txt )
             if (( ${#txt_files[@]} )); then
                 sudo cp "${txt_files[@]}" /usr/local/scripts/
             else
-                echo "No .txt files found to copy" | tee -a "$debug"
+                echo "No .txt files found to copy" | tee -a "$debug" "$log"
             fi
             cd ..
         else
@@ -100,16 +100,16 @@ if [[ "$public_repo" == "on" ]]; then
             if [[ -f "simulation.conf" ]]; then
                 sudo cp simulation.conf /usr/local/scripts/simulation.conf
             else
-                echo "No simulation.conf found in configs" | tee -a "$debug"
+                echo "No simulation.conf found in configs" | tee -a "$debug" "$log"
             fi
             cd ..
         else
-            echo "WARNING: configs directory not found" | tee -a "$debug"
+            echo "WARNING: configs directory not found" | tee -a "$debug" "$log"
         fi
         echo "Setting permissions..." | tee -a "$debug"
         sudo chmod -R 777 /usr/local/scripts
     else
-        echo "ERROR: Could not enter repo directory" | tee -a "$debug"
+        echo "ERROR: Could not enter repo directory" | tee -a "$debug" "$log"
     fi
 else
     echo "Using local SMB repository" | tee -a "$debug"
