@@ -8,6 +8,8 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 log="/usr/local/scripts/sim.log"
 refresh_rate=5
+simulation_id=s
+simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
