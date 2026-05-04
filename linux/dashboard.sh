@@ -130,14 +130,19 @@ while true; do
   if [ $vh_server == "off" ]; then echo "Phy: $sim_phy"; fi
   if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo "Adapter: $wladapter"; fi
   echo "Simulation Load: $sim_load"
-  echo "Kill Switch: $kill_switch"
-  echo "DHCP Fail: $dhcp_fail"
-  echo "DNS Fail: $dns_fail"
-  echo "WWW Traffic: $www_traffic"
-  echo "iPerf: $iperf"
-  echo "Download: $download"
-  echo "Port Flap: $port_flap"
-  echo "Incorrect SSID PW: $ssidpw_fail"
+  declare -A sim_flags=(
+   ["Kill Switch"]="$kill_switch"
+   ["DHCP Fail"]="$dhcp_fail"
+   ["DNS Fail"]="$dns_fail"
+   ["WWW Traffic"]="$www_traffic"
+   ["iPerf"]="$iperf"
+   ["Download"]="$download"
+   ["Port Flap"]="$port_flap"
+   ["Incorrect SSID PW"]="$ssidpw_fail"
+  )
+  for label in "${!sim_flags[@]}"; do
+   [[ "${sim_flags[$label]}" == "on" ]] && echo "$label: on"
+  done
   echo "Active Simulations:"
   get_sim_status
   echo "--------------------------------------------------"
