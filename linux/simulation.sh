@@ -390,7 +390,7 @@ if [ $kill_switch == "off" ]; then
     pkill -f firefox
     www_traffic="on"
    fi
-   echo End of simulation | tee -a $log
+   echo End of simulation
    #------------------------------------------------------------
    #Running update to either the cloud repo or local SMB repo
    #------------------------------------------------------------
@@ -398,8 +398,8 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Script Updates
    #------------------------------------------------------------
-   echo Sleeping for 5 seconds | tee -a $log
-   echo Loop iteration $z of 100 | tee -a $log
+   echo Sleeping for 5 seconds
+   echo Loop iteration $z of 100
    sleep 5
    #------------------------------------------------------------
    #End of 100 Loop Count
@@ -416,7 +416,7 @@ fi
 #------------------------------------------------------------
 #Killing Firefox simulation
 #------------------------------------------------------------
-echo Closing Firefox | tee -a $log
+echo Closing Firefox
 pkill -f firefox &
 #------------------------------------------------------------
 #End Kill switch Check 
@@ -435,7 +435,7 @@ if [ $allow_offline == "yes" ]; then
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
   echo Sleeping for $rn_offline_time seconds
-  echo ------------------------------| tee -a $log
+  echo ------------------------------
   #------------------------------------------------------------
   #Sleep for up to 4 hours to show the device left
   #------------------------------------------------------------
@@ -446,7 +446,7 @@ if [ $allow_offline == "yes" ]; then
   echo Bringing all interfaces online | tee -a $log
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-  echo ------------------------------| tee -a $log
+  echo ------------------------------
 fi
 #------------------------------------------------------------
 #Looping Script
