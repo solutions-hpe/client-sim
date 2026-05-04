@@ -1,9 +1,7 @@
 #!/bin/bash
 version=.33
-echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Check Logs Script
 #------------------------------------------------------------
@@ -14,7 +12,6 @@ source /usr/local/scripts/sys_mon.sh &
 #are applied. Some of these may be set during the installer but the 
 #installer is only ran one time.
 #------------------------------------------------------------
-echo Disabling screen blanking | tee -a /usr/local/scripts/sim.log
 gsettings set org.gnome.desktop.session idle-delay 0
 xset s noblank
 xset -dpms
@@ -28,8 +25,6 @@ username=$(echo $HOSTNAME | cut -d "-" -f 1)
 #------------------------------------------------------------
 #Calling config parser script
 #------------------------------------------------------------
-echo Reading Simulation Config File | tee -a /usr/local/scripts/sim.log
-#------------------------------------------------------------
 #Calling config parser script - reads the simulation.conf file
 #For values assinged to script variables
 #------------------------------------------------------------
@@ -39,10 +34,7 @@ source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
-echo ------------------------------| tee -a /usr/local/scripts/sim.log
-echo Parsing Config File | tee -a /usr/local/scripts/sim.log
-#------------------------------------------------------------
-#Settings read from the local config file
+# Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
 site_based_num=$(get_value 'simulation' 'site_based_num')

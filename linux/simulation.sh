@@ -2,7 +2,6 @@
 version=.93
 log="/usr/local/scripts/sim.log"
 echo $(date) | tee -a $log
-echo ------------------------------| tee -a $log
 echo Simulation Script Version $version | tee -a $log
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
@@ -86,27 +85,6 @@ for key in "${override_keys[@]}"; do
 done
 #------------------------------------------------------------
 #End User/Device Specific Overrides
-#------------------------------------------------------------
-echo $(date) | tee -a $log
-echo ------------------------------| tee -a $log
-echo Simulation Details: | tee -a $log
-echo Hostname: $HOSTNAME | tee -a $log
-echo Site: $wsite | tee -a $log
-echo Site Based SSID: $site_based_ssid | tee -a $log
-echo VHServer: $vh_server | tee -a $log
-if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a $log; fi
-if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a $log; fi
-echo Simulation Load: $sim_load | tee -a $log
-echo Kill Switch: $kill_switch | tee -a $log
-echo DHCP Fail: $dhcp_fail | tee -a $log
-echo DNS Fail: $dns_fail | tee -a $log
-echo WWW Traffic: $www_traffic | tee -a $log
-echo iPerf: $iperf | tee -a $log
-echo Download: $download | tee -a $log
-echo Port Flap: $port_flap | tee -a $log
-echo Incorrect SSID PW: $ssidpw_fail | tee -a $log
-echo ------------------------------| tee -a $log
-sleep 5
 #------------------------------------------------------------
 #Checking global kill switch config
 #------------------------------------------------------------

@@ -4,6 +4,65 @@
 #------------------------------------------------------------
 log="/usr/local/scripts/sim.log"
 refresh_rate=5
+source '/usr/local/scripts/ini-parser.sh'
+kill_switch=$(get_value 'simulation' 'kill_switch')
+rapid_update=$(get_value 'simulation' 'rapid_update')
+sim_load=$(get_value 'simulation' 'sim_load')
+public_repo=$(get_value 'simulation' 'public_repo')
+repo_location=$(get_value 'simulation' 'repo_location')
+vh_server=$(get_value 'simulation' 'vh_server')
+site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
+iperf_bw=$(get_value 'simulation' 'iperf_bw')
+auth_fail=$(get_value 'simulation' 'auth_fail')
+ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
+allow_offline=$(get_value 'simulation' 'allow_offline')
+#------------------------------------------------------------
+#Device Specific Simulation settings
+#------------------------------------------------------------
+wsite=$(get_value $simulation_id 'wsite')
+sim_phy=$(get_value $simulation_id 'sim_phy')
+ssid=$(get_value $simulation_id 'ssid')
+ssidpw=$(get_value $simulation_id 'ssidpw')
+dhcp_fail=$(get_value $simulation_id 'dhcp_fail')
+dns_fail=$(get_value $simulation_id 'dns_fail')
+assoc_fail=$(get_value $simulation_id 'assoc_fail')
+port_flap=$(get_value $simulation_id 'port_flap')
+ping_test=$(get_value $simulation_id 'ping_test')
+download=$(get_value $simulation_id 'download')
+iperf=$(get_value $simulation_id 'iperf')
+www_traffic=$(get_value $simulation_id 'www_traffic')
+#------------------------------------------------------------
+#Simlation IP
+#------------------------------------------------------------
+smb_address=$(get_value 'address' 'smb_address')
+ping_address=$(get_value 'address' 'ping_address')
+dns_latency_1=$(get_value 'address' 'dns_latency_1')
+dns_latency_2=$(get_value 'address' 'dns_latency_2')
+dns_latency_3=$(get_value 'address' 'dns_latency_3')
+dns_bad_ip_1=$(get_value 'address' 'dns_bad_ip_1')
+dns_bad_ip_2=$(get_value 'address' 'dns_bad_ip_2')
+dns_bad_ip_3=$(get_value 'address' 'dns_bad_ip_3')
+dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
+dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
+dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
+vh_server_address=$(get_value 'address' 'vh_server_addr')
+iperf_server=$(get_value 'address' 'iperf_server')
+#------------------------------------------------------------
+#User/Device Specific Overrides
+#------------------------------------------------------------
+apply_override() {
+  local var=$1
+  local val=$(get_value $username "$var")
+  [[ -n ${val} ]] && declare -g "$var=$val"
+}
+override_keys=(kill_switch sim_load public_repo repo_location vh_server site_based_ssid iperf_bw \
+  wsite sim_phy ssid ssidpw dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
+  www_traffic ssidpw_fail auth_fail smb_address ping_address dns_latency_1 dns_latency_2 \
+  dns_latency_3 dns_bad_ip_1 dns_bad_ip_2 dns_bad_ip_3 dns_bad_record_1 dns_bad_record_2 \
+  dns_bad_record_3 vh_server_addr iperf_server)
+for key in "${override_keys[@]}"; do
+  apply_override "$key"
+done
 #------------------------------------------------------------
 # Helper: get WiFi status
 #------------------------------------------------------------
@@ -58,7 +117,22 @@ while true; do
   echo "Hostname:    $HOSTNAME"
   echo "WiFi Status: $(get_wifi_status)"
   echo "Gateway:     $(get_gateway_status)"
-  echo "--------------------------------------------------"
+  echo --------------------------------------------------
+  echo Simulation Details:
+  echo Site: $wsite
+  echo Site Based SSID: $site_based_ssid | tee -a $log
+  echo VHServer: $vh_server
+  if [ $vh_server == "off" ]; then echo Phy: $sim_phy; fi
+  if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter; fi
+  echo Simulation Load: $sim_load
+  echo Kill Switch: $kill_switch
+  echo DHCP Fail: $dhcp_fail
+  echo DNS Fail: $dns_fail
+  echo WWW Traffic: $www_traffic
+  echo iPerf: $iperf
+  echo Download: $download
+  echo Port Flap: $port_flap
+  echo Incorrect SSID PW: $ssidpw_fail
   echo "Active Simulations:"
   get_sim_status
   echo "--------------------------------------------------"
