@@ -5,6 +5,7 @@
 log="/usr/local/scripts/sim.log"
 refresh_rate=5
 source '/usr/local/scripts/ini-parser.sh'
+process_ini_file '/usr/local/scripts/simulation.conf'
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
