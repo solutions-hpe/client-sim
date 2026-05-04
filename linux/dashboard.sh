@@ -150,7 +150,7 @@ while true; do
   get_sim_status
   echo "--------------------------------------------------"
   # Optional: show last log lines (helps debugging)
-  echo "Last Log Entries:"
+  echo "Last Error Log Entries:"
   tail -n 10 "$log" 2>/dev/null
   echo "--------------------------------------------------"
   sleep "$refresh_rate"
