@@ -2,7 +2,7 @@
 version=.29
 pkill -f firefox
 LOG_FILE="/usr/local/scripts/sim.log"
-echo "$(date)" | tee -a "$LOG_FILE"
+echo "$(date)"
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
