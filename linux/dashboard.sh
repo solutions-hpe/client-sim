@@ -35,7 +35,7 @@ get_gateway_status() {
 #------------------------------------------------------------
 get_sim_status() {
   for s in \
-    firefox-esr \
+    www_traffic.sh \
     ping_test.sh \
     iperf.sh \
     download.sh \
