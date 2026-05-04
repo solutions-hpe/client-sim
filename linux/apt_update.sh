@@ -18,4 +18,5 @@ sudo apt install dkms -y
 sudo apt install iperf3 -y
 sudo apt install firefox-esr -y
 sudo apt install rsyslog -y
+sudo apt install cpulimit -y
 sudo apt autoremove -y
