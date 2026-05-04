@@ -98,7 +98,7 @@ get_gateway_status() {
 # Helper: simulation process status
 #------------------------------------------------------------
 get_sim_status() {
-  exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh")
+  exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
   printf "%-10s %-15s %-8s %-10s\n" "STATUS" "SCRIPT" "PID" "RUNTIME"
   #printf "%-10s %-15s %-8s %-10s\n" "------" "------" "---" "-------"
   for s in /usr/local/scripts/*.sh; do
