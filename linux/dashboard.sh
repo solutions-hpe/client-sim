@@ -100,7 +100,7 @@ get_gateway_status() {
 get_sim_status() {
   exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
   printf "%-10s %-15s %-8s %-10s\n" "STATUS" "SCRIPT" "PID" "RUNTIME"
-  #printf "%-10s %-15s %-8s %-10s\n" "------" "------" "---" "-------"
+  printf "%-10s %-15s %-8s %-10s\n" "------" "------" "---" "-------"
   for s in /usr/local/scripts/*.sh; do
     script_name=$(basename "$s")
     # check if script is in exclude list

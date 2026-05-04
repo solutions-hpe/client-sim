@@ -62,7 +62,6 @@ if [[ "$public_repo" == "on" ]]; then
         #Updating the Repository based on the Branch configured in simulation.conf
         echo "Updating repository..." | tee -a "$LOG_FILE"
         git reset --hard "origin/$repo_branch"
-        # -------- linux section guarded --------
         if cd linux; then
             echo "Copying rsyslog config..." | tee -a "$LOG_FILE"
             if [[ -f "10-rsyslog.conf" ]]; then
