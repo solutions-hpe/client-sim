@@ -1,4 +1,6 @@
 #!/bin/bash
+version=.01
+echo Dashboard Version $version | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 # Simulation Dashboard (Read-only monitor)
 #------------------------------------------------------------
