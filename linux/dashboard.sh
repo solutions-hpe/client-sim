@@ -3,7 +3,7 @@
 # Simulation Dashboard (Read-only monitor)
 #------------------------------------------------------------
 log="/usr/local/scripts/sim.log"
-refresh_rate=30
+refresh_rate=5
 #------------------------------------------------------------
 # Helper: get WiFi status
 #------------------------------------------------------------
