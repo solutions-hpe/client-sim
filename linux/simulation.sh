@@ -384,7 +384,7 @@ if [ $kill_switch == "off" ]; then
      echo Running DNS Simulation
     fi
    fi
-   sleep 30
+   sleep 10
    if (( z % 10 == 0 )); then
     echo Closing Firefox | tee -a "$log"
     pkill -f firefox
