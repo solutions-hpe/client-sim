@@ -45,9 +45,10 @@ if [[ "$public_repo" == "on" ]]; then
             git clone "$repo_location" "$repo_dir"
             cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$LOG_FILE"
         fi
-        #git config http.lowSpeedLimit 100
-        #git config http.lowSpeedTime 30
-        #git config http.maxRequests 2
+        git config --global http.connectTimeout 5
+        git config http.lowSpeedLimit 100
+        git config http.lowSpeedTime 30
+        git config http.maxRequests 2
         git config pull.rebase true
 
         git fetch origin
