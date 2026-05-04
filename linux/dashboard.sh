@@ -100,7 +100,7 @@ get_gateway_status() {
 get_sim_status() {
   exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh")
   printf "%-10s %-15s %-8s %-10s\n" "STATUS" "SCRIPT" "PID" "RUNTIME"
-  printf "%-10s %-15s %-8s %-10s\n" "------" "------" "---" "-------"
+  #printf "%-10s %-15s %-8s %-10s\n" "------" "------" "---" "-------"
   for s in /usr/local/scripts/*.sh; do
     script_name=$(basename "$s")
     # check if script is in exclude list
@@ -128,11 +128,10 @@ while true; do
   echo "Gateway:     $(get_gateway_status)"
   echo ""--------------------------------------------------""
   echo "Simulation Details:"
-  echo "Site: $wsite"
-  echo "Site Based SSID: $site_based_ssid"
+  echo "Simulation Load: $sim_load"
+  echo "Site: $wsite Site Based SSID: $site_based_ssid"
   if [ $vh_server == "off" ]; then echo "Phy: $sim_phy"; fi
   if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo "Adapter: $wladapter"; fi
-  echo "Simulation Load: $sim_load"
   declare -A sim_flags=(
    ["VHServer"]="$vh_server"
    ["Kill Switch"]="$kill_switch"
@@ -147,7 +146,7 @@ while true; do
   for label in "${!sim_flags[@]}"; do
    [[ "${sim_flags[$label]}" == "on" ]] && echo "$label: on"
   done
-  echo "Active Simulations:"
+  #echo "Active Simulations:"
   get_sim_status
   echo "--------------------------------------------------"
   # Optional: show last log lines (helps debugging)
