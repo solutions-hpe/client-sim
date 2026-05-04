@@ -1,7 +1,5 @@
 #!/bin/bash
 version=.02
-echo apt update Script Version $version | tee -a /usr/local/scripts/sim.log
-echo $(date) | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 sudo apt update
 sudo dpkg --configure -a

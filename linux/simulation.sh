@@ -1,8 +1,6 @@
 #!/bin/bash
 version=.93
 log="/usr/local/scripts/sim.log"
-echo $(date) | tee -a $log
-echo Simulation Script Version $version | tee -a $log
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
@@ -17,8 +15,6 @@ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a $log; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a $log; fi
-#------------------------------------------------------------
-echo Parsing Config File | tee -a $log
 #------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
