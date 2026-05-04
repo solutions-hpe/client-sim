@@ -123,7 +123,7 @@ if [ $vh_server == "on" ]; then
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
-echo -----------------------------| tee -a /usr/local/scripts/sim.log
+echo -----------------------------
 cd /usr/local/scripts/ && sudo chmod +x *.sh &
 #------------------------------------------------------------
 #Looping Script
