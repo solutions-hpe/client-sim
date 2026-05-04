@@ -3,7 +3,9 @@ version=.29
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
-echo "$(date)"
+echo Update Script Version $version | tee "$debug"
+echo Update Script Version $version | tee -a "$log"
+echo "$(date)" | tee -a "$debug"
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------

@@ -2,7 +2,7 @@
 version=.33
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
-echo Startup Script Version $version | tee -a "$debug"
+echo Startup Script Version $version | tee "$debug" "$log"
 echo $(date) | tee -a "$debug"
 #------------------------------------------------------------
 #Check Logs Script

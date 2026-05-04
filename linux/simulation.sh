@@ -2,6 +2,8 @@
 version=.93
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
+echo Simulation Script Version $version | tee "$debug"
+echo Simulation Script Version $version | tee -a "$log"
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------

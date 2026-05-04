@@ -2,7 +2,8 @@
 version=.02
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
-echo DNS Failure Script Version $version | tee -a "$debug"
+echo DNS Failure Script Version $version | tee "$debug"
+echo DNS Failure Script Version $version | tee -a "$log"
 #------------------------------------------------------------
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
