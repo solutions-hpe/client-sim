@@ -1,6 +1,6 @@
 #!/bin/bash
-
-version=.28
+version=.29
+pkill -f firefox
 LOG_FILE="/usr/local/scripts/sim.log"
 echo "Update Script Version $version" | tee -a "$LOG_FILE"
 echo "$(date)" | tee -a "$LOG_FILE"
