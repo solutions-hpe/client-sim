@@ -1,13 +1,13 @@
 #!/bin/bash
 version=.01
 echo Dashboard Version $version | tee -a /usr/local/scripts/sim.log
+source '/usr/local/scripts/ini-parser.sh'
+process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 # Simulation Dashboard (Read-only monitor)
 #------------------------------------------------------------
 log="/usr/local/scripts/sim.log"
 refresh_rate=5
-source '/usr/local/scripts/ini-parser.sh'
-process_ini_file '/usr/local/scripts/simulation.conf'
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
@@ -120,22 +120,22 @@ while true; do
   echo "Hostname:    $HOSTNAME"
   echo "WiFi Status: $(get_wifi_status)"
   echo "Gateway:     $(get_gateway_status)"
-  echo --------------------------------------------------
-  echo Simulation Details:
-  echo Site: $wsite
-  echo Site Based SSID: $site_based_ssid | tee -a $log
-  echo VHServer: $vh_server
-  if [ $vh_server == "off" ]; then echo Phy: $sim_phy; fi
-  if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter; fi
-  echo Simulation Load: $sim_load
-  echo Kill Switch: $kill_switch
-  echo DHCP Fail: $dhcp_fail
-  echo DNS Fail: $dns_fail
-  echo WWW Traffic: $www_traffic
-  echo iPerf: $iperf
-  echo Download: $download
-  echo Port Flap: $port_flap
-  echo Incorrect SSID PW: $ssidpw_fail
+  echo ""--------------------------------------------------""
+  echo "Simulation Details:"
+  echo "Site: $wsite"
+  echo "Site Based SSID: $site_based_ssid"
+  echo "VHServer: $vh_server"
+  if [ $vh_server == "off" ]; then echo "Phy: $sim_phy"; fi
+  if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo "Adapter: $wladapter"; fi
+  echo "Simulation Load: $sim_load"
+  echo "Kill Switch: $kill_switch"
+  echo "DHCP Fail: $dhcp_fail"
+  echo "DNS Fail: $dns_fail"
+  echo "WWW Traffic: $www_traffic"
+  echo "iPerf: $iperf"
+  echo "Download: $download"
+  echo "Port Flap: $port_flap"
+  echo "Incorrect SSID PW: $ssidpw_fail"
   echo "Active Simulations:"
   get_sim_status
   echo "--------------------------------------------------"
