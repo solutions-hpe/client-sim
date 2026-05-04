@@ -358,32 +358,32 @@ if [ $kill_switch == "off" ]; then
    if [ "$www_traffic" == "on" ]; then
     if ! pgrep -f "www_traffic.sh" >/dev/null; then
      run_simulation "www_traffic.sh"
-     echo Running WWW Traffic Simulation | tee -a "$debug"
+     echo Running WWW Traffic Simulation | tee -a "$debug" "$log"
      www_traffic="off"
     fi
    fi
    if [ "$ping_test" == "on" ]; then
     if ! pgrep -f "ping_test.sh" >/dev/null; then
      run_simulation "ping_test.sh"
-     echo Running Ping Test Simulation | tee -a "$debug"
+     echo Running Ping Test Simulation | tee -a "$debug" "$log"
     fi
    fi
    if [ "$iperf" == "on" ]; then
     if ! pgrep -f "iperf.sh" >/dev/null; then
      run_simulation "iperf.sh"
-     echo Running iPerf Simulation | tee -a "$debug"
+     echo Running iPerf Simulation | tee -a "$debug" "$log"
     fi
    fi
    if [ "$download" == "on" ]; then
     if ! pgrep -f "download.sh" >/dev/null; then
      run_simulation "download.sh"
-     echo Running Download Simulation | tee -a "$debug"
+     echo Running Download Simulation | tee -a "$debug" "$log"
     fi
    fi
    if [ "$dns_fail" == "on" ]; then
     if ! pgrep -f "dns_fail.sh" >/dev/null; then
      run_simulation "dns_fail.sh"
-     echo Running DNS Simulation| tee -a "$debug"
+     echo Running DNS Simulation| tee -a "$debug" "$log"
     fi
    fi
    sleep 10
