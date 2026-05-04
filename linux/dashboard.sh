@@ -1,6 +1,5 @@
 #!/bin/bash
 version=.01
-echo Dashboard Version $version | tee -a /usr/local/scripts/sim.log
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
@@ -99,9 +98,13 @@ get_gateway_status() {
 # Helper: simulation process status
 #------------------------------------------------------------
 get_sim_status() {
+  exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh")
   for s in /usr/local/scripts/*.sh; do
     script_name=$(basename "$s")
-
+    # check if script is in exclude list
+    for e in "${exclude[@]}"; do
+      [[ "$script_name" == "$e" ]] && continue 2
+    done
     if pgrep -f "$script_name" >/dev/null 2>&1; then
       echo "[RUNNING] $script_name"
     else
