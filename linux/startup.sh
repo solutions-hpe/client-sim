@@ -1,7 +1,9 @@
 #!/bin/bash
 version=.33
-echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
-echo $(date) | tee -a /usr/local/scripts/sim.log
+log="/usr/local/scripts/sim.log"
+debug="/usr/local/scripts/debug-startup.log"
+echo Startup Script Version $version | tee -a "$debug"
+echo $(date) | tee -a "$debug"
 #------------------------------------------------------------
 #Check Logs Script
 #------------------------------------------------------------
@@ -76,16 +78,16 @@ if [ $syslog == "on" ]; then
     sudo sed -i '/module(load="imuxsock")/i $ModLoad imfile' /etc/rsyslog.conf
   fi
 else
- echo Skipping Syslog Server Update | tee -a /usr/local/scripts/sim.log
+ echo Skipping Syslog Server Update | tee -a "$debug"
 fi
 #------------------------------------------------------------
 #Scheduling Reboot
 #------------------------------------------------------------
 rn=$(($reboot_schedule + RANDOM % 600))
-echo Scheduling reboot $rn minutes | tee -a /usr/local/scripts/sim.log
+echo Scheduling reboot $rn minutes | tee -a "$debug"
 shutdown -r $rn
 #Making sure eth0 and wlan0 are online
-echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
+echo Bringing up all interfaces online | tee -a "$debug"
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
@@ -97,8 +99,8 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
-if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
-if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
+if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a "$debug"; fi
+if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a "$debug"; fi
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
@@ -106,27 +108,27 @@ mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
-echo -----------------------------| tee -a /usr/local/scripts/sim.log
+echo -----------------------------| tee -a "$debug"
 #------------------------------------------------------------
 #Running Updates
 #------------------------------------------------------------
-echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
+echo Updating Simulation from repo | tee -a "$debug"
 source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
 if [ $vh_server == "on" ]; then
-  echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
-  echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
+  echo Setting VH to autostart | tee -a "$debug"
+  echo Waiting for VH Client to start | tee -a "$debug"
   sudo /usr/sbin/vhclientx86_64 -n
   sleep 5
 fi
 #------------------------------------------------------------
-echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log
+echo Setting Script Permissions | tee -a "$debug"
 echo -----------------------------
 cd /usr/local/scripts/ && sudo chmod +x *.sh &
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
-echo Launching Simulation Script | tee -a /usr/local/scripts/sim.log
+echo Launching Simulation Script | tee -a "$debug"
 source /usr/local/scripts/simulation.sh

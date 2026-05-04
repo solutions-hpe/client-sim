@@ -1,6 +1,7 @@
 #!/bin/bash
 version=.93
 log="/usr/local/scripts/sim.log"
+debug="/usr/local/scripts/debug-simulation.log"
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
@@ -12,9 +13,9 @@ log="/usr/local/scripts/sim.log"
 #------------------------------------------------------------
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a $log; fi
+if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a "$debug"; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
-if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a $log; fi
+if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a "$debug"; fi
 #------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
@@ -110,25 +111,25 @@ wait_for_ssid() {
   local timeout=60
   local interval=3
   local elapsed=0
-  echo "Scanning for SSID: $target_ssid"
+  echo "Scanning for SSID: $target_ssid" | tee -a "$debug"
   # First scan phase
   while [ "$elapsed" -lt "$timeout" ]; do
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
-      echo "SSID found: $target_ssid"
+      echo "SSID found: $target_ssid" | tee -a "$debug"
       return 0
     fi
     sleep "$interval"
     elapsed=$((elapsed + interval))
   done
-  echo "SSID not found after $timeout seconds, attempting rescan..."
+  echo "SSID not found after $timeout seconds, attempting rescan" | tee -a "$debug" "$log"
   # Force rescan
   nmcli device wifi rescan >/dev/null 2>&1
   sleep 2
   if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
-    echo "SSID found after rescan: $target_ssid"
+    echo "SSID found after rescan: $target_ssid" | tee -a "$debug"
     return 0
   fi
-  echo "SSID still not found, resetting WiFi adapter..."
+  echo "SSID still not found, resetting WiFi adapter" | tee -a "$debug" "$log"
   # Toggle WiFi ONLY now
   nmcli radio wifi off
   sleep 3
@@ -139,13 +140,13 @@ wait_for_ssid() {
   while [ "$elapsed" -lt "$timeout" ]; do
     nmcli device wifi rescan >/dev/null 2>&1
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
-      echo "SSID found after WiFi reset: $target_ssid"
+      echo "SSID found after WiFi reset: $target_ssid" | tee -a "$debug" "$log"
       return 0
     fi
     sleep "$interval"
     elapsed=$((elapsed + interval))
   done
-  echo "ERROR: SSID '$target_ssid' not found after rescan and WiFi reset"
+  echo "ERROR: SSID '$target_ssid' not found after rescan and WiFi reset" | tee -a "$debug" "$log"
   return 1
 }
 #------------------------------------------------------------
@@ -153,7 +154,7 @@ wait_for_ssid() {
 #------------------------------------------------------------
 connect_wifi() {
   nmcli radio wifi on
-  echo "Ensuring WiFi Adapter is ON"
+  echo "Ensuring WiFi Adapter is ON" | tee -a "$debug"
   sleep 2
   if [ "$site_based_ssid" == "on" ]; then
     target_ssid="$wsite-$ssid"
@@ -163,11 +164,11 @@ connect_wifi() {
   # --- NEW: check current connection ---
   current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
   if [ "$current_ssid" == "$target_ssid" ]; then
-    echo "Already connected to $target_ssid — skipping"
+    echo "Already connected to $target_ssid — skipping" | tee -a "$debug"
     return 0
   fi
   wait_for_ssid "$target_ssid" || return 1
-  echo "Attempting to connect to $target_ssid"
+  echo "Attempting to connect to $target_ssid" | tee -a "$debug"
   nmcli device wifi connect "$target_ssid" password "$ssidpw"
 }
 #------------------------------------------------------------
@@ -177,21 +178,20 @@ manage_connection() {
   local action=$1
   local wait_time=$2
   nmcli radio wifi on
-  echo "Ensuring WiFi Adapter is ON"
+  echo "Ensuring WiFi Adapter is ON" | tee -a "$debug"
   sleep 2
   if [ "$site_based_ssid" == "on" ]; then
     target_ssid="$wsite-$ssid"
   else
     target_ssid="$ssid"
   fi
-  # --- NEW check ---
   current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
   if [ "$current_ssid" == "$target_ssid" ] && [ "$action" == "up" ]; then
-    echo "Already connected to $target_ssid — skipping bring-up"
+    echo "Already connected to $target_ssid — skipping bring-up" | tee -a "$debug"
     return 0
   fi
   wait_for_ssid "$target_ssid" || return 1
-  echo "Attempting to $action connection: $target_ssid"
+  echo "Attempting to $action connection: $target_ssid" | tee -a "$debug"
   nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
 #------------------------------------------------------------
@@ -210,29 +210,29 @@ connect_wifi
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
-echo Disabling unused interface
+echo Disabling unused interface | tee -a "$debug"
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
 if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
-echo Generating MAC address | tee -a $log
+echo Generating MAC address | tee -a "$debug"
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
 #Checking to see if the default gateway is reachable
 #------------------------------------------------------------
-echo Finding WLAN Adapter | tee -a $log
+echo Finding WLAN Adapter | tee -a "$debug"
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo Unblocking WiFi / RFKill | tee -a $log
+echo Unblocking WiFi / RFKill | tee -a "$debug"
 sudo rfkill unblock wifi & disown
-echo Getting Default Gateway | tee -a $log
+echo Getting Default Gateway | tee -a "$debug"
 dfgw=$(ip route | grep -oP 'default via \K\S+')
-echo Ping the Default Gateway | tee -a $log
+echo Ping the Default Gateway | tee -a "$debug"
 ping -c2 $dfgw
 if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
- echo Successful network connection - Pre-Simulation | tee -a $log
- echo In Pre-Simulation | tee -a $log
+ echo Successful network connection - Pre-Simulation | tee -a "$debug"
+ echo In Pre-Simulation | tee -a "$debug"
 else
-  echo Network connection failed | tee -a $log
-  echo In Pre-Simulation | tee -a $log
+  echo Network connection failed | tee -a "$debug"
+  echo In Pre-Simulation | tee -a "$debug"
   #------------------------------------------------------------
   #If VH is enabled then attempt to connect to VHServer
   #------------------------------------------------------------
@@ -250,8 +250,8 @@ fi
 #Begin Setting up simulation load
 #------------------------------------------------------------
 if [ $sim_load -lt $rn_sim_load ]; then
-  echo Simulation load under threshold | tee -a $log
-  echo Skipping Simulations but staying associated | tee -a $log
+  echo Simulation load under threshold | tee -a "$debug"
+  echo Skipping Simulations but staying associated | tee -a "$debug"
   if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
     manage_connection up 180
   fi
@@ -260,7 +260,7 @@ fi
 #------------------------------------------------------------
 #End Setting up simulation load
 #------------------------------------------------------------
-echo Kill Switch is $kill_switch | tee -a $log
+echo Kill Switch is $kill_switch | tee -a "$debug"
 if [ $kill_switch == "off" ]; then
  for z in {1..100}; do
   #------------------------------------------------------------
@@ -272,18 +272,18 @@ if [ $kill_switch == "off" ]; then
   if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
-      echo Running SSID Incorrect Password | tee -a $log
+      echo Running SSID Incorrect Password | tee -a "$debug"
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
-      echo Iteration $i of 100 | tee -a $log
+      echo Iteration $i of 100 | tee -a "$debug"
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       connect_wifi
      done
     fi
     if [ $auth_fail == "on" ]; then
-     echo Running Auth Failure | tee -a $log
+     echo Running Auth Failure | tee -a "$debug"
      for i in {1..100}; do
-      echo Enable/Disable WLAN interface | tee -a $log
-      echo Iteration $i of 100 | tee -a $log
+      echo Enable/Disable WLAN interface | tee -a "$debug"
+      echo Iteration $i of 100 | tee -a "$debug"
       sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
       manage_connection up 5
       sleep 5
@@ -306,27 +306,27 @@ if [ $kill_switch == "off" ]; then
    dfgw=$(ip route | grep -oP 'default via \K\S+')
    ping -c2 $dfgw
    if [ $? -eq 0 ]; then
-    echo Successful network connection | tee -a $log
-    echo In Simulation Loop | tee -a $log
+    echo Successful network connection | tee -a "$debug"
+    echo In Simulation Loop | tee -a "$debug"
     else
-     echo Network connection failed | tee -a $log
-     echo In Simulation Loop | tee -a $log
-     echo Attempting to reset adapter | tee -a $log
+     echo Network connection failed | tee -a "$debug"
+     echo In Simulation Loop | tee -a "$debug"
+     echo Attempting to reset adapter | tee -a "$debug"
      if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
      connect_wifi
-     echo WLAN Adapter name $wladapter | tee -a $log
+     echo WLAN Adapter name $wladapter | tee -a "$debug"
      sleep 15
      ping -c2 $dfgw
      if [ $? -eq 0 ]; then
-      echo Successful network connection | tee -a $log
-      echo After Adapter Reset | tee -a $log
+      echo Successful network connection | tee -a "$debug"
+      echo After Adapter Reset | tee -a "$debug"
      else
-     echo Connection failed muiltiple times | tee -a $log
-     echo Resetting configuration | tee -a $log
-     echo Purging VHConfig | tee -a $log
+     echo Connection failed muiltiple times | tee -a "$debug"
+     echo Resetting configuration | tee -a "$debug"
+     echo Purging VHConfig | tee -a "$debug"
      #------------------------------------------------------------
      #Running API to VHClient to disconnect all clients this device is connecting to
      #When a device ID changes on VH the client can think it should connect to multiple devices
@@ -356,41 +356,41 @@ if [ $kill_switch == "off" ]; then
    if [ "$www_traffic" == "on" ]; then
     if ! pgrep -f "www_traffic.sh" >/dev/null; then
      run_simulation "www_traffic.sh"
-     echo Running WWW Traffic Simulation
+     echo Running WWW Traffic Simulation | tee -a "$debug"
      www_traffic="off"
     fi
    fi
    if [ "$ping_test" == "on" ]; then
     if ! pgrep -f "ping_test.sh" >/dev/null; then
      run_simulation "ping_test.sh"
-     echo Running Ping Test Simulation
+     echo Running Ping Test Simulation | tee -a "$debug"
     fi
    fi
    if [ "$iperf" == "on" ]; then
     if ! pgrep -f "iperf.sh" >/dev/null; then
      run_simulation "iperf.sh"
-     echo Running iPerf Simulation
+     echo Running iPerf Simulation | tee -a "$debug"
     fi
    fi
    if [ "$download" == "on" ]; then
     if ! pgrep -f "download.sh" >/dev/null; then
      run_simulation "download.sh"
-     echo Running Download Simulation
+     echo Running Download Simulation | tee -a "$debug"
     fi
    fi
    if [ "$dns_fail" == "on" ]; then
     if ! pgrep -f "dns_fail.sh" >/dev/null; then
      run_simulation "dns_fail.sh"
-     echo Running DNS Simulation
+     echo Running DNS Simulation| tee -a "$debug"
     fi
    fi
    sleep 10
    if (( z % 10 == 0 )); then
-    echo Closing Firefox | tee -a "$log"
+    echo Closing Firefox | tee -a "$debug"
     pkill -f firefox
     www_traffic="on"
    fi
-   echo End of simulation
+   echo End of simulation | tee -a "$debug"
    #------------------------------------------------------------
    #Running update to either the cloud repo or local SMB repo
    #------------------------------------------------------------
@@ -398,8 +398,8 @@ if [ $kill_switch == "off" ]; then
    #------------------------------------------------------------
    #End Script Updates
    #------------------------------------------------------------
-   echo Sleeping for 5 seconds
-   echo Loop iteration $z of 100
+   echo Sleeping for 5 seconds | tee -a "$debug"
+   echo Loop iteration $z of 100 | tee -a "$debug"
    sleep 5
    #------------------------------------------------------------
    #End of 100 Loop Count
@@ -410,13 +410,13 @@ else
  #------------------------------------------------------------
  #If kill switch is enabled - sleeping for 5 minutes then restarting the loop
  #------------------------------------------------------------
- echo Kill switch enabled - sleeping for 5 minutes
+ echo Kill switch enabled - sleeping for 5 minutes | tee -a "$debug"
  sleep 300
 fi
 #------------------------------------------------------------
 #Killing Firefox simulation
 #------------------------------------------------------------
-echo Closing Firefox
+echo Closing Firefox | tee -a "$debug"
 pkill -f firefox &
 #------------------------------------------------------------
 #End Kill switch Check 
@@ -424,18 +424,18 @@ pkill -f firefox &
 #------------------------------------------------------------
 #Running apt update & apt upgrade
 #------------------------------------------------------------
-echo Running Updates | tee -a $log
+echo Running Updates | tee -a "$debug"
 bash /usr/local/scripts/apt_update.sh &
 if [ $allow_offline == "yes" ]; then
   #------------------------------------------------------------
   #Bringing all interfaces down to make it look like the device is offline.
   #Otherwise they get triggered as IOT since they are always connected.
   #------------------------------------------------------------
-  echo Bringing all interfaces down | tee -a $log
+  echo Bringing all interfaces down | tee -a "$debug"
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
-  echo Sleeping for $rn_offline_time seconds
-  echo ------------------------------
+  echo Sleeping for $rn_offline_time seconds | tee -a "$debug"
+  echo ------------------------------ | tee -a "$debug"
   #------------------------------------------------------------
   #Sleep for up to 4 hours to show the device left
   #------------------------------------------------------------
@@ -443,10 +443,10 @@ if [ $allow_offline == "yes" ]; then
   #------------------------------------------------------------
   #Bringing all interfaces back up to call home/update scripts
   #------------------------------------------------------------
-  echo Bringing all interfaces online | tee -a $log
+  echo Bringing all interfaces online | tee -a "$debug"
   if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
   if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-  echo ------------------------------
+  echo ------------------------------ | tee -a "$debug"
 fi
 #------------------------------------------------------------
 #Looping Script
