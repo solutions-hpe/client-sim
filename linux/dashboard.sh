@@ -149,7 +149,7 @@ while true; do
   echo "--------------------------------------------------"
   # Optional: show last log lines (helps debugging)
   echo "Last Log Entries:"
-  tail -n 5 "$log" 2>/dev/null
+  tail -n 10 "$log" 2>/dev/null
   echo "=================================================="
   sleep "$refresh_rate"
 done
