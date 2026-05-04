@@ -99,16 +99,20 @@ get_gateway_status() {
 #------------------------------------------------------------
 get_sim_status() {
   exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh")
+  printf "%-10s %-30s %-8s %-10s\n" "STATUS" "SCRIPT" "PID" "RUNTIME"
+  printf "%-10s %-30s %-8s %-10s\n" "------" "------" "---" "-------"
   for s in /usr/local/scripts/*.sh; do
     script_name=$(basename "$s")
     # check if script is in exclude list
     for e in "${exclude[@]}"; do
       [[ "$script_name" == "$e" ]] && continue 2
     done
-    if pgrep -f "$script_name" >/dev/null 2>&1; then
-      echo "[RUNNING] $script_name"
+    pid=$(pgrep -f "$script_name" | head -n 1)
+    if [[ -n "$pid" ]]; then
+      runtime=$(ps -p "$pid" -o etime= | tr -d ' ')
+      printf "%-10s %-30s %-8s %-10s\n" "[RUNNING]" "$script_name" "$pid" "$runtime"
     else
-      echo "[STOPPED]  $script_name"
+      printf "%-10s %-30s %-8s %-10s\n" "[STOPPED]" "$script_name" "-" "-"
     fi
   done
 }
