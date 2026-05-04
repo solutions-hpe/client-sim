@@ -2,9 +2,7 @@
 version=.29
 pkill -f firefox
 LOG_FILE="/usr/local/scripts/sim.log"
-echo "Update Script Version $version" | tee -a "$LOG_FILE"
 echo "$(date)" | tee -a "$LOG_FILE"
-echo "Reading Simulation Config File" | tee -a "$LOG_FILE"
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
@@ -50,9 +48,7 @@ if [[ "$public_repo" == "on" ]]; then
         git config http.lowSpeedTime 30
         git config http.maxRequests 2
         git config pull.rebase true
-
         git fetch origin
-
         if git show-ref --verify --quiet "refs/heads/$repo_branch"; then
             echo "Switching to branch: $repo_branch" | tee -a "$LOG_FILE"
             git switch "$repo_branch"
@@ -68,14 +64,12 @@ if [[ "$public_repo" == "on" ]]; then
         git reset --hard "origin/$repo_branch"
         # -------- linux section guarded --------
         if cd linux; then
-
             echo "Copying rsyslog config..." | tee -a "$LOG_FILE"
             if [[ -f "10-rsyslog.conf" ]]; then
                 sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
             else
                 echo "No rsyslog config file found" | tee -a "$LOG_FILE"
             fi
-
             echo "Copying desktop startup files..." | tee -a "$LOG_FILE"
             desktop_files=( *.desktop )
             if (( ${#desktop_files[@]} )); then
@@ -83,7 +77,6 @@ if [[ "$public_repo" == "on" ]]; then
             else
                 echo "No .desktop files found to copy" | tee -a "$LOG_FILE"
             fi
-
             echo "Copying shell scripts..." | tee -a "$LOG_FILE"
             sh_files=( *.sh )
             if (( ${#sh_files[@]} )); then
@@ -91,7 +84,6 @@ if [[ "$public_repo" == "on" ]]; then
             else
                 echo "No .sh files found to copy" | tee -a "$LOG_FILE"
             fi
-
             echo "Copying text files..." | tee -a "$LOG_FILE"
             txt_files=( *.txt )
             if (( ${#txt_files[@]} )); then
@@ -99,12 +91,10 @@ if [[ "$public_repo" == "on" ]]; then
             else
                 echo "No .txt files found to copy" | tee -a "$LOG_FILE"
             fi
-
             cd ..
         else
             echo "WARNING: linux directory not found, skipping file copy section" | tee -a "$LOG_FILE"
         fi
-
         if cd configs; then
             echo "Updating simulation.conf..." | tee -a "$LOG_FILE"
             if [[ -f "simulation.conf" ]]; then
@@ -116,17 +106,13 @@ if [[ "$public_repo" == "on" ]]; then
         else
             echo "WARNING: configs directory not found" | tee -a "$LOG_FILE"
         fi
-
         echo "Setting permissions..." | tee -a "$LOG_FILE"
         sudo chmod -R 777 /usr/local/scripts
-
     else
         echo "ERROR: Could not enter repo directory" | tee -a "$LOG_FILE"
     fi
-
 else
     echo "Using local SMB repository" | tee -a "$LOG_FILE"
     smbclient "$smb_location" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
 fi
-
 echo "Update complete" | tee -a "$LOG_FILE"
