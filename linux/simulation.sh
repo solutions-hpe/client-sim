@@ -205,7 +205,7 @@ run_simulation() {
  local script=$1
  local sleep_time=$2
  if [ -f "/usr/local/scripts/$script" ]; then
-  nohup bash "/usr/local/scripts/$script" >> $log 2>&1 &
+  nohup bash "/usr/local/scripts/$script" > /dev/null 2>&1 &
   sleep $sleep_time
  fi
 }
