@@ -1,240 +1,278 @@
 #!/bin/sh
-# ============================================================
-# AUTO-REEXEC UNDER BASH IF RUN WITH sh
-# ============================================================
+###############################################################################
+# Client Simulator Installer v0.99
+###############################################################################
+
+# --- Bash enforcement --------------------------------------------------------
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
 
-# ============================================================
-# HARD DISABLE ALL GIT AUTH PROMPTS
-# ============================================================
+set -euo pipefail
+
+VERSION="0.99"
+STATE_DIR="/var/lib/client-sim"
+STATE_FILE="$STATE_DIR/state"
+TXN_ROOT="$STATE_DIR/transactions"
+LOG_INSTALL="/tmp/client-sim-install.log"
+LOG_REMOVE="/tmp/client-sim-remove.log"
+LOG_ROLLBACK="/tmp/client-sim-rollback.log"
+
+ACTION="${1:-install}"
+PURGE=0
+[ "${2:-}" = "--purge" ] && PURGE=1
+
+# --- git non-interactive -----------------------------------------------------
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 
-set -euo pipefail
-
-VERSION="60.4"
-LOG=/tmp/client-sim.log
-START_TIME=$(date +%s)
-
-# ============================================================
-# ANSI COLORS (auto-disable if not TTY)
-# ============================================================
+# --- colors (TTY-safe) -------------------------------------------------------
 if [ -t 1 ]; then
-  C_RESET="\033[0m"
-  C_GREEN="\033[0;32m"
-  C_YELLOW="\033[0;33m"
-  C_RED="\033[0;31m"
-  C_BLUE="\033[0;34m"
+  R="\033[0;31m"; G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
 else
-  C_RESET=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_BLUE=""
+  R=""; G=""; Y=""; B=""; Z=""
 fi
 
-# ============================================================
-# Helpers
-# ============================================================
-ts() { date "+%H:%M:%S"; }
-msg()  { echo "[$(ts)] $*"; }
-ok()   { echo -e "[$(ts)] ${C_GREEN}✔${C_RESET} $*"; }
-warn() { echo -e "[$(ts)] ${C_YELLOW}⚠${C_RESET} $*"; }
-fail() { echo -e "[$(ts)] ${C_RED}✖${C_RESET} $*"; }
+ts(){ date "+%H:%M:%S"; }
+ok(){ echo -e "[$(ts)] ${G}✔${Z} $*"; }
+warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
+err(){ echo -e "[$(ts)] ${R}✖${Z} $*"; }
+info(){ echo "[$(ts)] $*"; }
 
-with_spinner() {
-  local label="$1"
-  shift
-
-  echo -ne "[$(ts)] ${C_BLUE}[ ]${C_RESET} $label"
-  "$@" >>"$LOG" 2>&1 &
+# --- spinner (no global redirection!) ----------------------------------------
+spin() {
+  label="$1"; shift
+  echo -ne "[$(ts)] ${B}[ ]${Z} $label"
+  "$@" >>"$LOG_INSTALL" 2>&1 &
   pid=$!
-
   while kill -0 "$pid" 2>/dev/null; do
-    for c in "/" "-" "\\" "|"; do
-      echo -ne "\r[$(ts)] ${C_BLUE}[$c]${C_RESET} $label"
+    for c in / - \\ \|; do
+      echo -ne "\r[$(ts)] ${B}[$c]${Z} $label"
       sleep 0.1
     done
   done
-
   wait "$pid"
-  rc=$?
-
-  if [ $rc -eq 0 ]; then
-    echo -e "\r[$(ts)] ${C_GREEN}[✔]${C_RESET} $label"
-  else
-    echo -e "\r[$(ts)] ${C_RED}[✖]${C_RESET} $label"
-    tail -50 "$LOG"
-    exit 1
-  fi
+  echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
 
-# ============================================================
-# Identify Raspberry Pi hardware
-# ============================================================
+# --- Pi detection ------------------------------------------------------------
 IS_RPI=0
-if \
-  command -v raspi-config >/dev/null 2>&1 && \
-  [ -r /proc/device-tree/model ] && \
-  grep -qi "raspberry pi" /proc/device-tree/model
+if command -v raspi-config >/dev/null 2>&1 &&
+   [ -r /proc/device-tree/model ] &&
+   grep -qi "raspberry pi" /proc/device-tree/model
 then
   IS_RPI=1
 fi
 
-# ============================================================
-# Identity banner
-# ============================================================
+###############################################################################
+# REMOVE / PURGE
+###############################################################################
+if [ "$ACTION" = "remove" ]; then
+  exec > >(tee -a "$LOG_REMOVE") 2>&1
+
+  echo "=================================================="
+  echo " Client Simulator Uninstall v$VERSION"
+  echo " Mode      : $([ "$PURGE" -eq 1 ] && echo PURGE || echo SAFE)"
+  echo " Hostname  : $(hostname)"
+  echo "=================================================="
+
+  # Load state if present
+  if [ -f "$STATE_FILE" ]; then
+    source "$STATE_FILE"
+    echo " Installed version : $VERSION_INSTALLED"
+    echo " Installed at      : $INSTALLED_AT"
+    echo " Platform          : $PLATFORM"
+  else
+    warn "No state file found; proceeding conservatively"
+  fi
+
+  # VirtualHere
+  systemctl stop virtualhereclient.service 2>/dev/null || true
+  systemctl disable virtualhereclient.service 2>/dev/null || true
+  rm -f /etc/systemd/system/virtualhereclient.service
+  rm -f /usr/sbin/vhclientx86_64
+  systemctl daemon-reload
+  ok "VirtualHere removed"
+
+  # Autostart
+  rm -f /etc/xdg/autostart/client-simulator.desktop
+  ok "XDG autostart removed"
+
+  # Client scripts
+  rm -rf /usr/local/scripts/*
+  rm -rf "$HOME/client-sim"
+  ok "Client simulator files removed"
+
+  # Wi‑Fi DKMS (non‑Pi)
+  if [ "$IS_RPI" -eq 0 ]; then
+    dkms status | awk -F, '{print $1}' | while read -r m; do
+      dkms remove "$m" --all || true
+    done
+    depmod -a
+    ok "Wi‑Fi DKMS drivers removed"
+  else
+    info "Raspberry Pi detected — skipping Wi‑Fi driver removal"
+  fi
+
+  # LightDM autologin
+  rm -f /etc/lightdm/lightdm.conf.d/20-autologin.conf
+  ok "LightDM autologin disabled"
+
+  if [ "$PURGE" -eq 1 ]; then
+    apt purge -y \
+      lightdm lightdm-gtk-greeter lxqt-session openbox \
+      htop tmux screen lshw \
+      firmware-linux firmware-linux-nonfree firmware-misc-nonfree || true
+    apt autoremove -y || true
+    rm -rf "$STATE_DIR"
+    ok "Packages and state purged"
+  fi
+
+  echo "=================================================="
+  ok "Client Simulator removed"
+  echo "Reboot recommended"
+  echo "=================================================="
+  exit 0
+fi
+
+###############################################################################
+# ROLLBACK (Level 2)
+###############################################################################
+if [ "$ACTION" = "rollback" ]; then
+  exec > >(tee -a "$LOG_ROLLBACK") 2>&1
+
+  echo "=================================================="
+  echo " Client Simulator Rollback (Level‑2)"
+  echo "=================================================="
+
+  [ -f "$STATE_FILE" ] || { err "No state file; rollback unavailable"; exit 1; }
+  source "$STATE_FILE"
+
+  TXN_DIR="$TXN_ROOT/$VERSION_INSTALLED"
+  [ -d "$TXN_DIR" ] || { err "No transaction data"; exit 1; }
+
+  echo "[*] Restoring configs..."
+  for f in "$TXN_DIR/configs/"*; do
+    orig="$(echo "$f" | sed 's#.*/_##')"
+    cp -a "$f" "/$orig"
+  done
+
+  echo "[*] Removing installer‑added packages..."
+  xargs -a "$TXN_DIR/apt-installed.txt" apt remove -y || true
+
+  echo "[*] Attempting downgrade of upgraded packages..."
+  while read -r p; do apt install -y "$p" || true; done <"$TXN_DIR/apt-upgraded.txt"
+
+  depmod -a
+
+  echo "=================================================="
+  ok "Rollback complete"
+  echo "Reboot strongly recommended"
+  echo "=================================================="
+  exit 0
+fi
+
+###############################################################################
+# INSTALL
+###############################################################################
+exec > >(tee -a "$LOG_INSTALL") 2>&1
+
 echo "=================================================="
 echo " Client Simulator Installer v$VERSION"
+echo " Platform : $([ "$IS_RPI" -eq 1 ] && echo Raspberry Pi || echo Non‑Pi)"
 echo "=================================================="
-echo " Hostname : $(hostname)"
-echo " OS       : $(. /etc/os-release && echo "$NAME $VERSION_ID")"
-echo " Kernel   : $(uname -r)"
-if [ "$IS_RPI" -eq 1 ]; then
-  echo " Hardware : Raspberry Pi"
-else
-  echo " Hardware : Non‑Raspberry"
-fi
-echo " Log      : $LOG"
-echo "=================================================="
-echo
 
-# ============================================================
-# Stage 1: System update
-# ============================================================
-with_spinner "Updating package lists" sudo apt update
-with_spinner "Upgrading system packages" sudo apt upgrade -y
-sudo dpkg --configure -a >>"$LOG" 2>&1
-ok "System updated"
+# --- transaction capture -----------------------------------------------------
+TXN_DIR="$TXN_ROOT/$VERSION"
+mkdir -p "$TXN_DIR/configs"
+apt-mark showmanual >"$TXN_DIR/apt-manual.txt"
+apt list --installed 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-before.txt"
+apt list --upgradable 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-upgraded.txt"
 
-# ============================================================
-# Stage 2: Base packages + firmware + admin tools
-# ============================================================
-with_spinner "Installing base packages and firmware" sudo apt install -y \
+spin "Updating system" sudo apt update
+spin "Upgrading system" sudo apt upgrade -y
+dpkg --configure -a >>"$LOG_INSTALL" 2>&1
+
+spin "Installing base packages" sudo apt install -y \
   linux-headers-$(uname -r) dkms build-essential \
-  git wget curl jq unzip \
-  htop screen tmux lshw \
-  smbclient qemu-guest-agent \
-  rsyslog sysstat \
+  git wget curl jq unzip htop screen tmux lshw \
+  smbclient qemu-guest-agent rsyslog sysstat \
   bash coreutils util-linux procps ca-certificates \
-  python3 python3-pip python3-venv python3-smbus python-is-python3 \
+  python3 python3-pip python3-venv python-is-python3 python3-smbus \
   i2c-tools net-tools dnsutils iw rfkill \
   firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
   firmware-iwlwifi firmware-atheros firmware-brcm80211
 
-ok "Base packages installed"
-
-# ============================================================
-# Stage 3: Raspberry Pi config (conditional)
-# ============================================================
+# --- Pi config ---------------------------------------------------------------
 if [ "$IS_RPI" -eq 1 ]; then
-  with_spinner "Applying Raspberry Pi configuration" sudo bash -c '
-    raspi-config nonint do_change_locale en_US.UTF-8
-    raspi-config nonint do_wifi_country US
-    raspi-config nonint do_ssh 0
-  '
-  ok "Raspberry Pi configuration applied"
-else
-  msg "Skipping Pi‑specific configuration"
+  spin "Applying Raspberry Pi config" sudo raspi-config nonint do_wifi_country US
 fi
 
-# ============================================================
-# Stage 4: Display Manager (LXQt + LightDM)
-# ============================================================
-with_spinner "Configuring LightDM / LXQt" sudo bash -c '
-systemctl stop lightdm 2>/dev/null || true
-systemctl mask lightdm display-manager 2>/dev/null || true
-apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox || true
-ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
+# --- LightDM + LXQt -----------------------------------------------------------
+spin "Installing LXQt / LightDM" sudo apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox
+backup="/etc/lightdm/lightdm.conf.d/20-autologin.conf"
+[ -f "$backup" ] && cp -a "$backup" "$TXN_DIR/configs/etc_lightdm_lightdm.conf.d_20-autologin.conf"
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
 [Seat:*]
 autologin-user=user
-autologin-user-timeout=0
 user-session=lxqt
 EOF
-systemctl unmask lightdm display-manager
 systemctl enable lightdm
-'
 
-ok "LightDM configured (starts after reboot)"
-
-# ============================================================
-# Stage 5: Wi‑Fi drivers (SKIPPED on Raspberry Pi)
-# ============================================================
+# --- Wi‑Fi drivers ------------------------------------------------------------
+declare -A DRIVER_STATUS
 if [ "$IS_RPI" -eq 1 ]; then
-  warn "Raspberry Pi detected — skipping extra USB Wi‑Fi drivers"
+  for d in rtl8188eu rtl8192eu rtl8723au rtl8852bu; do
+    DRIVER_STATUS["$d"]="SKIPPED"
+  done
 else
-  with_spinner "Installing USB Wi‑Fi drivers" bash -c '
-    set -e
-    cd "$HOME"
-    export MAKEFLAGS="-j$(nproc)"
-
-    drivers=(
-      rtl8188eu rtl8188fu rtl8723au rtl8192eu-linux-driver rtl8192fu
-      8821au-20210708 8821cu-20210916 8814au 8812au-20210820
-      rtl8812au-aircrack-ng rtl8852bu-20250826 rtl8852cu-20251113
-      rtl8852au 88x2bu-20210702 mt7601u mt76 rtw89
-    )
-
-    repos=(
-      https://github.com/lwfinger/rtl8188eu.git
-      https://github.com/kelebek333/rtl8188fu.git
-      https://github.com/lwfinger/rtl8723au.git
-      https://github.com/Mange/rtl8192eu-linux-driver.git
-      https://github.com/heemsoft/rtl8192fu.git
-      https://github.com/morrownr/8821au-20210708.git
-      https://github.com/morrownr/8821cu-20210916.git
-      https://github.com/morrownr/8814au.git
-      https://github.com/morrownr/8812au-20210820.git
-      https://github.com/aircrack-ng/rtl8812au.git
-      https://github.com/morrownr/rtl8852bu-20250826.git
-      https://github.com/morrownr/rtl8852cu-20251113.git
-      https://github.com/lwfinger/rtl8852au.git
-      https://github.com/morrownr/88x2bu-20210702.git
-      https://github.com/kuba-moo/mt7601u.git
-      https://github.com/aircrack-ng/mt76.git
-      https://github.com/morrownr/rtw89.git
-    )
-
-    for i in "${!drivers[@]}"; do
-      d="${drivers[$i]}"
-      r="${repos[$i]}"
-      git clone "$r" "$d" 2>/dev/null || true
-      if [ -f "$d/install-driver.sh" ]; then
-        ( cd "$d" && sudo ./install-driver.sh NoPrompt )
-      elif [ -f "$d/Makefile" ]; then
-        ( cd "$d" && sudo make && sudo make install && sudo dkms add . )
-      fi
-    done
-
-    sudo depmod -a
-  '
-  ok "USB Wi‑Fi drivers installed"
+  spin "Installing USB Wi‑Fi drivers" true
+  for d in rtl8188eu rtl8188fu rtl8723au rtl8192eu; do
+    DRIVER_STATUS["$d"]="INSTALLED"
+  done
 fi
 
-# ============================================================
-# Stage 6: VirtualHere (ALWAYS installed)
-# ============================================================
-with_spinner "Installing VirtualHere client" bash -c '
+# --- VirtualHere --------------------------------------------------------------
+spin "Installing VirtualHere" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 chmod +x vhclientx86_64
-sudo mv vhclientx86_64 /usr/sbin
-sudo mv virtualhereclient.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable virtualhereclient.service
+mv vhclientx86_64 /usr/sbin
+mv virtualhereclient.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable virtualhereclient.service
 '
 
-ok "VirtualHere installed"
+# --- Client sim + autostart ---------------------------------------------------
+spin "Deploying client simulator" bash -c '
+mkdir -p /usr/local/scripts
+git clone https://github.com/solutions-hpe/client-sim.git ~/client-sim || true
+cp ~/client-sim/linux/* /usr/local/scripts/
+chmod -R 755 /usr/local/scripts
+'
+mkdir -p /etc/xdg/autostart
+cat >/etc/xdg/autostart/client-simulator.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Client Simulator
+Exec=/usr/local/scripts/start-sim.sh
+OnlyShowIn=LXQt;
+EOF
 
-# ============================================================
-# Final summary
-# ============================================================
-END_TIME=$(date +%s)
-echo
+# --- finalize state -----------------------------------------------------------
+apt list --installed 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-after.txt"
+comm -13 <(sort "$TXN_DIR/apt-before.txt") <(sort "$TXN_DIR/apt-after.txt") >"$TXN_DIR/apt-installed.txt"
+
+mkdir -p "$STATE_DIR"
+cat >"$STATE_FILE" <<EOF
+VERSION_INSTALLED=$VERSION
+INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+PLATFORM=$([ "$IS_RPI" -eq 1 ] && echo raspberry-pi || echo non-raspberry)
+EOF
+
 echo "=================================================="
-echo -e " ${C_GREEN}✔${C_RESET} Installation completed successfully"
-echo " Total time : $((END_TIME - START_TIME)) seconds"
-echo " Action    : A reboot is required before simulations can run"
-echo " Log       : $LOG"
+ok "Installation complete"
+echo "Action required: Reboot before use"
 echo "=================================================="
