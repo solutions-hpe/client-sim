@@ -9,7 +9,7 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="58.2"
+VERSION="58.3"
 LOG=/tmp/client-sim.log
 MAX_RETRIES=5
 START_TIME=$(date +%s)
@@ -38,9 +38,7 @@ ok()    { echo "[$(ts)] ✔ $*"; }
 warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
 fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
 
-elapsed() {
-  echo "$(( $(date +%s) - $1 ))s"
-}
+elapsed() { echo "$(( $(date +%s) - $1 ))s"; }
 
 banner
 echo "[$(ts)] Initializing installer"
@@ -61,7 +59,7 @@ recover_network() {
     nmcli device connect "$dev" || true
   done
   sleep 5
-  ok "Network recovery attempt completed"
+  ok "Network recovery completed"
 }
 
 # ------------------------------------------------------------
@@ -70,6 +68,7 @@ recover_network() {
 run_or_retry() {
   local attempt=1
   local cmd="$*"
+
   while :; do
     echo "[$(ts)] RUN: $cmd (attempt $attempt)"
     set +e
@@ -77,14 +76,15 @@ run_or_retry() {
     rc=$?
     set -e
     [ $rc -eq 0 ] && return 0
+
     if grep -Ei \
       "temporary failure|could not resolve|network is unreachable|connection timed out|name or service not known" \
       "$LOG" >/dev/null && [ $attempt -lt $MAX_RETRIES ]; then
       warn "Network-related failure detected"
       recover_network
-      attempt=$((attempt+1))
+      attempt=$((attempt + 1))
     else
-      fail "Command failed after $attempt attempt(s)"
+      fail "Command failed after $attempt attempts"
       exit 1
     fi
   done
@@ -113,7 +113,7 @@ clone_if_exists() {
   fi
 
   if [ -n "$err" ]; then
-    warn "Transient or network error — skipping repo check"
+    warn "Transient or network error — skipping repo"
     SKIPPED_REPOS=1
     SKIPPED_REPO_NAMES["$dir"]=1
     return 0
@@ -152,24 +152,50 @@ run_or_retry "sudo apt install -y \
 ok "Core packages installed ($(elapsed $T2))"
 
 # ------------------------------------------------------------
-# Stage 3: Display manager
+# Stage 3: Display Manager (SAFE, NON-FATAL)
 # ------------------------------------------------------------
-stage 3 $TOTAL_STAGES "Configuring display manager"
+stage 3 $TOTAL_STAGES "Configuring display manager (LightDM)"
+
 CURRENT_DM="none"
 [ -L /etc/systemd/system/display-manager.service ] && \
   CURRENT_DM=$(readlink -f /etc/systemd/system/display-manager.service || echo unknown)
+
 echo "[$(ts)] ℹ Existing display manager: $CURRENT_DM"
 
-sudo apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox || true
-sudo ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
-sudo systemctl enable lightdm || true
+# Prevent auto-start during install
+sudo systemctl stop lightdm 2>/dev/null || true
+sudo systemctl mask lightdm 2>/dev/null || true
+sudo systemctl mask display-manager 2>/dev/null || true
 
-ok "Display manager configured"
+# Install without starting
+sudo DEBIAN_FRONTEND=noninteractive \
+  apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox || true
+
+# Force LightDM as the default DM
+sudo ln -sf /lib/systemd/system/lightdm.service \
+  /etc/systemd/system/display-manager.service
+
+# Configure autologin
+sudo mkdir -p /etc/lightdm/lightdm.conf.d
+sudo tee /etc/lightdm/lightdm.conf.d/20-autologin.conf >/dev/null <<EOF
+[Seat:*]
+autologin-user=user
+autologin-user-timeout=0
+user-session=lxqt
+EOF
+
+# Enable for next boot only
+sudo systemctl unmask lightdm
+sudo systemctl unmask display-manager
+sudo systemctl enable lightdm
+
+ok "LightDM configured (will start after reboot)"
 
 # ------------------------------------------------------------
-# Stage 4: USB Wi‑Fi drivers (QEMU only)
+# Stage 4: USB Wi-Fi drivers (QEMU only)
 # ------------------------------------------------------------
 stage 4 $TOTAL_STAGES "Installing USB Wi-Fi drivers"
+
 if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_vendor; then
   ok "QEMU detected — installing drivers"
   export MAKEFLAGS="-j$(nproc)"
@@ -177,32 +203,10 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
 
   clone_if_exists https://github.com/morrownr/8821au-20210708.git 8821au-20210708
   clone_if_exists https://github.com/morrownr/8821cu-20210916.git 8821cu-20210916
-  clone_if_exists https://github.com/morrownr/8814au.git 8814au
-  clone_if_exists https://github.com/morrownr/8812au-20210820.git 8812au-20210820
-  clone_if_exists https://github.com/morrownr/rtl8852bu-20250826.git rtl8852bu-20250826
-  clone_if_exists https://github.com/morrownr/rtl8852cu-20251113.git rtl8852cu-20251113
-  clone_if_exists https://github.com/morrownr/88x2bu-20210702.git 88x2bu-20210702
-  clone_if_exists https://github.com/lwfinger/rtl8188eu.git rtl8188eu
-  clone_if_exists https://github.com/kelebek333/rtl8188fu.git rtl8188fu
   clone_if_exists https://github.com/Mange/rtl8192eu-linux-driver.git rtl8192eu-linux-driver
   clone_if_exists https://github.com/heemsoft/rtl8192fu.git rtl8192fu
-  clone_if_exists https://github.com/lwfinger/rtl8852au.git rtl8852au
-  clone_if_exists https://github.com/lwfinger/rtl8723au.git rtl8723au
-  clone_if_exists https://github.com/kuba-moo/mt7601u.git mt7601u
-  clone_if_exists https://github.com/aircrack-ng/mt76.git mt76
-  clone_if_exists https://github.com/morrownr/rtw89.git rtw89
 
-  for d in \
-    8821au-20210708 \
-    8821cu-20210916 \
-    8814au \
-    8812au-20210820 \
-    rtl8852bu-20250826 \
-    rtl8852cu-20251113 \
-    88x2bu-20210702 \
-    rtl8188fu \
-    rtl8192eu-linux-driver \
-    rtl8192fu; do
+  for d in 8821au-20210708 8821cu-20210916 rtl8192eu-linux-driver rtl8192fu; do
     if [ -d "$HOME/$d" ] && [ -z "${SKIPPED_REPO_NAMES[$d]:-}" ]; then
       cd "$HOME/$d"
       sudo ./install-driver.sh NoPrompt || warn "Driver install failed: $d"
@@ -214,7 +218,7 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
   sudo depmod -a
   ok "Driver installation stage completed"
 else
-  echo "[$(ts)] ℹ Physical hardware detected — skipping USB Wi‑Fi drivers"
+  echo "[$(ts)] ℹ Physical hardware detected — skipping USB Wi-Fi drivers"
 fi
 
 # ------------------------------------------------------------
