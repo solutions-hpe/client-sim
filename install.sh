@@ -1,47 +1,38 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.2
+# Client Simulator Installer v0.99.3
+# WLAN-Complete (Option B) — DKMS drivers enabled only on non-Raspberry Pi
 ###############################################################################
 
 set -euo pipefail
 
-VERSION="0.99.2"
+VERSION="0.99.3"
 
-STATE_DIR="/var/lib/client-sim"
-STATE_FILE="$STATE_DIR/state"
-TXN_ROOT="$STATE_DIR/transactions"
+LOG="/tmp/client-sim-install.log"
 
-LOG_INSTALL="/tmp/client-sim-install.log"
-LOG_REMOVE="/tmp/client-sim-remove.log"
-LOG_ROLLBACK="/tmp/client-sim-rollback.log"
-LOG_RECOVERY="/tmp/client-sim-recovery.log"
-
-ACTION="${1:-install}"
-PURGE="${2:-}"
-
-# Disable git prompts
+# -------------------- Git safety --------------------
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 
-# ANSI colors (TTY-safe)
+# -------------------- Colors ------------------------
 if [ -t 1 ]; then
-  R="\033[0;31m"; G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
+  G="\033[0;32m"; Y="\033[0;33m"; R="\033[0;31m"; B="\033[0;34m"; Z="\033[0m"
 else
-  R=""; G=""; Y=""; B=""; Z=""
+  G=""; Y=""; R=""; B=""; Z=""
 fi
 
 ts(){ date "+%H:%M:%S"; }
-ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
+ok(){ echo -e "[$(ts)] ${G}✔${Z} $*"; }
 warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
-err(){  echo -e "[$(ts)] ${R}✖${Z} $*"; }
+err(){ echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
-# Spinner (NO global stdout redirection)
+# -------------------- Spinner -----------------------
 spin() {
   local label="$1"; shift
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
-  "$@" >>"$LOG_INSTALL" 2>&1 &
+  "$@" >>"$LOG" 2>&1 &
   local pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     for c in / - \\ \|; do
@@ -49,11 +40,11 @@ spin() {
       sleep 0.1
     done
   done
-  wait "$pid"
+  wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
 
-# Raspberry Pi detection
+# -------------------- Raspberry Pi detection --------
 IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    [ -r /proc/device-tree/model ] &&
@@ -63,133 +54,50 @@ then
 fi
 
 ###############################################################################
-# RECOVERY
+# BASE SYSTEM
 ###############################################################################
-if [ "$ACTION" = "recovery" ]; then
-  exec > >(tee "$LOG_RECOVERY") 2>&1
-  echo "===== Client Simulator Recovery ====="
 
-  systemctl stop lightdm 2>/dev/null || true
-  systemctl stop display-manager 2>/dev/null || true
-  systemctl mask lightdm display-manager || true
-  ok "Display managers stopped"
+info "Client Simulator Installer v$VERSION"
+info "Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Non‑Raspberry)"
 
-  dpkg --configure -a || true
-  apt -f install -y || true
-  ok "dpkg/apt repaired"
+export NEEDRESTART_MODE=a
 
-  systemctl enable NetworkManager || true
-  systemctl enable systemd-resolved || true
-  ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-  systemctl restart NetworkManager || true
-  ok "Networking repaired"
-
-  if [ "$IS_RPI" -eq 1 ]; then
-    raspi-config nonint do_ssh 0 || true
-    ok "SSH ensured (Raspberry Pi)"
-  fi
-
-  ok "Recovery complete — reboot recommended"
-  exit 0
-fi
-
-###############################################################################
-# REMOVE / PURGE
-###############################################################################
-if [ "$ACTION" = "remove" ]; then
-  exec > >(tee "$LOG_REMOVE") 2>&1
-  echo "===== Client Simulator Uninstall ====="
-
-  systemctl stop virtualhereclient.service 2>/dev/null || true
-  systemctl disable virtualhereclient.service 2>/dev/null || true
-  rm -f /usr/sbin/vhclientx86_64
-  rm -f /etc/systemd/system/virtualhereclient.service
-  systemctl daemon-reload
-  ok "VirtualHere removed"
-
-  rm -f /etc/xdg/autostart/client-simulator.desktop
-  rm -rf /usr/local/scripts/*
-  rm -rf "$HOME/client-sim"
-  ok "Client simulator removed"
-
-  if [ "$IS_RPI" -eq 0 ]; then
-    dkms status | awk -F, '{print $1}' | while read -r m; do
-      dkms remove "$m" --all || true
-    done
-    depmod -a
-    ok "Wi‑Fi DKMS cleaned"
-  fi
-
-  rm -f /etc/lightdm/lightdm.conf.d/20-autologin.conf
-
-  if [ "$PURGE" = "--purge" ]; then
-    apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
-                 htop tmux screen lshw \
-                 firmware-linux firmware-linux-nonfree firmware-misc-nonfree || true
-    apt autoremove -y || true
-    rm -rf "$STATE_DIR"
-    ok "Packages purged"
-  fi
-
-  ok "Uninstall complete — reboot recommended"
-  exit 0
-fi
-
-###############################################################################
-# INSTALL
-###############################################################################
-echo "===== Client Simulator Installer v$VERSION ====="
-echo "Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry Pi || echo Non‑Raspberry)"
-
-TXN_DIR="$TXN_ROOT/$VERSION"
-mkdir -p "$TXN_DIR/configs"
-
-apt-mark showmanual >"$TXN_DIR/apt-manual.txt"
-apt list --installed 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-before.txt"
-apt list --upgradable 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-upgraded.txt"
-
-spin "Updating system" apt update
-spin "Upgrading system" apt upgrade -y || true
-
-# 🔑 DEFENSIVE PACKAGE FIX (this is the missing piece)
-dpkg --configure -a >>"$LOG_INSTALL" 2>&1 || true
-apt -f install -y >>"$LOG_INSTALL" 2>&1 || true
+spin "Updating package index" apt update
+spin "Upgrading system packages" apt upgrade -y || true
+dpkg --configure -a >>"$LOG" 2>&1 || true
+apt -f install -y >>"$LOG" 2>&1 || true
 
 spin "Installing base packages" apt install -y \
   linux-headers-$(uname -r) dkms build-essential \
-  git wget curl jq unzip htop screen tmux lshw \
+  git wget curl jq unzip \
+  htop tmux screen lshw \
   smbclient qemu-guest-agent rsyslog sysstat \
   bash coreutils util-linux procps ca-certificates \
   python3 python3-pip python3-venv python-is-python3 python3-smbus \
-  i2c-tools net-tools dnsutils iw rfkill \
+  net-tools dnsutils iw rfkill i2c-tools \
+  network-manager systemd-resolved iperf3 \
   firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
   firmware-iwlwifi firmware-atheros firmware-brcm80211
 
-if [ "$IS_RPI" -eq 1 ]; then
-  spin "Setting Raspberry Pi Wi‑Fi country" raspi-config nonint do_wifi_country US
-fi
+###############################################################################
+# LIGHTDM / LXQT (SAFE INSTALL)
+###############################################################################
 
-###############################################################################
-# LIGHTDM / LXQT — SAFE INSTALL
-###############################################################################
 spin "Preparing display manager" bash -c '
 systemctl stop lightdm 2>/dev/null || true
 systemctl stop display-manager 2>/dev/null || true
 systemctl mask lightdm display-manager || true
 '
 
-spin "Installing LightDM / LXQt" bash -c '
+spin "Installing LXQt + LightDM" bash -c '
 export DEBIAN_FRONTEND=noninteractive
 export DEBCONF_NONINTERACTIVE_SEEN=true
 apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox
 '
 
-AUTOLOGIN="/etc/lightdm/lightdm.conf.d/20-autologin.conf"
-[ -f "$AUTOLOGIN" ] && cp -a "$AUTOLOGIN" "$TXN_DIR/configs/etc_lightdm_autologin.conf"
-
 spin "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
-cat >'"$AUTOLOGIN"' <<EOF
+cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
 [Seat:*]
 autologin-user=user
 user-session=lxqt
@@ -200,9 +108,84 @@ systemctl enable lightdm
 '
 
 ###############################################################################
+# WLAN DRIVERS (OPTION B — FULL, NON‑PI ONLY)
+###############################################################################
+
+declare -A DRIVER_STATUS
+
+DRIVER_REPOS=(
+  rtl8188eu=https://github.com/lwfinger/rtl8188eu.git
+  rtl8188fu=https://github.com/kelebek333/rtl8188fu.git
+  rtl8192eu=https://github.com/Mange/rtl8192eu-linux-driver.git
+  rtl8192fu=https://github.com/heemsoft/rtl8192fu.git
+  rtl8723au=https://github.com/lwfinger/rtl8723au.git
+  rtl8812au=https://github.com/aircrack-ng/rtl8812au.git
+  rtl8814au=https://github.com/morrownr/8814au.git
+  rtl8821cu=https://github.com/morrownr/8821cu-20210916.git
+  88x2bu=https://github.com/morrownr/88x2bu-20210702.git
+  rtl8852bu=https://github.com/morrownr/rtl8852bu.git
+  rtl8852au=https://github.com/lwfinger/rtl8852au.git
+  mt7601u=https://github.com/kuba-moo/mt7601u.git
+  mt76=https://github.com/aircrack-ng/mt76.git
+)
+
+if [ "$IS_RPI" -eq 1 ]; then
+  warn "Raspberry Pi detected — skipping USB Wi‑Fi DKMS drivers"
+  for entry in "${DRIVER_REPOS[@]}"; do
+    name="${entry%%=*}"
+    DRIVER_STATUS["$name"]="SKIPPED (Raspberry Pi)"
+  done
+else
+  spin "Installing USB Wi‑Fi drivers (DKMS)" bash -c '
+    set -e
+    mkdir -p /usr/src/wifi-drivers
+    cd /usr/src/wifi-drivers
+  '
+
+  for entry in "${DRIVER_REPOS[@]}"; do
+    NAME="${entry%%=*}"
+    REPO="${entry##*=}"
+    info "Installing driver: $NAME"
+    if git clone "$REPO" "$NAME" >>"$LOG" 2>&1; then
+      if cd "$NAME"; then
+        if make >>"$LOG" 2>&1 && make install >>"$LOG" 2>&1; then
+          dkms add . >>"$LOG" 2>&1 || true
+          dkms build "$NAME" >>"$LOG" 2>&1 || true
+          dkms install "$NAME" >>"$LOG" 2>&1 || true
+          DRIVER_STATUS["$NAME"]="INSTALLED"
+        else
+          DRIVER_STATUS["$NAME"]="BUILD FAILED"
+        fi
+        cd ..
+      else
+        DRIVER_STATUS["$NAME"]="DIR ERROR"
+      fi
+    else
+      DRIVER_STATUS["$NAME"]="CLONE FAILED"
+    fi
+  done
+
+  depmod -a || true
+fi
+
+###############################################################################
+# DRIVER SUMMARY TABLE
+###############################################################################
+
+echo
+echo "=================================================="
+echo " Wi‑Fi Driver Installation Summary"
+echo "=================================================="
+for d in "${!DRIVER_STATUS[@]}"; do
+  printf " %-15s : %s\n" "$d" "${DRIVER_STATUS[$d]}"
+done
+echo "=================================================="
+
+###############################################################################
 # VIRTUALHERE
 ###############################################################################
-spin "Installing VirtualHere" bash -c '
+
+spin "Installing VirtualHere client" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 chmod +x vhclientx86_64
@@ -215,6 +198,7 @@ systemctl enable virtualhereclient.service
 ###############################################################################
 # CLIENT SIM + AUTOSTART
 ###############################################################################
+
 spin "Deploying client simulator" bash -c '
 mkdir -p /usr/local/scripts
 git clone https://github.com/solutions-hpe/client-sim.git ~/client-sim || true
@@ -232,18 +216,9 @@ OnlyShowIn=LXQt;
 EOF
 
 ###############################################################################
-# FINALIZE STATE
+# FINAL
 ###############################################################################
-apt list --installed 2>/dev/null | sed 's#/.*##' >"$TXN_DIR/apt-after.txt"
-comm -13 <(sort "$TXN_DIR/apt-before.txt") <(sort "$TXN_DIR/apt-after.txt") >"$TXN_DIR/apt-installed.txt"
-
-mkdir -p "$STATE_DIR"
-cat >"$STATE_FILE" <<EOF
-VERSION_INSTALLED=$VERSION
-INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-PLATFORM=$([ "$IS_RPI" -eq 1 ] && echo raspberry-pi || echo non-raspberry)
-EOF
 
 ok "Installation complete"
 echo "Reboot required before use"
-echo "Log: $LOG_INSTALL"
+echo "Log: $LOG"
