@@ -3,7 +3,6 @@ version=.02
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-download.log"
 echo Download Script Version $version | tee "$debug"
-echo Download Script Version $version | tee -a "$log"
 #------------------------------------------------------------
 r_count=0
 dlfile=($(< /usr/local/scripts/downloads.txt))

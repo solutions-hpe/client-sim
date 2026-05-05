@@ -3,7 +3,6 @@ version=.04
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-www-traffic.log"
 echo WWW_Traffic Script Version $version | tee "$debug"
-echo WWW_Traffic Script Version $version | tee -a "$log"
 wwwfile=($(< /usr/local/scripts/websites.txt))
 rn_www=$((RANDOM % ${#wwwfile[@]}))
 url="${wwwfile[$rn_www]}"
