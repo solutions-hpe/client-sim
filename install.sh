@@ -87,12 +87,16 @@ stage "USB Wi‑Fi driver installation"
 export MAKEFLAGS="-j$(nproc)"
 cd "$HOME"
 
+# --------------------------
 # Clone phase
+# --------------------------
 for i in "${!DRIVERS[@]}"; do
   clone_if_exists "${DRIVER_REPOS[$i]}" "${DRIVERS[$i]}"
 done
 
+# --------------------------
 # Install phase
+# --------------------------
 for d in "${DRIVERS[@]}"; do
 
   # Already skipped due to repo issue
