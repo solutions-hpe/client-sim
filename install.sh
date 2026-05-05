@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.15
-# FULLY INTEGRATED — WLAN DRIVER LIST ABSTRACTION
+# Client Simulator Installer v0.99.17
+# FULLY INTEGRATED – ALL FIXES INCLUDED
 ###############################################################################
 
-# --- force bash ---
+# ---------------------------------------------------------------------------
+# Ensure Bash (auto re-exec)
+# ---------------------------------------------------------------------------
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +14,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.15"
+VERSION="0.99.17"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -41,6 +43,7 @@ fi
 ts(){ date "+%H:%M:%S"; }
 ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
 warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
+err(){  echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
@@ -54,9 +57,7 @@ spin_with_block_detection() {
   "$@" >>"$LOG" 2>&1 &
   pid=$!
 
-  elapsed=0
-  dumped=0
-
+  local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
     sleep 1
@@ -77,7 +78,7 @@ spin_with_block_detection() {
 }
 
 ###############################################################################
-# Per-package install
+# Per-package install to avoid silent hangs
 ###############################################################################
 install_packages_individually() {
   local pkg
@@ -97,23 +98,17 @@ if command -v raspi-config >/dev/null 2>&1 &&
   IS_RPI=1
 fi
 
+###############################################################################
+# Banner
+###############################################################################
 echo "=================================================="
 echo " Client Simulator Installer v$VERSION"
-echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Non‑Raspberry)"
+echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Debian/Ubuntu)"
 echo "=================================================="
 
 ###############################################################################
-# WLAN DRIVER DEFINITIONS — SINGLE SOURCE OF TRUTH
+# WLAN DRIVER LIST — SINGLE SOURCE OF TRUTH
 ###############################################################################
-# Format:
-# name|type|repo|module
-#
-# type:
-#   morrownr  -> install-driver.sh
-#   aircrack  -> dkms-install.sh
-#   dkms      -> make + dkms
-###############################################################################
-
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
   "8821cu|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu"
@@ -136,14 +131,14 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# REMOVE / PURGE MODE (UNCHANGED BEHAVIOR)
+# REMOVE / PURGE MODE
 ###############################################################################
 if [ "$ACTION" = "remove" ]; then
-  echo "==== Removal mode ($([ "$PURGE" = "--purge" ] && echo PURGE || echo SAFE)) ===="
+  info "Removing client simulator"
 
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
     while IFS=: read -r MODULE TYPE; do
-      info "Removing WLAN driver: $MODULE ($TYPE)"
+      info "Removing Wi‑Fi driver: $MODULE ($TYPE)"
       case "$TYPE" in
         dkms|aircrack) dkms remove "$MODULE" --all || true ;;
         morrownr)
@@ -153,44 +148,45 @@ if [ "$ACTION" = "remove" ]; then
     done <"$WLAN_STATE"
     depmod -a || true
     rm -f "$WLAN_STATE"
-    ok "WLAN drivers removed"
   fi
 
   systemctl stop virtualhereclient.service 2>/dev/null || true
   systemctl disable virtualhereclient.service 2>/dev/null || true
   rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
   systemctl daemon-reload
-  ok "VirtualHere removed"
 
   rm -rf /usr/local/scripts "$HOME/client-sim"
   rm -f /etc/xdg/autostart/client-simulator.desktop
-  ok "Client simulator removed"
 
   if [ "$PURGE" = "--purge" ]; then
     apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
       htop tmux screen lshw qemu-guest-agent sysstat iperf3 || true
     apt autoremove -y || true
     rm -rf "$STATE_DIR"
-    ok "Packages and state purged"
   fi
 
-  echo "Removal complete. Reboot recommended."
+  ok "Removal complete — reboot recommended"
   exit 0
 fi
 
 ###############################################################################
-# INSTALL BASE SYSTEM
+# BASE SYSTEM (SAFE – NO NETWORK DISRUPTION)
 ###############################################################################
 spin_with_block_detection "Updating package index" apt update
-spin_with_block_detection "Upgrading system packages" apt upgrade -y || true
+spin_with_block_detection "Upgrading base system" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-KERNEL="$(uname -r)"
-HEADER_PKG="linux-headers-$KERNEL"
+###############################################################################
+# Kernel headers
+###############################################################################
 HEADERS=()
+HEADER_PKG="linux-headers-$(uname -r)"
 apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG")
 
+###############################################################################
+# BASE PACKAGES (NON-NETWORK)
+###############################################################################
 BASE_PKGS=(
   build-essential dkms
   git wget curl jq unzip
@@ -200,7 +196,6 @@ BASE_PKGS=(
   bash coreutils util-linux procps ca-certificates
   python3 python3-pip python3-venv python-is-python3 python3-smbus
   net-tools dnsutils iw rfkill i2c-tools
-  network-manager systemd-resolved iperf3
   firmware-linux firmware-linux-nonfree firmware-misc-nonfree
   firmware-iwlwifi firmware-atheros firmware-brcm80211
 )
@@ -208,11 +203,9 @@ BASE_PKGS=(
 install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
 ###############################################################################
-# Desktop
+# Desktop (NO STOPPING DM)
 ###############################################################################
-install_packages_individually \
-  lightdm lightdm-gtk-greeter lxqt-session openbox
-
+install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
 spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
@@ -225,19 +218,16 @@ systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVER INSTALL (LIST-BASED)
+# WLAN DRIVER INSTALL
 ###############################################################################
 : >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
 
 if [ "$IS_RPI" -eq 0 ]; then
-  mkdir -p /usr/src/wifi-drivers
-  cd /usr/src/wifi-drivers
-
+  mkdir -p /usr/src/wifi-drivers && cd /usr/src/wifi-drivers
   for entry in "${WLAN_DRIVERS[@]}"; do
     IFS='|' read -r NAME TYPE REPO MODULE <<<"$entry"
-    info "Installing WLAN driver: $NAME ($TYPE)"
-
+    info "Installing WLAN driver: $NAME"
     case "$TYPE" in
       morrownr)
         git clone "$REPO" "$NAME" &&
@@ -260,10 +250,9 @@ if [ "$IS_RPI" -eq 0 ]; then
         ;;
     esac
   done
-
   depmod -a || true
 else
-  warn "Raspberry Pi detected — skipping WLAN drivers"
+  warn "Raspberry Pi detected — skipping Wi‑Fi driver builds"
 fi
 
 ###############################################################################
@@ -299,9 +288,13 @@ OnlyShowIn=LXQt;
 EOF
 
 ###############################################################################
+# NETWORK SERVICES — INSTALLED LAST
+###############################################################################
+install_packages_individually network-manager systemd-resolved iperf3
+
+###############################################################################
 # FINAL
 ###############################################################################
 ok "Installation complete"
-echo "LightDM changes will apply after reboot"
-echo "Reboot required"
+echo "Reboot required before use"
 echo "Log file: $LOG"
