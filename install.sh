@@ -15,7 +15,7 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="59.1"
+VERSION="59.2"
 LOG=/tmp/client-sim.log
 START_TIME=$(date +%s)
 MAX_RETRIES=5
@@ -26,21 +26,36 @@ exec > >(tee -a "$LOG") 2>&1
 # Formatting helpers
 # ============================================================
 ts() { date "+%H:%M:%S"; }
-ok()   { echo "[$(ts)] ✔ $*"; }
-warn() { echo "[$(ts)] ⚠ $*"; }
-fail() { echo "[$(ts)] ✖ $*"; }
+ok()    { echo "[$(ts)] ✔ SUCCESS: $*"; }
+warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
+info()  { echo "[$(ts)] ℹ INFO: $*"; }
+fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
+
+TOTAL_STAGES=5
+CURRENT_STAGE=0
 
 stage() {
+  CURRENT_STAGE=$((CURRENT_STAGE + 1))
+  PCT=$((CURRENT_STAGE * 100 / TOTAL_STAGES))
   echo
-  echo "[$(ts)] ▶ $*"
+  echo "[$(ts)] ▶ Stage ${CURRENT_STAGE}/${TOTAL_STAGES} (${PCT}%) — $*"
 }
 
 elapsed() { echo "$(( $(date +%s) - $1 ))s"; }
 
+# ============================================================
+# Installer identity header
+# ============================================================
 echo "=================================================="
-echo " Client Simulator Installer v$VERSION"
+echo " Client Simulator Installer v${VERSION}"
 echo "=================================================="
-echo "[$(ts)] Log file: $LOG"
+echo " Hostname   : $(hostname)"
+echo " OS         : $(. /etc/os-release && echo "${NAME} ${VERSION_ID}")"
+echo " Kernel     : $(uname -r)"
+echo " Shell      : bash ${BASH_VERSION}"
+echo " Start time : $(date '+%Y-%m-%d %H:%M:%S')"
+echo " Log file  : $LOG"
+echo "=================================================="
 
 # ============================================================
 # Network recovery helper
@@ -51,12 +66,8 @@ recover_network() {
   nmcli networking off || true
   sleep 2
   nmcli networking on || true
-  for dev in $(nmcli -t -f DEVICE,STATE device | awk -F: '$2=="connected"{print $1}'); do
-    nmcli device disconnect "$dev" || true
-    sleep 1
-    nmcli device connect "$dev" || true
-  done
   sleep 5
+  info "Network recovery completed"
 }
 
 # ============================================================
@@ -90,6 +101,7 @@ run_or_retry() {
 # ============================================================
 declare -A DRIVER_STATUS
 declare -A DRIVER_REASON
+declare -A DRIVER_METHOD
 declare -A SKIPPED_REPO_NAMES
 
 # ============================================================
@@ -99,14 +111,14 @@ clone_if_exists() {
   local repo_url="$1"
   local dir="$2"
 
-  echo "[$(ts)] ℹ Checking repository: $repo_url"
+  info "Checking repository: $repo_url"
 
   if git ls-remote "$repo_url" >/dev/null 2>&1; then
     if [ ! -d "$dir" ]; then
       git clone "$repo_url" "$dir"
       ok "Cloned $dir"
     else
-      echo "[$(ts)] ℹ Repo already present: $dir"
+      info "Repository already present: $dir"
     fi
   else
     warn "Repository unavailable or private — skipping $dir"
@@ -127,7 +139,7 @@ sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
 # ============================================================
-# Stage 2: Base packages (FULL parity)
+# Stage 2: Base packages
 # ============================================================
 stage "Installing base packages"
 
@@ -143,10 +155,11 @@ run_or_retry "sudo apt install -y \
 ok "Base packages installed"
 
 # ============================================================
-# Stage 3: Display Manager (LightDM, safe)
+# Stage 3: Display Manager
 # ============================================================
 stage "Configuring display manager (LightDM)"
 
+info "Masking display manager to prevent auto-start during install"
 sudo systemctl stop lightdm 2>/dev/null || true
 sudo systemctl mask lightdm display-manager 2>/dev/null || true
 
@@ -166,10 +179,11 @@ EOF
 
 sudo systemctl unmask lightdm display-manager
 sudo systemctl enable lightdm
+
 ok "LightDM configured (will start after reboot)"
 
 # ============================================================
-# Stage 4: USB Wi-Fi drivers (COMPLETE LIST)
+# Stage 4: USB Wi-Fi drivers
 # ============================================================
 stage "Installing USB Wi-Fi drivers"
 
@@ -216,23 +230,25 @@ REPOS=(
   https://github.com/morrownr/rtw89.git
 )
 
-# ---- Clone phase ----
+# Clone phase
 for i in "${!DRIVERS[@]}"; do
   clone_if_exists "${REPOS[$i]}" "${DRIVERS[$i]}"
 done
 
-# ---- Install phase ----
+# Install phase
 for d in "${DRIVERS[@]}"; do
   if [ "${DRIVER_STATUS[$d]:-}" = "SKIPPED" ]; then
-    warn "Skipping $d — ${DRIVER_REASON[$d]}"
+    info "Skipping $d — ${DRIVER_REASON[$d]}"
     continue
   fi
 
   if [ -f "$HOME/$d/install-driver.sh" ]; then
+    info "Decision: $d supports install-driver.sh"
     cd "$HOME/$d"
     if sudo ./install-driver.sh NoPrompt; then
       DRIVER_STATUS["$d"]="INSTALLED"
-      DRIVER_REASON["$d"]="install-driver.sh"
+      DRIVER_METHOD["$d"]="install-driver.sh"
+      DRIVER_REASON["$d"]="Installed successfully"
       ok "Installed $d"
     else
       DRIVER_STATUS["$d"]="FAILED"
@@ -242,11 +258,13 @@ for d in "${DRIVERS[@]}"; do
   fi
 
   if [ -f "$HOME/$d/Makefile" ]; then
+    info "Decision: $d supports Makefile build"
     cd "$HOME/$d"
     if sudo make && sudo make install; then
       sudo dkms add . 2>/dev/null || true
       DRIVER_STATUS["$d"]="INSTALLED"
-      DRIVER_REASON["$d"]="make + dkms"
+      DRIVER_METHOD["$d"]="make + dkms"
+      DRIVER_REASON["$d"]="Installed successfully"
       ok "Installed $d"
     else
       DRIVER_STATUS["$d"]="FAILED"
@@ -263,10 +281,11 @@ sudo depmod -a
 ok "Driver installation completed"
 
 # ============================================================
-# Stage 5: Network stack (iperf3 preseeding)
+# Stage 5: Final network configuration
 # ============================================================
 stage "Final network configuration"
 
+info "Preseeding iperf3 to avoid daemon prompt"
 echo "iperf3 iperf3/start_daemon boolean false" | sudo debconf-set-selections
 sudo systemctl mask iperf3 2>/dev/null || true
 
@@ -288,25 +307,38 @@ echo
 echo "=================================================="
 echo " Driver Installation Summary"
 echo "=================================================="
-printf "%-32s | %-10s | %s\n" "Driver" "Status" "Details"
-printf "%-32s-+-%-10s-+-%s\n" "--------------------------------" "----------" "----------------------------"
+printf "%-32s | %-10s | %-20s | %s\n" "Driver" "Status" "Method" "Details"
+printf "%-32s-+-%-10s-+-%-20s-+-%s\n" \
+  "--------------------------------" "----------" "--------------------" "----------------------------"
 
 for d in "${DRIVERS[@]}"; do
-  printf "%-32s | %-10s | %s\n" \
+  printf "%-32s | %-10s | %-20s | %s\n" \
     "$d" \
     "${DRIVER_STATUS[$d]:-UNKNOWN}" \
+    "${DRIVER_METHOD[$d]:-N/A}" \
     "${DRIVER_REASON[$d]:-N/A}"
 done
 echo "=================================================="
 
 # ============================================================
-# Final message
+# Final Installation Summary
 # ============================================================
 END_TIME=$(date +%s)
+
+INSTALLED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c INSTALLED || true)
+SKIPPED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c SKIPPED || true)
+FAILED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c FAILED || true)
+
 echo
 echo "=================================================="
-echo " ✔ Installation completed successfully"
-echo " Total time : $((END_TIME - START_TIME)) seconds"
-echo " Action    : A reboot is required before simulations can run"
-echo " Log       : $LOG"
+echo " Installation Outcome Summary"
+echo "=================================================="
+echo " Drivers installed : $INSTALLED_COUNT"
+echo " Drivers skipped   : $SKIPPED_COUNT"
+echo " Drivers failed    : $FAILED_COUNT"
+echo " Network stack     : NetworkManager + systemd-resolved"
+echo " Display manager   : LightDM (enabled, next boot)"
+echo " Reboot required   : YES — simulations will not run until reboot"
+echo " Total time        : $((END_TIME - START_TIME)) seconds"
+echo " Log               : $LOG"
 echo "=================================================="
