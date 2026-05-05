@@ -7,7 +7,7 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 # ============================================================
-# HARD DISABLE ALL GIT AUTH PROMPTS
+# HARD DISABLE ALL GIT AUTH PROMPTS (NON-INTERACTIVE SAFETY)
 # ============================================================
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
@@ -15,7 +15,7 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="59.2"
+VERSION="59.4"
 LOG=/tmp/client-sim.log
 START_TIME=$(date +%s)
 MAX_RETRIES=5
@@ -31,7 +31,7 @@ warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
 info()  { echo "[$(ts)] ℹ INFO: $*"; }
 fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
 
-TOTAL_STAGES=5
+TOTAL_STAGES=6
 CURRENT_STAGE=0
 
 stage() {
@@ -54,7 +54,7 @@ echo " OS         : $(. /etc/os-release && echo "${NAME} ${VERSION_ID}")"
 echo " Kernel     : $(uname -r)"
 echo " Shell      : bash ${BASH_VERSION}"
 echo " Start time : $(date '+%Y-%m-%d %H:%M:%S')"
-echo " Log file  : $LOG"
+echo " Log file   : $LOG"
 echo "=================================================="
 
 # ============================================================
@@ -97,39 +97,7 @@ run_or_retry() {
 }
 
 # ============================================================
-# Driver tracking
-# ============================================================
-declare -A DRIVER_STATUS
-declare -A DRIVER_REASON
-declare -A DRIVER_METHOD
-declare -A SKIPPED_REPO_NAMES
-
-# ============================================================
-# GitHub repo guard
-# ============================================================
-clone_if_exists() {
-  local repo_url="$1"
-  local dir="$2"
-
-  info "Checking repository: $repo_url"
-
-  if git ls-remote "$repo_url" >/dev/null 2>&1; then
-    if [ ! -d "$dir" ]; then
-      git clone "$repo_url" "$dir"
-      ok "Cloned $dir"
-    else
-      info "Repository already present: $dir"
-    fi
-  else
-    warn "Repository unavailable or private — skipping $dir"
-    SKIPPED_REPO_NAMES["$dir"]=1
-    DRIVER_STATUS["$dir"]="SKIPPED"
-    DRIVER_REASON["$dir"]="Repository unavailable or private"
-  fi
-}
-
-# ============================================================
-# Stage 1: System update
+# Package / system upgrade
 # ============================================================
 stage "Updating base system"
 T1=$(date +%s)
@@ -139,7 +107,7 @@ sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
 # ============================================================
-# Stage 2: Base packages
+# Base packages (full parity with v58)
 # ============================================================
 stage "Installing base packages"
 
@@ -155,7 +123,7 @@ run_or_retry "sudo apt install -y \
 ok "Base packages installed"
 
 # ============================================================
-# Stage 3: Display Manager
+# Display manager (LightDM, non-interactive & safe)
 # ============================================================
 stage "Configuring display manager (LightDM)"
 
@@ -179,13 +147,43 @@ EOF
 
 sudo systemctl unmask lightdm display-manager
 sudo systemctl enable lightdm
-
-ok "LightDM configured (will start after reboot)"
+ok "LightDM configured (will start on next boot)"
 
 # ============================================================
-# Stage 4: USB Wi-Fi drivers
+# Driver detection helpers
 # ============================================================
-stage "Installing USB Wi-Fi drivers"
+declare -A DRIVER_STATUS DRIVER_REASON DRIVER_METHOD SKIPPED_REPO_NAMES
+
+is_driver_installed() {
+  local module="$1"
+  if dkms status 2>/dev/null | grep -qi "$module"; then return 0; fi
+  if lsmod | grep -qi "^$module"; then return 0; fi
+  if modinfo "$module" >/dev/null 2>&1; then return 0; fi
+  return 1
+}
+
+clone_if_exists() {
+  local repo="$1"
+  local dir="$2"
+  info "Checking repository: $repo"
+  if git ls-remote "$repo" >/dev/null 2>&1; then
+    if [ ! -d "$dir" ]; then
+      git clone "$repo" "$dir"
+      ok "Cloned $dir"
+    else
+      info "Repo already present: $dir"
+    fi
+  else
+    warn "Repository unavailable or private — skipping $dir"
+    DRIVER_STATUS["$dir"]="SKIPPED"
+    DRIVER_REASON["$dir"]="Repository unavailable or private"
+  fi
+}
+
+# ============================================================
+# USB Wi‑Fi drivers (FULL LIST)
+# ============================================================
+stage "Installing USB Wi‑Fi drivers"
 
 export MAKEFLAGS="-j$(nproc)"
 cd "$HOME"
@@ -201,10 +199,10 @@ DRIVERS=(
   rtl8852au
   88x2bu-20210702
   rtl8188eu
+  rtl8188fu
   rtl8723au
   rtl8192eu-linux-driver
   rtl8192fu
-  rtl8188fu
   mt7601u
   mt76
   rtw89
@@ -221,67 +219,88 @@ REPOS=(
   https://github.com/lwfinger/rtl8852au.git
   https://github.com/morrownr/88x2bu-20210702.git
   https://github.com/lwfinger/rtl8188eu.git
+  https://github.com/kelebek333/rtl8188fu.git
   https://github.com/lwfinger/rtl8723au.git
   https://github.com/Mange/rtl8192eu-linux-driver.git
   https://github.com/heemsoft/rtl8192fu.git
-  https://github.com/kelebek333/rtl8188fu.git
   https://github.com/kuba-moo/mt7601u.git
   https://github.com/aircrack-ng/mt76.git
   https://github.com/morrownr/rtw89.git
 )
 
-# Clone phase
+MODULES=(
+  8812au
+  8821cu
+  8814au
+  8812au
+  8812au
+  8852bu
+  8852cu
+  8852au
+  88x2bu
+  8188eu
+  8188fu
+  8723au
+  8192eu
+  8192fu
+  mt7601u
+  mt76_usb
+  rtw89
+)
+
+# Clone if needed
 for i in "${!DRIVERS[@]}"; do
-  clone_if_exists "${REPOS[$i]}" "${DRIVERS[$i]}"
+  drv="${DRIVERS[$i]}"
+  mod="${MODULES[$i]}"
+  if is_driver_installed "$mod"; then
+    DRIVER_STATUS["$drv"]="INSTALLED"
+    DRIVER_METHOD["$drv"]="already present"
+    DRIVER_REASON["$drv"]="kernel/dkms"
+    info "Skipping $drv — driver already installed"
+  else
+    clone_if_exists "${REPOS[$i]}" "$drv"
+  fi
 done
 
-# Install phase
-for d in "${DRIVERS[@]}"; do
-  if [ "${DRIVER_STATUS[$d]:-}" = "SKIPPED" ]; then
-    info "Skipping $d — ${DRIVER_REASON[$d]}"
+# Install drivers
+for i in "${!DRIVERS[@]}"; do
+  drv="${DRIVERS[$i]}"
+  mod="${MODULES[$i]}"
+
+  [ "${DRIVER_STATUS[$drv]:-}" = "INSTALLED" ] && continue
+  [ "${DRIVER_STATUS[$drv]:-}" = "SKIPPED" ] && continue
+
+  if [ -f "$HOME/$drv/install-driver.sh" ]; then
+    info "Decision: $drv uses install-driver.sh"
+    cd "$HOME/$drv"
+    sudo ./install-driver.sh NoPrompt
+    DRIVER_STATUS["$drv"]="INSTALLED"
+    DRIVER_METHOD["$drv"]="install-driver.sh"
+    DRIVER_REASON["$drv"]="Installed successfully"
+    ok "Installed $drv"
     continue
   fi
 
-  if [ -f "$HOME/$d/install-driver.sh" ]; then
-    info "Decision: $d supports install-driver.sh"
-    cd "$HOME/$d"
-    if sudo ./install-driver.sh NoPrompt; then
-      DRIVER_STATUS["$d"]="INSTALLED"
-      DRIVER_METHOD["$d"]="install-driver.sh"
-      DRIVER_REASON["$d"]="Installed successfully"
-      ok "Installed $d"
-    else
-      DRIVER_STATUS["$d"]="FAILED"
-      DRIVER_REASON["$d"]="install-driver.sh failed"
-    fi
+  if [ -f "$HOME/$drv/Makefile" ]; then
+    info "Decision: $drv uses make + dkms"
+    cd "$HOME/$drv"
+    sudo make && sudo make install
+    sudo dkms add . 2>/dev/null || true
+    DRIVER_STATUS["$drv"]="INSTALLED"
+    DRIVER_METHOD["$drv"]="make + dkms"
+    DRIVER_REASON["$drv"]="Installed successfully"
+    ok "Installed $drv"
     continue
   fi
 
-  if [ -f "$HOME/$d/Makefile" ]; then
-    info "Decision: $d supports Makefile build"
-    cd "$HOME/$d"
-    if sudo make && sudo make install; then
-      sudo dkms add . 2>/dev/null || true
-      DRIVER_STATUS["$d"]="INSTALLED"
-      DRIVER_METHOD["$d"]="make + dkms"
-      DRIVER_REASON["$d"]="Installed successfully"
-      ok "Installed $d"
-    else
-      DRIVER_STATUS["$d"]="FAILED"
-      DRIVER_REASON["$d"]="make failed"
-    fi
-    continue
-  fi
-
-  DRIVER_STATUS["$d"]="SKIPPED"
-  DRIVER_REASON["$d"]="No supported install method"
+  DRIVER_STATUS["$drv"]="SKIPPED"
+  DRIVER_REASON["$drv"]="No supported install method"
 done
 
 sudo depmod -a
-ok "Driver installation completed"
 
 # ============================================================
-# Stage 5: Final network configuration
+# Network stack (iperf3 preseeding)
 # ============================================================
 stage "Final network configuration"
 
@@ -307,12 +326,13 @@ echo
 echo "=================================================="
 echo " Driver Installation Summary"
 echo "=================================================="
-printf "%-32s | %-10s | %-20s | %s\n" "Driver" "Status" "Method" "Details"
-printf "%-32s-+-%-10s-+-%-20s-+-%s\n" \
-  "--------------------------------" "----------" "--------------------" "----------------------------"
+printf "%-32s | %-10s | %-18s | %s\n" \
+  "Driver" "Status" "Method" "Details"
+printf "%-32s-+-%-10s-+-%-18s-+-%s\n" \
+  "--------------------------------" "----------" "------------------" "----------------------------"
 
 for d in "${DRIVERS[@]}"; do
-  printf "%-32s | %-10s | %-20s | %s\n" \
+  printf "%-32s | %-10s | %-18s | %s\n" \
     "$d" \
     "${DRIVER_STATUS[$d]:-UNKNOWN}" \
     "${DRIVER_METHOD[$d]:-N/A}" \
@@ -327,7 +347,6 @@ END_TIME=$(date +%s)
 
 INSTALLED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c INSTALLED || true)
 SKIPPED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c SKIPPED || true)
-FAILED_COUNT=$(printf "%s\n" "${DRIVER_STATUS[@]}" | grep -c FAILED || true)
 
 echo
 echo "=================================================="
@@ -335,7 +354,6 @@ echo " Installation Outcome Summary"
 echo "=================================================="
 echo " Drivers installed : $INSTALLED_COUNT"
 echo " Drivers skipped   : $SKIPPED_COUNT"
-echo " Drivers failed    : $FAILED_COUNT"
 echo " Network stack     : NetworkManager + systemd-resolved"
 echo " Display manager   : LightDM (enabled, next boot)"
 echo " Reboot required   : YES — simulations will not run until reboot"
