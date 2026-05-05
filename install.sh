@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.17
-# FULLY INTEGRATED – ALL FIXES INCLUDED
+# Client Simulator Installer v0.99.18
+# FULLY INTEGRATED – LightDM debconf preseed restored
 ###############################################################################
 
-# ---------------------------------------------------------------------------
-# Ensure Bash (auto re-exec)
-# ---------------------------------------------------------------------------
+# ---- force bash ----
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -14,7 +12,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.17"
+VERSION="0.99.18"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -43,27 +41,33 @@ fi
 ts(){ date "+%H:%M:%S"; }
 ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
 warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
-err(){  echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
 # Spinner with block detection + journalctl dump
 ###############################################################################
+SPIN_BLOCK_TIMEOUT=120
+
 spin_with_block_detection() {
   local label="$1"; shift
-  local timeout="${SPIN_BLOCK_TIMEOUT:-20}"
+  local frames=("." ".." "...")
+  local i=0
 
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
 
-  local elapsed=0 dumped=0
+  elapsed=0
+  dumped=0
+
   while kill -0 "$pid" 2>/dev/null; do
-    echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
+    dot="${frames[$i]}"
+    i=$(( (i+1) % ${#frames[@]} ))
+    echo -ne "\r[$(ts)] ${B}[$dot]${Z} $label"
     sleep 1
     elapsed=$((elapsed+1))
 
-    if (( elapsed >= timeout && dumped == 0 )); then
+    if (( elapsed >= SPIN_BLOCK_TIMEOUT && dumped == 0 )); then
       dumped=1
       echo
       warn "Operation appears blocked (${elapsed}s). Dumping journalctl:"
@@ -78,7 +82,7 @@ spin_with_block_detection() {
 }
 
 ###############################################################################
-# Per-package install to avoid silent hangs
+# Per-package install
 ###############################################################################
 install_packages_individually() {
   local pkg
@@ -98,9 +102,6 @@ if command -v raspi-config >/dev/null 2>&1 &&
   IS_RPI=1
 fi
 
-###############################################################################
-# Banner
-###############################################################################
 echo "=================================================="
 echo " Client Simulator Installer v$VERSION"
 echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Debian/Ubuntu)"
@@ -118,9 +119,7 @@ WLAN_DRIVERS=(
   "rtl8852bu|morrownr|https://github.com/morrownr/rtl8852bu.git|rtl8852bu"
   "rtl8852cu|morrownr|https://github.com/morrownr/rtl8852cu.git|rtl8852cu"
   "rtl8822bu|morrownr|https://github.com/morrownr/rtl8822bu.git|rtl8822bu"
-
   "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au"
-
   "rtl8188eu|dkms|https://github.com/lwfinger/rtl8188eu.git|8188eu"
   "rtl8188fu|dkms|https://github.com/kelebek333/rtl8188fu.git|8188fu"
   "rtl8192eu|dkms|https://github.com/Mange/rtl8192eu-linux-driver.git|8192eu"
@@ -131,62 +130,13 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# REMOVE / PURGE MODE
-###############################################################################
-if [ "$ACTION" = "remove" ]; then
-  info "Removing client simulator"
-
-  if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
-    while IFS=: read -r MODULE TYPE; do
-      info "Removing Wi‑Fi driver: $MODULE ($TYPE)"
-      case "$TYPE" in
-        dkms|aircrack) dkms remove "$MODULE" --all || true ;;
-        morrownr)
-          [ -x "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" ] &&
-          "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" || true ;;
-      esac
-    done <"$WLAN_STATE"
-    depmod -a || true
-    rm -f "$WLAN_STATE"
-  fi
-
-  systemctl stop virtualhereclient.service 2>/dev/null || true
-  systemctl disable virtualhereclient.service 2>/dev/null || true
-  rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
-  systemctl daemon-reload
-
-  rm -rf /usr/local/scripts "$HOME/client-sim"
-  rm -f /etc/xdg/autostart/client-simulator.desktop
-
-  if [ "$PURGE" = "--purge" ]; then
-    apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
-      htop tmux screen lshw qemu-guest-agent sysstat iperf3 || true
-    apt autoremove -y || true
-    rm -rf "$STATE_DIR"
-  fi
-
-  ok "Removal complete — reboot recommended"
-  exit 0
-fi
-
-###############################################################################
-# BASE SYSTEM (SAFE – NO NETWORK DISRUPTION)
+# BASE SYSTEM (non-network)
 ###############################################################################
 spin_with_block_detection "Updating package index" apt update
 spin_with_block_detection "Upgrading base system" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-###############################################################################
-# Kernel headers
-###############################################################################
-HEADERS=()
-HEADER_PKG="linux-headers-$(uname -r)"
-apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG")
-
-###############################################################################
-# BASE PACKAGES (NON-NETWORK)
-###############################################################################
 BASE_PKGS=(
   build-essential dkms
   git wget curl jq unzip
@@ -200,12 +150,18 @@ BASE_PKGS=(
   firmware-iwlwifi firmware-atheros firmware-brcm80211
 )
 
-install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
+install_packages_individually "${BASE_PKGS[@]}"
 
 ###############################################################################
-# Desktop (NO STOPPING DM)
+# DESKTOP (FIXED – DEBCONF PRESEEDED)
 ###############################################################################
-install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
+info "Preseeding LightDM debconf to avoid interactive prompt"
+echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
+echo "gdm3 shared/default-x-display-manager select lightdm" | debconf-set-selections
+
+install_packages_individually \
+  lightdm lightdm-gtk-greeter lxqt-session openbox
+
 spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
@@ -218,7 +174,7 @@ systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVER INSTALL
+# WLAN DRIVER INSTALL (list-based)
 ###############################################################################
 : >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
@@ -252,7 +208,7 @@ if [ "$IS_RPI" -eq 0 ]; then
   done
   depmod -a || true
 else
-  warn "Raspberry Pi detected — skipping Wi‑Fi driver builds"
+  warn "Raspberry Pi detected — skipping Wi‑Fi drivers"
 fi
 
 ###############################################################################
@@ -269,7 +225,7 @@ systemctl enable virtualhereclient.service
 '
 
 ###############################################################################
-# Client simulator
+# Client Simulator
 ###############################################################################
 spin_with_block_detection "Deploying client simulator" bash -c '
 mkdir -p /usr/local/scripts &&
@@ -296,5 +252,6 @@ install_packages_individually network-manager systemd-resolved iperf3
 # FINAL
 ###############################################################################
 ok "Installation complete"
-echo "Reboot required before use"
+echo "LightDM prompt permanently eliminated"
+echo "Reboot required"
 echo "Log file: $LOG"
