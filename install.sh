@@ -15,33 +15,47 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="60.0"
+VERSION="60.3"
 LOG=/tmp/client-sim.log
 START_TIME=$(date +%s)
 
 # ============================================================
-# Logging helpers (console only)
+# ANSI COLORS (auto-disable if not TTY)
+# ============================================================
+if [ -t 1 ]; then
+  C_RESET="\033[0m"
+  C_GREEN="\033[0;32m"
+  C_YELLOW="\033[0;33m"
+  C_RED="\033[0;31m"
+  C_BLUE="\033[0;34m"
+  C_GRAY="\033[0;90m"
+else
+  C_RESET=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_BLUE=""; C_GRAY=""
+fi
+
+# ============================================================
+# Helpers (console)
 # ============================================================
 ts() { date "+%H:%M:%S"; }
 msg()  { echo "[$(ts)] $*"; }
-ok()   { echo "[$(ts)] ✔ $*"; }
-warn() { echo "[$(ts)] ⚠ $*"; }
-fail() { echo "[$(ts)] ✖ $*"; }
+ok()   { echo -e "[$(ts)] ${C_GREEN}✔${C_RESET} $*"; }
+warn() { echo -e "[$(ts)] ${C_YELLOW}⚠${C_RESET} $*"; }
+fail() { echo -e "[$(ts)] ${C_RED}✖${C_RESET} $*"; }
 
 # ============================================================
-# Spinner helper (Option 3 – CORRECTED)
+# Spinner helper (correct pattern)
 # ============================================================
 with_spinner() {
   local message="$1"
   shift
 
-  echo -n "[$(ts)] [ ] $message"
+  echo -ne "[$(ts)] ${C_BLUE}[ ]${C_RESET} $message"
   "$@" >>"$LOG" 2>&1 &
   local pid=$!
 
   while kill -0 "$pid" 2>/dev/null; do
     for c in "/" "-" "\\" "|"; do
-      echo -ne "\r[$(ts)] [$c] $message"
+      echo -ne "\r[$(ts)] ${C_BLUE}[$c]${C_RESET} $message"
       sleep 0.1
     done
   done
@@ -50,9 +64,9 @@ with_spinner() {
   local rc=$?
 
   if [ $rc -eq 0 ]; then
-    echo -e "\r[$(ts)] [✔] $message"
+    echo -e "\r[$(ts)] ${C_GREEN}[✔]${C_RESET} $message"
   else
-    echo -e "\r[$(ts)] [✖] $message (failed)"
+    echo -e "\r[$(ts)] ${C_RED}[✖]${C_RESET} $message"
     echo "---- LAST 50 LOG LINES ----"
     tail -50 "$LOG"
     exit 1
@@ -64,7 +78,7 @@ with_spinner() {
 # ============================================================
 recover_network() {
   warn "Recovering network"
-  systemctl restart NetworkManager 2>>"$LOG" || true
+  systemctl restart NetworkManager >>"$LOG" 2>&1 || true
   nmcli networking off >>"$LOG" 2>&1 || true
   sleep 2
   nmcli networking on >>"$LOG" 2>&1 || true
@@ -96,7 +110,7 @@ ok "System updated"
 # ============================================================
 # Stage 2: Base packages + firmware + admin tools
 # ============================================================
-with_spinner "Installing base packages, firmware, and admin tools" sudo apt install -y \
+with_spinner "Installing base packages and firmware" sudo apt install -y \
   linux-headers-$(uname -r) \
   dkms build-essential \
   git wget curl jq unzip \
@@ -123,14 +137,14 @@ if command -v raspi-config >/dev/null 2>&1 && \
   '
   ok "Raspberry Pi configuration applied"
 else
-  msg "Not Raspberry Pi hardware – skipping Pi configuration"
+  msg "Not Raspberry Pi hardware — skipping Pi configuration"
 fi
 
 # ============================================================
 # Stage 4: User setup
 # ============================================================
 if ! id user &>/dev/null; then
-  with_spinner "Creating user '\''user'\''" sudo useradd -m -s /bin/bash user
+  with_spinner "Creating user 'user'" sudo useradd -m -s /bin/bash user
   echo "user:password" | sudo chpasswd
   ok "User created"
 else
@@ -159,21 +173,97 @@ systemctl enable lightdm
 ok "LightDM configured (starts after reboot)"
 
 # ============================================================
-# Stage 6: Network stack
+# Stage 6: USB Wi‑Fi drivers (with status + version capture)
 # ============================================================
-echo "iperf3 iperf3/start_daemon boolean false" | sudo debconf-set-selections >>"$LOG" 2>&1
-sudo systemctl mask iperf3 >>"$LOG" 2>&1
+declare -A DRIVER_STATUS
+declare -A DRIVER_METHOD
+declare -A DRIVER_VERSION
 
-with_spinner "Installing network services" sudo apt install -y \
-  network-manager wpasupplicant systemd-resolved iperf3 \
-  firmware-iwlwifi firmware-atheros firmware-brcm80211
+with_spinner "Installing USB Wi‑Fi drivers" bash -c '
+set -e
+cd "$HOME"
+export MAKEFLAGS="-j$(nproc)"
 
-sudo systemctl enable NetworkManager >>"$LOG" 2>&1
-sudo systemctl enable systemd-resolved >>"$LOG" 2>&1
-sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+drivers=(
+  rtl8188eu rtl8188fu rtl8723au rtl8192eu-linux-driver rtl8192fu
+  8821au-20210708 8821cu-20210916 8814au 8812au-20210820
+  rtl8812au-aircrack-ng rtl8852bu-20250826 rtl8852cu-20251113
+  rtl8852au 88x2bu-20210702 mt7601u mt76 rtw89
+)
 
-recover_network
-ok "Network configured"
+repos=(
+  https://github.com/lwfinger/rtl8188eu.git
+  https://github.com/kelebek333/rtl8188fu.git
+  https://github.com/lwfinger/rtl8723au.git
+  https://github.com/Mange/rtl8192eu-linux-driver.git
+  https://github.com/heemsoft/rtl8192fu.git
+  https://github.com/morrownr/8821au-20210708.git
+  https://github.com/morrownr/8821cu-20210916.git
+  https://github.com/morrownr/8814au.git
+  https://github.com/morrownr/8812au-20210820.git
+  https://github.com/aircrack-ng/rtl8812au.git
+  https://github.com/morrownr/rtl8852bu-20250826.git
+  https://github.com/morrownr/rtl8852cu-20251113.git
+  https://github.com/lwfinger/rtl8852au.git
+  https://github.com/morrownr/88x2bu-20210702.git
+  https://github.com/kuba-moo/mt7601u.git
+  https://github.com/aircrack-ng/mt76.git
+  https://github.com/morrownr/rtw89.git
+)
+
+for i in "${!drivers[@]}"; do
+  d="${drivers[$i]}"
+  r="${repos[$i]}"
+  git clone "$r" "$d" 2>/dev/null || true
+
+  if [ -f "$d/install-driver.sh" ]; then
+    ( cd "$d" && sudo ./install-driver.sh NoPrompt )
+    mod=$(modinfo -F name "$d" 2>/dev/null || true)
+    ver=$(modinfo -F version "$mod" 2>/dev/null || echo "unknown")
+    echo "$d INSTALLED install-driver.sh $ver"
+  elif [ -f "$d/Makefile" ]; then
+    ( cd "$d" && sudo make && sudo make install && sudo dkms add . )
+    mod=$(ls "$d"/*.ko 2>/dev/null | head -1 | xargs -n1 basename | sed "s/\\.ko//")
+    ver=$(modinfo -F version "$mod" 2>/dev/null || echo "unknown")
+    echo "$d INSTALLED make+dkms $ver"
+  else
+    echo "$d SKIPPED none -"
+  fi
+done
+
+sudo depmod -a
+' > /tmp/driver_status.txt
+
+ok "USB Wi‑Fi drivers processed"
+
+while read -r d status method version; do
+  DRIVER_STATUS["$d"]="$status"
+  DRIVER_METHOD["$d"]="$method"
+  DRIVER_VERSION["$d"]="$version"
+done </tmp/driver_status.txt
+
+# ============================================================
+# Stage 7: Driver Success Table (color‑coded)
+# ============================================================
+echo
+echo "=================================================="
+echo " Driver Installation Summary"
+echo "=================================================="
+printf "%-28s | %-10s | %-15s | %-10s\n" "Driver" "Status" "Method" "Version"
+printf "%-28s-+-%-10s-+-%-15s-+-%-10s\n" "----------------------------" "----------" "---------------" "----------"
+
+for d in "${!DRIVER_STATUS[@]}"; do
+  status="${DRIVER_STATUS[$d]}"
+  case "$status" in
+    INSTALLED) sc="$C_GREEN$status$C_RESET" ;;
+    SKIPPED)   sc="$C_YELLOW$status$C_RESET" ;;
+    *)         sc="$C_RED$status$C_RESET" ;;
+  esac
+
+  printf "%-28s | %-10b | %-15s | %-10s\n" \
+    "$d" "$sc" "${DRIVER_METHOD[$d]}" "${DRIVER_VERSION[$d]}"
+done
+echo "=================================================="
 
 # ============================================================
 # Final summary
@@ -181,7 +271,7 @@ ok "Network configured"
 END_TIME=$(date +%s)
 echo
 echo "=================================================="
-echo " ✔ Installation completed successfully"
+echo -e " ${C_GREEN}✔${C_RESET} Installation completed successfully"
 echo " Total time : $((END_TIME - START_TIME)) seconds"
 echo " Action    : A reboot is required before simulations can run"
 echo " Log       : $LOG"
