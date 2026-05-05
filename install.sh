@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.19
-# FULLY RESTORED – lifecycle complete
+# Client Simulator Installer v0.99.20
+# Baseline v0.99.19 + authoritative default-display-manager fix
 ###############################################################################
 
-# --- ensure Bash ---
+# ---------------------------------------------------------------------------
+# Ensure Bash (auto re-exec)
+# ---------------------------------------------------------------------------
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +14,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.19"
+VERSION="0.99.20"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -28,6 +30,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 export NEEDRESTART_MODE=a
+export DEBIAN_FRONTEND=noninteractive   # 🔑 authoritative fix
 
 ###############################################################################
 # UI helpers
@@ -44,7 +47,7 @@ warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
-# Spinner with block detection + dots + journalctl
+# Spinner with block detection + animated dots + journalctl dump
 ###############################################################################
 SPIN_BLOCK_TIMEOUT=120
 
@@ -80,7 +83,7 @@ spin_with_block_detection() {
 }
 
 ###############################################################################
-# Per-package install
+# Per-package installer
 ###############################################################################
 install_packages_individually() {
   local pkg
@@ -100,13 +103,16 @@ if command -v raspi-config >/dev/null 2>&1 &&
   IS_RPI=1
 fi
 
+###############################################################################
+# Banner
+###############################################################################
 echo "=================================================="
 echo " Client Simulator Installer v$VERSION"
 echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Debian/Ubuntu)"
 echo "=================================================="
 
 ###############################################################################
-# WLAN DRIVER LIST — single source of truth
+# WLAN DRIVER LIST — SINGLE SOURCE OF TRUTH
 ###############################################################################
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
@@ -128,7 +134,7 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# REMOVE / PURGE MODE (RESTORED)
+# REMOVE / PURGE MODE (unchanged from v0.99.19)
 ###############################################################################
 if [ "$ACTION" = "remove" ]; then
   info "Removing Client Simulator components"
@@ -175,14 +181,14 @@ dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
 ###############################################################################
-# Kernel headers (RESTORED)
+# Kernel headers
 ###############################################################################
 HEADERS=()
 HEADER_PKG="linux-headers-$(uname -r)"
 apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG")
 
 ###############################################################################
-# BASE PACKAGES (non-network)
+# BASE PACKAGES (NON-NETWORK)
 ###############################################################################
 BASE_PKGS=(
   build-essential dkms
@@ -200,10 +206,15 @@ BASE_PKGS=(
 install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
 ###############################################################################
-# DESKTOP (LightDM debconf fixed)
+# DESKTOP — AUTHORITATIVE DEFAULT DM FIX
 ###############################################################################
+info "Authoritatively setting LightDM as default display manager"
+
 echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
 echo "gdm3 shared/default-x-display-manager select lightdm" | debconf-set-selections
+echo "sddm shared/default-x-display-manager select lightdm" | debconf-set-selections
+
+echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
 
 install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
 
@@ -257,7 +268,7 @@ else
 fi
 
 ###############################################################################
-# WLAN DRIVER SUMMARY (RESTORED)
+# WLAN DRIVER SUMMARY
 ###############################################################################
 echo
 echo "================= Wi‑Fi Driver Summary ================="
@@ -307,5 +318,6 @@ install_packages_individually network-manager systemd-resolved iperf3
 # FINAL
 ###############################################################################
 ok "Installation complete"
+echo "Default display manager set to LightDM (authoritative)"
 echo "Reboot required"
 echo "Log file: $LOG"
