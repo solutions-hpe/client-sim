@@ -15,7 +15,7 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="59.0"
+VERSION="59.1"
 LOG=/tmp/client-sim.log
 START_TIME=$(date +%s)
 MAX_RETRIES=5
@@ -169,53 +169,51 @@ sudo systemctl enable lightdm
 ok "LightDM configured (will start after reboot)"
 
 # ============================================================
-# Stage 4: USB Wi‑Fi drivers (FULL SET)
+# Stage 4: USB Wi-Fi drivers (COMPLETE LIST)
 # ============================================================
-stage "Installing USB Wi‑Fi drivers"
+stage "Installing USB Wi-Fi drivers"
 
 export MAKEFLAGS="-j$(nproc)"
 cd "$HOME"
 
 DRIVERS=(
-  # ---- Original list you provided ----
-  "8821au-20210708"
-  "8821cu-20210916"
-  "8814au"
-  "8812au-20210820"
-  "rtl8852bu-20250826"
-  "rtl8852cu-20251113"
-  "rtl8852au"
-  "88x2bu-20210702"
-  "rtl8188eu"
-  "rtl8723au"
-  "rtl8192eu-linux-driver"
-  "rtl8192fu"
-
-  # ---- Additional high-value repos I identified ----
-  "rtl8188fu"
-  "mt7601u"
-  "mt76"
-  "rtw89"
+  8821au-20210708
+  8821cu-20210916
+  8814au
+  8812au-20210820
+  rtl8812au-aircrack-ng
+  rtl8852bu-20250826
+  rtl8852cu-20251113
+  rtl8852au
+  88x2bu-20210702
+  rtl8188eu
+  rtl8723au
+  rtl8192eu-linux-driver
+  rtl8192fu
+  rtl8188fu
+  mt7601u
+  mt76
+  rtw89
 )
 
 REPOS=(
-  "https://github.com/morrownr/8821au-20210708.git"
-  "https://github.com/morrownr/8821cu-20210916.git"
-  "https://github.com/morrownr/8814au.git"
-  "https://github.com/morrownr/8812au-20210820.git"
-  "https://github.com/morrownr/rtl8852bu-20250826.git"
-  "https://github.com/morrownr/rtl8852cu-20251113.git"
-  "https://github.com/lwfinger/rtl8852au.git"
-  "https://github.com/morrownr/88x2bu-20210702.git"
-  "https://github.com/lwfinger/rtl8188eu.git"
-  "https://github.com/lwfinger/rtl8723au.git"
-  "https://github.com/Mange/rtl8192eu-linux-driver.git"
-  "https://github.com/heemsoft/rtl8192fu.git"
-
-  "https://github.com/kelebek333/rtl8188fu.git"
-  "https://github.com/kuba-moo/mt7601u.git"
-  "https://github.com/aircrack-ng/mt76.git"
-  "https://github.com/morrownr/rtw89.git"
+  https://github.com/morrownr/8821au-20210708.git
+  https://github.com/morrownr/8821cu-20210916.git
+  https://github.com/morrownr/8814au.git
+  https://github.com/morrownr/8812au-20210820.git
+  https://github.com/aircrack-ng/rtl8812au.git
+  https://github.com/morrownr/rtl8852bu-20250826.git
+  https://github.com/morrownr/rtl8852cu-20251113.git
+  https://github.com/lwfinger/rtl8852au.git
+  https://github.com/morrownr/88x2bu-20210702.git
+  https://github.com/lwfinger/rtl8188eu.git
+  https://github.com/lwfinger/rtl8723au.git
+  https://github.com/Mange/rtl8192eu-linux-driver.git
+  https://github.com/heemsoft/rtl8192fu.git
+  https://github.com/kelebek333/rtl8188fu.git
+  https://github.com/kuba-moo/mt7601u.git
+  https://github.com/aircrack-ng/mt76.git
+  https://github.com/morrownr/rtw89.git
 )
 
 # ---- Clone phase ----
@@ -290,11 +288,11 @@ echo
 echo "=================================================="
 echo " Driver Installation Summary"
 echo "=================================================="
-printf "%-30s | %-10s | %s\n" "Driver" "Status" "Details"
-printf "%-30s-+-%-10s-+-%s\n" "------------------------------" "----------" "----------------------------"
+printf "%-32s | %-10s | %s\n" "Driver" "Status" "Details"
+printf "%-32s-+-%-10s-+-%s\n" "--------------------------------" "----------" "----------------------------"
 
 for d in "${DRIVERS[@]}"; do
-  printf "%-30s | %-10s | %s\n" \
+  printf "%-32s | %-10s | %s\n" \
     "$d" \
     "${DRIVER_STATUS[$d]:-UNKNOWN}" \
     "${DRIVER_REASON[$d]:-N/A}"
