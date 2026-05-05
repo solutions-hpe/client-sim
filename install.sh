@@ -1,24 +1,24 @@
 #!/bin/bash
 
-# ------------------------------------------------------------
-# HARD DISABLE GIT AUTH PROMPTS (MUST BE FIRST)
-# ------------------------------------------------------------
+# ============================================================
+# HARD DISABLE ALL GIT AUTH PROMPTS (CRITICAL)
+# ============================================================
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="58.3"
+VERSION="58.4"
 LOG=/tmp/client-sim.log
 MAX_RETRIES=5
 START_TIME=$(date +%s)
 
 exec > >(tee -a "$LOG") 2>&1
 
-# ------------------------------------------------------------
+# ============================================================
 # Formatting helpers
-# ------------------------------------------------------------
+# ============================================================
 ts() { date "+%H:%M:%S"; }
 
 banner() {
@@ -34,9 +34,9 @@ stage() {
   echo "[$(ts)] ▶ Stage $1/$2: $3"
 }
 
-ok()    { echo "[$(ts)] ✔ $*"; }
-warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
-fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
+ok()   { echo "[$(ts)] ✔ $*"; }
+warn() { echo "[$(ts)] ⚠ WARNING: $*"; }
+fail() { echo "[$(ts)] ✖ ERROR: $*"; }
 
 elapsed() { echo "$(( $(date +%s) - $1 ))s"; }
 
@@ -44,9 +44,9 @@ banner
 echo "[$(ts)] Initializing installer"
 echo "[$(ts)] Log file: $LOG"
 
-# ------------------------------------------------------------
+# ============================================================
 # Network recovery helper
-# ------------------------------------------------------------
+# ============================================================
 recover_network() {
   warn "Attempting network recovery"
   systemctl restart NetworkManager 2>/dev/null || true
@@ -62,9 +62,9 @@ recover_network() {
   ok "Network recovery completed"
 }
 
-# ------------------------------------------------------------
+# ============================================================
 # Network-aware command runner
-# ------------------------------------------------------------
+# ============================================================
 run_or_retry() {
   local attempt=1
   local cmd="$*"
@@ -75,6 +75,7 @@ run_or_retry() {
     eval "$cmd"
     rc=$?
     set -e
+
     [ $rc -eq 0 ] && return 0
 
     if grep -Ei \
@@ -90,9 +91,9 @@ run_or_retry() {
   done
 }
 
-# ------------------------------------------------------------
-# GitHub repo guard
-# ------------------------------------------------------------
+# ============================================================
+# GitHub repo guard (no auth prompts, skip cleanly)
+# ============================================================
 declare -A SKIPPED_REPO_NAMES
 SKIPPED_REPOS=0
 
@@ -105,7 +106,7 @@ clone_if_exists() {
   err=$(git ls-remote "$repo_url" 2>&1 || true)
 
   if echo "$err" | grep -qiE \
-    "repository not found|authentication failed|could not read Username|403|404"; then
+      "repository not found|authentication failed|could not read Username|403|404"; then
     warn "Repository unavailable or private — skipping"
     SKIPPED_REPOS=1
     SKIPPED_REPO_NAMES["$dir"]=1
@@ -129,9 +130,9 @@ clone_if_exists() {
 
 TOTAL_STAGES=6
 
-# ------------------------------------------------------------
+# ============================================================
 # Stage 1: System update
-# ------------------------------------------------------------
+# ============================================================
 stage 1 $TOTAL_STAGES "Updating base system"
 T1=$(date +%s)
 run_or_retry "sudo apt update"
@@ -139,9 +140,9 @@ run_or_retry "sudo apt upgrade -y"
 sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
-# ------------------------------------------------------------
+# ============================================================
 # Stage 2: Core packages (non-network)
-# ------------------------------------------------------------
+# ============================================================
 stage 2 $TOTAL_STAGES "Installing core packages"
 T2=$(date +%s)
 run_or_retry "sudo apt install -y \
@@ -151,31 +152,25 @@ run_or_retry "sudo apt install -y \
   python3-smbus i2c-tools"
 ok "Core packages installed ($(elapsed $T2))"
 
-# ------------------------------------------------------------
-# Stage 3: Display Manager (SAFE, NON-FATAL)
-# ------------------------------------------------------------
+# ============================================================
+# Stage 3: Display Manager (SAFE, NON-INTERACTIVE)
+# ============================================================
 stage 3 $TOTAL_STAGES "Configuring display manager (LightDM)"
 
 CURRENT_DM="none"
 [ -L /etc/systemd/system/display-manager.service ] && \
   CURRENT_DM=$(readlink -f /etc/systemd/system/display-manager.service || echo unknown)
-
 echo "[$(ts)] ℹ Existing display manager: $CURRENT_DM"
 
-# Prevent auto-start during install
 sudo systemctl stop lightdm 2>/dev/null || true
-sudo systemctl mask lightdm 2>/dev/null || true
-sudo systemctl mask display-manager 2>/dev/null || true
+sudo systemctl mask lightdm display-manager 2>/dev/null || true
 
-# Install without starting
 sudo DEBIAN_FRONTEND=noninteractive \
   apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox || true
 
-# Force LightDM as the default DM
 sudo ln -sf /lib/systemd/system/lightdm.service \
   /etc/systemd/system/display-manager.service
 
-# Configure autologin
 sudo mkdir -p /etc/lightdm/lightdm.conf.d
 sudo tee /etc/lightdm/lightdm.conf.d/20-autologin.conf >/dev/null <<EOF
 [Seat:*]
@@ -184,16 +179,14 @@ autologin-user-timeout=0
 user-session=lxqt
 EOF
 
-# Enable for next boot only
-sudo systemctl unmask lightdm
-sudo systemctl unmask display-manager
+sudo systemctl unmask lightdm display-manager
 sudo systemctl enable lightdm
 
-ok "LightDM configured (will start after reboot)"
+ok "LightDM configured (will start on reboot)"
 
-# ------------------------------------------------------------
+# ============================================================
 # Stage 4: USB Wi-Fi drivers (QEMU only)
-# ------------------------------------------------------------
+# ============================================================
 stage 4 $TOTAL_STAGES "Installing USB Wi-Fi drivers"
 
 if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_vendor; then
@@ -206,7 +199,11 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
   clone_if_exists https://github.com/Mange/rtl8192eu-linux-driver.git rtl8192eu-linux-driver
   clone_if_exists https://github.com/heemsoft/rtl8192fu.git rtl8192fu
 
-  for d in 8821au-20210708 8821cu-20210916 rtl8192eu-linux-driver rtl8192fu; do
+  for d in \
+    8821au-20210708 \
+    8821cu-20210916 \
+    rtl8192eu-linux-driver \
+    rtl8192fu; do
     if [ -d "$HOME/$d" ] && [ -z "${SKIPPED_REPO_NAMES[$d]:-}" ]; then
       cd "$HOME/$d"
       sudo ./install-driver.sh NoPrompt || warn "Driver install failed: $d"
@@ -221,10 +218,15 @@ else
   echo "[$(ts)] ℹ Physical hardware detected — skipping USB Wi-Fi drivers"
 fi
 
-# ------------------------------------------------------------
-# Stage 5: Final network stack
-# ------------------------------------------------------------
+# ============================================================
+# Stage 5: Final network & DNS stack (iperf3 preseeded)
+# ============================================================
 stage 5 $TOTAL_STAGES "Final network and DNS configuration"
+
+# Prevent iperf3 from prompting or starting
+echo "iperf3 iperf3/start_daemon boolean false" | sudo debconf-set-selections
+sudo systemctl mask iperf3 2>/dev/null || true
+
 run_or_retry "sudo apt install -y \
   network-manager wpasupplicant systemd-resolved dnsutils iw rfkill \
   net-tools iperf3 firmware-iwlwifi firmware-atheros firmware-brcm80211"
@@ -232,12 +234,13 @@ run_or_retry "sudo apt install -y \
 sudo systemctl enable NetworkManager
 sudo systemctl enable systemd-resolved
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
 recover_network
 ok "Network configuration finalized"
 
-# ------------------------------------------------------------
+# ============================================================
 # Stage 6: Completion summary
-# ------------------------------------------------------------
+# ============================================================
 stage 6 $TOTAL_STAGES "Finalization"
 END_TIME=$(date +%s)
 
