@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.8
-# Full WLAN superset + package-level debug status (non-scrolling)
+# Client Simulator Installer v0.99.8.1
+# FULL integration: base OS, desktop, WLAN, VirtualHere, client-sim
 ###############################################################################
 
 set -euo pipefail
 
-VERSION="0.99.8"
+VERSION="0.99.8.1"
 LOG="/tmp/client-sim-install.log"
+STATE_DIR="/var/lib/client-sim"
+WLAN_STATE="$STATE_DIR/wlan-drivers.state"
+
+mkdir -p "$STATE_DIR"
 
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 export NEEDRESTART_MODE=a
 
-# ===== Colors (TTY-safe) =====
+###############################################################################
+# UI helpers
+###############################################################################
 if [ -t 1 ]; then
   G="\033[0;32m"; Y="\033[0;33m"; R="\033[0;31m"; B="\033[0;34m"; Z="\033[0m"
 else
@@ -28,11 +34,10 @@ err(){ echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
-# Package install with live package status (non-scrolling)
+# Package install with live status (non-scrolling)
 ###############################################################################
 pkg_install_with_status() {
-  local label="$1"
-  shift
+  local label="$1"; shift
   local pkgs=("$@")
 
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
@@ -47,9 +52,8 @@ pkg_install_with_status() {
         if [ "$1" = "status" ]; then
           pkg="${5:-}"
           state="${3:-${2:-}}"
-          if [ -n "$pkg" ]; then
-            echo -ne "\r[$(ts)] ${Y}[pkg]${Z} $pkg — $state     "
-          fi
+          [ -n "$pkg" ] && \
+            echo -ne "\r[$(ts)] ${Y}[pkg]${Z} $pkg — $state    "
         fi
       done)
   ) >>"$LOG" 2>&1 || true
@@ -65,14 +69,9 @@ spin() {
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
-  waited=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
     sleep 1
-    waited=$((waited+1))
-    if (( waited == 20 )); then
-      warn "Command still running — check logs if this persists"
-    fi
   done
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
@@ -84,8 +83,7 @@ spin() {
 IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    [ -r /proc/device-tree/model ] &&
-   grep -qi "raspberry pi" /proc/device-tree/model
-then
+   grep -qi "raspberry pi" /proc/device-tree/model; then
   IS_RPI=1
 fi
 
@@ -95,14 +93,16 @@ echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Non‑Raspb
 echo "=================================================="
 
 ###############################################################################
-# BASE SYSTEM
+# Base system update / repair
 ###############################################################################
 spin "Updating package index" apt update
 spin "Upgrading system packages" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-# ----- Kernel headers detection -----
+###############################################################################
+# Kernel header detection
+###############################################################################
 KERNEL="$(uname -r)"
 HEADER_PKG="linux-headers-$KERNEL"
 HEADER_LIST=()
@@ -114,6 +114,9 @@ else
   warn "Kernel headers $HEADER_PKG not found — skipping"
 fi
 
+###############################################################################
+# Base packages
+###############################################################################
 BASE_PKGS=(
   build-essential dkms
   git wget curl jq unzip
@@ -132,7 +135,7 @@ pkg_install_with_status "Installing base packages" \
   "${BASE_PKGS[@]}" "${HEADER_LIST[@]}"
 
 ###############################################################################
-# LIGHTDM / LXQT (SAFE)
+# Desktop stack (LXQt + LightDM, safe)
 ###############################################################################
 spin "Preparing display manager" bash -c '
 systemctl stop lightdm 2>/dev/null || true
@@ -156,20 +159,23 @@ systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVERS — FULL SUPERSET (NON-PI ONLY)
+# WLAN drivers (FULL Option B, non-Pi only)
 ###############################################################################
 declare -A DRIVER_STATUS
+: >"$WLAN_STATE"
+
+record_driver() { echo "$1:$2" >>"$WLAN_STATE"; }
 
 install_morrownr() {
   git clone "$2" "$1" || return 1
   cd "$1"
-  ./install-driver.sh >>"$LOG" 2>&1
+  ./install-driver.sh >>"$LOG" 2>&1 && record_driver "$1" morrownr
 }
 
 install_aircrack() {
   git clone https://github.com/aircrack-ng/rtl8812au.git || return 1
   cd rtl8812au
-  ./dkms-install.sh >>"$LOG" 2>&1
+  ./dkms-install.sh >>"$LOG" 2>&1 && record_driver rtl8812au aircrack
 }
 
 install_make_dkms() {
@@ -177,11 +183,12 @@ install_make_dkms() {
   cd "$1"
   make >>"$LOG" 2>&1
   make install >>"$LOG" 2>&1
+  dkms add . >>"$LOG" 2>&1 || true
+  dkms install "$2" >>"$LOG" 2>&1 || true
+  record_driver "$1" dkms
 }
 
-if [ "$IS_RPI" -eq 1 ]; then
-  warn "Raspberry Pi detected — skipping USB Wi‑Fi drivers"
-else
+if [ "$IS_RPI" -eq 0 ]; then
   mkdir -p /usr/src/wifi-drivers
   cd /usr/src/wifi-drivers
 
@@ -225,24 +232,23 @@ else
 
   DRIVER_STATUS["mt76"]="SKIPPED (in-kernel)"
   DRIVER_STATUS["rtw89"]="SKIPPED (in-kernel)"
-
   depmod -a || true
+else
+  warn "Raspberry Pi detected — skipping WLAN driver installation"
 fi
 
 ###############################################################################
-# DRIVER SUMMARY
+# WLAN summary
 ###############################################################################
 echo
-echo "=================================================="
-echo " Wi‑Fi Driver Installation Summary"
-echo "=================================================="
+echo "========== Wi‑Fi Driver Installation Summary =========="
 for d in "${!DRIVER_STATUS[@]}"; do
-  printf " %-20s : %s\n" "$d" "${DRIVER_STATUS[$d]}"
+  printf " %-22s : %s\n" "$d" "${DRIVER_STATUS[$d]}"
 done
-echo "=================================================="
+echo "======================================================="
 
 ###############################################################################
-# VIRTUALHERE
+# VirtualHere
 ###############################################################################
 spin "Installing VirtualHere" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
@@ -255,7 +261,7 @@ systemctl enable virtualhereclient.service
 '
 
 ###############################################################################
-# CLIENT SIM + AUTOSTART
+# Client simulator + autostart
 ###############################################################################
 spin "Deploying client simulator" bash -c '
 mkdir -p /usr/local/scripts
@@ -274,8 +280,8 @@ OnlyShowIn=LXQt;
 EOF
 
 ###############################################################################
-# FINAL
+# Final
 ###############################################################################
 ok "Installation complete"
 echo "Reboot required before use"
-echo "Full log: $LOG"
+echo "Log file: $LOG"
