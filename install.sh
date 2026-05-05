@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.18
-# FULLY INTEGRATED – LightDM debconf preseed restored
+# Client Simulator Installer v0.99.19
+# FULLY RESTORED – lifecycle complete
 ###############################################################################
 
-# ---- force bash ----
+# --- ensure Bash ---
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +12,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.18"
+VERSION="0.99.19"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -44,7 +44,7 @@ warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
-# Spinner with block detection + journalctl dump
+# Spinner with block detection + dots + journalctl
 ###############################################################################
 SPIN_BLOCK_TIMEOUT=120
 
@@ -59,11 +59,9 @@ spin_with_block_detection() {
 
   elapsed=0
   dumped=0
-
   while kill -0 "$pid" 2>/dev/null; do
-    dot="${frames[$i]}"
+    echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
     i=$(( (i+1) % ${#frames[@]} ))
-    echo -ne "\r[$(ts)] ${B}[$dot]${Z} $label"
     sleep 1
     elapsed=$((elapsed+1))
 
@@ -108,7 +106,7 @@ echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Debian/Ubun
 echo "=================================================="
 
 ###############################################################################
-# WLAN DRIVER LIST — SINGLE SOURCE OF TRUTH
+# WLAN DRIVER LIST — single source of truth
 ###############################################################################
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
@@ -130,13 +128,62 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# BASE SYSTEM (non-network)
+# REMOVE / PURGE MODE (RESTORED)
+###############################################################################
+if [ "$ACTION" = "remove" ]; then
+  info "Removing Client Simulator components"
+
+  if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
+    while IFS=: read -r MODULE TYPE; do
+      info "Removing WLAN driver: $MODULE ($TYPE)"
+      case "$TYPE" in
+        dkms|aircrack) dkms remove "$MODULE" --all || true ;;
+        morrownr)
+          [ -x "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" ] &&
+          "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" || true ;;
+      esac
+    done <"$WLAN_STATE"
+    depmod -a || true
+    rm -f "$WLAN_STATE"
+  fi
+
+  systemctl stop virtualhereclient.service 2>/dev/null || true
+  systemctl disable virtualhereclient.service 2>/dev/null || true
+  rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
+  systemctl daemon-reload
+
+  rm -rf /usr/local/scripts "$HOME/client-sim"
+  rm -f /etc/xdg/autostart/client-simulator.desktop
+
+  if [ "$PURGE" = "--purge" ]; then
+    apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
+      htop tmux screen lshw qemu-guest-agent sysstat iperf3 || true
+    apt autoremove -y || true
+    rm -rf "$STATE_DIR"
+  fi
+
+  ok "Removal complete — reboot recommended"
+  exit 0
+fi
+
+###############################################################################
+# BASE SYSTEM
 ###############################################################################
 spin_with_block_detection "Updating package index" apt update
 spin_with_block_detection "Upgrading base system" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
+###############################################################################
+# Kernel headers (RESTORED)
+###############################################################################
+HEADERS=()
+HEADER_PKG="linux-headers-$(uname -r)"
+apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG")
+
+###############################################################################
+# BASE PACKAGES (non-network)
+###############################################################################
 BASE_PKGS=(
   build-essential dkms
   git wget curl jq unzip
@@ -150,17 +197,15 @@ BASE_PKGS=(
   firmware-iwlwifi firmware-atheros firmware-brcm80211
 )
 
-install_packages_individually "${BASE_PKGS[@]}"
+install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
 ###############################################################################
-# DESKTOP (FIXED – DEBCONF PRESEEDED)
+# DESKTOP (LightDM debconf fixed)
 ###############################################################################
-info "Preseeding LightDM debconf to avoid interactive prompt"
 echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
 echo "gdm3 shared/default-x-display-manager select lightdm" | debconf-set-selections
 
-install_packages_individually \
-  lightdm lightdm-gtk-greeter lxqt-session openbox
+install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
 
 spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
@@ -174,7 +219,7 @@ systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVER INSTALL (list-based)
+# WLAN DRIVER INSTALL (FULL)
 ###############################################################################
 : >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
@@ -210,6 +255,16 @@ if [ "$IS_RPI" -eq 0 ]; then
 else
   warn "Raspberry Pi detected — skipping Wi‑Fi drivers"
 fi
+
+###############################################################################
+# WLAN DRIVER SUMMARY (RESTORED)
+###############################################################################
+echo
+echo "================= Wi‑Fi Driver Summary ================="
+while IFS=: read -r NAME TYPE; do
+  printf " %-20s : %s\n" "$NAME" "$TYPE"
+done <"$WLAN_STATE" 2>/dev/null || echo "No external Wi‑Fi drivers installed"
+echo "========================================================"
 
 ###############################################################################
 # VirtualHere
@@ -252,6 +307,5 @@ install_packages_individually network-manager systemd-resolved iperf3
 # FINAL
 ###############################################################################
 ok "Installation complete"
-echo "LightDM prompt permanently eliminated"
 echo "Reboot required"
 echo "Log file: $LOG"
