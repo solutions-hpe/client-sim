@@ -40,25 +40,61 @@ sudo raspi-config nonint do_wifi_country US
 echo Running system updates | tee -a /tmp/client-sim.log
 sudo dkpg --configure -a
 sudo DEBIAN_FRONTEND=noninteractive apt update
-sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
-sudo DEBIAN_FRONTEND=noninteractive apt install linux-headers-$(uname -r)
-sudo DEBIAN_FRONTEND=noninteractive apt remote sysstat -y
-sudo DEBIAN_FRONTEND=noninteractive apt install git -y
-sudo DEBIAN_FRONTEND=noninteractive apt install wget -y
-sudo DEBIAN_FRONTEND=noninteractive apt install network-manager -y
-sudo DEBIAN_FRONTEND=noninteractive apt install qemu-guest-agent -y
-sudo DEBIAN_FRONTEND=noninteractive apt install net-tools -y
-sudo DEBIAN_FRONTEND=noninteractive apt install smbclient -y
-sudo DEBIAN_FRONTEND=noninteractive apt install dnsutils -y
-sudo DEBIAN_FRONTEND=noninteractive apt install dkms -y
-sudo DEBIAN_FRONTEND=noninteractive apt install iperf3 -y
-sudo DEBIAN_FRONTEND=noninteractive apt install firefox-esr -y
-sudo DEBIAN_FRONTEND=noninteractive apt install rsyslog -y
-sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-pip
-sudo DEBIAN_FRONTEND=noninteractive apt install -y i2c-tools
+# --- Kernel / build support ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  linux-headers-$(uname -r) \
+  dkms
+# --- Core system utilities ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  bash \
+  coreutils \
+  util-linux \
+  procps \
+  sudo \
+  ca-certificates \
+  rsyslog \
+  sysstat
+# --- Networking (Raspberry Pi OS–compatible stack) ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  network-manager \
+  wpasupplicant \
+  systemd-resolved \
+  net-tools \
+  dnsutils \
+  iw \
+  wireless-tools \
+  rfkill \
+  iperf3
+# --- Remove conflicting network stacks ---
+sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
+  dhcpcd5 \
+  ifupdown \
+  connman \
+  netplan.io
+# --- Admin / utility tools (from your list) ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  git \
+  wget \
+  smbclient \
+  qemu-guest-agent
+# --- Python (Pi‑compatible expectations) ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  python3 \
+  python3-pip \
+  python3-venv \
+  python-is-python3 \
+  python3-smbus
+# --- Hardware / I2C ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  i2c-tools
+# --- Optional browser (remove if truly headless) ---
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  firefox-esr
+# --- Cleanup ---
+sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y --purge
+sudo DEBIAN_FRONTEND=noninteractive apt autoclean
 sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-smbus
 sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
-sudo pip3 install rpi-lcd
 #------------------------------------------------------------
 #VirtualHere is coded into the client simulation
 #VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
