@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.11
-# Full integration + per-package spinner installs
+# Client Simulator Installer v0.99.13
+# FULLY INTEGRATED – NOTHING REMOVED
 ###############################################################################
 
-# --- ensure bash ---
+# --- force bash ---
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +12,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.11"
+VERSION="0.99.13"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -29,7 +29,9 @@ export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
 export NEEDRESTART_MODE=a
 
-# ===================== UI helpers =====================
+###############################################################################
+# UI helpers
+###############################################################################
 if [ -t 1 ]; then
   G="\033[0;32m"; Y="\033[0;33m"; R="\033[0;31m"; B="\033[0;34m"; Z="\033[0m"
 else
@@ -42,31 +44,57 @@ warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
 err(){  echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
-spin() {
+###############################################################################
+# Spinner with block detection + journalctl dump
+###############################################################################
+spin_with_block_detection() {
   local label="$1"; shift
+  local timeout="${SPIN_BLOCK_TIMEOUT:-20}"
+
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
+
+  elapsed=0
+  dumped=0
+
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
     sleep 1
+    elapsed=$((elapsed+1))
+
+    if (( elapsed >= timeout && dumped == 0 )); then
+      dumped=1
+      echo
+      warn "Operation appears blocked (${elapsed}s). Dumping journalctl:"
+      echo "---------------- journalctl (last 100 lines) ----------------"
+      journalctl -xe --no-pager -n 100 || true
+      echo "---------------- end journalctl dump ----------------"
+      warn "Continuing to wait..."
+      echo
+    fi
   done
+
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
 
-# ===================== per-package install =====================
+###############################################################################
+# Install packages one at a time (reliable, visible)
+###############################################################################
 install_packages_individually() {
   local pkg
   for pkg in "$@"; do
-    spin "Installing package: $pkg" apt install -y "$pkg" || {
+    spin_with_block_detection "Installing package: $pkg" apt install -y "$pkg" || {
       warn "Package failed or blocked: $pkg"
-      warn "Continuing install; see $LOG"
+      warn "Continuing install (see $LOG)"
     }
   done
 }
 
-# ===================== Raspberry Pi detection =====================
+###############################################################################
+# Raspberry Pi detection
+###############################################################################
 IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    [ -r /proc/device-tree/model ] &&
@@ -79,10 +107,13 @@ echo " Client Simulator Installer v$VERSION"
 echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Non‑Raspberry)"
 echo "=================================================="
 
-# ===================== REMOVE / PURGE =====================
+###############################################################################
+# REMOVE / PURGE MODE
+###############################################################################
 if [ "$ACTION" = "remove" ]; then
   echo "==== Removal mode ($([ "$PURGE" = "--purge" ] && echo PURGE || echo SAFE)) ===="
 
+  # --- WLAN drivers ---
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
     while IFS=: read -r DRIVER METHOD; do
       echo "Removing WLAN driver: $DRIVER ($METHOD)"
@@ -100,12 +131,14 @@ if [ "$ACTION" = "remove" ]; then
     ok "WLAN drivers removed"
   fi
 
+  # --- VirtualHere ---
   systemctl stop virtualhereclient.service 2>/dev/null || true
   systemctl disable virtualhereclient.service 2>/dev/null || true
   rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
   systemctl daemon-reload
   ok "VirtualHere removed"
 
+  # --- Client simulator ---
   rm -rf /usr/local/scripts "$HOME/client-sim"
   rm -f /etc/xdg/autostart/client-simulator.desktop
   ok "Client simulator removed"
@@ -122,20 +155,21 @@ if [ "$ACTION" = "remove" ]; then
   exit 0
 fi
 
-# ===================== INSTALL =====================
-: >"$WLAN_STATE"
-
-spin "Updating package index" apt update
-spin "Upgrading system packages" apt upgrade -y || true
+###############################################################################
+# INSTALL PATH
+###############################################################################
+spin_with_block_detection "Updating package index" apt update
+spin_with_block_detection "Upgrading system packages" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-# ----- kernel headers -----
+# --- Kernel headers ---
 KERNEL="$(uname -r)"
 HEADER_PKG="linux-headers-$KERNEL"
 HEADERS=()
-apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG") \
-  || warn "Kernel headers $HEADER_PKG not found — skipping"
+apt-cache show "$HEADER_PKG" >/dev/null 2>&1 \
+  && HEADERS+=("$HEADER_PKG") \
+  || warn "Kernel headers $HEADER_PKG not available — skipping"
 
 BASE_PKGS=(
   build-essential dkms
@@ -153,8 +187,10 @@ BASE_PKGS=(
 
 install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
-# ===================== Desktop =====================
-spin "Preparing display manager" bash -c '
+###############################################################################
+# Desktop stack (LXQt + LightDM)
+###############################################################################
+spin_with_block_detection "Preparing display manager" bash -c '
 systemctl stop lightdm 2>/dev/null || true
 systemctl stop display-manager 2>/dev/null || true
 systemctl mask lightdm display-manager || true
@@ -162,7 +198,7 @@ systemctl mask lightdm display-manager || true
 
 install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
 
-spin "Configuring LightDM autologin" bash -c '
+spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
 [Seat:*]
@@ -174,7 +210,10 @@ systemctl unmask lightdm display-manager
 systemctl enable lightdm
 '
 
-# ===================== WLAN DRIVERS (full superset, non-Pi only) =====================
+###############################################################################
+# WLAN DRIVERS (FULL SUPERSET, NON-PI ONLY)
+###############################################################################
+: >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
 
 install_morrownr(){
@@ -240,8 +279,10 @@ else
   warn "Raspberry Pi detected — skipping WLAN drivers"
 fi
 
-# ===================== VirtualHere =====================
-spin "Installing VirtualHere" bash -c '
+###############################################################################
+# VirtualHere
+###############################################################################
+spin_with_block_detection "Installing VirtualHere" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64 &&
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service &&
 chmod +x vhclientx86_64 &&
@@ -251,8 +292,10 @@ systemctl daemon-reload &&
 systemctl enable virtualhereclient.service
 '
 
-# ===================== Client Simulator =====================
-spin "Deploying client simulator" bash -c '
+###############################################################################
+# Client simulator + autostart
+###############################################################################
+spin_with_block_detection "Deploying client simulator" bash -c '
 mkdir -p /usr/local/scripts &&
 git clone https://github.com/solutions-hpe/client-sim.git ~/client-sim || true &&
 cp ~/client-sim/linux/* /usr/local/scripts/ &&
@@ -268,6 +311,9 @@ Exec=/usr/local/scripts/start-sim.sh
 OnlyShowIn=LXQt;
 EOF
 
+###############################################################################
+# FINAL SUMMARY
+###############################################################################
 ok "Installation complete"
 echo "Reboot required before use"
 echo "Log file: $LOG"
