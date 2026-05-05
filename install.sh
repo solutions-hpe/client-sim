@@ -48,10 +48,6 @@ sudo DEBIAN_FRONTEND=noninteractive apt install -y \
 #------------------------------------------------------------
 # User + LightDM autologin (no network impact)
 #------------------------------------------------------------
-if ! id user >/dev/null 2>&1; then
-  sudo useradd -m -s /bin/bash user
-fi
-echo "user:password" | sudo chpasswd
 sudo usermod -aG sudo,video,audio user
 
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
