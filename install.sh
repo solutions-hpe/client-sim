@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.14
-# Display manager LEFT RUNNING during install
+# Client Simulator Installer v0.99.15
+# FULLY INTEGRATED — WLAN DRIVER LIST ABSTRACTION
 ###############################################################################
 
-# ---- force bash if needed ----
+# --- force bash ---
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +12,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.14"
+VERSION="0.99.15"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -41,7 +41,6 @@ fi
 ts(){ date "+%H:%M:%S"; }
 ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
 warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
-err(){  echo -e "[$(ts)] ${R}✖${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
 ###############################################################################
@@ -55,7 +54,9 @@ spin_with_block_detection() {
   "$@" >>"$LOG" 2>&1 &
   pid=$!
 
-  local elapsed=0 dumped=0
+  elapsed=0
+  dumped=0
+
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
     sleep 1
@@ -65,9 +66,7 @@ spin_with_block_detection() {
       dumped=1
       echo
       warn "Operation appears blocked (${elapsed}s). Dumping journalctl:"
-      echo "---------------- journalctl (last 100 lines) ----------------"
       journalctl -xe --no-pager -n 100 || true
-      echo "---------------- end journalctl dump ----------------"
       warn "Continuing to wait..."
       echo
     fi
@@ -78,16 +77,13 @@ spin_with_block_detection() {
 }
 
 ###############################################################################
-# Per-package install (reliable, visible)
+# Per-package install
 ###############################################################################
 install_packages_individually() {
   local pkg
   for pkg in "$@"; do
     spin_with_block_detection "Installing package: $pkg" \
-      apt install -y "$pkg" || {
-        warn "Package failed or blocked: $pkg"
-        warn "Continuing install (see $LOG)"
-      }
+      apt install -y "$pkg" || warn "Package issue: $pkg"
   done
 }
 
@@ -107,21 +103,52 @@ echo " Platform: $([ "$IS_RPI" -eq 1 ] && echo Raspberry\ Pi || echo Non‑Raspb
 echo "=================================================="
 
 ###############################################################################
-# REMOVE / PURGE MODE
+# WLAN DRIVER DEFINITIONS — SINGLE SOURCE OF TRUTH
+###############################################################################
+# Format:
+# name|type|repo|module
+#
+# type:
+#   morrownr  -> install-driver.sh
+#   aircrack  -> dkms-install.sh
+#   dkms      -> make + dkms
+###############################################################################
+
+WLAN_DRIVERS=(
+  "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
+  "8821cu|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu"
+  "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au"
+  "8812au-20210820|morrownr|https://github.com/morrownr/8812au-20210820.git|8812au"
+  "88x2bu|morrownr|https://github.com/morrownr/88x2bu-20210702.git|88x2bu"
+  "rtl8852bu|morrownr|https://github.com/morrownr/rtl8852bu.git|rtl8852bu"
+  "rtl8852cu|morrownr|https://github.com/morrownr/rtl8852cu.git|rtl8852cu"
+  "rtl8822bu|morrownr|https://github.com/morrownr/rtl8822bu.git|rtl8822bu"
+
+  "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au"
+
+  "rtl8188eu|dkms|https://github.com/lwfinger/rtl8188eu.git|8188eu"
+  "rtl8188fu|dkms|https://github.com/kelebek333/rtl8188fu.git|8188fu"
+  "rtl8192eu|dkms|https://github.com/Mange/rtl8192eu-linux-driver.git|8192eu"
+  "rtl8192fu|dkms|https://github.com/heemsoft/rtl8192fu.git|8192fu"
+  "rtl8723au|dkms|https://github.com/lwfinger/rtl8723au.git|8723au"
+  "rtl8852au|dkms|https://github.com/lwfinger/rtl8852au.git|8852au"
+  "mt7601u|dkms|https://github.com/kuba-moo/mt7601u.git|mt7601u"
+)
+
+###############################################################################
+# REMOVE / PURGE MODE (UNCHANGED BEHAVIOR)
 ###############################################################################
 if [ "$ACTION" = "remove" ]; then
   echo "==== Removal mode ($([ "$PURGE" = "--purge" ] && echo PURGE || echo SAFE)) ===="
 
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
-    while IFS=: read -r DRIVER METHOD; do
-      echo "Removing WLAN driver: $DRIVER ($METHOD)"
-      case "$METHOD" in
-        dkms)     dkms remove "$DRIVER" --all || true ;;
-        aircrack) dkms remove rtl8812au --all || true ;;
+    while IFS=: read -r MODULE TYPE; do
+      info "Removing WLAN driver: $MODULE ($TYPE)"
+      case "$TYPE" in
+        dkms|aircrack) dkms remove "$MODULE" --all || true ;;
         morrownr)
-          [ -x "/usr/src/wifi-drivers/$DRIVER/remove-driver.sh" ] &&
-          "/usr/src/wifi-drivers/$DRIVER/remove-driver.sh" || true ;;
-        make) rm -rf "/usr/src/wifi-drivers/$DRIVER" ;;
+          [ -x "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" ] &&
+          "/usr/src/wifi-drivers/$MODULE/remove-driver.sh" || true ;;
       esac
     done <"$WLAN_STATE"
     depmod -a || true
@@ -141,7 +168,7 @@ if [ "$ACTION" = "remove" ]; then
 
   if [ "$PURGE" = "--purge" ]; then
     apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
-                 htop tmux screen lshw qemu-guest-agent sysstat iperf3 || true
+      htop tmux screen lshw qemu-guest-agent sysstat iperf3 || true
     apt autoremove -y || true
     rm -rf "$STATE_DIR"
     ok "Packages and state purged"
@@ -152,20 +179,17 @@ if [ "$ACTION" = "remove" ]; then
 fi
 
 ###############################################################################
-# INSTALL PATH
+# INSTALL BASE SYSTEM
 ###############################################################################
 spin_with_block_detection "Updating package index" apt update
 spin_with_block_detection "Upgrading system packages" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-# --- Kernel headers ---
 KERNEL="$(uname -r)"
 HEADER_PKG="linux-headers-$KERNEL"
 HEADERS=()
-apt-cache show "$HEADER_PKG" >/dev/null 2>&1 \
-  && HEADERS+=("$HEADER_PKG") \
-  || warn "Kernel headers $HEADER_PKG not available — skipping"
+apt-cache show "$HEADER_PKG" >/dev/null 2>&1 && HEADERS+=("$HEADER_PKG")
 
 BASE_PKGS=(
   build-essential dkms
@@ -184,14 +208,10 @@ BASE_PKGS=(
 install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
 ###############################################################################
-# Desktop stack (LXQt + LightDM, SAFE MODE)
+# Desktop
 ###############################################################################
-info "Installing LXQt and LightDM (will take effect after reboot)"
 install_packages_individually \
-  lightdm \
-  lightdm-gtk-greeter \
-  lxqt-session \
-  openbox
+  lightdm lightdm-gtk-greeter lxqt-session openbox
 
 spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
@@ -200,73 +220,45 @@ cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
 autologin-user=user
 user-session=lxqt
 EOF
-
 ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
 systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVERS — FULL SUPERSET (NON-PI ONLY)
+# WLAN DRIVER INSTALL (LIST-BASED)
 ###############################################################################
 : >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
 
-install_morrownr(){
-  git clone "$2" "$1" && cd "$1" &&
-  ./install-driver.sh >>"$LOG" 2>&1 &&
-  record_driver "$1" morrownr
-}
-
-install_aircrack(){
-  git clone https://github.com/aircrack-ng/rtl8812au.git &&
-  cd rtl8812au &&
-  ./dkms-install.sh >>"$LOG" 2>&1 &&
-  record_driver rtl8812au aircrack
-}
-
-install_make_dkms(){
-  git clone "$3" "$1" &&
-  cd "$1" &&
-  make >>"$LOG" 2>&1 &&
-  make install >>"$LOG" 2>&1 &&
-  dkms add . >>"$LOG" 2>&1 || true
-  dkms install "$2" >>"$LOG" 2>&1 || true
-  record_driver "$1" dkms
-}
-
 if [ "$IS_RPI" -eq 0 ]; then
-  mkdir -p /usr/src/wifi-drivers && cd /usr/src/wifi-drivers
-
-  for e in \
-    "8814au https://github.com/morrownr/8814au.git" \
-    "8821cu https://github.com/morrownr/8821cu-20210916.git" \
-    "8821au-20210708 https://github.com/morrownr/8821au-20210708.git" \
-    "8812au-20210820 https://github.com/morrownr/8812au-20210820.git" \
-    "88x2bu https://github.com/morrownr/88x2bu-20210702.git" \
-    "rtl8852bu https://github.com/morrownr/rtl8852bu.git" \
-    "rtl8852cu https://github.com/morrownr/rtl8852cu.git" \
-    "rtl8822bu https://github.com/morrownr/rtl8822bu.git"
-  do
-    set -- $e
-    install_morrownr "$1" "$2" || warn "$1 failed"
-    cd /usr/src/wifi-drivers
-  done
-
-  install_aircrack || warn "rtl8812au failed"
+  mkdir -p /usr/src/wifi-drivers
   cd /usr/src/wifi-drivers
 
-  for e in \
-    "rtl8188eu 8188eu https://github.com/lwfinger/rtl8188eu.git" \
-    "rtl8188fu 8188fu https://github.com/kelebek333/rtl8188fu.git" \
-    "rtl8192eu 8192eu https://github.com/Mange/rtl8192eu-linux-driver.git" \
-    "rtl8192fu 8192fu https://github.com/heemsoft/rtl8192fu.git" \
-    "rtl8723au 8723au https://github.com/lwfinger/rtl8723au.git" \
-    "rtl8852au 8852au https://github.com/lwfinger/rtl8852au.git" \
-    "mt7601u mt7601u https://github.com/kuba-moo/mt7601u.git"
-  do
-    set -- $e
-    install_make_dkms "$1" "$2" "$3" || warn "$1 failed"
-    cd /usr/src/wifi-drivers
+  for entry in "${WLAN_DRIVERS[@]}"; do
+    IFS='|' read -r NAME TYPE REPO MODULE <<<"$entry"
+    info "Installing WLAN driver: $NAME ($TYPE)"
+
+    case "$TYPE" in
+      morrownr)
+        git clone "$REPO" "$NAME" &&
+        (cd "$NAME" && ./install-driver.sh >>"$LOG" 2>&1 &&
+         record_driver "$NAME" morrownr) || warn "$NAME failed"
+        ;;
+      aircrack)
+        git clone "$REPO" "$NAME" &&
+        (cd "$NAME" && ./dkms-install.sh >>"$LOG" 2>&1 &&
+         record_driver "$MODULE" aircrack) || warn "$NAME failed"
+        ;;
+      dkms)
+        git clone "$REPO" "$NAME" &&
+        (cd "$NAME" &&
+         make >>"$LOG" 2>&1 &&
+         make install >>"$LOG" 2>&1 &&
+         dkms add . >>"$LOG" 2>&1 || true &&
+         dkms install "$MODULE" >>"$LOG" 2>&1 || true &&
+         record_driver "$MODULE" dkms) || warn "$NAME failed"
+        ;;
+    esac
   done
 
   depmod -a || true
@@ -288,7 +280,7 @@ systemctl enable virtualhereclient.service
 '
 
 ###############################################################################
-# Client simulator + autostart
+# Client simulator
 ###############################################################################
 spin_with_block_detection "Deploying client simulator" bash -c '
 mkdir -p /usr/local/scripts &&
@@ -307,9 +299,9 @@ OnlyShowIn=LXQt;
 EOF
 
 ###############################################################################
-# FINAL SUMMARY
+# FINAL
 ###############################################################################
 ok "Installation complete"
-echo "LightDM configuration will take effect after reboot"
-echo "Reboot required before use"
+echo "LightDM changes will apply after reboot"
+echo "Reboot required"
 echo "Log file: $LOG"
