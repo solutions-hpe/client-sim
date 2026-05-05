@@ -1,29 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION=".48"
+VERSION=".51"
 LOG=/tmp/client-sim.log
 touch "$LOG"
 echo "Installer Version $VERSION" | tee "$LOG"
 
-#------------------------------------------------------------
-# Sudo
-#------------------------------------------------------------
 if ! sudo grep -q "^$USER .*NOPASSWD" /etc/sudoers 2>/dev/null; then
   echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/99-${USER}-nopasswd >/dev/null
   sudo chmod 440 /etc/sudoers.d/99-${USER}-nopasswd
 fi
 
-#------------------------------------------------------------
-# Base system update (NO networking changes)
-#------------------------------------------------------------
 sudo DEBIAN_FRONTEND=noninteractive apt update
 sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
 sudo dpkg --configure -a
 
-#------------------------------------------------------------
-# Non‑network system packages ONLY
-#------------------------------------------------------------
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   linux-headers-$(uname -r) \
   dkms \
@@ -45,12 +36,12 @@ sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   python3-smbus \
   i2c-tools
 
-#------------------------------------------------------------
-# User + LightDM autologin (no network impact)
-#------------------------------------------------------------
-if ! id user >/dev/null 2>&1; then
+if id user >/dev/null 2>&1; then
+  echo "User 'user' already exists" | tee -a "$LOG"
+else
   sudo useradd -m -s /bin/bash user
 fi
+
 echo "user:password" | sudo chpasswd
 sudo usermod -aG sudo,video,audio user
 
@@ -70,17 +61,6 @@ EOF
 
 sudo systemctl enable lightdm
 
-#------------------------------------------------------------
-# Raspberry Pi specific (safe — no network stack)
-#------------------------------------------------------------
-if grep -qi raspberry /proc/cpuinfo; then
-  sudo raspi-config nonint do_change_locale en_US.UTF-8
-  sudo raspi-config nonint do_wifi_country US
-fi
-
-#------------------------------------------------------------
-# VirtualHere (binary + unit only, not started yet)
-#------------------------------------------------------------
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 chmod +x vhclientx86_64
@@ -89,9 +69,6 @@ sudo mv virtualhereclient.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable virtualhereclient.service
 
-#------------------------------------------------------------
-# Client simulation scripts
-#------------------------------------------------------------
 sudo mkdir -p /usr/local/scripts
 
 if [ ! -d "$HOME/client-sim" ]; then
@@ -102,25 +79,21 @@ cd "$HOME/client-sim/linux"
 sudo cp *.sh *.txt /usr/local/scripts/
 sudo chmod -R 755 /usr/local/scripts
 
-#============================================================
-# 🚫 NOTHING ABOVE THIS LINE TOUCHES NETWORKING 🚫
-#============================================================
-
-#------------------------------------------------------------
-# ✅ FINAL NETWORK STACK INSTALL & CUTOVER (ABSOLUTE LAST)
-#------------------------------------------------------------
+# ============================================================
+# ✅ FINAL NETWORK + DNS INSTALL, CUTOVER, AND IP REFRESH
+# ============================================================
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   network-manager \
   wpasupplicant \
   systemd-resolved \
+  dnsutils \
   iw \
   rfkill \
   net-tools \
-  dnsutils \
   iperf3 \
   firmware-iwlwifi \
   firmware-atheros \
-  firmware-brcm80211 || true
+  firmware-brcm80211
 
 sudo systemctl enable NetworkManager
 sudo systemctl enable systemd-resolved
@@ -133,5 +106,17 @@ sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
   connman \
   netplan.io || true
 
-echo "Install complete — REBOOT REQUIRED" | tee -a "$LOG"
-``
+# --- Explicit IP refresh (NM-safe) ---
+ACTIVE_DEVICES=$(nmcli -t -f DEVICE,STATE device | awk -F: '$2=="connected"{print $1}')
+
+for dev in $ACTIVE_DEVICES; do
+  nmcli device disconnect "$dev" || true
+  sleep 1
+  nmcli device connect "$dev" || true
+done
+
+nmcli networking off
+sleep 2
+nmcli networking on
+
+echo "Install complete — reboot STRONGLY RECOMMENDED" | tee -a "$LOG"
