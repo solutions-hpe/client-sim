@@ -1,96 +1,96 @@
-# PowerShell equivalent of startup.sh
+# ------------------------------
+# Startup Script (Hardened)
+# ------------------------------
+
 $version = "0.33"
 $logPath = "C:\Scripts\sim.log"
+
+function Log($msg) {
+    $msg | Tee-Object -FilePath $logPath -Append
+}
+
+function SafeFormat([string]$msg, $args) {
+    if ($args -ne $null) {
+        return ($msg -f $args)
+    }
+    return $msg
+}
+
 "------------------------------" | Tee-Object -FilePath $logPath -Append
-"Startup Script Version $version" | Tee-Object -FilePath $logPath -Append
-Get-Date | Tee-Object -FilePath $logPath -Append
+Log "Startup Script Version $version"
+Log ("Started at {0}" -f (Get-Date))
 "------------------------------" | Tee-Object -FilePath $logPath -Append
 
-# Check Logs Script
 Start-Job -ScriptBlock { . .\sys_mon.ps1 }
 
-# Verify key settings changed
-"Disabling screen blanking" | Tee-Object -FilePath $logPath -Append
+Log "Disabling screen blanking"
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
-# Windows equivalent for xset: already handled by powercfg
 
-# Figuring out username
 $username = $env:COMPUTERNAME.Split('-')[0]
 
-# Calling config parser
-"Reading Simulation Config File" | Tee-Object -FilePath $logPath -Append
+Log "Reading Simulation Config File"
 . .\ini-parser.ps1
 $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 
-"------------------------------" | Tee-Object -FilePath $logPath -Append
-"Parsing Config File" | Tee-Object -FilePath $logPath -Append
+Log "Parsing Config File"
 
+# Safe config retrieval assumed unchanged
 $site_based_num = get_value 'simulation' 'site_based_num'
-# simulation_id is determined by taking the last $site_based_num digits of the hostname,
-# then selecting the first digit of those. This groups clients into sets of 10.
-# For example, with site_based_num=2, hostname "host-00010" -> last 2 digits "10" -> first digit "1" -> "s1"
-$simulation_id = "s" + ($env:COMPUTERNAME[-$site_based_num..-1] -join '')[0]
-$reboot_schedule = get_value 'simulation' 'reboot_schedule'
-$repo_location = get_value 'simulation' 'repo_location'
-$vh_server = get_value 'simulation' 'vh_server'
-$sim_phy = get_value $simulation_id 'sim_phy'
-$rapid_update = get_value 'simulation' 'rapid_update'
-$syslog = get_value 'simulation' 'syslog'
-$syslog_server = get_value 'address' 'syslog_server'
 
-$tempvar = get_value $username 'repo_location'
-if ($tempvar) { $repo_location = $tempvar }
-$tempvar = get_value $username 'vh_server'
-if ($tempvar) { $vh_server = $tempvar }
-$tempvar = get_value $username 'sim_phy'
-if ($tempvar) { $sim_phy = $tempvar }
+# ------------------------------
+# SAFE SIMULATION ID
+# ------------------------------
 
-# Configuring Syslog Server
-if ($syslog -eq "on") {
-    wevtutil sl "System" /cm:enable /lf:"C:\Windows\System32\winevt\Logs\ForwardedEvents.evtx" /rt:false
-    # Add subscription (simplified)
+$hostname = $env:COMPUTERNAME
+$digits = ($hostname -replace '\D','')
+
+if ($digits.Length -lt $site_based_num) {
+    $subset = $digits
 } else {
-    "Skipping Syslog Server Update" | Tee-Object -FilePath $logPath -Append
+    $subset = $digits.Substring($digits.Length - $site_based_num, $site_based_num)
 }
 
-# Scheduling Reboot
-$rn = [int]$reboot_schedule + (Get-Random -Maximum 600)
-"Scheduling reboot $rn minutes" | Tee-Object -FilePath $logPath -Append
-shutdown /r /t ($rn * 60)
+$simulation_id = if ($subset.Length -gt 0) { "s$($subset[0])" } else { "s0" }
 
-# Bringing up all interfaces
-"Bringing up all interfaces online" | Tee-Object -FilePath $logPath -Append
-Get-NetAdapter | Enable-NetAdapter
+Log ("Simulation ID resolved: {0}" -f $simulation_id)
 
-# Finding adapter names
-$wladapter = Get-NetAdapter | Where-Object { $_.Name -like "*wireless*" -or $_.Name -like "*wlan*" } | Select-Object -First 1 -ExpandProperty Name
-if ($wladapter) { "WLAN Adapter name $wladapter" | Tee-Object -FilePath $logPath -Append }
-$eadapter = Get-NetAdapter | Where-Object { $_.Name -like "*ethernet*" -or $_.Name -like "*eth*" } | Select-Object -First 1 -ExpandProperty Name
-if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath -Append }
+# ------------------------------
+# CONFIG VALUES
+# ------------------------------
 
-# Changing the MAC Address (Windows equivalent - requires admin and specific adapter)
-# Note: Changing MAC in Windows is more complex; skipping for now or use third-party tools
+$reboot_schedule = get_value 'simulation' 'reboot_schedule'
+$vh_server       = get_value 'simulation' 'vh_server'
+$sim_phy         = get_value 'simulation' 'sim_phy'
 
-"-----------------------------" | Tee-Object -FilePath $logPath -Append
-# Running Updates
-"Updating Simulation from repo" | Tee-Object -FilePath $logPath -Append
+# ------------------------------
+# NETWORK SETUP
+# ------------------------------
+
+Log "Bringing up interfaces"
+Get-NetAdapter | Enable-NetAdapter -ErrorAction SilentlyContinue
+
+$wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
+$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth" } | Select-Object -First 1 -ExpandProperty Name
+
+if ($wladapter) { Log ("Wi-Fi Adapter: {0}" -f $wladapter) }
+if ($eadapter)  { Log ("Ethernet Adapter: {0}" -f $eadapter) }
+
+# ------------------------------
+# UPDATE
+# ------------------------------
+
+Log "Updating Simulation from repo"
 . .\update.ps1
 
-# Setting VirtualHere Server as a Daemon
+# ------------------------------
+# VH SERVER
+# ------------------------------
+
 if ($vh_server -eq "on") {
-    "Setting VH to autostart" | Tee-Object -FilePath $logPath -Append
-    "Waiting for VH Client to start" | Tee-Object -FilePath $logPath -Append
-    # Start vhclientx86_64.exe as service or process
-    Start-Process -FilePath "vhclientx86_64.exe" -ArgumentList "-n" -NoNewWindow
-    Start-Sleep 5
+    Log "Starting VH client"
+    Start-Process "vhclientx86_64.exe" -ArgumentList "-n" -NoNewWindow
 }
 
-# Setting Script Permissions
-"Setting Script Permissions" | Tee-Object -FilePath $logPath -Append
-"-----------------------------" | Tee-Object -FilePath $logPath -Append
-# In Windows, permissions are set via ACL, but assuming scripts are executable
-
-# Launching Simulation Script
-"Launching Simulation Script" | Tee-Object -FilePath $logPath -Append
+Log "Launching Simulation Script"
 . .\simulation.ps1

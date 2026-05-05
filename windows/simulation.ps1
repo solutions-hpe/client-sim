@@ -1,107 +1,218 @@
-# PowerShell equivalent of simulation.sh
-. .\ini-parser.ps1
 
-$version = "0.91"
+# =========================================================
+# WLAN SIMULATION ENGINE v4.0 (NO PROFILE CREATION)
+# - Uses existing Windows Wi-Fi profile only
+# - WlanConnect only
+# =========================================================
+
+$version = "4.0-profileless-connect"
+
+$script:ssid = $ssid
+
+$script:State = "Init"
+$script:cycle = 0
+$script:failCount = 0
+$script:maxRetries = 5
+
 $logPath = "C:\Scripts\sim.log"
-Get-Date | Tee-Object -FilePath $logPath -Append
-"------------------------------" | Tee-Object -FilePath $logPath -Append
-"Simulation Script Version $version" | Tee-Object -FilePath $logPath -Append
 
-# Finding adapter names
-$wladapter = Get-NetAdapter | Where-Object { $_.Name -like "*wireless*" -or $_.Name -like "*wlan*" } | Select-Object -First 1 -ExpandProperty Name
-if ($wladapter) { "WLAN Adapter name $wladapter" | Tee-Object -FilePath $logPath -Append }
-$eadapter = Get-NetAdapter | Where-Object { $_.Name -like "*ethernet*" -or $_.Name -like "*eth*" } | Select-Object -First 1 -ExpandProperty Name
-if ($eadapter) { "Wired Adapter name $eadapter" | Tee-Object -FilePath $logPath -Append }
+# -------------------------
+# LOGGING
+# -------------------------
 
-"Parsing Config File" | Tee-Object -FilePath $logPath -Append
-$global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
-
-# Global Simulation settings
-$kill_switch = get_value 'simulation' 'kill_switch'
-$rapid_update = get_value 'simulation' 'rapid_update'
-$sim_load = get_value 'simulation' 'sim_load'
-$public_repo = get_value 'simulation' 'public_repo'
-$repo_location = get_value 'simulation' 'repo_location'
-$vh_server = get_value 'simulation' 'vh_server'
-$site_based_ssid = get_value 'simulation' 'site_based_ssid'
-$iperf_bw = get_value 'simulation' 'iperf_bw'
-$auth_fail = get_value 'simulation' 'auth_fail'
-$ssidpw_fail = get_value 'simulation' 'ssidpw_fail'
-$allow_offline = get_value 'simulation' 'allow_offline'
-
-# Device Specific Simulation settings
-$wsite = get_value $simulation_id 'wsite'
-$sim_phy = get_value $simulation_id 'sim_phy'
-$ssid = get_value $simulation_id 'ssid'
-$ssidpw = get_value $simulation_id 'ssidpw'
-$dhcp_fail = get_value $simulation_id 'dhcp_fail'
-$dns_fail = get_value $simulation_id 'dns_fail'
-$assoc_fail = get_value $simulation_id 'assoc_fail'
-$port_flap = get_value $simulation_id 'port_flap'
-$ping_test = get_value $simulation_id 'ping_test'
-$download = get_value $simulation_id 'download'
-$iperf = get_value $simulation_id 'iperf'
-$www_traffic = get_value $simulation_id 'www_traffic'
-
-# Simulation IP
-$smb_address = get_value 'address' 'smb_address'
-$ping_address = get_value 'address' 'ping_address'
-$dns_latency_1 = get_value 'address' 'dns_latency_1'
-$dns_latency_2 = get_value 'address' 'dns_latency_2'
-$dns_latency_3 = get_value 'address' 'dns_latency_3'
-$dns_bad_ip_1 = get_value 'address' 'dns_bad_ip_1'
-$dns_bad_ip_2 = get_value 'address' 'dns_bad_ip_2'
-$dns_bad_ip_3 = get_value 'address' 'dns_bad_ip_3'
-$dns_bad_record_1 = get_value 'address' 'dns_bad_record_1'
-$dns_bad_record_2 = get_value 'address' 'dns_bad_record_2'
-$dns_bad_record_3 = get_value 'address' 'dns_bad_record_3'
-$vh_server_address = get_value 'address' 'vh_server_addr'
-$iperf_server = get_value 'address' 'iperf_server'
-
-# User/Device Specific Overrides
-function apply_override {
-    param([string]$var)
-    $val = get_value $username $var
-    if ($val) { Set-Variable -Name $var -Value $val -Scope Global }
+function Log($msg) {
+    $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $msg
+    $line | Tee-Object -FilePath $logPath -Append
 }
 
-$override_keys = @('kill_switch', 'sim_load', 'public_repo', 'repo_location', 'vh_server', 'site_based_ssid', 'iperf_bw', 'wsite', 'sim_phy', 'ssid', 'ssidpw', 'dhcp_fail', 'dns_fail', 'assoc_fail', 'port_flap', 'ping_test', 'download', 'iperf', 'www_traffic', 'ssidpw_fail', 'auth_fail', 'smb_address', 'ping_address', 'dns_latency_1', 'dns_latency_2', 'dns_latency_3', 'dns_bad_ip_1', 'dns_bad_ip_2', 'dns_bad_ip_3', 'dns_bad_record_1', 'dns_bad_record_2', 'dns_bad_record_3', 'vh_server_addr', 'iperf_server')
-
-foreach ($key in $override_keys) {
-    apply_override $key
+function Debug($msg) {
+    Log "[DEBUG] $msg"
 }
 
-Get-Date | Tee-Object -FilePath $logPath -Append
-"------------------------------" | Tee-Object -FilePath $logPath -Append
-"Simulation Details:" | Tee-Object -FilePath $logPath -Append
-"Hostname: $env:COMPUTERNAME" | Tee-Object -FilePath $logPath -Append
-"Site: $wsite" | Tee-Object -FilePath $logPath -Append
-"Site Based SSID: $site_based_ssid" | Tee-Object -FilePath $logPath -Append
-"VHServer: $vh_server" | Tee-Object -FilePath $logPath -Append
-if ($vh_server -eq "off") { "Phy: $sim_phy" | Tee-Object -FilePath $logPath -Append }
-if ($sim_phy -eq "wireless" -and $wladapter) { "Adapter: $wladapter" | Tee-Object -FilePath $logPath -Append }
-"Simulation Load: $sim_load" | Tee-Object -FilePath $logPath -Append
-"Kill Switch: $kill_switch" | Tee-Object -FilePath $logPath -Append
-"DHCP Fail: $dhcp_fail" | Tee-Object -FilePath $logPath -Append
-"DNS Fail: $dns_fail" | Tee-Object -FilePath $logPath -Append
-"WWW Traffic: $www_traffic" | Tee-Object -FilePath $logPath -Append
+# =========================================================
+# WLAN API
+# =========================================================
 
-# Main simulation loop (simplified, as the original has a large loop)
-# The original simulation.sh has a while loop with various conditions and calls to other scripts.
-# For brevity, here's a basic structure; expand as needed.
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class WlanApi
+{
+    [DllImport("wlanapi.dll")]
+    public static extern int WlanOpenHandle(
+        uint clientVersion,
+        IntPtr reserved,
+        out uint negotiatedVersion,
+        out IntPtr clientHandle
+    );
+
+    [DllImport("wlanapi.dll")]
+    public static extern int WlanCloseHandle(
+        IntPtr clientHandle,
+        IntPtr reserved
+    );
+
+    [DllImport("wlanapi.dll")]
+    public static extern int WlanConnect(
+        IntPtr clientHandle,
+        ref Guid interfaceGuid,
+        IntPtr connectionParams,
+        IntPtr reserved
+    );
+}
+"@
+
+# =========================================================
+# WIFI INTERFACE
+# =========================================================
+
+function Get-WifiInterface {
+
+    $iface = Get-NetAdapter |
+        Where-Object {
+            $_.Status -ne "Disabled" -and
+            $_.InterfaceDescription -match "Wi-Fi|Wireless|WLAN"
+        } |
+        Select-Object -First 1
+
+    if (-not $iface) {
+        throw "No Wi-Fi adapter found"
+    }
+
+    return $iface
+}
+
+# =========================================================
+# CONNECT ONLY (NO PROFILE MANAGEMENT)
+# =========================================================
+
+function Connect-Wifi {
+
+    try {
+        $iface = Get-WifiInterface
+
+        $handle = [IntPtr]::Zero
+        $version = 0
+
+        $res = [WlanApi]::WlanOpenHandle(2, [IntPtr]::Zero, [ref]$version, [ref]$handle)
+
+        if ($res -ne 0) {
+            Log "WlanOpenHandle failed: $res"
+            return $false
+        }
+
+        Log "Attempting connection to SSID -> $script:ssid"
+
+        # KEY POINT:
+        # We rely entirely on existing Windows profile
+        $result = [WlanApi]::WlanConnect(
+            $handle,
+            [ref]$iface.InterfaceGuid,
+            [IntPtr]::Zero,
+            [IntPtr]::Zero
+        )
+
+        [void][WlanApi]::WlanCloseHandle($handle, [IntPtr]::Zero)
+
+        if ($result -ne 0) {
+            Log "WlanConnect FAILED HRESULT=$result"
+            return $false
+        }
+
+        Start-Sleep 6
+
+        $status = netsh wlan show interfaces
+
+        if ($status -match "State\s*:\s*connected") {
+            Log "Wi-Fi CONNECTED SUCCESSFULLY"
+            return $true
+        }
+
+        Log "Wi-Fi NOT CONNECTED after attempt"
+        return $false
+    }
+    catch {
+        Log "CONNECT EXCEPTION: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# =========================================================
+# STATE ENGINE
+# =========================================================
+
+function State-Engine {
+
+    $script:cycle++
+
+    switch ($script:State) {
+
+        "Init" {
+
+            Log "STATE -> INIT"
+            $script:State = "Connect"
+        }
+
+        "Connect" {
+
+            if (Connect-Wifi) {
+                $script:State = "WirelessActive"
+                $script:failCount = 0
+            }
+            else {
+                $script:failCount++
+
+                Log "CONNECT FAIL COUNT = $script:failCount"
+
+                if ($script:failCount -ge $script:maxRetries) {
+                    $script:State = "Recovery"
+                }
+                else {
+                    Start-Sleep ($script:failCount * 2)
+                }
+            }
+        }
+
+        "WirelessActive" {
+
+            $status = netsh wlan show interfaces
+
+            if ($status -notmatch "State\s*:\s*connected") {
+                Log "WIRELESS LOST CONNECTION"
+                $script:State = "Connect"
+            }
+            else {
+                Debug "Wireless stable"
+            }
+        }
+
+        "Recovery" {
+
+            Log "STATE -> RECOVERY"
+            Start-Sleep 3
+            $script:State = "Init"
+        }
+    }
+}
+
+# =========================================================
+# MAIN LOOP
+# =========================================================
+
+Log "========================================"
+Log "PROFILELESS WLAN ENGINE v$version STARTED"
+Log "TARGET SSID: $script:ssid"
+Log "========================================"
 
 while ($true) {
-    if ($kill_switch -eq "on") {
-        "Kill switch activated" | Tee-Object -FilePath $logPath -Append
-        break
+
+    try {
+        State-Engine
+        Start-Sleep (Get-Random -Minimum 2 -Maximum 4)
     }
-
-    # Example: Run DNS fail if enabled
-    if ($dns_fail -eq "on") {
-        . .\dns_fail.ps1
+    catch {
+        Log "FATAL ERROR: $($_.Exception.Message)"
+        $script:State = "Recovery"
     }
-
-    # Add other simulation logic here, like download, iperf, etc.
-
-    Start-Sleep 60  # Sleep for 1 minute, adjust as needed
 }
