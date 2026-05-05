@@ -1,22 +1,49 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION=".56"
+VERSION=".58"
 LOG=/tmp/client-sim.log
 MAX_RETRIES=5
+START_TIME=$(date +%s)
 
-touch "$LOG"
-echo "Installer Version $VERSION" | tee "$LOG"
+exec > >(tee -a "$LOG") 2>&1
 
-log() {
-  echo "$(date '+%F %T') - $*" | tee -a "$LOG"
+# ------------------------------------------------------------
+# Formatting helpers
+# ------------------------------------------------------------
+ts() { date "+%H:%M:%S"; }
+
+banner() {
+  echo
+  echo "=================================================="
+  echo " Client Simulator Installer v$VERSION"
+  echo "=================================================="
+  echo
 }
 
-#------------------------------------------------------------
+stage() {
+  echo
+  echo "[${ts}] ▶ Stage $1/$2: $3"
+}
+
+ok()    { echo "[${ts}] ✔ $*"; }
+warn()  { echo "[${ts}] ⚠ WARNING: $*"; }
+fail()  { echo "[${ts}] ✖ ERROR: $*"; }
+
+elapsed() {
+  local end=$(date +%s)
+  echo "$((end - $1))s"
+}
+
+banner
+echo "[${ts}] Initializing installer"
+echo "[${ts}] Log file: $LOG"
+
+# ------------------------------------------------------------
 # Network recovery helper
-#------------------------------------------------------------
+# ------------------------------------------------------------
 recover_network() {
-  log "Attempting network recovery"
+  warn "Attempting network recovery"
   systemctl restart NetworkManager 2>/dev/null || true
   nmcli networking off || true
   sleep 2
@@ -27,83 +54,103 @@ recover_network() {
     nmcli device connect "$dev" || true
   done
   sleep 5
+  ok "Network recovery attempt completed"
 }
 
-#------------------------------------------------------------
-# Command runner with network-aware retry
-#------------------------------------------------------------
+# ------------------------------------------------------------
+# Network‑aware command runner
+# ------------------------------------------------------------
 run_or_retry() {
   local attempt=1
   local cmd="$*"
 
   while :; do
-    log "RUN: $cmd (attempt $attempt)"
+    echo "[${ts}] RUN: $cmd (attempt $attempt)"
     set +e
-    eval "$cmd" >>"$LOG" 2>&1
+    eval "$cmd"
     rc=$?
     set -e
 
-    if [ $rc -eq 0 ]; then
-      return 0
-    fi
+    [ $rc -eq 0 ] && return 0
 
     if grep -Ei \
       "temporary failure|could not resolve|network is unreachable|connection timed out|name or service not known" \
       "$LOG" >/dev/null && [ $attempt -lt $MAX_RETRIES ]; then
-      log "Detected network-related failure"
+      warn "Network-related failure detected"
       recover_network
       attempt=$((attempt + 1))
     else
-      log "Fatal error or max retries exceeded"
+      fail "Command failed after $attempt attempt(s)"
       exit 1
     fi
   done
 }
 
-#------------------------------------------------------------
-# Clone helper (checks repo exists)
-#------------------------------------------------------------
+# ------------------------------------------------------------
+# GitHub clone helper (handles private / missing repos)
+# ------------------------------------------------------------
 clone_if_exists() {
   local repo_url="$1"
   local dir="$2"
+  local err
 
-  log "Checking repository: $repo_url"
-  if git ls-remote --exit-code "$repo_url" &>/dev/null; then
-    if [ ! -d "$dir" ]; then
-      log "Cloning $repo_url"
-      git clone "$repo_url" "$dir"
-    else
-      log "Repo already present: $dir"
-    fi
+  echo "[${ts}] ℹ Checking repository: $repo_url"
+  err=$(git ls-remote "$repo_url" 2>&1 || true)
+
+  if echo "$err" | grep -qiE \
+      "authentication failed|could not read Username|repository not found"; then
+    warn "Repository requires authentication or is private — skipping"
+    SKIPPED_REPOS=1
+    return 0
+  fi
+
+  if [ -n "$err" ]; then
+    warn "Repository unreachable (network/transient) — skipping"
+    SKIPPED_REPOS=1
+    return 0
+  fi
+
+  if [ ! -d "$dir" ]; then
+    echo "[${ts}] ▶ Cloning $repo_url"
+    git clone "$repo_url" "$dir"
   else
-    log "WARNING: Repo not reachable, skipping: $repo_url"
+    echo "[${ts}] ℹ Repo already present: $dir"
   fi
 }
 
-#------------------------------------------------------------
-# Base system update
-#------------------------------------------------------------
+SKIPPED_REPOS=0
+TOTAL_STAGES=6
+
+# ------------------------------------------------------------
+# Stage 1: Base system update
+# ------------------------------------------------------------
+stage 1 $TOTAL_STAGES "Updating base system"
+T1=$(date +%s)
 run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt update"
 run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y"
 sudo dpkg --configure -a
+ok "System update complete ($(elapsed $T1))"
 
-#------------------------------------------------------------
-# Non-network packages
-#------------------------------------------------------------
+# ------------------------------------------------------------
+# Stage 2: Core packages (non-network)
+# ------------------------------------------------------------
+stage 2 $TOTAL_STAGES "Installing core packages"
+T2=$(date +%s)
 run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   linux-headers-$(uname -r) dkms git wget smbclient qemu-guest-agent \
   rsyslog sysstat bash coreutils util-linux procps ca-certificates \
   python3 python3-pip python3-venv python-is-python3 \
   python3-smbus i2c-tools"
+ok "Core packages installed ($(elapsed $T2))"
 
-#------------------------------------------------------------
-# Display manager handling (robust + logged)
-#------------------------------------------------------------
+# ------------------------------------------------------------
+# Stage 3: Display manager
+# ------------------------------------------------------------
+stage 3 $TOTAL_STAGES "Configuring display manager"
 CURRENT_DM="none"
-if [ -L /etc/systemd/system/display-manager.service ]; then
+[ -L /etc/systemd/system/display-manager.service ] && \
   CURRENT_DM=$(readlink -f /etc/systemd/system/display-manager.service || echo unknown)
-fi
-log "Current display manager: $CURRENT_DM"
+echo "[${ts}] ℹ Existing display manager: $CURRENT_DM"
 
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   lightdm lightdm-gtk-greeter lxqt-session openbox || true
@@ -119,11 +166,14 @@ user-session=lxqt
 EOF
 
 sudo systemctl enable lightdm || true
+ok "Display manager configured"
 
-#------------------------------------------------------------
-# USB Wi‑Fi DRIVERS (QEMU only)
-#------------------------------------------------------------
+# ------------------------------------------------------------
+# Stage 4: USB Wi‑Fi drivers (QEMU only)
+# ------------------------------------------------------------
+stage 4 $TOTAL_STAGES "Installing USB Wi‑Fi drivers"
 if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_vendor; then
+  ok "QEMU detected — installing drivers"
   export MAKEFLAGS="-j$(nproc)"
   cd "$HOME"
 
@@ -157,7 +207,7 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
     rtl8192fu; do
     if [ -d "$HOME/$d" ]; then
       cd "$HOME/$d"
-      sudo ./install-driver.sh NoPrompt || log "Install script failed for $d"
+      sudo ./install-driver.sh NoPrompt || warn "Driver install failed: $d"
     fi
   done
 
@@ -169,11 +219,15 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
   [ -d "$HOME/mt76" ] && cd "$HOME/mt76" && sudo make && sudo make install
 
   sudo depmod -a
+  ok "Driver installation stage completed"
+else
+  echo "[${ts}] ℹ Physical hardware detected — skipping USB Wi‑Fi drivers"
 fi
 
-#============================================================
-# FINAL NETWORK + DNS SETUP (ABSOLUTE LAST)
-#============================================================
+# ------------------------------------------------------------
+# Stage 5: Final network + DNS
+# ------------------------------------------------------------
+stage 5 $TOTAL_STAGES "Final network and DNS configuration"
 run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   network-manager wpasupplicant systemd-resolved dnsutils iw rfkill \
   net-tools iperf3 firmware-iwlwifi firmware-atheros firmware-brcm80211"
@@ -186,5 +240,24 @@ sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
   dhcpcd5 ifupdown connman netplan.io || true
 
 recover_network
+ok "Network configuration finalized"
 
-log "Install complete — REBOOT REQUIRED"
+# ------------------------------------------------------------
+# Stage 6: Completion summary
+# ------------------------------------------------------------
+stage 6 $TOTAL_STAGES "Finalization"
+END_TIME=$(date +%s)
+
+echo
+echo "=================================================="
+echo " ✔ Installation completed successfully"
+echo "=================================================="
+echo " Total time : $((END_TIME - START_TIME)) seconds"
+echo " Log file  : $LOG"
+if [ "$SKIPPED_REPOS" -eq 1 ]; then
+  echo " Note      : One or more driver repositories were skipped"
+  echo "             due to access restrictions or availability"
+fi
+echo " Reboot    : STRONGLY recommended"
+echo "=================================================="
+echo
