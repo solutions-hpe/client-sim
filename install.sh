@@ -1,11 +1,18 @@
 #!/bin/bash
+
+# ------------------------------------------------------------
+# HARD DISABLE GIT AUTH PROMPTS (MUST BE FIRST)
+# ------------------------------------------------------------
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/false
+export SSH_ASKPASS=/bin/false
+
 set -euo pipefail
 
-VERSION=".58.1"
+VERSION="58.2"
 LOG=/tmp/client-sim.log
 MAX_RETRIES=5
 START_TIME=$(date +%s)
-SKIPPED_REPOS=0
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -32,8 +39,7 @@ warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
 fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
 
 elapsed() {
-  local end=$(date +%s)
-  echo "$((end - $1))s"
+  echo "$(( $(date +%s) - $1 ))s"
 }
 
 banner
@@ -64,22 +70,19 @@ recover_network() {
 run_or_retry() {
   local attempt=1
   local cmd="$*"
-
   while :; do
     echo "[$(ts)] RUN: $cmd (attempt $attempt)"
     set +e
     eval "$cmd"
     rc=$?
     set -e
-
     [ $rc -eq 0 ] && return 0
-
     if grep -Ei \
       "temporary failure|could not resolve|network is unreachable|connection timed out|name or service not known" \
       "$LOG" >/dev/null && [ $attempt -lt $MAX_RETRIES ]; then
       warn "Network-related failure detected"
       recover_network
-      attempt=$((attempt + 1))
+      attempt=$((attempt+1))
     else
       fail "Command failed after $attempt attempt(s)"
       exit 1
@@ -88,8 +91,11 @@ run_or_retry() {
 }
 
 # ------------------------------------------------------------
-# GitHub clone helper (private/missing safe)
+# GitHub repo guard
 # ------------------------------------------------------------
+declare -A SKIPPED_REPO_NAMES
+SKIPPED_REPOS=0
+
 clone_if_exists() {
   local repo_url="$1"
   local dir="$2"
@@ -99,15 +105,17 @@ clone_if_exists() {
   err=$(git ls-remote "$repo_url" 2>&1 || true)
 
   if echo "$err" | grep -qiE \
-      "authentication failed|could not read Username|repository not found"; then
-    warn "Repository requires authentication or is private — skipping"
+    "repository not found|authentication failed|could not read Username|403|404"; then
+    warn "Repository unavailable or private — skipping"
     SKIPPED_REPOS=1
+    SKIPPED_REPO_NAMES["$dir"]=1
     return 0
   fi
 
   if [ -n "$err" ]; then
-    warn "Repository unreachable (network/transient) — skipping"
+    warn "Transient or network error — skipping repo check"
     SKIPPED_REPOS=1
+    SKIPPED_REPO_NAMES["$dir"]=1
     return 0
   fi
 
@@ -126,17 +134,17 @@ TOTAL_STAGES=6
 # ------------------------------------------------------------
 stage 1 $TOTAL_STAGES "Updating base system"
 T1=$(date +%s)
-run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt update"
-run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y"
+run_or_retry "sudo apt update"
+run_or_retry "sudo apt upgrade -y"
 sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
 # ------------------------------------------------------------
-# Stage 2: Core packages
+# Stage 2: Core packages (non-network)
 # ------------------------------------------------------------
 stage 2 $TOTAL_STAGES "Installing core packages"
 T2=$(date +%s)
-run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+run_or_retry "sudo apt install -y \
   linux-headers-$(uname -r) dkms git wget smbclient qemu-guest-agent \
   rsyslog sysstat bash coreutils util-linux procps ca-certificates \
   python3 python3-pip python3-venv python-is-python3 \
@@ -144,7 +152,7 @@ run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
 ok "Core packages installed ($(elapsed $T2))"
 
 # ------------------------------------------------------------
-# Stage 3: Display manager setup
+# Stage 3: Display manager
 # ------------------------------------------------------------
 stage 3 $TOTAL_STAGES "Configuring display manager"
 CURRENT_DM="none"
@@ -152,26 +160,16 @@ CURRENT_DM="none"
   CURRENT_DM=$(readlink -f /etc/systemd/system/display-manager.service || echo unknown)
 echo "[$(ts)] ℹ Existing display manager: $CURRENT_DM"
 
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
-  lightdm lightdm-gtk-greeter lxqt-session openbox || true
-
+sudo apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox || true
 sudo ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
-
-sudo mkdir -p /etc/lightdm/lightdm.conf.d
-sudo tee /etc/lightdm/lightdm.conf.d/20-autologin.conf >/dev/null <<EOF
-[Seat:*]
-autologin-user=user
-autologin-user-timeout=0
-user-session=lxqt
-EOF
-
 sudo systemctl enable lightdm || true
+
 ok "Display manager configured"
 
 # ------------------------------------------------------------
-# Stage 4: USB Wi-Fi drivers (QEMU only)
+# Stage 4: USB Wi‑Fi drivers (QEMU only)
 # ------------------------------------------------------------
-stage 4 $TOTAL_STAGES "Installing USB Wi‑Fi drivers"
+stage 4 $TOTAL_STAGES "Installing USB Wi-Fi drivers"
 if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_vendor; then
   ok "QEMU detected — installing drivers"
   export MAKEFLAGS="-j$(nproc)"
@@ -205,18 +203,13 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
     rtl8188fu \
     rtl8192eu-linux-driver \
     rtl8192fu; do
-    if [ -d "$HOME/$d" ]; then
+    if [ -d "$HOME/$d" ] && [ -z "${SKIPPED_REPO_NAMES[$d]:-}" ]; then
       cd "$HOME/$d"
       sudo ./install-driver.sh NoPrompt || warn "Driver install failed: $d"
+    else
+      warn "Skipping driver install for $d"
     fi
   done
-
-  [ -d "$HOME/rtl8188eu" ] && cd "$HOME/rtl8188eu" && sudo make && sudo make install && sudo dkms add .
-  [ -d "$HOME/rtl8852au" ] && cd "$HOME/rtl8852au" && sudo make && sudo make install && sudo dkms add .
-  [ -d "$HOME/rtl8723au" ] && cd "$HOME/rtl8723au" && sudo make && sudo make install && sudo dkms add .
-  [ -d "$HOME/rtw89" ] && cd "$HOME/rtw89" && sudo make && sudo make install && sudo dkms add .
-  [ -d "$HOME/mt7601u" ] && cd "$HOME/mt7601u" && sudo make && sudo make install
-  [ -d "$HOME/mt76" ] && cd "$HOME/mt76" && sudo make && sudo make install
 
   sudo depmod -a
   ok "Driver installation stage completed"
@@ -225,20 +218,16 @@ else
 fi
 
 # ------------------------------------------------------------
-# Stage 5: Final network configuration
+# Stage 5: Final network stack
 # ------------------------------------------------------------
 stage 5 $TOTAL_STAGES "Final network and DNS configuration"
-run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+run_or_retry "sudo apt install -y \
   network-manager wpasupplicant systemd-resolved dnsutils iw rfkill \
   net-tools iperf3 firmware-iwlwifi firmware-atheros firmware-brcm80211"
 
 sudo systemctl enable NetworkManager
 sudo systemctl enable systemd-resolved
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-
-sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
-  dhcpcd5 ifupdown connman netplan.io || true
-
 recover_network
 ok "Network configuration finalized"
 
