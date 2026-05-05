@@ -146,6 +146,7 @@ while true; do
   for label in "${!sim_flags[@]}"; do
    [[ "${sim_flags[$label]}" == "on" ]] && echo "$label: on"
   done
+  echo ""--------------------------------------------------""
   #echo "Active Simulations:"
   get_sim_status
   echo "--------------------------------------------------"
