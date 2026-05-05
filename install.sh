@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.13
-# FULLY INTEGRATED – NOTHING REMOVED
+# Client Simulator Installer v0.99.14
+# Display manager LEFT RUNNING during install
 ###############################################################################
 
-# --- force bash ---
+# ---- force bash if needed ----
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -12,7 +12,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.13"
+VERSION="0.99.14"
 
 LOG="/tmp/client-sim-install.log"
 STATE_DIR="/var/lib/client-sim"
@@ -55,9 +55,7 @@ spin_with_block_detection() {
   "$@" >>"$LOG" 2>&1 &
   pid=$!
 
-  elapsed=0
-  dumped=0
-
+  local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
     sleep 1
@@ -80,15 +78,16 @@ spin_with_block_detection() {
 }
 
 ###############################################################################
-# Install packages one at a time (reliable, visible)
+# Per-package install (reliable, visible)
 ###############################################################################
 install_packages_individually() {
   local pkg
   for pkg in "$@"; do
-    spin_with_block_detection "Installing package: $pkg" apt install -y "$pkg" || {
-      warn "Package failed or blocked: $pkg"
-      warn "Continuing install (see $LOG)"
-    }
+    spin_with_block_detection "Installing package: $pkg" \
+      apt install -y "$pkg" || {
+        warn "Package failed or blocked: $pkg"
+        warn "Continuing install (see $LOG)"
+      }
   done
 }
 
@@ -113,7 +112,6 @@ echo "=================================================="
 if [ "$ACTION" = "remove" ]; then
   echo "==== Removal mode ($([ "$PURGE" = "--purge" ] && echo PURGE || echo SAFE)) ===="
 
-  # --- WLAN drivers ---
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
     while IFS=: read -r DRIVER METHOD; do
       echo "Removing WLAN driver: $DRIVER ($METHOD)"
@@ -131,14 +129,12 @@ if [ "$ACTION" = "remove" ]; then
     ok "WLAN drivers removed"
   fi
 
-  # --- VirtualHere ---
   systemctl stop virtualhereclient.service 2>/dev/null || true
   systemctl disable virtualhereclient.service 2>/dev/null || true
   rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
   systemctl daemon-reload
   ok "VirtualHere removed"
 
-  # --- Client simulator ---
   rm -rf /usr/local/scripts "$HOME/client-sim"
   rm -f /etc/xdg/autostart/client-simulator.desktop
   ok "Client simulator removed"
@@ -188,15 +184,14 @@ BASE_PKGS=(
 install_packages_individually "${HEADERS[@]}" "${BASE_PKGS[@]}"
 
 ###############################################################################
-# Desktop stack (LXQt + LightDM)
+# Desktop stack (LXQt + LightDM, SAFE MODE)
 ###############################################################################
-spin_with_block_detection "Preparing display manager" bash -c '
-systemctl stop lightdm 2>/dev/null || true
-systemctl stop display-manager 2>/dev/null || true
-systemctl mask lightdm display-manager || true
-'
-
-install_packages_individually lightdm lightdm-gtk-greeter lxqt-session openbox
+info "Installing LXQt and LightDM (will take effect after reboot)"
+install_packages_individually \
+  lightdm \
+  lightdm-gtk-greeter \
+  lxqt-session \
+  openbox
 
 spin_with_block_detection "Configuring LightDM autologin" bash -c '
 mkdir -p /etc/lightdm/lightdm.conf.d
@@ -205,13 +200,13 @@ cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
 autologin-user=user
 user-session=lxqt
 EOF
+
 ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
-systemctl unmask lightdm display-manager
 systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVERS (FULL SUPERSET, NON-PI ONLY)
+# WLAN DRIVERS — FULL SUPERSET (NON-PI ONLY)
 ###############################################################################
 : >"$WLAN_STATE"
 record_driver(){ echo "$1:$2" >>"$WLAN_STATE"; }
@@ -315,5 +310,6 @@ EOF
 # FINAL SUMMARY
 ###############################################################################
 ok "Installation complete"
+echo "LightDM configuration will take effect after reboot"
 echo "Reboot required before use"
 echo "Log file: $LOG"
