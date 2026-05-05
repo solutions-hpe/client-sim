@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.4
-# WLAN‑correct, DKMS‑aware, Raspberry‑Pi safe
+# Client Simulator Installer v0.99.7
+# FULL WLAN SUPERSET — all known Realtek/MTK USB drivers restored
 ###############################################################################
 
 set -euo pipefail
 
-VERSION="0.99.4"
+VERSION="0.99.7"
 LOG="/tmp/client-sim-install.log"
 
-# Disable git prompts
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
-
-# Avoid needrestart exits
 export NEEDRESTART_MODE=a
 
-# Colors (TTY safe)
+# ---- colors (tty‑safe) ----
 if [ -t 1 ]; then
   G="\033[0;32m"; Y="\033[0;33m"; R="\033[0;31m"; B="\033[0;34m"; Z="\033[0m"
 else
@@ -35,17 +32,22 @@ spin() {
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
+  waited=0
   while kill -0 "$pid" 2>/dev/null; do
-    for c in / - \\ \|; do
-      echo -ne "\r[$(ts)] ${B}[$c]${Z} $label"
-      sleep 0.1
-    done
+    echo -ne "\r[$(ts)] ${B}[..]${Z} $label"
+    sleep 1
+    waited=$((waited+1))
+    if (( waited == 20 )); then
+      warn "Command still running – possible blocker:"
+      ps aux | grep -E 'apt|dpkg' | grep -v grep | head -n1 || true
+      warn "Check journalctl -xe if this persists"
+    fi
   done
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
 
-# Raspberry Pi detection
+# ---- Raspberry Pi detection ----
 IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    [ -r /proc/device-tree/model ] &&
@@ -64,24 +66,39 @@ echo "=================================================="
 ###############################################################################
 
 spin "Updating package index" apt update
-spin "Upgrading system" apt upgrade -y || true
+spin "Upgrading system packages" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-spin "Installing base packages" apt install -y \
-  linux-headers-$(uname -r) build-essential dkms \
-  git wget curl jq unzip \
-  htop tmux screen lshw \
-  smbclient qemu-guest-agent rsysstat rsyslog \
-  bash coreutils util-linux procps ca-certificates \
-  python3 python3-pip python3-venv python-is-python3 python3-smbus \
-  net-tools dnsutils iw rfkill i2c-tools \
-  network-manager systemd-resolved iperf3 \
-  firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+KERNEL="$(uname -r)"
+HEADER_PKG="linux-headers-$KERNEL"
+HEADER_LIST=()
+
+if apt-cache show "$HEADER_PKG" >/dev/null 2>&1; then
+  HEADER_LIST+=("$HEADER_PKG")
+  ok "Kernel headers found: $HEADER_PKG"
+else
+  warn "Kernel headers $HEADER_PKG not available – skipping"
+fi
+
+BASE_PKGS=(
+  build-essential dkms
+  git wget curl jq unzip
+  htop tmux screen lshw
+  smbclient qemu-guest-agent
+  sysstat rsyslog
+  bash coreutils util-linux procps ca-certificates
+  python3 python3-pip python3-venv python-is-python3 python3-smbus
+  net-tools dnsutils iw rfkill i2c-tools
+  network-manager systemd-resolved iperf3
+  firmware-linux firmware-linux-nonfree firmware-misc-nonfree
   firmware-iwlwifi firmware-atheros firmware-brcm80211
+)
+
+spin "Installing base packages" apt install -y "${BASE_PKGS[@]}" "${HEADER_LIST[@]}"
 
 ###############################################################################
-# LIGHTDM / LXQT (SAFE)
+# LIGHTDM / LXQT
 ###############################################################################
 
 spin "Preparing display manager" bash -c '
@@ -90,7 +107,7 @@ systemctl stop display-manager 2>/dev/null || true
 systemctl mask lightdm display-manager || true
 '
 
-spin "Installing LightDM / LXQt" bash -c '
+spin "Installing LXQt + LightDM" bash -c '
 export DEBIAN_FRONTEND=noninteractive
 export DEBCONF_NONINTERACTIVE_SEEN=true
 apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox
@@ -109,100 +126,77 @@ systemctl enable lightdm
 '
 
 ###############################################################################
-# WLAN DRIVERS (CORRECT HANDLING)
+# WLAN DRIVERS — FULL SUPERSET (NON‑PI ONLY)
 ###############################################################################
 
 declare -A DRIVER_STATUS
-declare -A DRIVER_VERSION
 
 install_morrownr() {
-  local name="$1" repo="$2"
-  git clone "$repo" "$name" || return 1
-  cd "$name"
+  git clone "$2" "$1" || return 1
+  cd "$1"
   ./install-driver.sh >>"$LOG" 2>&1
 }
 
 install_aircrack() {
-  git clone https://github.com/aircrack-ng/rtl8812au.git
+  git clone https://github.com/aircrack-ng/rtl8812au.git || return 1
   cd rtl8812au
   ./dkms-install.sh >>"$LOG" 2>&1
 }
 
 install_make_dkms() {
-  local name="$1" module="$2" repo="$3"
-  git clone "$repo" "$name" || return 1
-  cd "$name"
+  git clone "$3" "$1" || return 1
+  cd "$1"
   make >>"$LOG" 2>&1
   make install >>"$LOG" 2>&1
-  dkms add . >>"$LOG" 2>&1 || true
-  dkms build "$module" >>"$LOG" 2>&1 || true
-  dkms install "$module" >>"$LOG" 2>&1 || true
 }
 
 if [ "$IS_RPI" -eq 1 ]; then
-  warn "Raspberry Pi detected — skipping USB Wi‑Fi DKMS drivers"
-  for d in rtl8188eu rtl8188fu rtl8192eu rtl8192fu rtl8723au rtl8812au rtl8814au \
-           rtl8821cu 88x2bu rtl8852bu rtl8852au mt7601u mt76 rtw89; do
-    DRIVER_STATUS["$d"]="SKIPPED (Raspberry Pi)"
-  done
+  warn "Raspberry Pi detected — skipping USB Wi‑Fi drivers"
 else
   mkdir -p /usr/src/wifi-drivers
   cd /usr/src/wifi-drivers
 
-  # Morrownr drivers
-  for d in \
-    8814au=https://github.com/morrownr/8814au.git \
-    8821cu=https://github.com/morrownr/8821cu-20210916.git \
-    88x2bu=https://github.com/morrownr/88x2bu-20210702.git \
-    rtl8852bu=https://github.com/morrownr/rtl8852bu.git
+  # Morrownr installers (install-driver.sh)
+  for entry in \
+    "8814au https://github.com/morrownr/8814au.git" \
+    "8821cu https://github.com/morrownr/8821cu-20210916.git" \
+    "8821au-20210708 https://github.com/morrownr/8821au-20210708.git" \
+    "8812au-20210820 https://github.com/morrownr/8812au-20210820.git" \
+    "88x2bu https://github.com/morrownr/88x2bu-20210702.git" \
+    "rtl8852bu https://github.com/morrownr/rtl8852bu.git" \
+    "rtl8852cu https://github.com/morrownr/rtl8852cu.git" \
+    "rtl8822bu https://github.com/morrownr/rtl8822bu.git"
   do
-    NAME="${d%%=*}"; REPO="${d##*=}"
-    if install_morrownr "$NAME" "$REPO"; then
-      DRIVER_STATUS["$NAME"]="INSTALLED"
-    else
-      DRIVER_STATUS["$NAME"]="FAILED"
-    fi
+    set -- $entry
+    install_morrownr "$1" "$2" \
+      && DRIVER_STATUS["$1"]="INSTALLED" \
+      || DRIVER_STATUS["$1"]="FAILED"
     cd /usr/src/wifi-drivers
   done
 
-  # Aircrack 8812au
-  if install_aircrack; then
-    DRIVER_STATUS["rtl8812au"]="INSTALLED"
-  else
-    DRIVER_STATUS["rtl8812au"]="FAILED"
-  fi
+  # Aircrack
+  install_aircrack \
+    && DRIVER_STATUS["rtl8812au"]="INSTALLED" \
+    || DRIVER_STATUS["rtl8812au"]="FAILED"
   cd /usr/src/wifi-drivers
 
-  # Make + DKMS drivers
-  install_make_dkms rtl8188eu 8188eu https://github.com/lwfinger/rtl8188eu.git \
-    && DRIVER_STATUS["rtl8188eu"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8188eu"]="FAILED"
+  # make/DKMS style
+  for entry in \
+    "rtl8188eu 8188eu https://github.com/lwfinger/rtl8188eu.git" \
+    "rtl8188fu 8188fu https://github.com/kelebek333/rtl8188fu.git" \
+    "rtl8192eu 8192eu https://github.com/Mange/rtl8192eu-linux-driver.git" \
+    "rtl8192fu 8192fu https://github.com/heemsoft/rtl8192fu.git" \
+    "rtl8723au 8723au https://github.com/lwfinger/rtl8723au.git" \
+    "rtl8852au 8852au https://github.com/lwfinger/rtl8852au.git" \
+    "mt7601u mt7601u https://github.com/kuba-moo/mt7601u.git"
+  do
+    set -- $entry
+    install_make_dkms "$1" "$2" "$3" \
+      && DRIVER_STATUS["$1"]="INSTALLED" \
+      || DRIVER_STATUS["$1"]="FAILED"
+    cd /usr/src/wifi-drivers
+  done
 
-  install_make_dkms rtl8188fu 8188fu https://github.com/kelebek333/rtl8188fu.git \
-    && DRIVER_STATUS["rtl8188fu"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8188fu"]="FAILED"
-
-  install_make_dkms rtl8192eu 8192eu https://github.com/Mange/rtl8192eu-linux-driver.git \
-    && DRIVER_STATUS["rtl8192eu"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8192eu"]="FAILED"
-
-  install_make_dkms rtl8192fu 8192fu https://github.com/heemsoft/rtl8192fu.git \
-    && DRIVER_STATUS["rtl8192fu"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8192fu"]="FAILED"
-
-  install_make_dkms rtl8723au 8723au https://github.com/lwfinger/rtl8723au.git \
-    && DRIVER_STATUS["rtl8723au"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8723au"]="FAILED"
-
-  install_make_dkms rtl8852au 8852au https://github.com/lwfinger/rtl8852au.git \
-    && DRIVER_STATUS["rtl8852au"]="INSTALLED" \
-    || DRIVER_STATUS["rtl8852au"]="FAILED"
-
-  install_make_dkms mt7601u mt7601u https://github.com/kuba-moo/mt7601u.git \
-    && DRIVER_STATUS["mt7601u"]="INSTALLED" \
-    || DRIVER_STATUS["mt7601u"]="FAILED"
-
-  # In‑kernel drivers
   DRIVER_STATUS["mt76"]="SKIPPED (in‑kernel)"
   DRIVER_STATUS["rtw89"]="SKIPPED (in‑kernel)"
 
@@ -218,7 +212,7 @@ echo "=================================================="
 echo " Wi‑Fi Driver Installation Summary"
 echo "=================================================="
 for d in "${!DRIVER_STATUS[@]}"; do
-  printf " %-15s : %s\n" "$d" "${DRIVER_STATUS[$d]}"
+  printf " %-20s : %s\n" "$d" "${DRIVER_STATUS[$d]}"
 done
 echo "=================================================="
 
@@ -226,7 +220,7 @@ echo "=================================================="
 # VIRTUALHERE
 ###############################################################################
 
-spin "Installing VirtualHere client" bash -c '
+spin "Installing VirtualHere" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 chmod +x vhclientx86_64
