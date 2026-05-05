@@ -15,7 +15,7 @@ export SSH_ASKPASS=/bin/false
 
 set -euo pipefail
 
-VERSION="58.9"
+VERSION="59.0"
 LOG=/tmp/client-sim.log
 START_TIME=$(date +%s)
 MAX_RETRIES=5
@@ -90,12 +90,11 @@ run_or_retry() {
 # ============================================================
 declare -A DRIVER_STATUS
 declare -A DRIVER_REASON
-
-# ============================================================
-# GitHub repo guard (FIXED)
-# ============================================================
 declare -A SKIPPED_REPO_NAMES
 
+# ============================================================
+# GitHub repo guard
+# ============================================================
 clone_if_exists() {
   local repo_url="$1"
   local dir="$2"
@@ -128,23 +127,23 @@ sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
 # ============================================================
-# Stage 2: Base packages (v58 parity)
+# Stage 2: Base packages (FULL parity)
 # ============================================================
 stage "Installing base packages"
 
 run_or_retry "sudo apt install -y \
-  linux-headers-$(uname -r) dkms build-essential git wget curl \
+  linux-headers-$(uname -r) dkms build-essential \
+  git wget curl jq \
   smbclient qemu-guest-agent \
-  rsyslog sysstat jq \
+  rsyslog sysstat \
   bash coreutils util-linux procps ca-certificates \
-  python3 python3-pip python3-venv python-is-python3 \
-  python3-smbus i2c-tools \
-  net-tools dnsutils iw rfkill"
+  python3 python3-pip python3-venv python-is-python3 python3-smbus \
+  i2c-tools net-tools dnsutils iw rfkill"
 
 ok "Base packages installed"
 
 # ============================================================
-# Stage 3: Display manager (LightDM, safe)
+# Stage 3: Display Manager (LightDM, safe)
 # ============================================================
 stage "Configuring display manager (LightDM)"
 
@@ -170,31 +169,61 @@ sudo systemctl enable lightdm
 ok "LightDM configured (will start after reboot)"
 
 # ============================================================
-# Stage 4: USB Wi-Fi drivers (QEMU only)
+# Stage 4: USB Wi‑Fi drivers (FULL SET)
 # ============================================================
-stage "Installing USB Wi-Fi drivers"
+stage "Installing USB Wi‑Fi drivers"
 
 export MAKEFLAGS="-j$(nproc)"
 cd "$HOME"
 
 DRIVERS=(
+  # ---- Original list you provided ----
   "8821au-20210708"
   "8821cu-20210916"
+  "8814au"
+  "8812au-20210820"
+  "rtl8852bu-20250826"
+  "rtl8852cu-20251113"
+  "rtl8852au"
+  "88x2bu-20210702"
+  "rtl8188eu"
+  "rtl8723au"
   "rtl8192eu-linux-driver"
   "rtl8192fu"
+
+  # ---- Additional high-value repos I identified ----
+  "rtl8188fu"
+  "mt7601u"
+  "mt76"
+  "rtw89"
 )
 
 REPOS=(
   "https://github.com/morrownr/8821au-20210708.git"
   "https://github.com/morrownr/8821cu-20210916.git"
+  "https://github.com/morrownr/8814au.git"
+  "https://github.com/morrownr/8812au-20210820.git"
+  "https://github.com/morrownr/rtl8852bu-20250826.git"
+  "https://github.com/morrownr/rtl8852cu-20251113.git"
+  "https://github.com/lwfinger/rtl8852au.git"
+  "https://github.com/morrownr/88x2bu-20210702.git"
+  "https://github.com/lwfinger/rtl8188eu.git"
+  "https://github.com/lwfinger/rtl8723au.git"
   "https://github.com/Mange/rtl8192eu-linux-driver.git"
   "https://github.com/heemsoft/rtl8192fu.git"
+
+  "https://github.com/kelebek333/rtl8188fu.git"
+  "https://github.com/kuba-moo/mt7601u.git"
+  "https://github.com/aircrack-ng/mt76.git"
+  "https://github.com/morrownr/rtw89.git"
 )
 
+# ---- Clone phase ----
 for i in "${!DRIVERS[@]}"; do
   clone_if_exists "${REPOS[$i]}" "${DRIVERS[$i]}"
 done
 
+# ---- Install phase ----
 for d in "${DRIVERS[@]}"; do
   if [ "${DRIVER_STATUS[$d]:-}" = "SKIPPED" ]; then
     warn "Skipping $d — ${DRIVER_REASON[$d]}"
@@ -219,7 +248,7 @@ for d in "${DRIVERS[@]}"; do
     if sudo make && sudo make install; then
       sudo dkms add . 2>/dev/null || true
       DRIVER_STATUS["$d"]="INSTALLED"
-      DRIVER_REASON["$d"]="make+dkms"
+      DRIVER_REASON["$d"]="make + dkms"
       ok "Installed $d"
     else
       DRIVER_STATUS["$d"]="FAILED"
@@ -236,7 +265,7 @@ sudo depmod -a
 ok "Driver installation completed"
 
 # ============================================================
-# Stage 5: Network stack (iperf3 preseeded)
+# Stage 5: Network stack (iperf3 preseeding)
 # ============================================================
 stage "Final network configuration"
 
@@ -261,11 +290,11 @@ echo
 echo "=================================================="
 echo " Driver Installation Summary"
 echo "=================================================="
-printf "%-28s | %-10s | %s\n" "Driver" "Status" "Details"
-printf "%-28s-+-%-10s-+-%s\n" "----------------------------" "----------" "----------------------------"
+printf "%-30s | %-10s | %s\n" "Driver" "Status" "Details"
+printf "%-30s-+-%-10s-+-%s\n" "------------------------------" "----------" "----------------------------"
 
 for d in "${DRIVERS[@]}"; do
-  printf "%-28s | %-10s | %s\n" \
+  printf "%-30s | %-10s | %s\n" \
     "$d" \
     "${DRIVER_STATUS[$d]:-UNKNOWN}" \
     "${DRIVER_REASON[$d]:-N/A}"
