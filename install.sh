@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION=".58"
+VERSION=".58.1"
 LOG=/tmp/client-sim.log
 MAX_RETRIES=5
 START_TIME=$(date +%s)
+SKIPPED_REPOS=0
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -23,12 +24,12 @@ banner() {
 
 stage() {
   echo
-  echo "[${ts}] ▶ Stage $1/$2: $3"
+  echo "[$(ts)] ▶ Stage $1/$2: $3"
 }
 
-ok()    { echo "[${ts}] ✔ $*"; }
-warn()  { echo "[${ts}] ⚠ WARNING: $*"; }
-fail()  { echo "[${ts}] ✖ ERROR: $*"; }
+ok()    { echo "[$(ts)] ✔ $*"; }
+warn()  { echo "[$(ts)] ⚠ WARNING: $*"; }
+fail()  { echo "[$(ts)] ✖ ERROR: $*"; }
 
 elapsed() {
   local end=$(date +%s)
@@ -36,8 +37,8 @@ elapsed() {
 }
 
 banner
-echo "[${ts}] Initializing installer"
-echo "[${ts}] Log file: $LOG"
+echo "[$(ts)] Initializing installer"
+echo "[$(ts)] Log file: $LOG"
 
 # ------------------------------------------------------------
 # Network recovery helper
@@ -58,14 +59,14 @@ recover_network() {
 }
 
 # ------------------------------------------------------------
-# Network‑aware command runner
+# Network-aware command runner
 # ------------------------------------------------------------
 run_or_retry() {
   local attempt=1
   local cmd="$*"
 
   while :; do
-    echo "[${ts}] RUN: $cmd (attempt $attempt)"
+    echo "[$(ts)] RUN: $cmd (attempt $attempt)"
     set +e
     eval "$cmd"
     rc=$?
@@ -87,14 +88,14 @@ run_or_retry() {
 }
 
 # ------------------------------------------------------------
-# GitHub clone helper (handles private / missing repos)
+# GitHub clone helper (private/missing safe)
 # ------------------------------------------------------------
 clone_if_exists() {
   local repo_url="$1"
   local dir="$2"
   local err
 
-  echo "[${ts}] ℹ Checking repository: $repo_url"
+  echo "[$(ts)] ℹ Checking repository: $repo_url"
   err=$(git ls-remote "$repo_url" 2>&1 || true)
 
   if echo "$err" | grep -qiE \
@@ -111,18 +112,17 @@ clone_if_exists() {
   fi
 
   if [ ! -d "$dir" ]; then
-    echo "[${ts}] ▶ Cloning $repo_url"
+    echo "[$(ts)] ▶ Cloning $repo_url"
     git clone "$repo_url" "$dir"
   else
-    echo "[${ts}] ℹ Repo already present: $dir"
+    echo "[$(ts)] ℹ Repo already present: $dir"
   fi
 }
 
-SKIPPED_REPOS=0
 TOTAL_STAGES=6
 
 # ------------------------------------------------------------
-# Stage 1: Base system update
+# Stage 1: System update
 # ------------------------------------------------------------
 stage 1 $TOTAL_STAGES "Updating base system"
 T1=$(date +%s)
@@ -132,7 +132,7 @@ sudo dpkg --configure -a
 ok "System update complete ($(elapsed $T1))"
 
 # ------------------------------------------------------------
-# Stage 2: Core packages (non-network)
+# Stage 2: Core packages
 # ------------------------------------------------------------
 stage 2 $TOTAL_STAGES "Installing core packages"
 T2=$(date +%s)
@@ -144,13 +144,13 @@ run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
 ok "Core packages installed ($(elapsed $T2))"
 
 # ------------------------------------------------------------
-# Stage 3: Display manager
+# Stage 3: Display manager setup
 # ------------------------------------------------------------
 stage 3 $TOTAL_STAGES "Configuring display manager"
 CURRENT_DM="none"
 [ -L /etc/systemd/system/display-manager.service ] && \
   CURRENT_DM=$(readlink -f /etc/systemd/system/display-manager.service || echo unknown)
-echo "[${ts}] ℹ Existing display manager: $CURRENT_DM"
+echo "[$(ts)] ℹ Existing display manager: $CURRENT_DM"
 
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   lightdm lightdm-gtk-greeter lxqt-session openbox || true
@@ -169,7 +169,7 @@ sudo systemctl enable lightdm || true
 ok "Display manager configured"
 
 # ------------------------------------------------------------
-# Stage 4: USB Wi‑Fi drivers (QEMU only)
+# Stage 4: USB Wi-Fi drivers (QEMU only)
 # ------------------------------------------------------------
 stage 4 $TOTAL_STAGES "Installing USB Wi‑Fi drivers"
 if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_vendor; then
@@ -221,11 +221,11 @@ if [ -r /sys/class/dmi/id/sys_vendor ] && grep -q QEMU /sys/class/dmi/id/sys_ven
   sudo depmod -a
   ok "Driver installation stage completed"
 else
-  echo "[${ts}] ℹ Physical hardware detected — skipping USB Wi‑Fi drivers"
+  echo "[$(ts)] ℹ Physical hardware detected — skipping USB Wi‑Fi drivers"
 fi
 
 # ------------------------------------------------------------
-# Stage 5: Final network + DNS
+# Stage 5: Final network configuration
 # ------------------------------------------------------------
 stage 5 $TOTAL_STAGES "Final network and DNS configuration"
 run_or_retry "sudo DEBIAN_FRONTEND=noninteractive apt install -y \
