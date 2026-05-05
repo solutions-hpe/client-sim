@@ -129,7 +129,7 @@ while true; do
   echo ""--------------------------------------------------""
   echo "Simulation Details:"
   echo "Simulation Load: $sim_load"
-  echo "Site: $wsite Site Based SSID: $site_based_ssid"
+  echo "Site: $wsite || Site Based SSID: $site_based_ssid"
   if [ $vh_server == "off" ]; then echo "Phy: $sim_phy"; fi
   if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo "Adapter: $wladapter"; fi
   declare -A sim_flags=(
