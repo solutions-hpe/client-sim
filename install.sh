@@ -48,6 +48,10 @@ sudo DEBIAN_FRONTEND=noninteractive apt install -y \
 #------------------------------------------------------------
 # User + LightDM autologin (no network impact)
 #------------------------------------------------------------
+if ! id user >/dev/null 2>&1; then
+  sudo useradd -m -s /bin/bash user
+fi
+echo "user:password" | sudo chpasswd
 sudo usermod -aG sudo,video,audio user
 
 sudo DEBIAN_FRONTEND=noninteractive apt install -y \
@@ -130,3 +134,4 @@ sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
   netplan.io || true
 
 echo "Install complete — REBOOT REQUIRED" | tee -a "$LOG"
+``
