@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.29
+version=.30
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -11,6 +11,8 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
+web_server=$(get_value 'simulation' 'web_server')
+server_url=$(get_value 'server' 'server_url')
 #------------------------------------------------------------
 echo "Updating Scripts" | tee -a "$debug" "$log"
 if [[ "$public_repo" == "on" ]]; then
@@ -117,3 +119,56 @@ else
     smbclient "$smb_location" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
 fi
 echo "Update complete" | tee -a "$debug"
+
+#------------------------------------------------------------
+# Web server sync (3rd source — mirrors GitHub, preferred over direct pull)
+# The web server syncs all scripts and simulation.conf from GitHub.
+# If web_server=on and the server is reachable, pull everything from it locally.
+# Falls back silently to whatever was pulled from GitHub/SMB above.
+#------------------------------------------------------------
+if [[ "$web_server" == "on" && -n "$server_url" ]]; then
+    echo "Checking web server: $server_url" | tee -a "$debug"
+
+    if curl -fsSL --connect-timeout 5 --max-time 10 \
+            "${server_url}/api/health" >>/dev/null 2>>"$debug"; then
+
+        echo "Web server reachable — syncing files" | tee -a "$debug" "$log"
+
+        # ── simulation.conf ──────────────────────────────────────────────────
+        if curl -fsSL --connect-timeout 5 --max-time 15 \
+                "${server_url}/api/config" \
+                -o /tmp/simulation.conf.webserver 2>>"$debug"; then
+            sudo cp /tmp/simulation.conf.webserver /usr/local/scripts/simulation.conf
+            rm -f /tmp/simulation.conf.webserver
+            echo "simulation.conf synced from web server" | tee -a "$debug" "$log"
+        else
+            echo "WARNING: Failed to fetch simulation.conf from web server" | tee -a "$debug" "$log"
+        fi
+
+        # ── Linux scripts (.sh, .txt, .conf) ────────────────────────────────
+        file_list=$(curl -fsSL --connect-timeout 5 --max-time 10 \
+            "${server_url}/api/scripts/list?platform=linux" 2>>"$debug" || echo "")
+
+        if [[ -n "$file_list" ]]; then
+            echo "Syncing linux scripts from web server..." | tee -a "$debug"
+            for filename in $file_list; do
+                if curl -fsSL --connect-timeout 5 --max-time 30 \
+                        "${server_url}/api/scripts/linux/${filename}" \
+                        -o "/usr/local/scripts/${filename}" 2>>"$debug"; then
+                    echo "  ✓ $filename" | tee -a "$debug"
+                else
+                    echo "  ✗ WARNING: Failed to fetch $filename" | tee -a "$debug" "$log"
+                fi
+            done
+            sudo chmod +x /usr/local/scripts/*.sh 2>/dev/null || true
+            echo "Linux script sync complete" | tee -a "$debug" "$log"
+        else
+            echo "WARNING: Could not get script list from web server" | tee -a "$debug" "$log"
+        fi
+
+    else
+        echo "WARNING: Web server not reachable — keeping files from GitHub/SMB" | tee -a "$debug" "$log"
+    fi
+else
+    echo "Web server sync disabled or not configured — skipping" | tee -a "$debug"
+fi

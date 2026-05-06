@@ -1,4 +1,4 @@
-$version = '.29'
+$version = '.30'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-update.log'
 $scriptRoot = 'C:\Scripts'
@@ -146,4 +146,66 @@ try {
     Write-UpdateLog "Update failed: $($_.Exception.Message)"
 } finally {
     Set-Location $originalLocation
+}
+
+#------------------------------------------------------------
+# Web server sync (3rd source — mirrors GitHub, preferred over direct pull)
+# The web server syncs all scripts and simulation.conf from GitHub.
+# If web_server=on and the server is reachable, pull everything from it locally.
+# Falls back silently to whatever was pulled from GitHub/SMB above.
+#------------------------------------------------------------
+$web_server = get_value 'simulation' 'web_server'
+$server_url = get_value 'server' 'server_url'
+
+if ($web_server -eq 'on' -and $server_url) {
+    Write-UpdateLog "Checking web server: $server_url"
+
+    $serverReachable = $false
+    try {
+        Invoke-WebRequest -Uri "$server_url/api/health" -UseBasicParsing `
+            -TimeoutSec 10 -ErrorAction Stop | Out-Null
+        $serverReachable = $true
+    } catch {
+        Write-UpdateLog "WARNING: Web server not reachable — keeping files from GitHub/SMB"
+    }
+
+    if ($serverReachable) {
+        Write-UpdateLog 'Web server reachable — syncing files'
+
+        # ── simulation.conf ──────────────────────────────────────────────────
+        try {
+            $tmpConf = Join-Path $env:TEMP 'simulation.conf.webserver'
+            Invoke-WebRequest -Uri "$server_url/api/config" `
+                -OutFile $tmpConf -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop
+            Copy-Item $tmpConf (Join-Path $scriptRoot 'simulation.conf') -Force
+            Remove-Item $tmpConf -ErrorAction SilentlyContinue
+            Write-UpdateLog 'simulation.conf synced from web server'
+        } catch {
+            Write-UpdateLog "WARNING: Failed to fetch simulation.conf from web server ($_)"
+        }
+
+        # ── Windows scripts (.ps1, .txt) ─────────────────────────────────────
+        try {
+            $listResponse = Invoke-WebRequest -Uri "$server_url/api/scripts/list?platform=windows" `
+                -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+            $fileList = $listResponse.Content | ConvertFrom-Json
+
+            Write-UpdateLog 'Syncing windows scripts from web server...'
+            foreach ($filename in $fileList) {
+                try {
+                    $destPath = Join-Path $scriptRoot $filename
+                    Invoke-WebRequest -Uri "$server_url/api/scripts/windows/$filename" `
+                        -OutFile $destPath -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+                    Write-UpdateLog "  + $filename"
+                } catch {
+                    Write-UpdateLog "  ! WARNING: Failed to fetch $filename ($_)"
+                }
+            }
+            Write-UpdateLog 'Windows script sync complete'
+        } catch {
+            Write-UpdateLog "WARNING: Could not get script list from web server ($_)"
+        }
+    }
+} else {
+    Write-UpdateLog 'Web server sync disabled or not configured — skipping'
 }

@@ -32,7 +32,7 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.14"
+VERSION="0.15"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
@@ -589,6 +589,7 @@ fi
 
 if [[ -n "$RSYSLOG_SOURCE" ]]; then
   start_spinner "Installing rsyslog config"
+  mkdir -p /etc/rsyslog.d
   cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
   # Validate the full rsyslog config (including the new drop-in) not just the snippet
   if rsyslogd -N1 >>"$LOG" 2>&1; then
