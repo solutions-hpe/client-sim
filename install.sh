@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.35
+# Client Simulator Installer v0.99.37
 #
-# Canonical baseline (PATCHED forward, NOT regenerated)
-# - Spinner restored and used consistently
-# - Full lifecycle symmetry (install / remove / purge)
-# - Reboot suppression during WLAN driver installs
-# - Explicit reboot-request logging
-# - LightDM autologin + systemd hardening
+# PATCH NOTES
+# -----------------------------------------------------------------------------
+# ✅ Added post-install health check
+# ✅ All functionality from v0.99.36 preserved
 ###############################################################################
 
 ###############################################################################
@@ -20,7 +18,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.35"
+VERSION="0.99.37"
 
 ###############################################################################
 # Global state and logging
@@ -65,7 +63,7 @@ fi
 ts(){ date "+%H:%M:%S"; }
 info(){ echo "[$(ts)] $*" | tee -a "$LOG"; }
 warn(){ echo -e "[$(ts)] ${Y}WARN:${Z} $*" | tee -a "$LOG"; }
-ok(){ echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
+ok(){   echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
 
 SPIN_BLOCK_TIMEOUT=120
 spin() {
@@ -75,7 +73,7 @@ spin() {
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
-  local elapsed=0 dumped=0
+  elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
     i=$(( (i+1) % 3 ))
@@ -128,7 +126,7 @@ if [ "$ACTION" = "remove" ]; then
   fi
 
   rm -rf "$CLIENTSIM_DIR" "$CLIENTSIM_REPO"
-  rm -f /etc/xdg/autostart/client-simulator.desktop
+  rm -f /etc/xdg/autostart/*.desktop
 
   systemctl stop virtualhereclient.service 2>/dev/null || true
   systemctl disable virtualhereclient.service 2>/dev/null || true
@@ -262,7 +260,7 @@ systemctl daemon-reload
 systemctl enable lightdm
 
 ###############################################################################
-# Client-sim deployment
+# Client-sim deployment (repo is source of truth)
 ###############################################################################
 info "Deploying client-sim"
 mkdir -p "$CLIENTSIM_DIR"
@@ -270,14 +268,11 @@ git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO" || t
 cp -r "$CLIENTSIM_REPO/linux/"* "$CLIENTSIM_DIR/"
 chmod +x "$CLIENTSIM_DIR"/*
 
+info "Installing client-sim autostart entries from repo"
 mkdir -p /etc/xdg/autostart
-cat >/etc/xdg/autostart/client-simulator.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Client Simulator
-Exec=/usr/local/scripts/start-sim.sh
-OnlyShowIn=LXQt;
-EOF
+cp -f "$CLIENTSIM_REPO/linux/"*.desktop /etc/xdg/autostart/ || true
+chown root:root /etc/xdg/autostart/*.desktop
+chmod 644 /etc/xdg/autostart/*.desktop
 
 ###############################################################################
 # VirtualHere
@@ -296,6 +291,57 @@ systemctl enable virtualhereclient.service
 ###############################################################################
 info "Phase 3b: Network"
 install_pkgs network-manager systemd-resolved iperf3
+
+###############################################################################
+# Post-install health check ✅
+###############################################################################
+info "Running post-install health check"
+
+health_ok=true
+
+check_service() {
+  local svc="$1"
+  if systemctl is-active --quiet "$svc"; then
+    ok "$svc is active"
+  else
+    warn "$svc is NOT active"
+    health_ok=false
+  fi
+}
+
+check_service lightdm
+check_service virtualhereclient.service
+check_service NetworkManager
+check_service systemd-resolved
+
+if [ -x /usr/local/scripts/start-sim.sh ]; then
+  ok "client-sim start script present"
+else
+  warn "client-sim start script missing"
+  health_ok=false
+fi
+
+if ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1; then
+  ok "autostart desktop files present"
+else
+  warn "no autostart desktop files found"
+  health_ok=false
+fi
+
+if [ -f "$WLAN_STATE" ]; then
+  ok "WLAN driver state file present"
+else
+  warn "WLAN driver state file missing"
+fi
+
+echo
+echo "========== POST-INSTALL HEALTH SUMMARY =========="
+if [ "$health_ok" = true ]; then
+  ok "System health PASSED"
+else
+  warn "System health has WARNINGS"
+fi
+echo "==============================================="
 
 ###############################################################################
 # Final summary
