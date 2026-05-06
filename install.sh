@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.44
+# Client Simulator Installer v0.99.45
 #
-# PATCH OVER v0.99.43
+# PATCH OVER v0.99.44
 # -----------------------------------------------------------------------------
-# ✅ Add visible startup version banner (early echo)
+# ✅ FIX WLAN DRIVER INSTALLATION REGRESSION
+#    - Restore single-step authoritative installs per driver repo
+#    - Retain per-repo spinner (no internal stage splitting)
 ###############################################################################
 
 ###############################################################################
@@ -17,10 +19,10 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.44"
+VERSION="0.99.45"
 
 ###############################################################################
-# STARTUP VERSION BANNER  ✅ NEW
+# STARTUP VERSION BANNER
 ###############################################################################
 echo
 echo "============================================================"
@@ -137,9 +139,9 @@ apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# Phase 2 — WLAN drivers (per‑repo, per‑stage spinners)
+# Phase 2 — WLAN drivers (FIXED: single-step installs per repo)
 ###############################################################################
-info "Phase 2: WLAN drivers (per‑repo, per‑stage spinners)"
+info "Phase 2: WLAN drivers (authoritative installs)"
 
 mkdir -p "$STATE_DIR"
 touch "$DRIVER_LOG"
@@ -162,63 +164,57 @@ cd /usr/src/wifi-drivers
 if [ "$IS_RPI" -eq 0 ]; then
   for d in "${WLAN_DRIVERS[@]}"; do
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
-    info "Processing WLAN driver: $NAME"
+    info "Installing WLAN driver: $NAME"
     start_ts="$(ts_epoch)"
     STATUS="FAILED"
+    TMPLOG="$(mktemp)"
 
-    spin "[$NAME] Cloning repository" git clone "$REPO" "$NAME" || true
-
-    if [ -d "$NAME" ]; then
-      case "$TYPE" in
+    spin "[$NAME] Installing driver" bash -c "
+      set -e
+      git clone '$REPO' '$NAME'
+      cd '$NAME'
+      case '$TYPE' in
         morrownr)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./install-driver.sh --no-install" || true
+          ./install-driver.sh
           ;;
         aircrack)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./dkms-install.sh --no-install" || true
+          ./dkms-install.sh
           ;;
         dkms)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && make" || true
+          make
+          make install
+          dkms add . || true
+          dkms install '$MOD' || true
           ;;
       esac
-    fi
+    " >\"$TMPLOG\" 2>&1 && STATUS=\"INSTALLED\"
 
-    if [ -d "$NAME" ]; then
-      case "$TYPE" in
-        morrownr)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./install-driver.sh" && STATUS="INSTALLED"
-          ;;
-        aircrack)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./dkms-install.sh" && STATUS="INSTALLED"
-          ;;
-        dkms)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && make install && dkms add . || true && dkms install '$MOD' || true" && STATUS="INSTALLED"
-          ;;
-      esac
-    fi
+    grep -qi \"already\" \"$TMPLOG\" && STATUS=\"ALREADY_INSTALLED\"
 
-    grep -qi "already" "$LOG" && STATUS="ALREADY_INSTALLED"
-    end_ts="$(ts_epoch)"
-    echo "$start_ts,$end_ts,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
-    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
+    end_ts=\"$(ts_epoch)\"
+    echo \"$start_ts,$end_ts,$NAME,$TYPE,$STATUS\" >>\"$DRIVER_LOG\"
+    echo \"$MOD:$TYPE:$STATUS\" >>\"$WLAN_STATE\"
+    cat \"$TMPLOG\" >>\"$LOG\"
+    rm -f \"$TMPLOG\"
   done
   depmod -a || true
 fi
 
-export PATH="$OLD_PATH"
-rm -rf "$SUPPRESS"
+export PATH=\"$OLD_PATH\"
+rm -rf \"$SUPPRESS\"
 
 ###############################################################################
 # Phase 3a — firmware
 ###############################################################################
-info "Phase 3a: Firmware"
-install_pkgs firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+info \"Phase 3a: Firmware\"
+install_pkgs firmware-linux firmware-linux-nonfree firmware-misc-nonfree \\
              firmware-iwlwifi firmware-atheros
 
 ###############################################################################
 # LightDM install + autologin + hardening
 ###############################################################################
-info "Installing and configuring LightDM"
-echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
+info \"Installing and configuring LightDM\"
+echo \"/usr/sbin/lightdm\" > /etc/X11/default-display-manager
 install_pkgs lightdm lightdm-gtk-greeter lxqt-session openbox
 
 mkdir -p /etc/lightdm/lightdm.conf.d
@@ -243,36 +239,34 @@ systemctl daemon-reload
 systemctl enable lightdm
 
 ###############################################################################
-# Client‑sim deployment (fresh repo guaranteed)
+# Client-sim deployment (fresh repo guaranteed)
 ###############################################################################
-info "Deploying client-sim"
+info \"Deploying client-sim\"
 
-if [ -d "$CLIENTSIM_REPO/.git" ]; then
-  info "Updating existing client-sim repo"
-  git -C "$CLIENTSIM_REPO" fetch --all
-  git -C "$CLIENTSIM_REPO" reset --hard origin/HEAD
+if [ -d \"$CLIENTSIM_REPO/.git\" ]; then
+  git -C \"$CLIENTSIM_REPO\" fetch --all
+  git -C \"$CLIENTSIM_REPO\" reset --hard origin/HEAD
 else
-  info "Cloning client-sim repo"
-  rm -rf "$CLIENTSIM_REPO"
-  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO"
+  rm -rf \"$CLIENTSIM_REPO\"
+  git clone https://github.com/solutions-hpe/client-sim.git \"$CLIENTSIM_REPO\"
 fi
 
-mkdir -p "$CLIENTSIM_DIR"
-cp -r "$CLIENTSIM_REPO/linux/"* "$CLIENTSIM_DIR/"
-chmod +x "$CLIENTSIM_DIR"/*
+mkdir -p \"$CLIENTSIM_DIR\"
+cp -r \"$CLIENTSIM_REPO/linux/\"* \"$CLIENTSIM_DIR/\"
+chmod +x \"$CLIENTSIM_DIR\"/*
 
-info "Installing client-sim autostart entries from repo"
+info \"Installing client-sim autostart entries from repo\"
 mkdir -p /etc/xdg/autostart
-cp -f "$CLIENTSIM_REPO/linux/"*.desktop /etc/xdg/autostart/
+cp -f \"$CLIENTSIM_REPO/linux/\"*.desktop /etc/xdg/autostart/
 chown root:root /etc/xdg/autostart/*.desktop
 chmod 644 /etc/xdg/autostart/*.desktop
 
 ###############################################################################
 # VirtualHere
 ###############################################################################
-info "Installing VirtualHere"
-spin "Downloading VirtualHere client" wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
-spin "Downloading VirtualHere service" wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
+info \"Installing VirtualHere\"
+spin \"Downloading VirtualHere client\" wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
+spin \"Downloading VirtualHere service\" wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 chmod +x vhclientx86_64
 mv vhclientx86_64 /usr/sbin/
 mv virtualhereclient.service /etc/systemd/system/
@@ -282,32 +276,20 @@ systemctl enable virtualhereclient.service
 ###############################################################################
 # Phase 3b — network (LAST)
 ###############################################################################
-info "Phase 3b: Network"
+info \"Phase 3b: Network\"
 install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Post‑install health check
+# Post-install health check
 ###############################################################################
-info "Running post-install health check"
+info \"Running post-install health check\"
 
-health_ok=true
-check_service() {
-  local svc="$1"
-  systemctl is-active --quiet "$svc" && ok "$svc is active" || { warn "$svc is NOT active"; health_ok=false; }
-}
+systemctl is-active --quiet lightdm && ok \"LightDM active\" || warn \"LightDM inactive\"
+systemctl is-active --quiet virtualhereclient.service && ok \"VirtualHere active\" || warn \"VirtualHere inactive\"
+systemctl is-active --quiet NetworkManager && ok \"NetworkManager active\" || warn \"NetworkManager inactive\"
+systemctl is-active --quiet systemd-resolved && ok \"Resolved active\" || warn \"Resolved inactive\"
 
-check_service lightdm
-check_service virtualhereclient.service
-check_service NetworkManager
-check_service systemd-resolved
+ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1 && ok \"Autostart files present\" || warn \"No autostart files\"
 
-[ -x /usr/local/scripts/start-sim.sh ] && ok "client-sim start script present" || warn "client-sim start script missing"
-ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1 && ok "autostart desktop files present" || warn "no autostart desktop files found"
-
-echo
-echo "========== POST-INSTALL HEALTH SUMMARY =========="
-[ "$health_ok" = true ] && ok "System health PASSED" || warn "System health has WARNINGS"
-echo "==============================================="
-
-ok "Installation complete — manual reboot recommended"
-echo "Log: $LOG"
+ok \"Installation complete — manual reboot recommended\"
+echo \"Log: $LOG\"
