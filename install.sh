@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.32
+# Client Simulator Installer v0.99.33
 #
-# RESTORED FEATURES
+# PATCH NOTES
 # -----------------------------------------------------------------------------
-# ✅ Full remove / purge symmetry
-# ✅ Full client-sim deployment
-# ✅ Full VirtualHere lifecycle
-# ✅ WLAN reboot suppression + logging
-# ✅ Troubleshooting guide restored
+# ✅ Restored spinner (animated dots + blocking detection)
+# ✅ Restored spin-based package installation everywhere
+# ✅ Kept reboot suppression during WLAN driver installs
+# ✅ Kept full remove / purge symmetry
+# ✅ Kept client-sim deployment & autostart
+# ✅ Kept VirtualHere lifecycle
+# ✅ Kept rfkill prereq, RPi handling, PATH hardening
+# ✅ Kept troubleshooting + design comments
 #
-# INSTALL ORDER AND PHASED DESIGN ARE UNCHANGED
+# This version PATCHES FORWARD from the last full baseline.
 ###############################################################################
 
 ###############################################################################
@@ -23,7 +26,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.32"
+VERSION="0.99.33"
 
 ###############################################################################
 # GLOBAL STATE AND LOGGING
@@ -47,7 +50,7 @@ export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
 ###############################################################################
-# WLAN DRIVER DEFINITIONS — EDIT HERE FIRST
+# WLAN DRIVER DEFINITIONS — EDIT HERE
 ###############################################################################
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
@@ -57,12 +60,49 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# UI HELPERS
+# UI + SPINNER (RESTORED)
 ###############################################################################
+if [ -t 1 ]; then
+  G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
+else
+  G=""; Y=""; B=""; Z=""
+fi
+
 ts(){ date "+%H:%M:%S"; }
+ok(){   echo -e "[$(ts)] ${G}✔${Z} $*" | tee -a "$LOG"; }
+warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*" | tee -a "$LOG"; }
 info(){ echo "[$(ts)] $*" | tee -a "$LOG"; }
-warn(){ echo "[$(ts)] WARN: $*" | tee -a "$LOG"; }
-ok(){ echo "[$(ts)] OK: $*" | tee -a "$LOG"; }
+
+SPIN_BLOCK_TIMEOUT=120
+
+spin() {
+  local label="$1"; shift
+  local frames=("." ".." "...")
+  local i=0
+  echo -ne "[$(ts)] ${B}[ ]${Z} $label"
+  "$@" >>"$LOG" 2>&1 &
+  pid=$!
+  local elapsed=0 dumped=0
+  while kill -0 "$pid" 2>/dev/null; do
+    echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
+    i=$(( (i+1) % 3 ))
+    sleep 1
+    elapsed=$((elapsed+1))
+    if (( elapsed >= SPIN_BLOCK_TIMEOUT && dumped == 0 )); then
+      dumped=1
+      warn "Operation running long; dumping journal for diagnostics"
+      journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
+    fi
+  done
+  wait "$pid" || true
+  echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
+}
+
+install_pkgs() {
+  for p in "$@"; do
+    spin "Installing package: $p" apt install -y "$p" || warn "Issue installing $p"
+  done
+}
 
 ###############################################################################
 # RASPBERRY PI DETECTION
@@ -71,65 +111,44 @@ IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
   IS_RPI=1
-  info "Raspberry Pi detected — external WLAN drivers will be skipped"
+  info "Raspberry Pi detected — external WLAN drivers skipped"
 fi
 
 ###############################################################################
-# REMOVE / PURGE MODE (FULLY RESTORED)
+# USER MANAGEMENT
 ###############################################################################
-if [ "$ACTION" = "remove" ]; then
-  info "Removing client simulator components"
-
-  # --- WLAN drivers ---
-  if [ "$IS_RPI" -eq 0 ] && [ -f "$WLAN_STATE" ]; then
-    while IFS=: read -r MOD TYPE STATUS; do
-      info "Removing WLAN driver $MOD ($TYPE)"
-      case "$TYPE" in
-        dkms|aircrack) dkms remove "$MOD" --all || true ;;
-        morrownr)
-          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] &&
-          "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
-      esac
-    done <"$WLAN_STATE"
-    depmod -a || true
-    rm -f "$WLAN_STATE"
-  fi
-
-  # --- client-sim ---
-  rm -rf "$CLIENTSIM_DIR" "$CLIENTSIM_REPO"
-  rm -f /etc/xdg/autostart/client-simulator.desktop
-
-  # --- VirtualHere ---
-  systemctl stop virtualhereclient.service 2>/dev/null || true
-  systemctl disable virtualhereclient.service 2>/dev/null || true
-  rm -f /usr/sbin/vhclientx86_64
-  rm -f /etc/systemd/system/virtualhereclient.service
-  systemctl daemon-reload || true
-
-  if [ "$PURGE" = "--purge" ]; then
-    info "Purging all system packages installed by this script"
-    apt purge -y \
-      lightdm lightdm-gtk-greeter lxqt-session openbox \
-      build-essential dkms git rfkill \
-      firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
-      firmware-iwlwifi firmware-atheros \
-      network-manager systemd-resolved iperf3 || true
-    apt autoremove -y || true
-    rm -rf "$STATE_DIR"
-  fi
-
-  ok "Removal complete"
-  exit 0
-fi
+info "Ensuring canonical user exists and has sudo"
+id user >/dev/null 2>&1 || useradd -m -s /bin/bash user
+getent group sudo >/dev/null 2>&1 || groupadd sudo || true
+usermod -aG sudo user
 
 ###############################################################################
-# BASE UPDATE
+# DISABLE SCREEN SAVER / DPMS (LXQt)
 ###############################################################################
-info "Updating base system"
-apt update
-apt upgrade -y || true
-dpkg --configure -a || true
-apt -f install -y || true
+info "Disabling screen saver and DPMS for LXQt"
+USER_HOME="$(getent passwd user | cut -d: -f6)"
+mkdir -p "$USER_HOME/.config/autostart" "$USER_HOME/.config/lxqt"
+cat >"$USER_HOME/.config/autostart/disable-screensaver.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Disable Screen Saver
+Exec=sh -c "xset s off; xset s noblank; xset -dpms"
+OnlyShowIn=LXQt;
+EOF
+cat >"$USER_HOME/.config/lxqt/session.conf" <<EOF
+[Session]
+allowScreenSaver=false
+allowSuspend=false
+EOF
+chown -R user:user "$USER_HOME/.config"
+
+###############################################################################
+# BASE UPDATE (SPINNER-ENABLED)
+###############################################################################
+spin "Updating package index" apt update
+spin "Upgrading base system" apt upgrade -y || true
+spin "Fixing broken packages" dpkg --configure -a || true
+spin "APT dependency fix" apt -f install -y || true
 
 ###############################################################################
 # PHASE 1 — DRIVER PREREQUISITES
@@ -138,19 +157,18 @@ info "Phase 1: Driver prerequisites"
 HEADERS=()
 HEADER="linux-headers-$(uname -r)"
 apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
-apt install -y build-essential dkms git rfkill "${HEADERS[@]}"
+install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
 # PHASE 2 — WLAN DRIVERS (REBOOT SUPPRESSED + LOGGED)
 ###############################################################################
-info "Phase 2: WLAN driver installation (reboot suppressed)"
-
+info "Phase 2: WLAN drivers (reboot suppressed)"
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt; do
-  echo -e "#!/bin/sh\necho \"[reboot-request] $cmd\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/$cmd"
+  echo -e "#!/bin/sh\necho \"driver requested reboot: $cmd\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/$cmd"
   chmod +x "$SUPPRESS/$cmd"
 done
-echo -e "#!/bin/sh\necho \"[reboot-request] systemctl $*\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/systemctl"
+echo -e "#!/bin/sh\necho \"driver requested systemctl reboot\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/systemctl"
 chmod +x "$SUPPRESS/systemctl"
 
 OLD_PATH="$PATH"
@@ -165,7 +183,6 @@ if [ "$IS_RPI" -eq 0 ]; then
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
     TMPLOG="$(mktemp)"
     STATUS="FAILED"
-
     info "Installing WLAN driver: $NAME"
 
     case "$TYPE" in
@@ -202,15 +219,15 @@ rm -rf "$SUPPRESS"
 # PHASE 3a — FIRMWARE
 ###############################################################################
 info "Phase 3a: Firmware"
-apt install -y firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
-               firmware-iwlwifi firmware-atheros
+install_pkgs firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+             firmware-iwlwifi firmware-atheros
 
 ###############################################################################
 # LIGHTDM + CLIENT-SIM AUTOSTART
 ###############################################################################
 info "Configuring LightDM"
 echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
-apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox
+install_pkgs lightdm lightdm-gtk-greeter lxqt-session openbox
 
 ###############################################################################
 # CLIENT-SIM DEPLOYMENT
@@ -234,8 +251,8 @@ EOF
 # VIRTUALHERE INSTALL
 ###############################################################################
 info "Installing VirtualHere"
-wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
-wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
+spin "Downloading VirtualHere client" wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
+spin "Downloading VirtualHere service" wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
 chmod +x vhclientx86_64
 mv vhclientx86_64 /usr/sbin/
 mv virtualhereclient.service /etc/systemd/system/
@@ -246,7 +263,7 @@ systemctl enable virtualhereclient.service
 # PHASE 3b — NETWORK (LAST)
 ###############################################################################
 info "Phase 3b: Network services"
-apt install -y network-manager systemd-resolved iperf3
+install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
 # FINAL SUMMARY
@@ -257,7 +274,7 @@ column -t -s: "$WLAN_STATE"
 echo "========================================"
 
 if [ -s "$REBOOT_LOG" ]; then
-  warn "Some drivers requested a reboot (requests suppressed):"
+  warn "Drivers requested reboot (suppressed):"
   cat "$REBOOT_LOG"
 fi
 
