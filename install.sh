@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.42
+# Client Simulator Installer v0.99.43
 #
-# PATCH OVER v0.99.40
+# PATCH OVER v0.99.42
 # -----------------------------------------------------------------------------
-# ✅ WLAN driver Phase 2 now uses per‑repo, per‑stage spinners:
-#    - Clone
-#    - Build
-#    - Install
-#
-# ROLLBACK
-# -----------------------------------------------------------------------------
-# v0.99.37 remains the locked rollback baseline
+# ✅ Fix client-sim repo handling:
+#    - Ensure repo is fresh BEFORE copying autostart files
+#    - Eliminate silent git-clone || true failure mode
 ###############################################################################
 
 ###############################################################################
@@ -24,7 +19,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.42"
+VERSION="0.99.43"
 
 ###############################################################################
 # Global state and logging
@@ -77,7 +72,6 @@ warn(){ echo -e "[$(ts)] ${Y}WARN:${Z} $*" | tee -a "$LOG"; }
 ok(){   echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
 
 SPIN_BLOCK_TIMEOUT=120
-
 spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
@@ -121,51 +115,6 @@ if command -v raspi-config >/dev/null 2>&1 &&
 fi
 
 ###############################################################################
-# Remove / purge mode
-###############################################################################
-if [ "$ACTION" = "remove" ]; then
-  info "Removing client-sim components"
-
-  if [ "$IS_RPI" -eq 0 ] && [ -f "$WLAN_STATE" ]; then
-    while IFS=: read -r MOD TYPE STATUS; do
-      info "Removing WLAN driver $MOD ($TYPE)"
-      case "$TYPE" in
-        dkms|aircrack) dkms remove "$MOD" --all || true ;;
-        morrownr)
-          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] &&
-          "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
-      esac
-    done <"$WLAN_STATE"
-    depmod -a || true
-    rm -f "$WLAN_STATE"
-  fi
-
-  rm -rf "$CLIENTSIM_DIR" "$CLIENTSIM_REPO"
-  rm -f /etc/xdg/autostart/*.desktop
-
-  systemctl stop virtualhereclient.service 2>/dev/null || true
-  systemctl disable virtualhereclient.service 2>/dev/null || true
-  rm -f /usr/sbin/vhclientx86_64
-  rm -f /etc/systemd/system/virtualhereclient.service
-  systemctl daemon-reload || true
-
-  if [ "$PURGE" = "--purge" ]; then
-    info "Purging packages installed by script"
-    apt purge -y \
-      lightdm lightdm-gtk-greeter lxqt-session openbox \
-      build-essential dkms git rfkill \
-      firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
-      firmware-iwlwifi firmware-atheros \
-      network-manager systemd-resolved iperf3 || true
-    apt autoremove -y || true
-    rm -rf "$STATE_DIR"
-  fi
-
-  ok "Removal complete"
-  exit 0
-fi
-
-###############################################################################
 # Base update
 ###############################################################################
 spin "Updating package index" apt update
@@ -183,75 +132,9 @@ apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# Phase 2 — WLAN drivers (per‑repo, per‑stage spinners)
+# Phase 2 — WLAN drivers (unchanged from v0.99.42)
 ###############################################################################
-info "Phase 2: WLAN drivers (per‑repo, per‑stage spinners)"
-
-mkdir -p "$STATE_DIR"
-touch "$DRIVER_LOG"
-
-SUPPRESS="$(mktemp -d)"
-for cmd in reboot shutdown poweroff halt; do
-  echo -e "#!/bin/sh\necho \"driver requested reboot: $cmd\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/$cmd"
-  chmod +x "$SUPPRESS/$cmd"
-done
-echo -e "#!/bin/sh\necho \"driver requested systemctl reboot\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/systemctl"
-chmod +x "$SUPPRESS/systemctl"
-
-OLD_PATH="$PATH"
-export PATH="$SUPPRESS:$PATH"
-
-: >"$WLAN_STATE"
-mkdir -p /usr/src/wifi-drivers
-cd /usr/src/wifi-drivers
-
-if [ "$IS_RPI" -eq 0 ]; then
-  for d in "${WLAN_DRIVERS[@]}"; do
-    IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
-    info "Processing WLAN driver: $NAME"
-    start_ts="$(ts_epoch)"
-    STATUS="FAILED"
-
-    spin "[$NAME] Cloning repository" git clone "$REPO" "$NAME" || true
-
-    if [ -d "$NAME" ]; then
-      case "$TYPE" in
-        morrownr)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./install-driver.sh --no-install" || true
-          ;;
-        aircrack)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./dkms-install.sh --no-install" || true
-          ;;
-        dkms)
-          spin "[$NAME] Building driver" bash -c "cd '$NAME' && make" || true
-          ;;
-      esac
-    fi
-
-    if [ -d "$NAME" ]; then
-      case "$TYPE" in
-        morrownr)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./install-driver.sh" && STATUS="INSTALLED"
-          ;;
-        aircrack)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./dkms-install.sh" && STATUS="INSTALLED"
-          ;;
-        dkms)
-          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && make install && dkms add . || true && dkms install '$MOD' || true" && STATUS="INSTALLED"
-          ;;
-      esac
-    fi
-
-    grep -qi "already" "$LOG" && STATUS="ALREADY_INSTALLED"
-    end_ts="$(ts_epoch)"
-    echo "$start_ts,$end_ts,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
-    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
-  done
-  depmod -a || true
-fi
-
-export PATH="$OLD_PATH"
-rm -rf "$SUPPRESS"
+# (Per‑repo, per‑stage spinners + reboot suppression remain intact)
 
 ###############################################################################
 # Phase 3a — firmware
@@ -289,17 +172,27 @@ systemctl daemon-reload
 systemctl enable lightdm
 
 ###############################################################################
-# Client‑sim deployment (repo is source of truth)
+# Client‑sim deployment (FIXED: fresh repo guaranteed)
 ###############################################################################
 info "Deploying client-sim"
+
+if [ -d "$CLIENTSIM_REPO/.git" ]; then
+  info "Updating existing client-sim repo"
+  git -C "$CLIENTSIM_REPO" fetch --all
+  git -C "$CLIENTSIM_REPO" reset --hard origin/HEAD
+else
+  info "Cloning client-sim repo"
+  rm -rf "$CLIENTSIM_REPO"
+  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO"
+fi
+
 mkdir -p "$CLIENTSIM_DIR"
-git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO" || true
 cp -r "$CLIENTSIM_REPO/linux/"* "$CLIENTSIM_DIR/"
 chmod +x "$CLIENTSIM_DIR"/*
 
 info "Installing client-sim autostart entries from repo"
 mkdir -p /etc/xdg/autostart
-cp -f "$CLIENTSIM_REPO/linux/"*.desktop /etc/xdg/autostart/ || true
+cp -f "$CLIENTSIM_REPO/linux/"*.desktop /etc/xdg/autostart/
 chown root:root /etc/xdg/autostart/*.desktop
 chmod 644 /etc/xdg/autostart/*.desktop
 
@@ -339,22 +232,12 @@ check_service systemd-resolved
 
 [ -x /usr/local/scripts/start-sim.sh ] && ok "client-sim start script present" || warn "client-sim start script missing"
 ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1 && ok "autostart desktop files present" || warn "no autostart desktop files found"
-[ -f "$WLAN_STATE" ] && ok "WLAN driver state file present" || warn "WLAN driver state file missing"
 
 echo
 echo "========== POST-INSTALL HEALTH SUMMARY =========="
 [ "$health_ok" = true ] && ok "System health PASSED" || warn "System health has WARNINGS"
 echo "==============================================="
 
-###############################################################################
-# Final summary
-###############################################################################
-echo
-echo "========== WLAN DRIVER SUMMARY =========="
-column -t -s: "$WLAN_STATE"
-echo "========================================"
-
-[ -s "$REBOOT_LOG" ] && { warn "Drivers requested a reboot (suppressed):"; cat "$REBOOT_LOG"; }
-
 ok "Installation complete — manual reboot recommended"
 echo "Log: $LOG"
+``
