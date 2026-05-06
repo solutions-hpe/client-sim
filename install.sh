@@ -261,6 +261,7 @@ fi
 
 start_spinner "Configuring sudoers"
 
+# sim-user: scoped passwordless sudo for simulation operations
 cat >/etc/sudoers.d/99-simuser-nopasswd <<EOF
 # Managed by client-sim-install.sh — do not edit manually
 $SIM_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/sbin/dpkg, /bin/systemctl, /sbin/depmod, /usr/sbin/dkms
@@ -273,8 +274,27 @@ if ! visudo -cf /etc/sudoers.d/99-simuser-nopasswd >>"$LOG" 2>&1; then
   rm -f /etc/sudoers.d/99-simuser-nopasswd
   exit 1
 fi
-stop_spinner
 ok "Scoped passwordless sudo configured for '$SIM_USER'"
+
+# user: full passwordless sudo — required for driver builds (morrownr install-driver.sh calls sudo internally)
+if id "user" &>/dev/null; then
+  cat >/etc/sudoers.d/99-user-nopasswd <<EOF
+# Managed by client-sim-install.sh — do not edit manually
+user ALL=(ALL) NOPASSWD: ALL
+EOF
+  chmod 0440 /etc/sudoers.d/99-user-nopasswd
+  if ! visudo -cf /etc/sudoers.d/99-user-nopasswd >>"$LOG" 2>&1; then
+    stop_spinner
+    err "sudoers fragment for 'user' failed validation — removing"
+    rm -f /etc/sudoers.d/99-user-nopasswd
+    exit 1
+  fi
+  ok "Full passwordless sudo configured for 'user'"
+else
+  warn "User 'user' does not exist — skipping its sudoers entry"
+fi
+
+stop_spinner
 
 # ── SMB credentials template ─────────────────────────────────────────────────
 start_spinner "Checking SMB credentials file"

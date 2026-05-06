@@ -188,6 +188,248 @@ Get-ChildItem "C:\Scripts\*.ps1"
 
 ---
 
+## Web Dashboard
+
+The Client-Sim Web Dashboard is a FastAPI application that provides centralised visibility into all simulation clients.  It holds all state **in memory** — no database is required.  If the service restarts, it resumes collecting data on the next beacon cycle.
+
+### What it provides
+
+| Feature | Detail |
+|---------|--------|
+| Live client table | Status, last-seen time, current simulation, online/offline indicator |
+| Per-client overrides | Push temporary config changes without editing `simulation.conf` |
+| Script serving | Clients pull `.ps1`, `.sh`, and `.txt` files directly from the dashboard |
+| Config serving | `simulation.conf` served from the GitHub-synced repo cache |
+| WebSocket updates | Dashboard auto-refreshes in the browser — no manual reload |
+| API docs | Interactive Swagger UI at `/docs` |
+
+> **Source of truth**: the dashboard continuously syncs from the GitHub repo in the background.  `simulation.conf` and scripts are always served from the latest commit on the configured branch.
+
+---
+
+### Architecture
+
+```
+GitHub repo (solutions-hpe/client-sim)
+        │  git pull (background sync)
+        ▼
+┌─────────────────────────┐
+│  Client-Sim Dashboard   │  ← Proxmox LXC container (recommended)
+│  FastAPI / uvicorn      │    or Docker, or bare Python
+│  Port 8000              │
+└─────────────────────────┘
+        ▲  POST /api/status (beacon)
+        │  GET  /api/config?hostname=…
+        │  GET  /api/scripts/{platform}/{file}
+┌───────┴──────────────────────────┐
+│  Simulation clients              │
+│  Linux (simulation.sh)           │
+│  Windows (simulation.ps1)        │
+└──────────────────────────────────┘
+```
+
+---
+
+### Option 1 — LXC Container on Proxmox (Recommended)
+
+This is the recommended deployment.  The installer creates an isolated service inside a Debian/Ubuntu LXC container.
+
+#### 1. Create the LXC container
+
+In the Proxmox web UI (or via `pct`):
+
+| Setting | Recommended value |
+|---------|------------------|
+| Template | Debian 12 (bookworm) or Ubuntu 24.04 |
+| Disk | 4 GB |
+| RAM | 512 MB (1 GB recommended) |
+| CPU | 1 vCPU |
+| Network | DHCP on your management bridge |
+| Start on boot | ✅ Yes |
+| Unprivileged | ✅ Yes |
+
+Assign a **static IP** or DHCP reservation so clients always reach the same address.
+
+#### 2. Enter the container and run the installer
+
+```bash
+# On the Proxmox host
+pct enter <CTID>
+
+# Inside the container — one-liner install
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh | sudo bash
+```
+
+**Or clone and run manually:**
+
+```bash
+git clone https://github.com/solutions-hpe/client-sim.git
+cd client-sim
+sudo bash webui/install-lxc.sh
+```
+
+**Override defaults with environment variables before running:**
+
+```bash
+# Example: custom branch, custom port
+export REPO_BRANCH=main
+export PORT=9000
+sudo bash webui/install-lxc.sh
+```
+
+#### 3. What the installer does
+
+| Step | Action |
+|------|--------|
+| 1 | Verifies Debian/Ubuntu OS |
+| 2 | Installs `python3`, `pip`, `venv`, `git`, `curl` |
+| 3 | Creates a locked-down `dashboard` service user |
+| 4 | Clones the client-sim repo to `/opt/client-sim-repo` |
+| 5 | Copies the `webui/` application to `/opt/client-sim-dashboard` |
+| 6 | Creates a Python virtual environment and installs dependencies |
+| 7 | Writes `/opt/client-sim-dashboard/.env` with runtime settings |
+| 8 | Installs and enables a `systemd` service (`client-sim-dashboard`) |
+| 9 | Sets correct ownership/permissions |
+| 10 | Starts the service and runs a health check |
+
+At the end of the install the container IP, dashboard URL, and the `simulation.conf` snippet to add to each client are printed to the console.
+
+#### 4. Verify the installation
+
+```bash
+# Service status
+systemctl status client-sim-dashboard
+
+# Live logs
+journalctl -u client-sim-dashboard -f
+
+# Quick API health check
+curl http://localhost:8000/api/health
+```
+
+Install log: `/var/log/client-sim-dashboard-install.log`
+
+---
+
+### Option 2 — Docker / Docker Compose
+
+```bash
+cd webui
+docker compose up --build
+```
+
+The `docker-compose.yml` exposes port **8000** and passes `REPO_URL`, `REPO_BRANCH`, and `OFFLINE_TIMEOUT` as environment variables.  Edit `docker-compose.yml` to change defaults.
+
+```bash
+# Detach and run in background
+docker compose up --build -d
+
+# View logs
+docker compose logs -f
+```
+
+---
+
+### Option 3 — Python (bare / development)
+
+```bash
+cd webui
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REPO_URL` | `https://github.com/solutions-hpe/client-sim.git` | GitHub repo to sync from |
+| `REPO_BRANCH` | `lrb` | Branch to track |
+| `REPO_DIR` | `/opt/client-sim-repo` | Local repo checkout path |
+| `OFFLINE_TIMEOUT` | `60` | Seconds before a client shows as offline |
+| `PORT` | `8000` | TCP port (LXC installer only) |
+
+For Docker, set these in `docker-compose.yml`.  For the LXC install, set them as shell environment variables before running `install-lxc.sh` — they are written to `/opt/client-sim-dashboard/.env` and read by `systemd` at service start.
+
+---
+
+### Connecting Clients to the Dashboard
+
+Add a `[server]` section to each client's `simulation.conf`:
+
+```ini
+[server]
+server_url=http://<dashboard-ip>:8000
+```
+
+Replace `<dashboard-ip>` with the LXC container's IP address (shown at the end of the install).
+
+With this configured, each client will:
+- **POST** a beacon to `/api/status` at the start of every simulation cycle
+- **GET** its current config from `/api/config?hostname=<hostname>` (overrides take priority over the local `simulation.conf`)
+- **GET** the latest scripts from `/api/scripts/{platform}/{filename}` instead of the local filesystem
+
+---
+
+### Dashboard API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Service health check |
+| `GET` | `/api/clients` | List all clients and their current state |
+| `POST` | `/api/status` | Client beacon — updates in-memory state |
+| `GET` | `/api/config?hostname=<h>` | Serve merged `simulation.conf` for a client |
+| `POST` | `/api/clients/{hostname}/control` | Push override settings to a specific client |
+| `DELETE` | `/api/clients/{hostname}/control` | Clear overrides for a specific client |
+| `POST` | `/api/clients/all/control` | Push override to all clients at once |
+| `GET` | `/api/scripts/list?platform=linux\|windows` | List available scripts |
+| `GET` | `/api/scripts/{platform}/{filename}` | Download a specific script |
+| `WS` | `/ws` | WebSocket — browser dashboard live updates |
+
+Interactive API docs (Swagger UI): `http://<dashboard-ip>:8000/docs`
+
+---
+
+### Dashboard Troubleshooting
+
+**Service won't start**
+```bash
+journalctl -u client-sim-dashboard -n 50
+# Common cause: port 8000 already in use — change PORT in .env and restart
+```
+
+**Clients not appearing in dashboard**
+```bash
+# Verify client can reach the dashboard
+curl http://<dashboard-ip>:8000/api/health
+
+# Check simulation.conf [server] section is correct
+grep -A2 '\[server\]' /usr/local/scripts/simulation.conf
+```
+
+**Config or scripts out of date**
+```bash
+# Force a repo sync (restart triggers a pull)
+systemctl restart client-sim-dashboard
+
+# Or manually pull inside the container
+git -C /opt/client-sim-repo pull
+```
+
+**Dashboard shows client as offline**
+```bash
+# Increase OFFLINE_TIMEOUT in .env if clients beacon less frequently
+# Default is 60 seconds
+echo "OFFLINE_TIMEOUT=120" >> /opt/client-sim-dashboard/.env
+systemctl restart client-sim-dashboard
+```
+
+---
+
 ## Configuration
 
 ### Configuration File Location
