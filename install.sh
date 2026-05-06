@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.47
+# Client Simulator Installer v0.99.49
 #
-# PATCH OVER v0.99.46
+# CANONICAL FULL RE-EMIT
 # -----------------------------------------------------------------------------
-# ✅ Remove spinner UI for package installs
-# ✅ Restore visible INFO feedback + live apt output
+# ✅ Quiet apt installs (no console spam)
+# ✅ INFO / OK progress lines only
+# ✅ Stable, synchronous WLAN driver installs
+# ✅ Deterministic client-sim repo handling
+# ✅ Version banner restored
 ###############################################################################
 
+###############################################################################
+# Bash + PATH hardening
+###############################################################################
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
 fi
 
-export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
+export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
-VERSION="0.99.47"
+VERSION="0.99.49"
 
 ###############################################################################
 # Startup version banner
@@ -40,21 +46,34 @@ CLIENTSIM_DIR="/usr/local/scripts"
 CLIENTSIM_REPO="/home/user/client-sim"
 
 mkdir -p "$STATE_DIR" /var/log
-: >"$LOG" : >"$REBOOT_LOG" : >"$DRIVER_LOG"
+: >"$LOG"
+: >"$WLAN_STATE"
+: >"$REBOOT_LOG"
+: >"$DRIVER_LOG"
 
-chmod 644 "$LOG" "$REBOOT_LOG" "$DRIVER_LOG"
+chmod 644 "$LOG" "$WLAN_STATE" "$REBOOT_LOG" "$DRIVER_LOG"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
 ###############################################################################
-# Helper logging functions
+# Logging helpers
 ###############################################################################
 ts(){ date "+%H:%M:%S"; }
-info(){ echo "[$(ts)] INFO: $*" | tee -a "$LOG"; }
-ok(){ echo "[$(ts)] OK:   $*" | tee -a "$LOG"; }
-warn(){ echo "[$(ts)] WARN: $*" | tee -a "$LOG"; }
+info(){ echo "[$(ts)] INFO: $*"; }
+ok(){   echo "[$(ts)] OK:   $*"; }
+warn(){ echo "[$(ts)] WARN: $*"; }
+
+###############################################################################
+# Helper: quiet apt install with INFO/OK feedback
+###############################################################################
+apt_install() {
+  local label="$1"; shift
+  info "$label"
+  apt install -y --quiet=2 "$@" >>"$LOG" 2>&1
+  ok "$label complete"
+}
 
 ###############################################################################
 # Raspberry Pi detection
@@ -67,82 +86,80 @@ if command -v raspi-config >/dev/null 2>&1 &&
 fi
 
 ###############################################################################
-# Base update
+# Base system update
 ###############################################################################
 info "Updating package index"
-apt update | tee -a "$LOG"
+apt update --quiet=2 >>"$LOG" 2>&1
+ok "Package index updated"
 
 info "Upgrading base system"
-apt upgrade -y | tee -a "$LOG" || true
-
-info "Configuring partially installed packages"
-dpkg --configure -a | tee -a "$LOG" || true
-
-info "Fixing missing dependencies"
-apt -f install -y | tee -a "$LOG" || true
-ok "Base system update complete"
+apt upgrade -y --quiet=2 >>"$LOG" 2>&1 || true
+ok "Base system upgrade complete"
 
 ###############################################################################
 # Phase 1 — Driver prerequisites
 ###############################################################################
-info "Installing driver build prerequisites"
-
-HEADERS="linux-headers-$(uname -r)"
-apt install -y build-essential dkms git rfkill "$HEADERS" | tee -a "$LOG" || true
-
-ok "Driver prerequisites installed"
+apt_install "Installing driver build prerequisites" \
+  build-essential dkms git rfkill linux-headers-$(uname -r)
 
 ###############################################################################
-# Phase 2 — WLAN drivers (synchronous, authoritative)
+# Phase 2 — WLAN drivers (stable, authoritative)
 ###############################################################################
 info "Phase 2: WLAN drivers"
 
-: >"$WLAN_STATE"
 mkdir -p /usr/src/wifi-drivers
 cd /usr/src/wifi-drivers
 
+# Suppress reboots requested by driver scripts
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt systemctl; do
-  echo -e "#!/bin/sh\necho \"$cmd requested\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/$cmd"
+  echo -e "#!/bin/sh\necho \"$cmd requested\" >>'$REBOOT_LOG'\nexit 0" \
+    >"$SUPPRESS/$cmd"
   chmod +x "$SUPPRESS/$cmd"
 done
 OLD_PATH="$PATH"
 export PATH="$SUPPRESS:$PATH"
 
 if [ "$IS_RPI" -eq 0 ]; then
-  for d in \
+  for entry in \
     "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au" \
     "8821cu|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu" \
     "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au" \
     "rtl8188eu|dkms|https://github.com/lwfinger/rtl8188eu.git|8188eu"
   do
-    IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
+    IFS='|' read -r NAME TYPE REPO MOD <<<"$entry"
     info "Installing WLAN driver: $NAME"
     rm -rf "$NAME"
+
+    START_TS="$(date +%s)"
     STATUS="FAILED"
-    START="$(date +%s)"
 
     if git clone "$REPO" "$NAME" >>"$LOG" 2>&1; then
       cd "$NAME"
       case "$TYPE" in
-        morrownr) ./install-driver.sh >>"$LOG" 2>&1 ;;
-        aircrack) ./dkms-install.sh >>"$LOG" 2>&1 ;;
+        morrownr)
+          ./install-driver.sh >>"$LOG" 2>&1 && STATUS="INSTALLED"
+          ;;
+        aircrack)
+          ./dkms-install.sh >>"$LOG" 2>&1 && STATUS="INSTALLED"
+          ;;
         dkms)
           make >>"$LOG" 2>&1
           make install >>"$LOG" 2>&1
           dkms add . >>"$LOG" 2>&1 || true
           dkms install "$MOD" >>"$LOG" 2>&1 || true
+          STATUS="INSTALLED"
           ;;
       esac
-      STATUS="INSTALLED"
       cd ..
     fi
 
-    END="$(date +%s)"
-    echo "$START,$END,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
+    END_TS="$(date +%s)"
+    echo "$START_TS,$END_TS,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
     echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
     ok "WLAN driver $NAME: $STATUS"
   done
+
   depmod -a >>"$LOG" 2>&1 || true
 fi
 
@@ -150,20 +167,17 @@ export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
 ###############################################################################
-# Firmware
+# Phase 3a — Firmware
 ###############################################################################
-info "Installing firmware packages"
-apt install -y firmware-linux firmware-linux-nonfree \
-  firmware-misc-nonfree firmware-iwlwifi firmware-atheros \
-  | tee -a "$LOG" || true
-ok "Firmware install complete"
+apt_install "Installing firmware packages" \
+  firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+  firmware-iwlwifi firmware-atheros
 
 ###############################################################################
-# LightDM + LXQt
+# LightDM + LXQt desktop
 ###############################################################################
-info "Installing LightDM and LXQt"
-apt install -y lightdm lightdm-gtk-greeter lxqt-session openbox \
-  | tee -a "$LOG"
+apt_install "Installing LightDM and LXQt" \
+  lightdm lightdm-gtk-greeter lxqt-session openbox
 
 echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
 
@@ -189,16 +203,17 @@ systemctl enable lightdm
 ok "Desktop stack installed"
 
 ###############################################################################
-# Client-sim deployment (deterministic)
+# Client-sim deployment (deterministic repo sync)
 ###############################################################################
 info "Deploying client-sim"
 
 if [ -d "$CLIENTSIM_REPO/.git" ]; then
-  git -C "$CLIENTSIM_REPO" fetch --all
-  git -C "$CLIENTSIM_REPO" reset --hard origin/HEAD
+  git -C "$CLIENTSIM_REPO" fetch --all >>"$LOG" 2>&1
+  git -C "$CLIENTSIM_REPO" reset --hard origin/HEAD >>"$LOG" 2>&1
 else
   rm -rf "$CLIENTSIM_REPO"
-  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO"
+  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO" \
+    >>"$LOG" 2>&1
 fi
 
 mkdir -p "$CLIENTSIM_DIR"
@@ -208,19 +223,16 @@ chmod +x "$CLIENTSIM_DIR"/*
 mkdir -p /etc/xdg/autostart
 cp -f "$CLIENTSIM_REPO/linux/"*.desktop /etc/xdg/autostart/
 chmod 644 /etc/xdg/autostart/*.desktop
-
 ok "client-sim deployed"
 
 ###############################################################################
 # Network (LAST)
 ###############################################################################
-info "Installing network services"
-apt install -y network-manager systemd-resolved iperf3 \
-  | tee -a "$LOG"
-ok "Network stack installed"
+apt_install "Installing network services" \
+  network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Health check
+# Health check summary
 ###############################################################################
 echo
 echo "========== HEALTH CHECK =========="
@@ -229,7 +241,7 @@ systemctl is-active --quiet NetworkManager && echo "Network: OK" || echo "Networ
 lsmod | grep -E '88|rtl' >/dev/null && echo "WLAN: PRESENT" || echo "WLAN: NOT LOADED"
 ls /etc/xdg/autostart/*.desktop >/dev/null && echo "Autostart: OK" || echo "Autostart: MISSING"
 echo "================================="
-
 echo
-echo "Installation complete — manual reboot recommended"
-echo "Log: $LOG"
+
+info "Installation complete — manual reboot recommended"
+info "Log file: $LOG"
