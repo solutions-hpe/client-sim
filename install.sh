@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.40
+# Client Simulator Installer v0.99.42
 #
-# PATCH OVER v0.99.39
+# PATCH OVER v0.99.40
 # -----------------------------------------------------------------------------
-# ✅ Fixed spin redirection bug (correct stdout/stderr handling)
+# ✅ WLAN driver Phase 2 now uses per‑repo, per‑stage spinners:
+#    - Clone
+#    - Build
+#    - Install
 #
 # ROLLBACK
 # -----------------------------------------------------------------------------
@@ -21,7 +24,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.40"
+VERSION="0.99.42"
 
 ###############################################################################
 # Global state and logging
@@ -68,11 +71,13 @@ fi
 
 ts(){ date "+%H:%M:%S"; }
 ts_epoch(){ date "+%s"; }
+
 info(){ echo "[$(ts)] $*" | tee -a "$LOG"; }
 warn(){ echo -e "[$(ts)] ${Y}WARN:${Z} $*" | tee -a "$LOG"; }
 ok(){   echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
 
 SPIN_BLOCK_TIMEOUT=120
+
 spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
@@ -178,9 +183,9 @@ apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# Phase 2 — WLAN drivers (spinner-enhanced, reboot suppressed)
+# Phase 2 — WLAN drivers (per‑repo, per‑stage spinners)
 ###############################################################################
-info "Phase 2: WLAN drivers (spinner-enhanced)"
+info "Phase 2: WLAN drivers (per‑repo, per‑stage spinners)"
 
 mkdir -p "$STATE_DIR"
 touch "$DRIVER_LOG"
@@ -203,41 +208,43 @@ cd /usr/src/wifi-drivers
 if [ "$IS_RPI" -eq 0 ]; then
   for d in "${WLAN_DRIVERS[@]}"; do
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
-
+    info "Processing WLAN driver: $NAME"
     start_ts="$(ts_epoch)"
-    TMPLOG="$(mktemp)"
     STATUS="FAILED"
 
-    spin "Installing WLAN driver: $NAME" bash -c "
-      set -e
-      case \"$TYPE\" in
+    spin "[$NAME] Cloning repository" git clone "$REPO" "$NAME" || true
+
+    if [ -d "$NAME" ]; then
+      case "$TYPE" in
         morrownr)
-          git clone \"$REPO\" \"$NAME\" &&
-          (cd \"$NAME\" && ./install-driver.sh)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./install-driver.sh --no-install" || true
           ;;
         aircrack)
-          git clone \"$REPO\" \"$NAME\" &&
-          (cd \"$NAME\" && ./dkms-install.sh)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./dkms-install.sh --no-install" || true
           ;;
         dkms)
-          git clone \"$REPO\" \"$NAME\" &&
-          (cd \"$NAME\" &&
-           make &&
-           make install &&
-           dkms add . || true &&
-           dkms install \"$MOD\" || true)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && make" || true
           ;;
       esac
-    " >"$TMPLOG" 2>&1 && STATUS="INSTALLED"
+    fi
 
-    grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+    if [ -d "$NAME" ]; then
+      case "$TYPE" in
+        morrownr)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./install-driver.sh" && STATUS="INSTALLED"
+          ;;
+        aircrack)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./dkms-install.sh" && STATUS="INSTALLED"
+          ;;
+        dkms)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && make install && dkms add . || true && dkms install '$MOD' || true" && STATUS="INSTALLED"
+          ;;
+      esac
+    fi
 
+    grep -qi "already" "$LOG" && STATUS="ALREADY_INSTALLED"
     end_ts="$(ts_epoch)"
     echo "$start_ts,$end_ts,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
-
-    cat "$TMPLOG" >>"$LOG"
-    rm -f "$TMPLOG"
-
     echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
   done
   depmod -a || true
@@ -282,7 +289,7 @@ systemctl daemon-reload
 systemctl enable lightdm
 
 ###############################################################################
-# Client-sim deployment (repo is source of truth)
+# Client‑sim deployment (repo is source of truth)
 ###############################################################################
 info "Deploying client-sim"
 mkdir -p "$CLIENTSIM_DIR"
@@ -315,20 +322,14 @@ info "Phase 3b: Network"
 install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Post-install health check
+# Post‑install health check
 ###############################################################################
 info "Running post-install health check"
 
 health_ok=true
-
 check_service() {
   local svc="$1"
-  if systemctl is-active --quiet "$svc"; then
-    ok "$svc is active"
-  else
-    warn "$svc is NOT active"
-    health_ok=false
-  fi
+  systemctl is-active --quiet "$svc" && ok "$svc is active" || { warn "$svc is NOT active"; health_ok=false; }
 }
 
 check_service lightdm
@@ -336,33 +337,13 @@ check_service virtualhereclient.service
 check_service NetworkManager
 check_service systemd-resolved
 
-if [ -x /usr/local/scripts/start-sim.sh ]; then
-  ok "client-sim start script present"
-else
-  warn "client-sim start script missing"
-  health_ok=false
-fi
-
-if ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1; then
-  ok "autostart desktop files present"
-else
-  warn "no autostart desktop files found"
-  health_ok=false
-fi
-
-if [ -f "$WLAN_STATE" ]; then
-  ok "WLAN driver state file present"
-else
-  warn "WLAN driver state file missing"
-fi
+[ -x /usr/local/scripts/start-sim.sh ] && ok "client-sim start script present" || warn "client-sim start script missing"
+ls /etc/xdg/autostart/*.desktop >/dev/null 2>&1 && ok "autostart desktop files present" || warn "no autostart desktop files found"
+[ -f "$WLAN_STATE" ] && ok "WLAN driver state file present" || warn "WLAN driver state file missing"
 
 echo
 echo "========== POST-INSTALL HEALTH SUMMARY =========="
-if [ "$health_ok" = true ]; then
-  ok "System health PASSED"
-else
-  warn "System health has WARNINGS"
-fi
+[ "$health_ok" = true ] && ok "System health PASSED" || warn "System health has WARNINGS"
 echo "==============================================="
 
 ###############################################################################
@@ -373,10 +354,7 @@ echo "========== WLAN DRIVER SUMMARY =========="
 column -t -s: "$WLAN_STATE"
 echo "========================================"
 
-if [ -s "$REBOOT_LOG" ]; then
-  warn "Drivers requested a reboot (suppressed):"
-  cat "$REBOOT_LOG"
-fi
+[ -s "$REBOOT_LOG" ] && { warn "Drivers requested a reboot (suppressed):"; cat "$REBOOT_LOG"; }
 
 ok "Installation complete — manual reboot recommended"
 echo "Log: $LOG"
