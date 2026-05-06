@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.49
+# Client Simulator Installer v0.99.51
 #
-# CANONICAL FULL RE-EMIT
+# PATCH OVER v0.99.50
 # -----------------------------------------------------------------------------
-# ✅ Quiet apt installs (no console spam)
-# ✅ INFO / OK progress lines only
-# ✅ Stable, synchronous WLAN driver installs
-# ✅ Deterministic client-sim repo handling
-# ✅ Version banner restored
+# ✅ Restore creation of user "user"
+# ✅ Restore sudo access for that user
 ###############################################################################
 
-###############################################################################
-# Bash + PATH hardening
-###############################################################################
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -22,7 +16,7 @@ fi
 set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
-VERSION="0.99.49"
+VERSION="0.99.51"
 
 ###############################################################################
 # Startup version banner
@@ -76,6 +70,25 @@ apt_install() {
 }
 
 ###############################################################################
+# USER PROVISIONING (RESTORED)
+###############################################################################
+info "Ensuring local user 'user' exists and has sudo access"
+
+if ! id user >/dev/null 2>&1; then
+  useradd -m -s /bin/bash user
+  ok "Created user 'user'"
+else
+  ok "User 'user' already exists"
+fi
+
+if ! id -nG user | grep -qw sudo; then
+  usermod -aG sudo user
+  ok "Added user 'user' to sudo group"
+else
+  ok "User 'user' already has sudo access"
+fi
+
+###############################################################################
 # Raspberry Pi detection
 ###############################################################################
 IS_RPI=0
@@ -110,7 +123,6 @@ info "Phase 2: WLAN drivers"
 mkdir -p /usr/src/wifi-drivers
 cd /usr/src/wifi-drivers
 
-# Suppress reboots requested by driver scripts
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt systemctl; do
   echo -e "#!/bin/sh\necho \"$cmd requested\" >>'$REBOOT_LOG'\nexit 0" \
@@ -137,12 +149,8 @@ if [ "$IS_RPI" -eq 0 ]; then
     if git clone "$REPO" "$NAME" >>"$LOG" 2>&1; then
       cd "$NAME"
       case "$TYPE" in
-        morrownr)
-          ./install-driver.sh >>"$LOG" 2>&1 && STATUS="INSTALLED"
-          ;;
-        aircrack)
-          ./dkms-install.sh >>"$LOG" 2>&1 && STATUS="INSTALLED"
-          ;;
+        morrownr) ./install-driver.sh >>"$LOG" 2>&1 && STATUS="INSTALLED" ;;
+        aircrack) ./dkms-install.sh >>"$LOG" 2>&1 && STATUS="INSTALLED" ;;
         dkms)
           make >>"$LOG" 2>&1
           make install >>"$LOG" 2>&1
@@ -159,25 +167,23 @@ if [ "$IS_RPI" -eq 0 ]; then
     echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
     ok "WLAN driver $NAME: $STATUS"
   done
-
-  depmod -a >>"$LOG" 2>&1 || true
 fi
 
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
 ###############################################################################
-# Phase 3a — Firmware
+# Firmware
 ###############################################################################
 apt_install "Installing firmware packages" \
   firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
   firmware-iwlwifi firmware-atheros
 
 ###############################################################################
-# LightDM + LXQt desktop
+# Desktop stack
 ###############################################################################
-apt_install "Installing LightDM and LXQt" \
-  lightdm lightdm-gtk-greeter lxqt-session openbox
+apt_install "Installing desktop components" \
+  lightdm lightdm-gtk-greeter lxqt-session openbox gnome-terminal
 
 echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
 
@@ -193,17 +199,15 @@ cat >/etc/systemd/system/lightdm.service.d/override.conf <<EOF
 [Service]
 Restart=always
 RestartSec=2
-StartLimitIntervalSec=0
 [Unit]
 Conflicts=getty@tty7.service
 EOF
 
 systemctl daemon-reload
 systemctl enable lightdm
-ok "Desktop stack installed"
 
 ###############################################################################
-# Client-sim deployment (deterministic repo sync)
+# client-sim deployment
 ###############################################################################
 info "Deploying client-sim"
 
@@ -232,10 +236,12 @@ apt_install "Installing network services" \
   network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Health check summary
+# Health check
 ###############################################################################
 echo
 echo "========== HEALTH CHECK =========="
+id user >/dev/null && echo "User: OK" || echo "User: MISSING"
+groups user | grep -qw sudo && echo "Sudo: OK" || echo "Sudo: FAIL"
 systemctl is-active --quiet lightdm && echo "LightDM: OK" || echo "LightDM: FAIL"
 systemctl is-active --quiet NetworkManager && echo "Network: OK" || echo "Network: FAIL"
 lsmod | grep -E '88|rtl' >/dev/null && echo "WLAN: PRESENT" || echo "WLAN: NOT LOADED"
