@@ -229,13 +229,13 @@ do
   if git clone "$REPO" "$NAME" >>"$LOG" 2>&1; then
     cd "$NAME"
     case "$TYPE" in
-      morrownr) ./install-driver.sh NoPrompt >>"$LOG" 2>&1 ;;
-      aircrack) ./install-driver.sh >>"$LOG" 2>&1 ;;
+      morrownr) sudo ./install-driver.sh NoPrompt >>"$LOG" 2>&1 ;;
+      aircrack) sudo ./install-driver.sh >>"$LOG" 2>&1 ;;
       lwfinger)
-        make all >>"$LOG" 2>&1
-        make install >>"$LOG" 2>&1
-        dkms add . >>"$LOG" 2>&1 || true
-        dkms install "$MOD" >>"$LOG" 2>&1 || true
+        sudo make all >>"$LOG" 2>&1
+        sudo make install >>"$LOG" 2>&1
+        sudo dkms add . >>"$LOG" 2>&1 || true
+        sudo dkms install "$MOD" >>"$LOG" 2>&1 || true
         ;;
     esac
     cd ..
@@ -247,7 +247,7 @@ do
   fi
 done
 
-depmod -a >>"$LOG" 2>&1
+sudo depmod -a >>"$LOG" 2>&1
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
