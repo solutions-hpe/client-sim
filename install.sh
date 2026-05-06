@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.04
+# Client Simulator Installer v0.06
 ###############################################################################
 
 set -euo pipefail
@@ -21,7 +21,7 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
-VERSION="0.04"
+VERSION="0.06"
 
 ###############################################################################
 # Logging
@@ -140,7 +140,6 @@ start_spinner() {
     done
   ) &
   SPINNER_PID=$!
-  disown "$SPINNER_PID" 2>/dev/null || true
 }
 
 stop_spinner() {
@@ -197,7 +196,6 @@ else
 fi
 
 start_spinner "Configuring sudoers"
-usermod -aG sudo "$SIM_USER"
 
 cat >/etc/sudoers.d/99-simuser-nopasswd <<EOF
 # Managed by client-sim-install.sh — do not edit manually
@@ -224,8 +222,22 @@ start_spinner "Updating package lists"
 retry apt-get update --quiet=2 >>"$LOG" 2>&1
 stop_spinner; ok "Package lists updated"
 
+# Pre-seed debconf answers for packages known to prompt interactively.
+# samba-common prompts for workgroup even with DEBIAN_FRONTEND=noninteractive.
+start_spinner "Pre-seeding debconf answers"
+{
+  echo "samba-common samba-common/workgroup string WORKGROUP"
+  echo "samba-common samba-common/dhcp boolean false"
+  echo "samba-common samba-common/smb.conf.update.template boolean false"
+  echo "rsyslog rsyslog/enable_all boolean false"
+  echo "lightdm shared/default-x-display-manager select lightdm"
+} | debconf-set-selections >>"$LOG" 2>&1
+stop_spinner; ok "debconf answers pre-seeded"
+
 start_spinner "Upgrading existing packages"
-retry apt-get upgrade -y --quiet=2 >>"$LOG" 2>&1
+retry apt-get upgrade -y --quiet=2 \
+  -o Dpkg::Options::="--force-confdef" \
+  -o Dpkg::Options::="--force-confold" >>"$LOG" 2>&1
 stop_spinner; ok "System packages upgraded"
 
 PACKAGES=(
@@ -258,7 +270,10 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   stop_spinner
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
   start_spinner "Installing: ${BATCH[*]}"
-  retry apt-get install -y --quiet=2 "${BATCH[@]}" >>"$LOG" 2>&1
+  retry apt-get install -y --quiet=2 \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    "${BATCH[@]}" >>"$LOG" 2>&1
 done
 
 stop_spinner
@@ -409,7 +424,9 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
 
     # ── Final permissions ────────────────────────────────────────────────────
     start_spinner "Setting permissions on /usr/local/scripts"
-    chmod -R 777 /usr/local/scripts >>"$LOG" 2>&1
+    find /usr/local/scripts -type d                -exec chmod 755 {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f -name "*.sh"   -exec chmod 755 {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} \; >>"$LOG" 2>&1
     stop_spinner; ok "Permissions set on /usr/local/scripts"
 
     cd "$HOME"
@@ -677,11 +694,11 @@ for entry in "${DRIVERS[@]}"; do
 
           DKMS_VER="0.0"
           if [[ -f dkms.conf ]]; then
-            DKMS_VER="$(grep -Po '(?<=PACKAGE_VERSION=")[^"]+' dkms.conf || echo "0.0")"
+            DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
           fi
 
           start_spinner "DKMS install $NAME ($MOD/$DKMS_VER)"
-          dkms add    . >>"$LOG" 2>&1 || true
+          dkms add -m "$MOD" -v "$DKMS_VER" --sourcetree "$(pwd)" >>"$LOG" 2>&1 || true
           dkms install "${MOD}/${DKMS_VER}" >>"$LOG" 2>&1 \
             || warn "$NAME: dkms install failed (non-fatal)"
           stop_spinner
@@ -737,11 +754,12 @@ echo ""
 echo "================ HEALTH CHECK ================"
 id "$SIM_USER"    &>/dev/null              && echo "  User ($SIM_USER):   OK"      || echo "  User ($SIM_USER):   MISSING"
 groups "$SIM_USER" | grep -q sudo          && echo "  Sudo group:         OK"      || echo "  Sudo group:         MISSING"
+[[ -f /etc/sudoers.d/99-simuser-nopasswd ]] && echo "  Scoped sudoers:     OK"      || echo "  Scoped sudoers:     MISSING"
 systemctl is-active --quiet lightdm        && echo "  LightDM:            OK"      || echo "  LightDM:            NOT ACTIVE"
 systemctl is-active --quiet NetworkManager && echo "  NetworkManager:     OK"      || echo "  NetworkManager:     NOT ACTIVE"
 systemctl is-active --quiet virtualhereclient \
                                            && echo "  VirtualHere:        OK"      || echo "  VirtualHere:        NOT ACTIVE"
-lsmod | grep -qE '88|rtw|885'             && echo "  WLAN modules:       LOADED"  || echo "  WLAN modules:       NOT LOADED"
+lsmod | grep -qE '^(88|rtw|rtl)'          && echo "  WLAN modules:       LOADED"  || echo "  WLAN modules:       NOT LOADED"
 [[ -f /usr/local/scripts/simulation.conf ]] \
                                            && echo "  simulation.conf:    OK"      || echo "  simulation.conf:    MISSING"
 [[ -f /etc/rsyslog.d/10-rsyslog.conf ]]   && echo "  rsyslog config:     OK"      || echo "  rsyslog config:     NOT INSTALLED"
