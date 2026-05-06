@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.03
+# Client Simulator Installer v0.04
 ###############################################################################
 
 set -euo pipefail
@@ -21,7 +21,7 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
-VERSION="0.03"
+VERSION="0.04"
 
 ###############################################################################
 # Logging
@@ -44,32 +44,30 @@ err()  { echo "[$(ts)] ERR:  $*" | tee -a "$LOG" >&2; }
 ###############################################################################
 # PROGRESS TRACKING
 ###############################################################################
-# Define all phases and their weights (must sum to 100)
-#   Phase name                    Weight
 PHASE_NAMES=(
-  "User Provisioning"             # 5
-  "Package Install"               # 10
-  "GNOME Configuration"           # 5
-  "Scripts Directory"             # 2
-  "SMB Config Sync"               # 5
-  "rsyslog Config"                # 3
-  "VirtualHere Install"           # 10
-  "WLAN Drivers"                  # 55
-  "Network Apps"                  # 3
-  "Health Check"                  # 2
+  "User Provisioning"
+  "Package Install"
+  "GNOME Configuration"
+  "Scripts Directory"
+  "Client-Sim Repo"
+  "SMB Config Sync"
+  "rsyslog Config"
+  "VirtualHere Install"
+  "WLAN Drivers"
+  "Health Check"
 )
-PHASE_WEIGHTS=( 5 10 5 2 5 3 10 55 3 2 )
+PHASE_WEIGHTS=( 4 12 5 2 8 5 3 10 49 2 )
 
 CURRENT_PHASE=0
-CURRENT_PROGRESS=0   # cumulative % completed so far
+CURRENT_PROGRESS=0
 SPINNER_PID=""
 
-# ── Terminal colour/width helpers ────────────────────────────────────────────
+# ── Terminal helpers ─────────────────────────────────────────────────────────
 TERM_WIDTH=80
 if command -v tput &>/dev/null && tput cols &>/dev/null 2>&1; then
   TERM_WIDTH="$(tput cols)"
 fi
-BAR_WIDTH=$(( TERM_WIDTH - 30 ))   # leave room for label & percentage
+BAR_WIDTH=$(( TERM_WIDTH - 30 ))
 [[ "$BAR_WIDTH" -lt 20 ]] && BAR_WIDTH=20
 
 COL_RESET="\033[0m"
@@ -78,81 +76,61 @@ COL_CYAN="\033[0;36m"
 COL_YELLOW="\033[1;33m"
 COL_BOLD="\033[1m"
 
-# ── Draw the progress bar ────────────────────────────────────────────────────
-# Usage: draw_bar <percent 0-100> <label>
+# ── Draw progress bar ────────────────────────────────────────────────────────
 draw_bar() {
-  local pct="$1"
-  local label="$2"
+  local pct="$1" label="$2"
   local filled=$(( pct * BAR_WIDTH / 100 ))
   local empty=$(( BAR_WIDTH - filled ))
-  local bar=""
+  local bar="" col="$COL_GREEN"
 
   for (( i=0; i<filled; i++ )); do bar+="█"; done
   for (( i=0; i<empty;  i++ )); do bar+="░"; done
 
-  # Choose colour by completion
-  local col="$COL_GREEN"
   [[ "$pct" -lt 50 ]] && col="$COL_CYAN"
   [[ "$pct" -lt 20 ]] && col="$COL_YELLOW"
 
-  # \r to overwrite the same line; no newline at end
-  printf "\r${COL_BOLD}%-18s${COL_RESET} ${col}%s${COL_RESET} ${COL_BOLD}%3d%%${COL_RESET}" \
-    "${label:0:18}" "$bar" "$pct"
+  printf "\r${COL_BOLD}%-20s${COL_RESET} ${col}%s${COL_RESET} ${COL_BOLD}%3d%%${COL_RESET}" \
+    "${label:0:20}" "$bar" "$pct"
 }
 
-# ── Advance to the next phase ────────────────────────────────────────────────
-# Call at the START of each phase.
+# ── Phase control ────────────────────────────────────────────────────────────
 begin_phase() {
-  # Stop any running spinner first
   stop_spinner
-
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
-  local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
-
   draw_bar "$CURRENT_PROGRESS" "$name"
-  echo ""   # newline after the bar so info() lines scroll below it
-
+  echo ""
   info "Phase $((CURRENT_PHASE+1))/${#PHASE_NAMES[@]}: $name"
 }
 
-# Call at the END of each phase.
 end_phase() {
   stop_spinner
   local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
   CURRENT_PROGRESS=$(( CURRENT_PROGRESS + weight ))
   [[ "$CURRENT_PROGRESS" -gt 100 ]] && CURRENT_PROGRESS=100
-
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
   draw_bar "$CURRENT_PROGRESS" "$name"
   printf "  ✓\n"
-
   CURRENT_PHASE=$(( CURRENT_PHASE + 1 ))
 }
 
 # ── Sub-step progress within a phase ────────────────────────────────────────
-# Usage: phase_step <current_step> <total_steps> <label>
-# Renders fractional progress within the current phase weight.
 phase_step() {
-  local step="$1" total="$2" label="$3"
+  local step="$1" total="$2"
   local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
   local prev_weight=0
-
-  # Sum weights of completed phases
   for (( i=0; i<CURRENT_PHASE; i++ )); do
     prev_weight=$(( prev_weight + PHASE_WEIGHTS[i] ))
   done
-
   local frac_pct=$(( prev_weight + (step * weight / total) ))
   draw_bar "$frac_pct" "${PHASE_NAMES[$CURRENT_PHASE]:-}"
 }
 
-# ── Spinner for commands where progress is unknown ───────────────────────────
+# ── Spinner ──────────────────────────────────────────────────────────────────
 SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 
 start_spinner() {
   local label="${1:-Working...}"
-  stop_spinner   # ensure no double-spinner
-
+  stop_spinner
   (
     local i=0
     while true; do
@@ -170,15 +148,14 @@ stop_spinner() {
     kill "$SPINNER_PID" 2>/dev/null || true
     wait "$SPINNER_PID" 2>/dev/null || true
     SPINNER_PID=""
-    printf "\r\033[K"   # clear the spinner line
+    printf "\r\033[K"
   fi
 }
 
-# Ensure spinner is always stopped on exit
 trap 'stop_spinner; tput cnorm 2>/dev/null || true' EXIT
 
 ###############################################################################
-# Startup banner  (written to both stdout AND the log)
+# Startup banner
 ###############################################################################
 {
 echo
@@ -189,7 +166,7 @@ echo "============================================================"
 echo
 } | tee -a "$LOG"
 
-# Hide cursor during install for cleaner output
+# Hide cursor during install
 tput civis 2>/dev/null || true
 
 ###############################################################################
@@ -224,7 +201,7 @@ usermod -aG sudo "$SIM_USER"
 
 cat >/etc/sudoers.d/99-simuser-nopasswd <<EOF
 # Managed by client-sim-install.sh — do not edit manually
-$SIM_USER ALL=(ALL) NOPASSWD: /usr/bin/apt, /usr/sbin/dpkg, /bin/systemctl, /sbin/depmod, /usr/sbin/dkms
+$SIM_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/sbin/dpkg, /bin/systemctl, /sbin/depmod, /usr/sbin/dkms
 EOF
 chmod 0440 /etc/sudoers.d/99-simuser-nopasswd
 
@@ -239,37 +216,50 @@ ok "Scoped passwordless sudo configured for '$SIM_USER'"
 end_phase
 
 ###############################################################################
-# PHASE 2 — PACKAGE INSTALL
+# PHASE 2 — PACKAGE INSTALL  (update + upgrade + install)
 ###############################################################################
 begin_phase
-
-PACKAGES=(
-  gnome-terminal wget "linux-headers-$(uname -r)"
-  git qemu-guest-agent smbclient rsyslog rfkill
-  firefox-esr iperf3 dkms sysstat build-essential
-  net-tools dnsutils network-manager lightdm
-)
-TOTAL_PKGS="${#PACKAGES[@]}"
 
 start_spinner "Updating package lists"
 retry apt-get update --quiet=2 >>"$LOG" 2>&1
 stop_spinner; ok "Package lists updated"
 
-# Install in smaller batches so we can show sub-step progress
-BATCH_SIZE=5
-BATCH_NUM=0
+# ── Full system upgrade (from original script) ───────────────────────────────
+start_spinner "Upgrading existing packages"
+retry apt-get upgrade -y --quiet=2 >>"$LOG" 2>&1
+stop_spinner; ok "System packages upgraded"
+
+# ── Install in batches so the bar moves ─────────────────────────────────────
+PACKAGES=(
+  "gnome-terminal"
+  "wget"
+  "linux-headers-$(uname -r)"
+  "git"
+  "qemu-guest-agent"
+  "smbclient"
+  "rsyslog"
+  "rfkill"
+  "firefox-esr"
+  "iperf3"
+  "dkms"
+  "build-essential"
+  "net-tools"
+  "dnsutils"
+  "network-manager"
+  "lightdm"
+)
+TOTAL_PKGS="${#PACKAGES[@]}"
+BATCH_SIZE=4
 INSTALLED_COUNT=0
 
 for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   BATCH=( "${PACKAGES[@]:$i:$BATCH_SIZE}" )
-  BATCH_NUM=$(( BATCH_NUM + 1 ))
   INSTALLED_COUNT=$(( i + ${#BATCH[@]} ))
   [[ "$INSTALLED_COUNT" -gt "$TOTAL_PKGS" ]] && INSTALLED_COUNT="$TOTAL_PKGS"
 
   stop_spinner
-  phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS" ""
+  phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
   start_spinner "Installing: ${BATCH[*]}"
-
   retry apt-get install -y --quiet=2 "${BATCH[@]}" >>"$LOG" 2>&1
 done
 
@@ -280,7 +270,7 @@ stop_spinner; ok "Core dependencies installed"
 end_phase
 
 ###############################################################################
-# Live GNOME terminal for installer log (only if a graphical session exists)
+# Live GNOME terminal for installer log
 ###############################################################################
 if [[ -n "${DISPLAY:-}" ]] && command -v gnome-terminal &>/dev/null; then
   gnome-terminal --geometry=80x15+0+477 -- tail -f "$LOG" &
@@ -310,7 +300,7 @@ if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   xset s off     || true
   stop_spinner; ok "Screen power management disabled"
 
-  start_spinner "Setting screen resolution"
+  start_spinner "Setting screen resolution to 1440x900"
   xrandr --output Virtual-1 --mode 1440x900 || true
   stop_spinner; ok "Screen resolution set"
 else
@@ -321,13 +311,13 @@ if command -v raspi-config &>/dev/null; then
   start_spinner "Configuring Raspberry Pi locale and Wi-Fi region"
   raspi-config nonint do_change_locale en_US.UTF-8
   raspi-config nonint do_wifi_country US
-  stop_spinner; ok "Raspberry Pi configured"
+  stop_spinner; ok "Raspberry Pi locale and Wi-Fi region configured"
 fi
 
 end_phase
 
 ###############################################################################
-# PHASE 4 — /usr/local/scripts population
+# PHASE 4 — /usr/local/scripts setup
 ###############################################################################
 begin_phase
 
@@ -335,14 +325,109 @@ start_spinner "Preparing /usr/local/scripts"
 mkdir -p /usr/local/scripts
 chown root:"$SIM_USER" /usr/local/scripts
 chmod 775 /usr/local/scripts
+
 touch /usr/local/scripts/sim.log
 chown "$SIM_USER":"$SIM_USER" /usr/local/scripts/sim.log
 chmod 664 /usr/local/scripts/sim.log
-stop_spinner; ok "/usr/local/scripts prepared"
+
+# Write installer version to sim.log (from original script)
+echo "Installer Version $VERSION" | tee /usr/local/scripts/sim.log >>"$LOG"
+
+stop_spinner; ok "/usr/local/scripts prepared — version $VERSION written to sim.log"
 end_phase
 
 ###############################################################################
-# PHASE 5 — SMB CONFIG SYNC
+# PHASE 5 — CLIENT-SIM GITHUB REPO CLONE + FILE DEPLOYMENT
+###############################################################################
+begin_phase
+
+CLIENT_SIM_REPO="https://github.com/solutions-hpe/client-sim.git"
+CLIENT_SIM_DIR="$HOME/client-sim"
+
+start_spinner "Cloning solutions-hpe/client-sim"
+rm -rf "$CLIENT_SIM_DIR"
+if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1; then
+  stop_spinner; ok "client-sim repo cloned"
+
+  LINUX_DIR="$CLIENT_SIM_DIR/linux"
+  CONFIGS_DIR="$CLIENT_SIM_DIR/configs"
+
+  if [[ -d "$LINUX_DIR" ]]; then
+    cd "$LINUX_DIR"
+
+    # ── .desktop autostart files ─────────────────────────────────────────────
+    start_spinner "Installing .desktop autostart files"
+    if compgen -G "*.desktop" &>/dev/null; then
+      cp *.desktop /etc/xdg/autostart/ >>"$LOG" 2>&1
+      stop_spinner; ok ".desktop autostart files installed"
+    else
+      stop_spinner; warn "No .desktop files found in $LINUX_DIR"
+    fi
+
+    # ── Shell scripts ────────────────────────────────────────────────────────
+    start_spinner "Copying shell scripts to /usr/local/scripts"
+    if compgen -G "*.sh" &>/dev/null; then
+      cp *.sh /usr/local/scripts/ >>"$LOG" 2>&1
+      stop_spinner; ok "Shell scripts copied"
+    else
+      stop_spinner; warn "No .sh files found in $LINUX_DIR"
+    fi
+
+    # ── Flat text files ──────────────────────────────────────────────────────
+    start_spinner "Copying text files to /usr/local/scripts"
+    if compgen -G "*.txt" &>/dev/null; then
+      cp *.txt /usr/local/scripts/ >>"$LOG" 2>&1
+      stop_spinner; ok "Text files copied"
+    else
+      stop_spinner; warn "No .txt files found in $LINUX_DIR"
+    fi
+
+    # ── simulation.conf (conditional — don't overwrite existing) ─────────────
+    start_spinner "Checking simulation.conf"
+    if [[ -f /usr/local/scripts/simulation.conf ]]; then
+      stop_spinner; ok "simulation.conf already exists — not overwriting"
+    else
+      if [[ -f "$CONFIGS_DIR/simulation.conf" ]]; then
+        cp "$CONFIGS_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
+        stop_spinner; ok "simulation.conf copied from configs directory"
+      elif [[ -f "$LINUX_DIR/simulation.conf" ]]; then
+        cp "$LINUX_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
+        stop_spinner; ok "simulation.conf copied from linux directory"
+      else
+        stop_spinner; warn "simulation.conf not found in repo — skipping"
+      fi
+    fi
+
+    # ── rsyslog config from repo ─────────────────────────────────────────────
+    start_spinner "Checking for rsyslog config in repo"
+    if [[ -f "$LINUX_DIR/10-rsyslog.conf" ]]; then
+      stop_spinner
+      info "Found 10-rsyslog.conf in repo — will apply in rsyslog phase"
+      REPO_RSYSLOG_CONF="$LINUX_DIR/10-rsyslog.conf"
+    else
+      stop_spinner; warn "No 10-rsyslog.conf in repo linux directory"
+      REPO_RSYSLOG_CONF=""
+    fi
+
+    # ── Final permissions ────────────────────────────────────────────────────
+    start_spinner "Setting permissions on /usr/local/scripts"
+    chmod -R 777 /usr/local/scripts >>"$LOG" 2>&1
+    stop_spinner; ok "Permissions set on /usr/local/scripts"
+
+    cd "$HOME"
+  else
+    stop_spinner; warn "linux/ directory not found in client-sim repo — skipping file deployment"
+    REPO_RSYSLOG_CONF=""
+  fi
+else
+  stop_spinner; warn "Failed to clone client-sim repo — skipping file deployment"
+  REPO_RSYSLOG_CONF=""
+fi
+
+end_phase
+
+###############################################################################
+# PHASE 6 — SMB CONFIG SYNC  (authenticated + checksum validated)
 ###############################################################################
 begin_phase
 
@@ -371,37 +456,50 @@ else
       fi
       stop_spinner; ok "SMB file checksums verified"
     else
-      warn "No checksums.sha256 manifest — skipping integrity check"
+      warn "No checksums.sha256 manifest found — skipping integrity check"
     fi
     ok "SMB config sync complete"
   else
     stop_spinner; warn "SMB config sync failed — continuing without remote config"
   fi
 fi
+
 end_phase
 
 ###############################################################################
-# PHASE 6 — RSYSLOG CUSTOM CONFIG
+# PHASE 7 — RSYSLOG CUSTOM CONFIG
+# Priority: repo file > SMB-synced file > skip
 ###############################################################################
 begin_phase
 
-if [[ -f /usr/local/scripts/10-rsyslog.conf ]]; then
-  start_spinner "Validating and installing rsyslog config"
-  if rsyslogd -N1 -f /usr/local/scripts/10-rsyslog.conf >>"$LOG" 2>&1; then
-    cp /usr/local/scripts/10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+# REPO_RSYSLOG_CONF is set (or empty) by Phase 5
+RSYSLOG_SOURCE=""
+if [[ -n "${REPO_RSYSLOG_CONF:-}" && -f "$REPO_RSYSLOG_CONF" ]]; then
+  RSYSLOG_SOURCE="$REPO_RSYSLOG_CONF"
+  info "Using rsyslog config from GitHub repo"
+elif [[ -f /usr/local/scripts/10-rsyslog.conf ]]; then
+  RSYSLOG_SOURCE="/usr/local/scripts/10-rsyslog.conf"
+  info "Using rsyslog config from /usr/local/scripts (SMB)"
+fi
+
+if [[ -n "$RSYSLOG_SOURCE" ]]; then
+  start_spinner "Validating rsyslog config"
+  if rsyslogd -N1 -f "$RSYSLOG_SOURCE" >>"$LOG" 2>&1; then
+    cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
     systemctl restart rsyslog || true
-    systemctl enable rsyslog  || true
-    stop_spinner; ok "rsyslog configured"
+    systemctl enable  rsyslog || true
+    stop_spinner; ok "rsyslog configured from $RSYSLOG_SOURCE"
   else
     stop_spinner; warn "rsyslog config validation failed — skipping"
   fi
 else
-  warn "No custom rsyslog config found — skipping"
+  warn "No rsyslog config source found — skipping"
 fi
+
 end_phase
 
 ###############################################################################
-# PHASE 7 — VIRTUALHERE INSTALL
+# PHASE 8 — VIRTUALHERE INSTALL  (SHA256-verified)
 ###############################################################################
 begin_phase
 info "Installing VirtualHere"
@@ -409,6 +507,7 @@ info "Installing VirtualHere"
 ARCH="$(uname -m)"
 VH_BIN=""
 
+# Populate these from https://www.virtualhere.com/usb_client_software
 declare -A VH_SHA256=(
   [vhclientx86_64]="REPLACE_WITH_OFFICIAL_SHA256_FOR_x86_64"
   [vhclientarm64]="REPLACE_WITH_OFFICIAL_SHA256_FOR_arm64"
@@ -426,35 +525,52 @@ if [[ -n "$VH_BIN" ]]; then
   VH_TMP="$(mktemp)"
 
   start_spinner "Downloading VirtualHere ($VH_BIN)"
-  if retry curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
-      -o "$VH_TMP"; then
+  if retry curl -fsSL \
+      "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
+      -o "$VH_TMP" >>"$LOG" 2>&1; then
     stop_spinner
 
     EXPECTED_SUM="${VH_SHA256[$VH_BIN]:-}"
     if [[ "$EXPECTED_SUM" == "REPLACE_WITH_OFFICIAL_SHA256"* || -z "$EXPECTED_SUM" ]]; then
       warn "No checksum configured for $VH_BIN — skipping install until checksums are set"
     else
-      start_spinner "Verifying VirtualHere binary"
+      start_spinner "Verifying VirtualHere checksum"
       ACTUAL_SUM="$(sha256sum "$VH_TMP" | awk '{print $1}')"
       if [[ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]]; then
         stop_spinner
         err "VirtualHere checksum mismatch! Expected: $EXPECTED_SUM  Got: $ACTUAL_SUM"
-        rm -f "$VH_TMP"
-        exit 1
+        rm -f "$VH_TMP"; exit 1
       fi
       stop_spinner; ok "VirtualHere checksum verified"
 
-      install -o root -g root -m 0755 "$VH_TMP" /usr/sbin/vhclient
+      # Install binary — keep arch-specific name AND create generic symlink
+      install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
+      ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
+      ok "VirtualHere binary installed as /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
 
-      start_spinner "Creating VirtualHere systemd service"
-      cat >/etc/systemd/system/virtualhereclient.service <<EOF
+      start_spinner "Downloading VirtualHere systemd service"
+      VH_SVC_TMP="$(mktemp)"
+      if retry curl -fsSL \
+          "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
+          -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
+        stop_spinner
+        # Patch ExecStart to point to our installed binary path
+        sed "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" "$VH_SVC_TMP" \
+          >/etc/systemd/system/virtualhereclient.service
+        rm -f "$VH_SVC_TMP"
+        ok "VirtualHere service file installed"
+      else
+        stop_spinner
+        warn "Could not download official service file — writing fallback"
+        rm -f "$VH_SVC_TMP"
+        cat >/etc/systemd/system/virtualhereclient.service <<EOF
 [Unit]
 Description=VirtualHere USB Client
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/sbin/vhclient
+ExecStart=/usr/sbin/$VH_BIN
 Restart=on-failure
 RestartSec=5
 User=root
@@ -462,14 +578,17 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
+      fi
+
+      start_spinner "Enabling and starting VirtualHere service"
       systemctl daemon-reload
       systemctl enable virtualhereclient
-      systemctl start virtualhereclient
+      systemctl start  virtualhereclient
       stop_spinner
 
       rm -f /usr/local/scripts/vhcached.txt || true
-      /usr/sbin/vhclient -t "AUTO USE CLEAR ALL"   || true
-      /usr/sbin/vhclient -t "STOP USING ALL LOCAL"  || true
+      "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   || true
+      "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  || true
 
       ok "VirtualHere installed and initialized"
     fi
@@ -478,10 +597,11 @@ EOF
   fi
   rm -f "$VH_TMP"
 fi
+
 end_phase
 
 ###############################################################################
-# PHASE 8 — WLAN DRIVERS INSTALL
+# PHASE 9 — WLAN DRIVERS INSTALL
 ###############################################################################
 begin_phase
 
@@ -510,20 +630,21 @@ OLD_PATH="$PATH"
 export PATH="$SUPPRESS:$PATH"
 # ────────────────────────────────────────────────────────────────────────────
 
-# Format: "dir-name|type|repo-url|dkms-module|pinned-tag-or-commit"
+# Format: "dir-name|type|repo-url|dkms-module|pinned-tag|modprobe-module"
+# modprobe-module: leave as "-" if no explicit modprobe needed after install
 DRIVERS=(
-  "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au|HEAD"
-  "8821cu-20210916|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu|HEAD"
-  "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au|HEAD"
-  "8812au-20210820|morrownr|https://github.com/morrownr/8812au-20210820.git|8812au|HEAD"
-  "rtl8852bu-20240418|morrownr|https://github.com/morrownr/rtl8852bu-20240418.git|8852bu|HEAD"
-  "rtl8852cu-20240510|morrownr|https://github.com/morrownr/rtl8852cu-20240510.git|8852cu|HEAD"
-  "88x2bu-20210702|morrownr|https://github.com/morrownr/88x2bu-20210702.git|88x2bu|HEAD"
-  "rtw89|morrownr|https://github.com/morrownr/rtw89.git|rtw89|HEAD"
-  "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au|HEAD"
-  "rtl8188eu|lwfinger|https://github.com/lwfinger/rtl8188eu.git|8188eu|HEAD"
-  "rtl8723au|lwfinger|https://github.com/lwfinger/rtl8723au.git|8723au|HEAD"
-  "rtl8852au|lwfinger|https://github.com/lwfinger/rtl8852au.git|8852au|HEAD"
+  "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au|HEAD|-"
+  "8821cu-20210916|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu|HEAD|-"
+  "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au|HEAD|-"
+  "8812au-20210820|morrownr|https://github.com/morrownr/8812au-20210820.git|8812au|HEAD|-"
+  "rtl8852bu-20240418|morrownr|https://github.com/morrownr/rtl8852bu-20240418.git|8852bu|HEAD|-"
+  "rtl8852cu-20240510|morrownr|https://github.com/morrownr/rtl8852cu-20240510.git|8852cu|HEAD|-"
+  "88x2bu-20210702|morrownr|https://github.com/morrownr/88x2bu-20210702.git|88x2bu|HEAD|-"
+  "rtw89|morrownr|https://github.com/morrownr/rtw89.git|rtw89|HEAD|-"
+  "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au|HEAD|-"
+  "rtl8188eu|lwfinger|https://github.com/lwfinger/rtl8188eu.git|8188eu|HEAD|-"
+  "rtl8723au|lwfinger|https://github.com/lwfinger/rtl8723au.git|8723au|HEAD|8723au"
+  "rtl8852au|lwfinger|https://github.com/lwfinger/rtl8852au.git|8852au|HEAD|-"
 )
 
 TOTAL_DRIVERS="${#DRIVERS[@]}"
@@ -531,23 +652,20 @@ DRIVER_NUM=0
 
 for entry in "${DRIVERS[@]}"; do
   SAVED_IFS="$IFS"
-  IFS='|' read -r NAME TYPE REPO MOD PIN <<<"$entry"
+  IFS='|' read -r NAME TYPE REPO MOD PIN MODPROBE <<<"$entry"
   IFS="$SAVED_IFS"
 
   DRIVER_NUM=$(( DRIVER_NUM + 1 ))
 
-  # Sub-step progress bar for this driver within the phase weight
   stop_spinner
-  phase_step "$DRIVER_NUM" "$TOTAL_DRIVERS" ""
-  printf "  [%d/%d] " "$DRIVER_NUM" "$TOTAL_DRIVERS"
+  phase_step "$DRIVER_NUM" "$TOTAL_DRIVERS"
+  info "Driver $DRIVER_NUM/$TOTAL_DRIVERS: $NAME"
 
-  info "Installing WLAN driver: $NAME ($DRIVER_NUM/$TOTAL_DRIVERS)"
   rm -rf "$NAME"
-
   CLONE_ARGS=(--depth=1)
   [[ "$PIN" != "HEAD" ]] && CLONE_ARGS+=(--branch "$PIN")
 
-  start_spinner "Cloning $NAME"
+  start_spinner "Cloning $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
   if git clone "${CLONE_ARGS[@]}" "$REPO" "$NAME" >>"$LOG" 2>&1; then
     stop_spinner
     cd "$NAME"
@@ -580,15 +698,25 @@ for entry in "${DRIVERS[@]}"; do
         start_spinner "Building $NAME (lwfinger)"
         if make all >>"$LOG" 2>&1 && make install >>"$LOG" 2>&1; then
           stop_spinner
+
           DKMS_VER="0.0"
           if [[ -f dkms.conf ]]; then
             DKMS_VER="$(grep -Po '(?<=PACKAGE_VERSION=")[^"]+' dkms.conf || echo "0.0")"
           fi
-          start_spinner "DKMS install $NAME"
+
+          start_spinner "DKMS install $NAME ($MOD/$DKMS_VER)"
           dkms add    . >>"$LOG" 2>&1 || true
           dkms install "${MOD}/${DKMS_VER}" >>"$LOG" 2>&1 \
             || warn "$NAME: dkms install failed (non-fatal)"
           stop_spinner
+
+          # Explicit modprobe if specified in driver table
+          if [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
+            start_spinner "Loading module: $MODPROBE"
+            modprobe "$MODPROBE" >>"$LOG" 2>&1 \
+              || warn "modprobe $MODPROBE failed (may need reboot)"
+            stop_spinner; ok "Module $MODPROBE loaded"
+          fi
         else
           stop_spinner
           INSTALL_OK=false
@@ -600,19 +728,19 @@ for entry in "${DRIVERS[@]}"; do
 
     if $INSTALL_OK; then
       echo "$NAME:INSTALLED" >>"$DRIVER_STATE"
-      ok "✓ WLAN driver $NAME installed ($DRIVER_NUM/$TOTAL_DRIVERS)"
+      ok "✓ $NAME installed [$DRIVER_NUM/$TOTAL_DRIVERS]"
     else
       echo "$NAME:FAILED" >>"$DRIVER_STATE"
-      warn "✗ WLAN driver $NAME failed ($DRIVER_NUM/$TOTAL_DRIVERS)"
+      warn "✗ $NAME build/install failed [$DRIVER_NUM/$TOTAL_DRIVERS]"
     fi
   else
     stop_spinner
     echo "$NAME:CLONE_FAILED" >>"$DRIVER_STATE"
-    warn "✗ Failed to clone $NAME ($DRIVER_NUM/$TOTAL_DRIVERS)"
+    warn "✗ Failed to clone $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
   fi
 done
 
-start_spinner "Running depmod"
+start_spinner "Running depmod -a"
 depmod -a >>"$LOG" 2>&1
 stop_spinner
 
@@ -622,26 +750,10 @@ ok "WLAN driver installation complete"
 end_phase
 
 ###############################################################################
-# PHASE 9 — NETWORK APPS
-###############################################################################
-begin_phase
-
-start_spinner "Installing network tools"
-retry apt-get install -y --quiet=2 \
-  net-tools dnsutils network-manager >>"$LOG" 2>&1
-stop_spinner
-
-start_spinner "Running autoremove"
-apt-get autoremove -y --quiet=2 >>"$LOG" 2>&1
-stop_spinner; ok "Network tools installed"
-end_phase
-
-###############################################################################
 # PHASE 10 — FINAL HEALTH SUMMARY
 ###############################################################################
 begin_phase
 
-# Restore cursor before printing final report
 tput cnorm 2>/dev/null || true
 
 echo ""
@@ -654,6 +766,9 @@ systemctl is-active --quiet NetworkManager && echo "  NetworkManager:     OK"   
 systemctl is-active --quiet virtualhereclient \
                                            && echo "  VirtualHere:        OK"      || echo "  VirtualHere:        NOT ACTIVE"
 lsmod | grep -qE '88|rtw|885'             && echo "  WLAN modules:       LOADED"  || echo "  WLAN modules:       NOT LOADED"
+[[ -f /usr/local/scripts/simulation.conf ]] \
+                                           && echo "  simulation.conf:    OK"      || echo "  simulation.conf:    MISSING"
+[[ -f /etc/rsyslog.d/10-rsyslog.conf ]]   && echo "  rsyslog config:     OK"      || echo "  rsyslog config:     NOT INSTALLED"
 
 echo ""
 echo "  ---- Driver State ----"
@@ -683,3 +798,4 @@ printf "  ✓\n\n"
 ok "Installation complete — reboot recommended"
 info "Full log:      $LOG"
 info "Driver state:  $DRIVER_STATE"
+info "Sim log:       /usr/local/scripts/sim.log"
