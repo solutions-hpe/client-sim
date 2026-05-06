@@ -1,28 +1,62 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.23
-# - PATH hardened for admin tools
-# - Ensure 'user' exists and is sudoer
-# - WLAN driver status classification fixed
-# - Screen saver / DPMS disabled for LXQt session
-# - Phased ordering (drivers -> firmware -> network)
+# Client Simulator Installer v0.99.27
+#
+# =============================================================================
+# DESIGN DECISIONS SUMMARY
+# =============================================================================
+#
+# This installer is a phased lifecycle tool, not a simple package script.
+# Its structure is deliberate and based on observed failures during testing.
+#
+# CORE INVARIANTS (DO NOT VIOLATE):
+#
+# 1. PHASED EXECUTION MODEL
+#    - Phase 1 : Driver build prerequisites (safe under active X)
+#    - Phase 2 : GitHub WLAN drivers (build-time only, hardware-specific)
+#    - Phase 3a: Firmware (highest reboot / X crash risk)
+#    - Phase 3b: Network services (LAST — connectivity may drop)
+#
+# 2. DESKTOP SESSION STAYS RUNNING
+#    - LightDM / LXQt must NOT be stopped or masked during install.
+#
+# 3. NETWORK-AFFECTING PACKAGES ARE LAST
+#    - NetworkManager resets interfaces and DNS.
+#
+# 4. DRIVER BUILDS BEFORE FIRMWARE
+#    - Firmware updates can reset GPUs and crash active X11 sessions.
+#
+# 5. DRIVER FAILURES DO NOT ABORT INSTALL
+#    - WLAN drivers are hardware-specific.
+#
+# 6. SECURE BOOT IS NOT MANAGED
+#    - No module signing or MOK enrollment is done.
+#
+# 7. PERSISTENT LOGGING IS REQUIRED
+#
+# 8. PATH HARDENING IS REQUIRED
+#    - Non-login shells lack /usr/sbin on minimal systems.
+#
+# 9. THE "user" ACCOUNT IS CANONICAL
+#
 ###############################################################################
 
-# ---------------------------------------------------------------------------
-# Ensure Bash + harden PATH for non-login shells
-# ---------------------------------------------------------------------------
+###############################################################################
+# ENSURE BASH + HARDEN PATH
+###############################################################################
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
 fi
 
-# PATH hardening (admin utilities live here on minimal systems)
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
-
 set -euo pipefail
 
-VERSION="0.99.23"
+VERSION="0.99.27"
 
+###############################################################################
+# GLOBAL STATE AND LOGGING
+###############################################################################
 STATE_DIR="/var/lib/client-sim"
 LOG="/var/log/client-sim-install.log"
 WLAN_STATE="$STATE_DIR/wlan-drivers.state"
@@ -34,120 +68,24 @@ mkdir -p "$STATE_DIR" /var/log
 touch "$LOG"
 chmod 644 "$LOG"
 
-export GIT_TERMINAL_PROMPT=0
-export GIT_ASKPASS=/bin/false
-export SSH_ASKPASS=/bin/false
-export NEEDRESTART_MODE=a
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export GIT_TERMINAL_PROMPT=0
 
 ###############################################################################
-# UI helpers
-###############################################################################
-if [ -t 1 ]; then
-  G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
-else
-  G=""; Y=""; B=""; Z=""
-fi
-
-ts(){ date "+%H:%M:%S"; }
-ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
-warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
-info(){ echo "[$(ts)] $*"; }
-
-###############################################################################
-# Spinner with animated dots + block detection + journal dump
-###############################################################################
-SPIN_BLOCK_TIMEOUT=120
-
-spin() {
-  local label="$1"; shift
-  local frames=("." ".." "...")
-  local i=0
-  echo -ne "[$(ts)] ${B}[ ]${Z} $label"
-  "$@" >>"$LOG" 2>&1 &
-  pid=$!
-  local elapsed=0 dumped=0
-  while kill -0 "$pid" 2>/dev/null; do
-    echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
-    i=$(( (i+1) % ${#frames[@]} ))
-    sleep 1
-    elapsed=$((elapsed+1))
-    if (( elapsed >= SPIN_BLOCK_TIMEOUT && dumped == 0 )); then
-      dumped=1
-      echo
-      warn "Long operation (${elapsed}s). Dumping journalctl:"
-      journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
-      echo
-    fi
-  done
-  wait "$pid" || true
-  echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
-}
-
-install_pkgs() {
-  for p in "$@"; do
-    spin "Installing package: $p" apt install -y "$p" || warn "Issue installing $p"
-  done
-}
-
-###############################################################################
-# Raspberry Pi detection
-###############################################################################
-IS_RPI=0
-if command -v raspi-config >/dev/null 2>&1 &&
-   grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
-  IS_RPI=1
-fi
-
-info "Client Simulator Installer v$VERSION"
-
-###############################################################################
-# Ensure 'user' exists and is in sudoers (queued fix applied)
-###############################################################################
-info "Ensuring 'user' account exists and has sudo privileges"
-if ! id user >/dev/null 2>&1; then
-  useradd -m -s /bin/bash user
-  info "Created user: user"
-fi
-
-if getent group sudo >/dev/null 2>&1; then
-  usermod -aG sudo user
-else
-  groupadd sudo || true
-  usermod -aG sudo user
-fi
-
-###############################################################################
-# Disable screen saver / screen blanking for LXQt session (queued fix applied)
-###############################################################################
-info "Disabling screen saver and DPMS for user session"
-
-USER_HOME="$(getent passwd user | cut -d: -f6)"
-mkdir -p "$USER_HOME/.config/autostart" "$USER_HOME/.config/lxqt"
-chown -R user:user "$USER_HOME/.config"
-
-# Autostart xset commands at session start
-cat >"$USER_HOME/.config/autostart/disable-screensaver.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Disable Screen Saver
-Exec=sh -c "xset s off; xset s noblank; xset -dpms"
-X-LXQt-Need-Tray=false
-OnlyShowIn=LXQt;
-EOF
-
-# Disable LXQt screen saver at the session level
-cat >"$USER_HOME/.config/lxqt/session.conf" <<EOF
-[Session]
-allowScreenSaver=false
-allowSuspend=false
-EOF
-
-chown user:user "$USER_HOME/.config/autostart/disable-screensaver.desktop"
-chown user:user "$USER_HOME/.config/lxqt/session.conf"
-
-###############################################################################
-# WLAN driver list (single source of truth)
+# WLAN DRIVER DEFINITIONS — EDIT HERE ONLY
+#
+# Format:
+#   "name|type|git_repo|module"
+#
+# type:
+#   morrownr  -> install-driver.sh
+#   aircrack  -> dkms-install.sh
+#   dkms      -> make + dkms add/install
+#
+# NOTES:
+# - Exit codes are unreliable; output inspection is used.
+# - Secure Boot ON => modules build but will not load.
 ###############################################################################
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
@@ -169,41 +107,80 @@ WLAN_DRIVERS=(
 )
 
 ###############################################################################
-# REMOVE / PURGE
+# UI HELPERS
 ###############################################################################
-if [ "$ACTION" = "remove" ]; then
-  info "Removal mode"
-  if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
-    while IFS=: read -r MOD TYPE STATUS; do
-      case "$TYPE" in
-        dkms|aircrack) dkms remove "$MOD" --all || true ;;
-        morrownr)
-          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] &&
-          "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
-      esac
-    done <"$WLAN_STATE"
-    depmod -a || true
-    rm -f "$WLAN_STATE"
-  fi
-
-  systemctl stop virtualhereclient.service 2>/dev/null || true
-  systemctl disable virtualhereclient.service 2>/dev/null || true
-  rm -f /usr/sbin/vhclientx86_64 /etc/systemd/system/virtualhereclient.service
-  systemctl daemon-reload || true
-
-  rm -rf /usr/local/scripts "$HOME/client-sim"
-  rm -f /etc/xdg/autostart/client-simulator.desktop
-
-  if [ "$PURGE" = "--purge" ]; then
-    apt purge -y lightdm lightdm-gtk-greeter lxqt-session openbox \
-      build-essential dkms git || true
-    apt autoremove -y || true
-    rm -rf "$STATE_DIR"
-  fi
-
-  ok "Removal complete"
-  exit 0
+if [ -t 1 ]; then
+  G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
+else
+  G=""; Y=""; B=""; Z=""
 fi
+
+ts(){ date "+%H:%M:%S"; }
+ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
+warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
+info(){ echo "[$(ts)] $*"; }
+
+###############################################################################
+# SPINNER WITH BLOCK DETECTION
+###############################################################################
+SPIN_BLOCK_TIMEOUT=120
+
+spin() {
+  local label="$1"; shift
+  local frames=("." ".." "...")
+  local i=0
+  echo -ne "[$(ts)] ${B}[ ]${Z} $label"
+  "$@" >>"$LOG" 2>&1 &
+  pid=$!
+  elapsed=0; dumped=0
+  while kill -0 "$pid" 2>/dev/null; do
+    echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
+    i=$(( (i+1) % 3 ))
+    sleep 1
+    elapsed=$((elapsed+1))
+    if (( elapsed >= SPIN_BLOCK_TIMEOUT && dumped == 0 )); then
+      dumped=1
+      journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
+    fi
+  done
+  wait "$pid" || true
+  echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
+}
+
+install_pkgs() {
+  for p in "$@"; do
+    spin "Installing package: $p" apt install -y "$p" ||
+      warn "Issue installing $p"
+  done
+}
+
+###############################################################################
+# USER SETUP
+###############################################################################
+info "Ensuring canonical user exists and has sudo"
+id user >/dev/null 2>&1 || useradd -m -s /bin/bash user
+getent group sudo >/dev/null 2>&1 || groupadd sudo || true
+usermod -aG sudo user
+
+###############################################################################
+# DISABLE SCREEN SAVER / DPMS (LXQt)
+###############################################################################
+info "Disabling screen saver and DPMS for LXQt"
+USER_HOME="$(getent passwd user | cut -d: -f6)"
+mkdir -p "$USER_HOME/.config/autostart" "$USER_HOME/.config/lxqt"
+cat >"$USER_HOME/.config/autostart/disable-screensaver.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Disable Screen Saver
+Exec=sh -c "xset s off; xset s noblank; xset -dpms"
+OnlyShowIn=LXQt;
+EOF
+cat >"$USER_HOME/.config/lxqt/session.conf" <<EOF
+[Session]
+allowScreenSaver=false
+allowSuspend=false
+EOF
+chown -R user:user "$USER_HOME/.config"
 
 ###############################################################################
 # BASE UPDATE
@@ -216,161 +193,86 @@ apt -f install -y >>"$LOG" 2>&1 || true
 ###############################################################################
 # PHASE 1 — DRIVER BUILD PREREQUISITES
 ###############################################################################
-info "Phase 1: GitHub driver prerequisites"
-
+info "Phase 1: Driver build prerequisites"
 HEADERS=()
 HEADER="linux-headers-$(uname -r)"
 apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
-
-install_pkgs build-essential dkms git "${HEADERS[@]}"
+install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# PHASE 2 — GITHUB WLAN DRIVERS (status-aware)
+# PHASE 2 — GITHUB WLAN DRIVERS
 ###############################################################################
 info "Phase 2: GitHub WLAN drivers"
-
 : >"$WLAN_STATE"
 mkdir -p /usr/src/wifi-drivers
+cd /usr/src/wifi-drivers
 
-if [ "$IS_RPI" -eq 0 ]; then
-  cd /usr/src/wifi-drivers
-  for d in "${WLAN_DRIVERS[@]}"; do
-    IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
-    info "Installing WLAN driver: $NAME"
+for d in "${WLAN_DRIVERS[@]}"; do
+  IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
+  info "Building driver: $NAME"
+  TMPLOG="$(mktemp)"
+  STATUS="FAILED"
 
-    TMPLOG="$(mktemp)"
-    STATUS="FAILED"
+  case "$TYPE" in
+    morrownr)
+      git clone "$REPO" "$NAME" &&
+      (cd "$NAME" && ./install-driver.sh >"$TMPLOG" 2>&1) &&
+      STATUS="INSTALLED" ||
+      grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+      ;;
+    aircrack)
+      git clone "$REPO" "$NAME" &&
+      (cd "$NAME" && ./dkms-install.sh >"$TMPLOG" 2>&1) &&
+      STATUS="INSTALLED" ||
+      grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+      ;;
+    dkms)
+      git clone "$REPO" "$NAME" &&
+      (cd "$NAME" &&
+       make >"$TMPLOG" 2>&1 &&
+       make install >>"$TMPLOG" 2>&1 &&
+       dkms add . >>"$TMPLOG" 2>&1 || true &&
+       dkms install "$MOD" >>"$TMPLOG" 2>&1 || true) &&
+      STATUS="INSTALLED" ||
+      grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+      ;;
+  esac
 
-    case "$TYPE" in
-      morrownr)
-        if git clone "$REPO" "$NAME" &&
-           (cd "$NAME" && ./install-driver.sh >"$TMPLOG" 2>&1); then
-          STATUS="INSTALLED"
-        else
-          grep -qiE "already installed|already exists|nothing to do" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
-        fi
-        ;;
-      aircrack)
-        if git clone "$REPO" "$NAME" &&
-           (cd "$NAME" && ./dkms-install.sh >"$TMPLOG" 2>&1); then
-          STATUS="INSTALLED"
-        else
-          grep -qiE "already installed|already exists|nothing to do" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
-        fi
-        ;;
-      dkms)
-        if git clone "$REPO" "$NAME" &&
-           (cd "$NAME" &&
-            make >"$TMPLOG" 2>&1 &&
-            make install >>"$TMPLOG" 2>&1 &&
-            dkms add . >>"$TMPLOG" 2>&1 || true &&
-            dkms install "$MOD" >>"$TMPLOG" 2>&1 || true); then
-          STATUS="INSTALLED"
-        else
-          grep -qiE "already installed|already exists|dkms.*present|module.*exists" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
-        fi
-        ;;
-    esac
+  cat "$TMPLOG" >>"$LOG"
+  echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
+  rm -f "$TMPLOG"
+done
 
-    cat "$TMPLOG" >>"$LOG"
-    rm -f "$TMPLOG"
-
-    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
-    info "WLAN driver $NAME status: $STATUS"
-  done
-  depmod -a || true
-else
-  warn "RPi detected — skipping external WLAN drivers"
-fi
+depmod -a || true
 
 ###############################################################################
-# PHASE 3a — FIRMWARE (before network)
+# PHASE 3a — FIRMWARE
 ###############################################################################
-info "Phase 3a: Firmware"
-
-install_pkgs \
-  firmware-linux \
-  firmware-linux-nonfree \
-  firmware-misc-nonfree \
-  firmware-iwlwifi \
-  firmware-atheros
+info "Phase 3a: Firmware (before network)"
+install_pkgs firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+             firmware-iwlwifi firmware-atheros
 
 ###############################################################################
-# DESKTOP — AUTHORITATIVE LightDM FIX
+# LIGHTDM CONFIGURATION (AUTHORITATIVE)
 ###############################################################################
-info "Configuring LightDM (non-interactive)"
-
+info "Configuring LightDM"
 echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
-echo "gdm3 shared/default-x-display-manager select lightdm" | debconf-set-selections
 echo "sddm shared/default-x-display-manager select lightdm" | debconf-set-selections
 echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
-
 install_pkgs lightdm lightdm-gtk-greeter lxqt-session openbox
-
-spin "Configuring LightDM autologin" bash -c '
-mkdir -p /etc/lightdm/lightdm.conf.d
-cat >/etc/lightdm/lightdm.conf.d/20-autologin.conf <<EOF
-[Seat:*]
-autologin-user=user
-user-session=lxqt
-EOF
-ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
-systemctl enable lightdm
-'
-
-###############################################################################
-# VIRTUALHERE + CLIENT SIM
-###############################################################################
-spin "Installing VirtualHere" bash -c '
-wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64 &&
-wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service &&
-chmod +x vhclientx86_64 &&
-mv vhclientx86_64 /usr/sbin &&
-mv virtualhereclient.service /etc/systemd/system/ &&
-systemctl daemon-reload &&
-systemctl enable virtualhereclient.service
-'
-
-spin "Deploying client simulator" bash -c '
-mkdir -p /usr/local/scripts &&
-git clone https://github.com/solutions-hpe/client-sim.git ~/client-sim || true &&
-cp ~/client-sim/linux/* /usr/local/scripts/ &&
-chmod -R 755 /usr/local/scripts
-'
-
-mkdir -p /etc/xdg/autostart
-cat >/etc/xdg/autostart/client-simulator.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Client Simulator
-Exec=/usr/local/scripts/start-sim.sh
-OnlyShowIn=LXQt;
-EOF
 
 ###############################################################################
 # PHASE 3b — NETWORK (LAST)
 ###############################################################################
 info "Phase 3b: Network services (last)"
-
 install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
-# DRIVER SUMMARY
+# FINAL SUMMARY
 ###############################################################################
 echo
-echo "================= Wi‑Fi Driver Summary ================="
-if [ -f "$WLAN_STATE" ]; then
-  while IFS=: read -r MOD TYPE STATUS; do
-    printf " %-20s | %-10s | %s\n" "$MOD" "$TYPE" "$STATUS"
-  done <"$WLAN_STATE"
-else
-  echo "No external Wi‑Fi drivers processed"
-fi
-echo "========================================================"
-
-###############################################################################
-# FINAL
-###############################################################################
-ok "Installation complete"
-echo "Reboot recommended"
-echo "Log: $LOG"
+echo "================ WLAN DRIVER SUMMARY ================"
+cat "$WLAN_STATE" | column -t -s:
+echo "===================================================="
+ok "Installation complete — reboot recommended"
+echo "Log saved to $LOG"
