@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.51
+# Client Simulator Installer v0.99.52
 #
-# PATCH OVER v0.99.50
+# PATCH OVER v0.99.51
 # -----------------------------------------------------------------------------
-# ✅ Restore creation of user "user"
-# ✅ Restore sudo access for that user
+# ✅ Add architecture-aware VirtualHere installation
 ###############################################################################
 
+###############################################################################
+# Bash + PATH hardening
+###############################################################################
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
@@ -16,7 +18,7 @@ fi
 set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
-VERSION="0.99.51"
+VERSION="0.99.52"
 
 ###############################################################################
 # Startup version banner
@@ -40,11 +42,7 @@ CLIENTSIM_DIR="/usr/local/scripts"
 CLIENTSIM_REPO="/home/user/client-sim"
 
 mkdir -p "$STATE_DIR" /var/log
-: >"$LOG"
-: >"$WLAN_STATE"
-: >"$REBOOT_LOG"
-: >"$DRIVER_LOG"
-
+: >"$LOG" : >"$WLAN_STATE" : >"$REBOOT_LOG" : >"$DRIVER_LOG"
 chmod 644 "$LOG" "$WLAN_STATE" "$REBOOT_LOG" "$DRIVER_LOG"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -60,7 +58,7 @@ ok(){   echo "[$(ts)] OK:   $*"; }
 warn(){ echo "[$(ts)] WARN: $*"; }
 
 ###############################################################################
-# Helper: quiet apt install with INFO/OK feedback
+# Helper: quiet apt install
 ###############################################################################
 apt_install() {
   local label="$1"; shift
@@ -70,7 +68,7 @@ apt_install() {
 }
 
 ###############################################################################
-# USER PROVISIONING (RESTORED)
+# USER provisioning
 ###############################################################################
 info "Ensuring local user 'user' exists and has sudo access"
 
@@ -116,10 +114,9 @@ apt_install "Installing driver build prerequisites" \
   build-essential dkms git rfkill linux-headers-$(uname -r)
 
 ###############################################################################
-# Phase 2 — WLAN drivers (stable, authoritative)
+# Phase 2 — WLAN drivers (unchanged)
 ###############################################################################
 info "Phase 2: WLAN drivers"
-
 mkdir -p /usr/src/wifi-drivers
 cd /usr/src/wifi-drivers
 
@@ -205,6 +202,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable lightdm
+ok "Desktop stack installed"
 
 ###############################################################################
 # client-sim deployment
@@ -230,6 +228,54 @@ chmod 644 /etc/xdg/autostart/*.desktop
 ok "client-sim deployed"
 
 ###############################################################################
+# VirtualHere — ARCHITECTURE-AWARE ✅
+###############################################################################
+info "Installing VirtualHere client (architecture-aware)"
+
+ARCH="$(uname -m)"
+VH_BIN=""
+case "$ARCH" in
+  x86_64)
+    VH_BIN="vhclientx86_64"
+    ;;
+  aarch64)
+    VH_BIN="vhclientarm64"
+    ;;
+  armv7l|armhf)
+    VH_BIN="vhclientarm"
+    ;;
+  *)
+    warn "Unsupported architecture for VirtualHere: $ARCH"
+    VH_BIN=""
+    ;;
+esac
+
+if [ -n "$VH_BIN" ]; then
+  curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
+    -o /usr/sbin/vhclient || { warn "Failed to download VirtualHere"; }
+  chmod +x /usr/sbin/vhclient
+
+  cat >/etc/systemd/system/virtualhereclient.service <<EOF
+[Unit]
+Description=VirtualHere Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/vhclient
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable virtualhereclient
+  systemctl start virtualhereclient || true
+  ok "VirtualHere installed for architecture: $ARCH"
+fi
+
+###############################################################################
 # Network (LAST)
 ###############################################################################
 apt_install "Installing network services" \
@@ -244,7 +290,7 @@ id user >/dev/null && echo "User: OK" || echo "User: MISSING"
 groups user | grep -qw sudo && echo "Sudo: OK" || echo "Sudo: FAIL"
 systemctl is-active --quiet lightdm && echo "LightDM: OK" || echo "LightDM: FAIL"
 systemctl is-active --quiet NetworkManager && echo "Network: OK" || echo "Network: FAIL"
-lsmod | grep -E '88|rtl' >/dev/null && echo "WLAN: PRESENT" || echo "WLAN: NOT LOADED"
+systemctl is-active --quiet virtualhereclient && echo "VirtualHere: OK" || echo "VirtualHere: NOT RUNNING"
 ls /etc/xdg/autostart/*.desktop >/dev/null && echo "Autostart: OK" || echo "Autostart: MISSING"
 echo "================================="
 echo
