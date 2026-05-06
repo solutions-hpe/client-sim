@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.43
+# Client Simulator Installer v0.99.44
 #
-# PATCH OVER v0.99.42
+# PATCH OVER v0.99.43
 # -----------------------------------------------------------------------------
-# ✅ Fix client-sim repo handling:
-#    - Ensure repo is fresh BEFORE copying autostart files
-#    - Eliminate silent git-clone || true failure mode
+# ✅ Add visible startup version banner (early echo)
 ###############################################################################
 
 ###############################################################################
@@ -19,7 +17,17 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.43"
+VERSION="0.99.44"
+
+###############################################################################
+# STARTUP VERSION BANNER  ✅ NEW
+###############################################################################
+echo
+echo "============================================================"
+echo " Client Simulator Installer v${VERSION}"
+echo " Started at: $(date)"
+echo "============================================================"
+echo
 
 ###############################################################################
 # Global state and logging
@@ -76,11 +84,9 @@ spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
   local i=0
-
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
-
   local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
@@ -93,7 +99,6 @@ spin() {
       journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
     fi
   done
-
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
@@ -132,9 +137,75 @@ apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# Phase 2 — WLAN drivers (unchanged from v0.99.42)
+# Phase 2 — WLAN drivers (per‑repo, per‑stage spinners)
 ###############################################################################
-# (Per‑repo, per‑stage spinners + reboot suppression remain intact)
+info "Phase 2: WLAN drivers (per‑repo, per‑stage spinners)"
+
+mkdir -p "$STATE_DIR"
+touch "$DRIVER_LOG"
+
+SUPPRESS="$(mktemp -d)"
+for cmd in reboot shutdown poweroff halt; do
+  echo -e "#!/bin/sh\necho \"driver requested reboot: $cmd\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/$cmd"
+  chmod +x "$SUPPRESS/$cmd"
+done
+echo -e "#!/bin/sh\necho \"driver requested systemctl reboot\" >>'$REBOOT_LOG'\nexit 0" >"$SUPPRESS/systemctl"
+chmod +x "$SUPPRESS/systemctl"
+
+OLD_PATH="$PATH"
+export PATH="$SUPPRESS:$PATH"
+
+: >"$WLAN_STATE"
+mkdir -p /usr/src/wifi-drivers
+cd /usr/src/wifi-drivers
+
+if [ "$IS_RPI" -eq 0 ]; then
+  for d in "${WLAN_DRIVERS[@]}"; do
+    IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
+    info "Processing WLAN driver: $NAME"
+    start_ts="$(ts_epoch)"
+    STATUS="FAILED"
+
+    spin "[$NAME] Cloning repository" git clone "$REPO" "$NAME" || true
+
+    if [ -d "$NAME" ]; then
+      case "$TYPE" in
+        morrownr)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./install-driver.sh --no-install" || true
+          ;;
+        aircrack)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && ./dkms-install.sh --no-install" || true
+          ;;
+        dkms)
+          spin "[$NAME] Building driver" bash -c "cd '$NAME' && make" || true
+          ;;
+      esac
+    fi
+
+    if [ -d "$NAME" ]; then
+      case "$TYPE" in
+        morrownr)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./install-driver.sh" && STATUS="INSTALLED"
+          ;;
+        aircrack)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && ./dkms-install.sh" && STATUS="INSTALLED"
+          ;;
+        dkms)
+          spin "[$NAME] Installing driver" bash -c "cd '$NAME' && make install && dkms add . || true && dkms install '$MOD' || true" && STATUS="INSTALLED"
+          ;;
+      esac
+    fi
+
+    grep -qi "already" "$LOG" && STATUS="ALREADY_INSTALLED"
+    end_ts="$(ts_epoch)"
+    echo "$start_ts,$end_ts,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
+    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
+  done
+  depmod -a || true
+fi
+
+export PATH="$OLD_PATH"
+rm -rf "$SUPPRESS"
 
 ###############################################################################
 # Phase 3a — firmware
@@ -172,7 +243,7 @@ systemctl daemon-reload
 systemctl enable lightdm
 
 ###############################################################################
-# Client‑sim deployment (FIXED: fresh repo guaranteed)
+# Client‑sim deployment (fresh repo guaranteed)
 ###############################################################################
 info "Deploying client-sim"
 
@@ -240,4 +311,3 @@ echo "==============================================="
 
 ok "Installation complete — manual reboot recommended"
 echo "Log: $LOG"
-``
