@@ -19,9 +19,12 @@ fi
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1          # belt-and-suspenders for needrestart
 export GIT_TERMINAL_PROMPT=0
+export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
+export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.07"
+VERSION="0.08"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
@@ -243,19 +246,25 @@ retry apt-get update --quiet=2 >>"$LOG" 2>&1
 stop_spinner; ok "Package lists updated"
 
 # Pre-seed debconf answers for packages known to prompt interactively.
-# samba-common prompts for workgroup even with DEBIAN_FRONTEND=noninteractive.
+# samba-common ignores DEBIAN_FRONTEND without do_debconf=false.
 start_spinner "Pre-seeding debconf answers"
 {
+  # samba-common: do_debconf=false prevents ALL interactive questions
+  echo "samba-common samba-common/do_debconf boolean false"
   echo "samba-common samba-common/workgroup string WORKGROUP"
   echo "samba-common samba-common/dhcp boolean false"
   echo "samba-common samba-common/smb.conf.update.template boolean false"
+  echo "samba-common samba-common/smb.conf.upgrade boolean false"
+  # rsyslog
   echo "rsyslog rsyslog/enable_all boolean false"
+  # display manager
   echo "lightdm shared/default-x-display-manager select lightdm"
+  echo "gdm3 shared/default-x-display-manager select lightdm"
 } | debconf-set-selections >>"$LOG" 2>&1
 stop_spinner; ok "debconf answers pre-seeded"
 
 start_spinner "Upgrading existing packages"
-retry apt-get upgrade -y --quiet=2 \
+retry timeout 300 apt-get upgrade -y --quiet \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold" >>"$LOG" 2>&1
 stop_spinner; ok "System packages upgraded"
@@ -290,10 +299,25 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   stop_spinner
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
   start_spinner "Installing: ${BATCH[*]}"
-  retry apt-get install -y --quiet=2 \
-    -o Dpkg::Options::="--force-confdef" \
-    -o Dpkg::Options::="--force-confold" \
-    "${BATCH[@]}" >>"$LOG" 2>&1
+  info "Batch install start [$(ts)]: ${BATCH[*]}"
+  if ! timeout 300 apt-get install -y --quiet \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      "${BATCH[@]}" >>"$LOG" 2>&1; then
+    stop_spinner
+    warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
+    for pkg in "${BATCH[@]}"; do
+      info "Retrying individual install: $pkg"
+      timeout 180 apt-get install -y --quiet \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        "$pkg" >>"$LOG" 2>&1 \
+        && ok "Installed: $pkg" \
+        || warn "Failed to install: $pkg (non-fatal, continuing)"
+    done
+    start_spinner "Installing: ${BATCH[*]}"
+  fi
+  info "Batch install end   [$(ts)]: ${BATCH[*]}"
 done
 
 stop_spinner
