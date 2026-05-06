@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.06
+# Client Simulator Installer v0.07
 ###############################################################################
 
 set -euo pipefail
@@ -21,7 +21,11 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
-VERSION="0.06"
+VERSION="0.07"
+INSTALL_START=$(date +%s)
+WARN_COUNT=0
+ERR_COUNT=0
+PHASE_START=0
 
 ###############################################################################
 # Logging
@@ -38,8 +42,8 @@ chmod 644 "$LOG" "$DRIVER_STATE"
 ts()   { date "+%H:%M:%S"; }
 info() { echo "[$(ts)] INFO: $*" | tee -a "$LOG"; }
 ok()   { echo "[$(ts)] OK:   $*" | tee -a "$LOG"; }
-warn() { echo "[$(ts)] WARN: $*" | tee -a "$LOG"; }
-err()  { echo "[$(ts)] ERR:  $*" | tee -a "$LOG" >&2; }
+warn() { WARN_COUNT=$(( WARN_COUNT + 1 )); echo "[$(ts)] WARN: $*" | tee -a "$LOG"; }
+err()  { ERR_COUNT=$(( ERR_COUNT + 1 ));  echo "[$(ts)] ERR:  $*" | tee -a "$LOG" >&2; }
 
 ###############################################################################
 # PROGRESS TRACKING
@@ -72,9 +76,11 @@ BAR_WIDTH=$(( TERM_WIDTH - 30 ))
 
 COL_RESET="\033[0m"
 COL_GREEN="\033[0;32m"
+COL_RED="\033[0;31m"
 COL_CYAN="\033[0;36m"
 COL_YELLOW="\033[1;33m"
 COL_BOLD="\033[1m"
+COL_DIM="\033[2m"
 
 # ── Draw progress bar ────────────────────────────────────────────────────────
 draw_bar() {
@@ -96,6 +102,7 @@ draw_bar() {
 # ── Phase control ────────────────────────────────────────────────────────────
 begin_phase() {
   stop_spinner
+  PHASE_START=$(date +%s)
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
   draw_bar "$CURRENT_PROGRESS" "$name"
   echo ""
@@ -104,12 +111,13 @@ begin_phase() {
 
 end_phase() {
   stop_spinner
+  local elapsed=$(( $(date +%s) - PHASE_START ))
   local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
   CURRENT_PROGRESS=$(( CURRENT_PROGRESS + weight ))
   [[ "$CURRENT_PROGRESS" -gt 100 ]] && CURRENT_PROGRESS=100
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
   draw_bar "$CURRENT_PROGRESS" "$name"
-  printf "  ✓\n"
+  printf "  ${COL_GREEN}✓${COL_RESET}  ${COL_DIM}(%ds)${COL_RESET}\n" "$elapsed"
   CURRENT_PHASE=$(( CURRENT_PHASE + 1 ))
 }
 
@@ -152,6 +160,7 @@ stop_spinner() {
 }
 
 trap 'stop_spinner; tput cnorm 2>/dev/null || true' EXIT
+trap 'echo; echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; stop_spinner; tput cnorm 2>/dev/null || true; exit 130' INT
 
 ###############################################################################
 # Startup banner
@@ -167,6 +176,17 @@ echo
 
 # Hide cursor during install
 tput civis 2>/dev/null || true
+
+# ── Pre-flight summary ───────────────────────────────────────────────────────
+printf "${COL_DIM}  Phases : ${COL_RESET}"
+for (( i=0; i<${#PHASE_NAMES[@]}; i++ )); do
+  [[ $i -gt 0 ]] && printf "${COL_DIM} →${COL_RESET} "
+  printf "${COL_DIM}%s${COL_RESET}" "${PHASE_NAMES[$i]}"
+done
+printf "\n"
+printf "${COL_DIM}  Log    : %s${COL_RESET}\n" "$LOG"
+printf "${COL_DIM}  Press Ctrl+C at any time to abort.${COL_RESET}\n"
+echo
 
 ###############################################################################
 # HELPER: retry wrapper
@@ -751,27 +771,50 @@ tput cnorm 2>/dev/null || true
 
 echo ""
 {
+# Helper functions for colored health check rows (output goes to tee below)
+_hc_ok()   { printf "  \033[0;32m✓\033[0m  %-24s \033[0;32mOK\033[0m\n"       "$1"; }
+_hc_warn()  { printf "  \033[1;33m✗\033[0m  %-24s \033[1;33m%s\033[0m\n"      "$1" "$2"; }
+_hc_fail()  { printf "  \033[0;31m✗\033[0m  %-24s \033[0;31m%s\033[0m\n"      "$1" "$2"; }
+_hc_drv_ok(){ printf "  \033[0;32m✓\033[0m  %-35s \033[0;32mINSTALLED\033[0m\n" "$1"; }
+_hc_drv_fail(){ printf "  \033[0;31m✗\033[0m  %-35s \033[0;31m%s\033[0m\n"    "$1" "$2"; }
+
 echo "================ HEALTH CHECK ================"
-id "$SIM_USER"    &>/dev/null              && echo "  User ($SIM_USER):   OK"      || echo "  User ($SIM_USER):   MISSING"
-groups "$SIM_USER" | grep -q sudo          && echo "  Sudo group:         OK"      || echo "  Sudo group:         MISSING"
-[[ -f /etc/sudoers.d/99-simuser-nopasswd ]] && echo "  Scoped sudoers:     OK"      || echo "  Scoped sudoers:     MISSING"
-systemctl is-active --quiet lightdm        && echo "  LightDM:            OK"      || echo "  LightDM:            NOT ACTIVE"
-systemctl is-active --quiet NetworkManager && echo "  NetworkManager:     OK"      || echo "  NetworkManager:     NOT ACTIVE"
+id "$SIM_USER" &>/dev/null \
+  && _hc_ok   "User ($SIM_USER)" \
+  || _hc_fail "User ($SIM_USER)" "MISSING"
+groups "$SIM_USER" | grep -q sudo \
+  && _hc_ok   "Sudo group" \
+  || _hc_warn "Sudo group" "NOT IN GROUP"
+[[ -f /etc/sudoers.d/99-simuser-nopasswd ]] \
+  && _hc_ok   "Scoped sudoers" \
+  || _hc_fail "Scoped sudoers" "MISSING"
+systemctl is-active --quiet lightdm \
+  && _hc_ok   "LightDM" \
+  || _hc_warn "LightDM" "NOT ACTIVE"
+systemctl is-active --quiet NetworkManager \
+  && _hc_ok   "NetworkManager" \
+  || _hc_fail "NetworkManager" "NOT ACTIVE"
 systemctl is-active --quiet virtualhereclient \
-                                           && echo "  VirtualHere:        OK"      || echo "  VirtualHere:        NOT ACTIVE"
-lsmod | grep -qE '^(88|rtw|rtl)'          && echo "  WLAN modules:       LOADED"  || echo "  WLAN modules:       NOT LOADED"
+  && _hc_ok   "VirtualHere" \
+  || _hc_warn "VirtualHere" "NOT ACTIVE"
+lsmod | grep -qE '^(88|rtw|rtl)' \
+  && _hc_ok   "WLAN modules" \
+  || _hc_warn "WLAN modules" "NOT LOADED (reboot may be needed)"
 [[ -f /usr/local/scripts/simulation.conf ]] \
-                                           && echo "  simulation.conf:    OK"      || echo "  simulation.conf:    MISSING"
-[[ -f /etc/rsyslog.d/10-rsyslog.conf ]]   && echo "  rsyslog config:     OK"      || echo "  rsyslog config:     NOT INSTALLED"
+  && _hc_ok   "simulation.conf" \
+  || _hc_fail "simulation.conf" "MISSING"
+[[ -f /etc/rsyslog.d/10-rsyslog.conf ]] \
+  && _hc_ok   "rsyslog config" \
+  || _hc_warn "rsyslog config" "NOT INSTALLED"
 
 echo ""
 echo "  ---- Driver State ----"
 while IFS=: read -r drv status; do
   case "$status" in
-    INSTALLED)    printf "  ✓ %-35s INSTALLED\n"    "$drv" ;;
-    FAILED)       printf "  ✗ %-35s FAILED\n"       "$drv" ;;
-    CLONE_FAILED) printf "  ✗ %-35s CLONE FAILED\n" "$drv" ;;
-    *)            printf "  ? %-35s %s\n"            "$drv" "$status" ;;
+    INSTALLED)    _hc_drv_ok   "$drv" ;;
+    FAILED)       _hc_drv_fail "$drv" "FAILED" ;;
+    CLONE_FAILED) _hc_drv_fail "$drv" "CLONE FAILED" ;;
+    *)            printf "  ?  %-35s %s\n" "$drv" "$status" ;;
   esac
 done < "$DRIVER_STATE"
 
@@ -784,12 +827,41 @@ end_phase
 # FINAL PROGRESS BAR — 100%
 ###############################################################################
 draw_bar 100 "Complete"
-printf "  ✓\n\n"
+printf "  ${COL_GREEN}✓${COL_RESET}\n\n"
 
 ###############################################################################
 # END
 ###############################################################################
-ok "Installation complete — reboot recommended"
-info "Full log:      $LOG"
-info "Driver state:  $DRIVER_STATE"
-info "Sim log:       /usr/local/scripts/sim.log"
+TOTAL_ELAPSED=$(( $(date +%s) - INSTALL_START ))
+ELAPSED_MIN=$(( TOTAL_ELAPSED / 60 ))
+ELAPSED_SEC=$(( TOTAL_ELAPSED % 60 ))
+
+{
+echo "============================================================"
+printf " Installation complete — reboot recommended\n"
+printf " Total time : %dm %02ds\n" "$ELAPSED_MIN" "$ELAPSED_SEC"
+if [[ "$WARN_COUNT" -gt 0 ]]; then
+  printf " Warnings   : %d  (see %s)\n" "$WARN_COUNT" "$LOG"
+else
+  printf " Warnings   : 0\n"
+fi
+if [[ "$ERR_COUNT" -gt 0 ]]; then
+  printf " Errors     : %d  (see %s)\n" "$ERR_COUNT" "$LOG"
+else
+  printf " Errors     : 0\n"
+fi
+printf " Full log   : %s\n" "$LOG"
+printf " Driver state: %s\n" "$DRIVER_STATE"
+printf " Sim log    : /usr/local/scripts/sim.log\n"
+echo "============================================================"
+} | tee -a "$LOG" | while IFS= read -r line; do
+  if   echo "$line" | grep -q "Warnings" && [[ "$WARN_COUNT" -gt 0 ]]; then
+    printf "${COL_YELLOW}%s${COL_RESET}\n" "$line"
+  elif echo "$line" | grep -q "Errors"   && [[ "$ERR_COUNT"  -gt 0 ]]; then
+    printf "${COL_RED}%s${COL_RESET}\n" "$line"
+  elif echo "$line" | grep -q "complete"; then
+    printf "${COL_GREEN}%s${COL_RESET}\n" "$line"
+  else
+    echo "$line"
+  fi
+done
