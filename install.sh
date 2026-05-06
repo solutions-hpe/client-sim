@@ -13,13 +13,13 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export GIT_TERMINAL_PROMPT=0
 
-VERSION="0.99.7"
+VERSION="0.01"
 
 ###############################################################################
 # Logging
 ###############################################################################
 STATE_DIR="/var/lib/client-sim"
-LOG="/tmp/client-sim.log"
+LOG="/var/log/client-sim_install.log"
 DRIVER_STATE="$STATE_DIR/wlan-drivers.state"
 
 mkdir -p "$STATE_DIR"
@@ -43,20 +43,38 @@ echo "============================================================"
 echo | tee -a "$LOG"
 
 ###############################################################################
+# USER PROVISIONING + PASSWORDLESS SUDO
+###############################################################################
+info "Ensuring user 'user' exists with passwordless sudo"
+
+if ! id user &>/dev/null; then
+  useradd -m -s /bin/bash user
+  ok "Created user 'user'"
+else
+  ok "User 'user' already exists"
+fi
+
+usermod -aG sudo user
+
+cat >/etc/sudoers.d/99-user-nopasswd <<EOF
+user ALL=(ALL) NOPASSWD:ALL
+EOF
+chmod 0440 /etc/sudoers.d/99-user-nopasswd
+ok "Passwordless sudo configured"
+
+###############################################################################
 # PACKAGE PARITY
 ###############################################################################
 info "Installing apps needed for WiFi Driver Install"
 
-apt update --quiet=2 >>"$LOG" 2>&1
-apt install -y --quiet=2 \
-  gnome-terminal wget sudo \
-  qemu-guest-agent smbclient \
-  dnsutils firefox-esr rsyslog \
-  iperf3 git dkms sysstat rfkill \
-  build-essential linux-headers-$(uname -r) \
+sud apt update --quiet=2 >>"$LOG" 2>&1
+sud apt install -y --quiet=2 \
+  gnome-terminal wget sudo linux-headers-$(uname -r) \
+  git qemu-guest-agent smbclient rsyslog rfkill \
+  firefox-esr iperf3 dkms sysstat rfkill build-essential \
   >>"$LOG" 2>&1
 
-apt autoremove -y --quiet=2 >>"$LOG" 2>&1
+sudo apt autoremove -y --quiet=2 >>"$LOG" 2>&1
 ok "Installing apps needed for WiFi Driver Install"
 
 ###############################################################################
@@ -82,27 +100,7 @@ info "Setting screen resolution"
 xrandr --output Virtual-1 --mode 1440x900 || true
 
 ###############################################################################
-# USER PROVISIONING + PASSWORDLESS SUDO
-###############################################################################
-info "Ensuring user 'user' exists with passwordless sudo"
-
-if ! id user &>/dev/null; then
-  useradd -m -s /bin/bash user
-  ok "Created user 'user'"
-else
-  ok "User 'user' already exists"
-fi
-
-usermod -aG sudo user
-
-cat >/etc/sudoers.d/99-user-nopasswd <<EOF
-user ALL=(ALL) NOPASSWD:ALL
-EOF
-chmod 0440 /etc/sudoers.d/99-user-nopasswd
-ok "Passwordless sudo configured"
-
-###############################################################################
-# RASPBERRY PI REGION (conditional)
+# RASPBERRY PI REGION
 ###############################################################################
 if command -v raspi-config >/dev/null 2>&1; then
   info "Configuring Raspberry Pi locale and Wi-Fi region"
@@ -131,13 +129,13 @@ smbclient //nas/scripts -N -c \
   >>"$LOG" 2>&1 || warn "SMB config sync failed"
 
 ###############################################################################
-# RSIYSLOG CUSTOM CONFIG
+# RSYSLOG CUSTOM CONFIG
 ###############################################################################
 if [ -f /usr/local/scripts/10-rsyslog.conf ]; then
   info "Installing custom rsyslog config"
   cp /usr/local/scripts/10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
-  systemctl restart rsyslog || true
-  systemctl enable rsyslog || true
+  sudo systemctl restart rsyslog || true
+  sudo systemctl enable rsyslog || true
   ok "rsyslog configured"
 fi
 
@@ -173,9 +171,9 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-  systemctl daemon-reload
-  systemctl enable virtualhereclient
-  systemctl start virtualhereclient
+  sudo systemctl daemon-reload
+  sudo systemctl enable virtualhereclient
+  sudo systemctl start virtualhereclient
 
   rm -f /usr/local/scripts/vhcached.txt || true
   /usr/sbin/vhclient -t "AUTO USE CLEAR ALL" || true
@@ -185,7 +183,7 @@ EOF
 fi
 
 ###############################################################################
-# WLAN DRIVERS — FULL PARITY (12 REPOS)
+# WLAN DRIVERS INSTALL
 ###############################################################################
 info "Installing WLAN drivers"
 
@@ -246,11 +244,11 @@ export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
 info "Installing Network Related Applications"
-apt install -y --quiet=2 \
+sudo apt install -y --quiet=2 \
   net-tools dnsutils network-manager \
   >>"$LOG" 2>&1
 
-apt autoremove -y --quiet=2 >>"$LOG" 2>&1
+sudo apt autoremove -y --quiet=2 >>"$LOG" 2>&1
 ok "Installing Network Related Applications"
 
 ###############################################################################
