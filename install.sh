@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.07
+# Client Simulator Installer v0.09
 ###############################################################################
 
 set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+
+###############################################################################
+# Debug flag  (sudo bash install.sh --debug)
+###############################################################################
+DEBUG=0
+for arg in "$@"; do
+  [[ "$arg" == "--debug" || "$arg" == "-d" ]] && DEBUG=1
+done
 
 ###############################################################################
 # Root check
@@ -24,7 +32,7 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.08"
+VERSION="0.11"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
@@ -173,6 +181,7 @@ echo
 echo "============================================================"
 echo " Client Simulator Installer v${VERSION}"
 echo " Started at: $(date)"
+[[ "$DEBUG" -eq 1 ]] && echo " *** DEBUG MODE — apt output shown on screen ***"
 echo "============================================================"
 echo
 } | tee -a "$LOG"
@@ -205,6 +214,22 @@ retry() {
 }
 
 ###############################################################################
+# HELPER: apt_run — silent normally, live output in --debug mode
+# Usage: apt_run [apt-get args...]
+###############################################################################
+apt_run() {
+  if [[ "$DEBUG" -eq 1 ]]; then
+    stop_spinner
+    printf "\n${COL_DIM}  [DEBUG] apt-get %s${COL_RESET}\n" "$*"
+    apt-get "$@" 2>&1 | tee -a "$LOG"
+    local rc=${PIPESTATUS[0]}
+    return $rc
+  else
+    apt-get "$@" >>"$LOG" 2>&1
+  fi
+}
+
+###############################################################################
 # PHASE 1 — USER PROVISIONING + SCOPED SUDO
 ###############################################################################
 begin_phase
@@ -234,6 +259,26 @@ if ! visudo -cf /etc/sudoers.d/99-simuser-nopasswd >>"$LOG" 2>&1; then
 fi
 stop_spinner
 ok "Scoped passwordless sudo configured for '$SIM_USER'"
+
+# ── SMB credentials template ─────────────────────────────────────────────────
+start_spinner "Checking SMB credentials file"
+SMB_CREDS_DIR="/etc/client-sim"
+SMB_CREDS="$SMB_CREDS_DIR/smb-credentials"
+mkdir -p "$SMB_CREDS_DIR"
+if [[ ! -f "$SMB_CREDS" ]]; then
+  cat >"$SMB_CREDS" <<'CREDS'
+# client-sim SMB credentials — edit before running installer
+# username=your_username
+# password=your_password
+# domain=your_domain
+CREDS
+  chmod 600 "$SMB_CREDS"
+  stop_spinner
+  warn "SMB credentials template created at $SMB_CREDS — edit it to enable SMB sync"
+else
+  chmod 600 "$SMB_CREDS"
+  stop_spinner; ok "SMB credentials file already exists"
+fi
 end_phase
 
 ###############################################################################
@@ -242,7 +287,7 @@ end_phase
 begin_phase
 
 start_spinner "Updating package lists"
-retry apt-get update --quiet=2 >>"$LOG" 2>&1
+retry apt_run update --quiet=2
 stop_spinner; ok "Package lists updated"
 
 # Pre-seed debconf answers for packages known to prompt interactively.
@@ -264,9 +309,9 @@ start_spinner "Pre-seeding debconf answers"
 stop_spinner; ok "debconf answers pre-seeded"
 
 start_spinner "Upgrading existing packages"
-retry timeout 300 apt-get upgrade -y --quiet \
+retry timeout 300 apt_run upgrade -y --quiet \
   -o Dpkg::Options::="--force-confdef" \
-  -o Dpkg::Options::="--force-confold" >>"$LOG" 2>&1
+  -o Dpkg::Options::="--force-confold"
 stop_spinner; ok "System packages upgraded"
 
 PACKAGES=(
@@ -300,18 +345,18 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
   start_spinner "Installing: ${BATCH[*]}"
   info "Batch install start [$(ts)]: ${BATCH[*]}"
-  if ! timeout 300 apt-get install -y --quiet \
+  if ! timeout 300 apt_run install -y --quiet \
       -o Dpkg::Options::="--force-confdef" \
       -o Dpkg::Options::="--force-confold" \
-      "${BATCH[@]}" >>"$LOG" 2>&1; then
+      "${BATCH[@]}"; then
     stop_spinner
     warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
     for pkg in "${BATCH[@]}"; do
       info "Retrying individual install: $pkg"
-      timeout 180 apt-get install -y --quiet \
+      timeout 180 apt_run install -y --quiet \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
-        "$pkg" >>"$LOG" 2>&1 \
+        "$pkg" \
         && ok "Installed: $pkg" \
         || warn "Failed to install: $pkg (non-fatal, continuing)"
     done
@@ -322,7 +367,7 @@ done
 
 stop_spinner
 start_spinner "Running autoremove"
-apt-get autoremove -y --quiet=2 >>"$LOG" 2>&1
+apt_run autoremove -y --quiet=2
 stop_spinner; ok "Core dependencies installed"
 end_phase
 
@@ -490,13 +535,14 @@ end_phase
 ###############################################################################
 begin_phase
 
-SMB_CREDS="/etc/client-sim/smb-credentials"
 SMB_SHARE="//nas/scripts"
 SMB_REMOTE_DIR="/SIM/CONFIG"
 
+# Check credentials exist and have been filled in (not just the template)
 if [[ ! -f "$SMB_CREDS" ]]; then
   warn "SMB credentials file not found at $SMB_CREDS — skipping SMB sync"
-  warn "Create $SMB_CREDS with: username=..., password=..., domain=..."
+elif grep -qE '^\s*#|^[[:space:]]*$' "$SMB_CREDS" && ! grep -qE '^username=' "$SMB_CREDS"; then
+  warn "SMB credentials file is still a template — edit $SMB_CREDS to enable SMB sync"
 else
   chmod 600 "$SMB_CREDS"
   start_spinner "Syncing config files from SMB share"
@@ -592,9 +638,10 @@ if [[ -n "$VH_BIN" ]]; then
         "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
         -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
       stop_spinner
-      # Patch ExecStart to point to our installed binary path
-      sed "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" "$VH_SVC_TMP" \
-        >/etc/systemd/system/virtualhereclient.service
+      # Patch ExecStart and add start timeout so install never blocks
+      sed -e "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" \
+          -e '/\[Service\]/a TimeoutStartSec=15' \
+          "$VH_SVC_TMP" >/etc/systemd/system/virtualhereclient.service
       rm -f "$VH_SVC_TMP"
       ok "VirtualHere service file installed"
     else
@@ -611,6 +658,7 @@ Wants=network-online.target
 ExecStart=/usr/sbin/$VH_BIN
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=15
 User=root
 
 [Install]
@@ -618,15 +666,19 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    start_spinner "Enabling and starting VirtualHere service"
+    start_spinner "Enabling VirtualHere service"
     systemctl daemon-reload
-    systemctl enable virtualhereclient
-    systemctl start  virtualhereclient
+    systemctl enable virtualhereclient >>"$LOG" 2>&1
+    # Start non-blocking — VH client needs a server to connect to which may
+    # not be present at install time; failure here is non-fatal.
+    systemctl start virtualhereclient >>"$LOG" 2>&1 || \
+      warn "VirtualHere service did not start (no server reachable yet) — will start on boot"
     stop_spinner
 
+    sleep 2
     rm -f /usr/local/scripts/vhcached.txt || true
-    "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   || true
-    "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  || true
+    "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   >>"$LOG" 2>&1 || true
+    "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  >>"$LOG" 2>&1 || true
 
     ok "VirtualHere installed and initialized"
   else
