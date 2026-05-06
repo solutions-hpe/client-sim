@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.38
+# Client Simulator Installer v0.99.39
 #
-# PATCH OVER v0.99.37
+# PATCH OVER v0.99.38
 # -----------------------------------------------------------------------------
-# ✅ Per‑driver spinner UI during WLAN installs (Phase 2 only)
-# ✅ Structured driver install log: driver-install.log
+# ✅ Defensively ensure driver log directory & file exist before Phase 2
 #
 # ROLLBACK
 # -----------------------------------------------------------------------------
@@ -22,7 +21,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.38"
+VERSION="0.99.39"
 
 ###############################################################################
 # Global state and logging
@@ -42,7 +41,6 @@ mkdir -p "$STATE_DIR" /var/log
 : >"$LOG"
 : >"$REBOOT_LOG"
 : >"$DRIVER_LOG"
-
 chmod 644 "$LOG" "$REBOOT_LOG" "$DRIVER_LOG"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -70,22 +68,18 @@ fi
 
 ts(){ date "+%H:%M:%S"; }
 ts_epoch(){ date "+%s"; }
-
 info(){ echo "[$(ts)] $*" | tee -a "$LOG"; }
 warn(){ echo -e "[$(ts)] ${Y}WARN:${Z} $*" | tee -a "$LOG"; }
 ok(){   echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
 
 SPIN_BLOCK_TIMEOUT=120
-
 spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
   local i=0
-
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
-
   local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
@@ -98,7 +92,6 @@ spin() {
       journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
     fi
   done
-
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
@@ -185,6 +178,10 @@ install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 # Phase 2 — WLAN drivers (spinner-enhanced, reboot suppressed)
 ###############################################################################
 info "Phase 2: WLAN drivers (spinner-enhanced)"
+
+# ✅ DEFENSIVE FIX (NEW)
+mkdir -p "$STATE_DIR"
+touch "$DRIVER_LOG"
 
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt; do
