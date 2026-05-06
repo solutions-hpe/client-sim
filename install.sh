@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.22
-# Baseline v0.99.21 + queued fixes:
-#  - WLAN driver status: INSTALLED / ALREADY_INSTALLED / FAILED
-#  - Ensure 'user' exists and is in sudoers (idempotent)
+# Client Simulator Installer v0.99.23
+# - PATH hardened for admin tools
+# - Ensure 'user' exists and is sudoer
+# - WLAN driver status classification fixed
+# - Screen saver / DPMS disabled for LXQt session
+# - Phased ordering (drivers -> firmware -> network)
 ###############################################################################
 
-# ---------------- Bash enforcement ----------------
+# ---------------------------------------------------------------------------
+# Ensure Bash + harden PATH for non-login shells
+# ---------------------------------------------------------------------------
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
 fi
 
+# PATH hardening (admin utilities live here on minimal systems)
+export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+
 set -euo pipefail
 
-VERSION="0.99.22"
+VERSION="0.99.23"
 
 STATE_DIR="/var/lib/client-sim"
 LOG="/var/log/client-sim-install.log"
@@ -33,7 +40,9 @@ export SSH_ASKPASS=/bin/false
 export NEEDRESTART_MODE=a
 export DEBIAN_FRONTEND=noninteractive
 
-# ---------------- UI helpers ----------------
+###############################################################################
+# UI helpers
+###############################################################################
 if [ -t 1 ]; then
   G="\033[0;32m"; Y="\033[0;33m"; B="\033[0;34m"; Z="\033[0m"
 else
@@ -41,11 +50,13 @@ else
 fi
 
 ts(){ date "+%H:%M:%S"; }
-ok(){ echo -e "[$(ts)] ${G}✔${Z} $*"; }
+ok(){   echo -e "[$(ts)] ${G}✔${Z} $*"; }
 warn(){ echo -e "[$(ts)] ${Y}⚠${Z} $*"; }
 info(){ echo "[$(ts)] $*"; }
 
-# ---------------- Spinner ----------------
+###############################################################################
+# Spinner with animated dots + block detection + journal dump
+###############################################################################
 SPIN_BLOCK_TIMEOUT=120
 
 spin() {
@@ -79,7 +90,9 @@ install_pkgs() {
   done
 }
 
-# ---------------- Raspberry Pi detection ----------------
+###############################################################################
+# Raspberry Pi detection
+###############################################################################
 IS_RPI=0
 if command -v raspi-config >/dev/null 2>&1 &&
    grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
@@ -89,7 +102,7 @@ fi
 info "Client Simulator Installer v$VERSION"
 
 ###############################################################################
-# Ensure 'user' exists and is in sudoers (QUEUED FIX APPLIED)
+# Ensure 'user' exists and is in sudoers (queued fix applied)
 ###############################################################################
 info "Ensuring 'user' account exists and has sudo privileges"
 if ! id user >/dev/null 2>&1; then
@@ -97,14 +110,41 @@ if ! id user >/dev/null 2>&1; then
   info "Created user: user"
 fi
 
-# Debian-family admin group
 if getent group sudo >/dev/null 2>&1; then
   usermod -aG sudo user
 else
-  # Fallback (should rarely be needed on Debian-family)
   groupadd sudo || true
   usermod -aG sudo user
 fi
+
+###############################################################################
+# Disable screen saver / screen blanking for LXQt session (queued fix applied)
+###############################################################################
+info "Disabling screen saver and DPMS for user session"
+
+USER_HOME="$(getent passwd user | cut -d: -f6)"
+mkdir -p "$USER_HOME/.config/autostart" "$USER_HOME/.config/lxqt"
+chown -R user:user "$USER_HOME/.config"
+
+# Autostart xset commands at session start
+cat >"$USER_HOME/.config/autostart/disable-screensaver.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Disable Screen Saver
+Exec=sh -c "xset s off; xset s noblank; xset -dpms"
+X-LXQt-Need-Tray=false
+OnlyShowIn=LXQt;
+EOF
+
+# Disable LXQt screen saver at the session level
+cat >"$USER_HOME/.config/lxqt/session.conf" <<EOF
+[Session]
+allowScreenSaver=false
+allowSuspend=false
+EOF
+
+chown user:user "$USER_HOME/.config/autostart/disable-screensaver.desktop"
+chown user:user "$USER_HOME/.config/lxqt/session.conf"
 
 ###############################################################################
 # WLAN driver list (single source of truth)
@@ -135,11 +175,10 @@ if [ "$ACTION" = "remove" ]; then
   info "Removal mode"
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
     while IFS=: read -r MOD TYPE STATUS; do
-      info "Removing WLAN driver: $MOD ($TYPE)"
       case "$TYPE" in
         dkms|aircrack) dkms remove "$MOD" --all || true ;;
         morrownr)
-          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] && \
+          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] &&
           "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
       esac
     done <"$WLAN_STATE"
@@ -183,14 +222,10 @@ HEADERS=()
 HEADER="linux-headers-$(uname -r)"
 apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 
-install_pkgs \
-  build-essential \
-  dkms \
-  git \
-  "${HEADERS[@]}"
+install_pkgs build-essential dkms git "${HEADERS[@]}"
 
 ###############################################################################
-# PHASE 2 — GITHUB WLAN DRIVERS (STATUS FIX APPLIED)
+# PHASE 2 — GITHUB WLAN DRIVERS (status-aware)
 ###############################################################################
 info "Phase 2: GitHub WLAN drivers"
 
@@ -317,10 +352,7 @@ EOF
 ###############################################################################
 info "Phase 3b: Network services (last)"
 
-install_pkgs \
-  network-manager \
-  systemd-resolved \
-  iperf3
+install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
 # DRIVER SUMMARY
