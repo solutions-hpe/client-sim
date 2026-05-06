@@ -3,7 +3,7 @@
 # Client Simulator Installer v.01
 ###############################################################################
 
-set -euo pipefail
+#set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
 ###############################################################################
