@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.39
+# Client Simulator Installer v0.99.40
 #
-# PATCH OVER v0.99.38
+# PATCH OVER v0.99.39
 # -----------------------------------------------------------------------------
-# ✅ Defensively ensure driver log directory & file exist before Phase 2
+# ✅ Fixed spin redirection bug (correct stdout/stderr handling)
 #
 # ROLLBACK
 # -----------------------------------------------------------------------------
@@ -21,7 +21,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.39"
+VERSION="0.99.40"
 
 ###############################################################################
 # Global state and logging
@@ -77,9 +77,11 @@ spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
   local i=0
+
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
+
   local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
@@ -92,6 +94,7 @@ spin() {
       journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
     fi
   done
+
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
@@ -179,7 +182,6 @@ install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 ###############################################################################
 info "Phase 2: WLAN drivers (spinner-enhanced)"
 
-# ✅ DEFENSIVE FIX (NEW)
 mkdir -p "$STATE_DIR"
 touch "$DRIVER_LOG"
 
@@ -203,12 +205,11 @@ if [ "$IS_RPI" -eq 0 ]; then
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
 
     start_ts="$(ts_epoch)"
-    info "Starting WLAN driver: $NAME"
-
     TMPLOG="$(mktemp)"
     STATUS="FAILED"
 
     spin "Installing WLAN driver: $NAME" bash -c "
+      set -e
       case \"$TYPE\" in
         morrownr)
           git clone \"$REPO\" \"$NAME\" &&
@@ -227,17 +228,17 @@ if [ "$IS_RPI" -eq 0 ]; then
            dkms install \"$MOD\" || true)
           ;;
       esac
-    " >\"$TMPLOG\" 2>&1 && STATUS=\"INSTALLED\"
+    " >"$TMPLOG" 2>&1 && STATUS="INSTALLED"
 
-    grep -qi \"already\" \"$TMPLOG\" && STATUS=\"ALREADY_INSTALLED\"
+    grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
 
-    end_ts=\"$(ts_epoch)\"
-    echo \"$start_ts,$end_ts,$NAME,$TYPE,$STATUS\" >>\"$DRIVER_LOG\"
+    end_ts="$(ts_epoch)"
+    echo "$start_ts,$end_ts,$NAME,$TYPE,$STATUS" >>"$DRIVER_LOG"
 
-    cat \"$TMPLOG\" >>\"$LOG\"
-    rm -f \"$TMPLOG\"
+    cat "$TMPLOG" >>"$LOG"
+    rm -f "$TMPLOG"
 
-    echo \"$MOD:$TYPE:$STATUS\" >>\"$WLAN_STATE\"
+    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
   done
   depmod -a || true
 fi
