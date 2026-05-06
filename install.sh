@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.52
+# Client Simulator Installer v0.99.53
 #
-# PATCH OVER v0.99.51
+# PATCH OVER v0.99.52
 # -----------------------------------------------------------------------------
-# ✅ Add architecture-aware VirtualHere installation
+# ✅ Install sudo (if missing)
+# ✅ Enable PASSWORDLESS sudo for user "user" via /etc/sudoers.d
 ###############################################################################
 
 ###############################################################################
@@ -14,11 +15,10 @@ if [ -z "${BASH_VERSION:-}" ]; then
   echo "[INFO] Re-running installer with bash..."
   exec bash "$0" "$@"
 fi
-
 set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
-VERSION="0.99.52"
+VERSION="0.99.53"
 
 ###############################################################################
 # Startup version banner
@@ -58,7 +58,7 @@ ok(){   echo "[$(ts)] OK:   $*"; }
 warn(){ echo "[$(ts)] WARN: $*"; }
 
 ###############################################################################
-# Helper: quiet apt install
+# Helper: quiet apt install with INFO/OK feedback
 ###############################################################################
 apt_install() {
   local label="$1"; shift
@@ -68,9 +68,9 @@ apt_install() {
 }
 
 ###############################################################################
-# USER provisioning
+# USER provisioning + PASSWORDLESS SUDO (ENHANCEMENT)
 ###############################################################################
-info "Ensuring local user 'user' exists and has sudo access"
+info "Ensuring local user 'user' exists"
 
 if ! id user >/dev/null 2>&1; then
   useradd -m -s /bin/bash user
@@ -79,12 +79,24 @@ else
   ok "User 'user' already exists"
 fi
 
+# Ensure sudo is present
+apt_install "Installing sudo (if missing)" sudo
+
+# Ensure group membership (idempotent)
 if ! id -nG user | grep -qw sudo; then
   usermod -aG sudo user
   ok "Added user 'user' to sudo group"
 else
-  ok "User 'user' already has sudo access"
+  ok "User 'user' already in sudo group"
 fi
+
+# Enable passwordless sudo via sudoers.d
+info "Enabling passwordless sudo for user 'user'"
+cat >/etc/sudoers.d/99-user-nopasswd <<EOF
+user ALL=(ALL) NOPASSWD:ALL
+EOF
+chmod 0440 /etc/sudoers.d/99-user-nopasswd
+ok "Passwordless sudo enabled for user 'user'"
 
 ###############################################################################
 # Raspberry Pi detection
@@ -114,12 +126,14 @@ apt_install "Installing driver build prerequisites" \
   build-essential dkms git rfkill linux-headers-$(uname -r)
 
 ###############################################################################
-# Phase 2 — WLAN drivers (unchanged)
+# Phase 2 — WLAN drivers (stable, authoritative)
 ###############################################################################
 info "Phase 2: WLAN drivers"
+
 mkdir -p /usr/src/wifi-drivers
 cd /usr/src/wifi-drivers
 
+# Suppress reboots requested by driver scripts
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt systemctl; do
   echo -e "#!/bin/sh\necho \"$cmd requested\" >>'$REBOOT_LOG'\nexit 0" \
@@ -164,20 +178,21 @@ if [ "$IS_RPI" -eq 0 ]; then
     echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
     ok "WLAN driver $NAME: $STATUS"
   done
+  depmod -a >>"$LOG" 2>&1 || true
 fi
 
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
 ###############################################################################
-# Firmware
+# Phase 3a — Firmware
 ###############################################################################
 apt_install "Installing firmware packages" \
   firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
   firmware-iwlwifi firmware-atheros
 
 ###############################################################################
-# Desktop stack
+# Desktop stack (LightDM + LXQt + GNOME Terminal)
 ###############################################################################
 apt_install "Installing desktop components" \
   lightdm lightdm-gtk-greeter lxqt-session openbox gnome-terminal
@@ -205,7 +220,7 @@ systemctl enable lightdm
 ok "Desktop stack installed"
 
 ###############################################################################
-# client-sim deployment
+# client-sim deployment (deterministic repo sync)
 ###############################################################################
 info "Deploying client-sim"
 
@@ -214,8 +229,7 @@ if [ -d "$CLIENTSIM_REPO/.git" ]; then
   git -C "$CLIENTSIM_REPO" reset --hard origin/HEAD >>"$LOG" 2>&1
 else
   rm -rf "$CLIENTSIM_REPO"
-  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO" \
-    >>"$LOG" 2>&1
+  git clone https://github.com/solutions-hpe/client-sim.git "$CLIENTSIM_REPO" >>"$LOG" 2>&1
 fi
 
 mkdir -p "$CLIENTSIM_DIR"
@@ -228,31 +242,21 @@ chmod 644 /etc/xdg/autostart/*.desktop
 ok "client-sim deployed"
 
 ###############################################################################
-# VirtualHere — ARCHITECTURE-AWARE ✅
+# VirtualHere — architecture-aware
 ###############################################################################
 info "Installing VirtualHere client (architecture-aware)"
-
 ARCH="$(uname -m)"
 VH_BIN=""
 case "$ARCH" in
-  x86_64)
-    VH_BIN="vhclientx86_64"
-    ;;
-  aarch64)
-    VH_BIN="vhclientarm64"
-    ;;
-  armv7l|armhf)
-    VH_BIN="vhclientarm"
-    ;;
-  *)
-    warn "Unsupported architecture for VirtualHere: $ARCH"
-    VH_BIN=""
-    ;;
+  x86_64) VH_BIN="vhclientx86_64" ;;
+  aarch64) VH_BIN="vhclientarm64" ;;
+  armv7l|armhf) VH_BIN="vhclientarm" ;;
+  *) warn "Unsupported architecture for VirtualHere: $ARCH" ;;
 esac
 
 if [ -n "$VH_BIN" ]; then
   curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
-    -o /usr/sbin/vhclient || { warn "Failed to download VirtualHere"; }
+    -o /usr/sbin/vhclient || warn "Failed to download VirtualHere"
   chmod +x /usr/sbin/vhclient
 
   cat >/etc/systemd/system/virtualhereclient.service <<EOF
@@ -260,11 +264,9 @@ if [ -n "$VH_BIN" ]; then
 Description=VirtualHere Client
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 ExecStart=/usr/sbin/vhclient
 Restart=always
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -272,7 +274,7 @@ EOF
   systemctl daemon-reload
   systemctl enable virtualhereclient
   systemctl start virtualhereclient || true
-  ok "VirtualHere installed for architecture: $ARCH"
+  ok "VirtualHere installed for $ARCH"
 fi
 
 ###############################################################################
@@ -282,12 +284,13 @@ apt_install "Installing network services" \
   network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Health check
+# Health check summary + VERIFICATION
 ###############################################################################
 echo
 echo "========== HEALTH CHECK =========="
 id user >/dev/null && echo "User: OK" || echo "User: MISSING"
-groups user | grep -qw sudo && echo "Sudo: OK" || echo "Sudo: FAIL"
+groups user | grep -qw sudo && echo "Sudo group: OK" || echo "Sudo group: FAIL"
+test -f /etc/sudoers.d/99-user-nopasswd && echo "Passwordless sudo: OK" || echo "Passwordless sudo: MISSING"
 systemctl is-active --quiet lightdm && echo "LightDM: OK" || echo "LightDM: FAIL"
 systemctl is-active --quiet NetworkManager && echo "Network: OK" || echo "Network: FAIL"
 systemctl is-active --quiet virtualhereclient && echo "VirtualHere: OK" || echo "VirtualHere: NOT RUNNING"
