@@ -67,8 +67,8 @@ ok "Passwordless sudo configured"
 ###############################################################################
 info "Installing apps needed for WiFi Driver Install"
 
-sud apt update --quiet=2 >>"$LOG" 2>&1
-sud apt install -y --quiet=2 \
+sudo apt update --quiet=2 >>"$LOG" 2>&1
+sudo apt install -y --quiet=2 \
   gnome-terminal wget sudo linux-headers-$(uname -r) \
   git qemu-guest-agent smbclient rsyslog rfkill \
   firefox-esr iperf3 dkms sysstat rfkill build-essential \
