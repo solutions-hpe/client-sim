@@ -1,96 +1,98 @@
-# ------------------------------
-# Startup Script (Hardened)
-# ------------------------------
+$version = '.33'
+$logPath = 'C:\Scripts\sim.log'
+$debugPath = 'C:\Scripts\debug-startup.log'
 
-$version = "0.33"
-$logPath = "C:\Scripts\sim.log"
-
-function Log($msg) {
-    $msg | Tee-Object -FilePath $logPath -Append
+function Write-StartupLog {
+    param([string]$Message)
+    $Message | Tee-Object -FilePath $debugPath -Append | Tee-Object -FilePath $logPath -Append | Out-Null
 }
 
-function SafeFormat([string]$msg, $args) {
-    if ($args -ne $null) {
-        return ($msg -f $args)
-    }
-    return $msg
-}
+"Startup Script Version $version" | Tee-Object -FilePath $debugPath
+"Startup Script Version $version" | Tee-Object -FilePath $logPath -Append | Out-Null
+Get-Date | Tee-Object -FilePath $debugPath -Append | Tee-Object -FilePath $logPath -Append | Out-Null
 
-"------------------------------" | Tee-Object -FilePath $logPath -Append
-Log "Startup Script Version $version"
-Log ("Started at {0}" -f (Get-Date))
-"------------------------------" | Tee-Object -FilePath $logPath -Append
+Start-Job -ScriptBlock {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\Scripts\sys_mon.ps1'
+} | Out-Null
 
-Start-Job -ScriptBlock { . .\sys_mon.ps1 }
+Write-StartupLog 'Disabling screen blanking and sleep timers'
+powercfg /change standby-timeout-ac 0 | Out-Null
+powercfg /change standby-timeout-dc 0 | Out-Null
+powercfg /change monitor-timeout-ac 0 | Out-Null
+powercfg /change monitor-timeout-dc 0 | Out-Null
 
-Log "Disabling screen blanking"
-powercfg /change standby-timeout-ac 0
-powercfg /change monitor-timeout-ac 0
-
-$username = $env:COMPUTERNAME.Split('-')[0]
-
-Log "Reading Simulation Config File"
-. .\ini-parser.ps1
+$username = ($env:COMPUTERNAME -split '-')[0]
+. 'C:\Scripts\ini-parser.ps1'
 $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 
-Log "Parsing Config File"
-
-# Safe config retrieval assumed unchanged
-$site_based_num = get_value 'simulation' 'site_based_num'
-
-# ------------------------------
-# SAFE SIMULATION ID
-# ------------------------------
-
+$site_based_num = [int](get_value 'simulation' 'site_based_num')
 $hostname = $env:COMPUTERNAME
-$digits = ($hostname -replace '\D','')
-
-if ($digits.Length -lt $site_based_num) {
-    $subset = $digits
+if ($site_based_num -gt 0 -and $hostname.Length -ge $site_based_num) {
+    $lastN = $hostname.Substring($hostname.Length - $site_based_num)
 } else {
-    $subset = $digits.Substring($digits.Length - $site_based_num, $site_based_num)
+    $lastN = $hostname
+}
+$simulation_id = if ($lastN.Length -gt 0) { 's' + $lastN[0] } else { 's0' }
+
+$reboot_schedule = [int](get_value 'simulation' 'reboot_schedule')
+$repo_location = get_value 'simulation' 'repo_location'
+$vh_server = get_value 'simulation' 'vh_server'
+$sim_phy = get_value $simulation_id 'sim_phy'
+$rapid_update = get_value 'simulation' 'rapid_update'
+
+$overrideRepoLocation = get_value $username 'repo_location'
+if (-not [string]::IsNullOrWhiteSpace($overrideRepoLocation)) {
+    $repo_location = $overrideRepoLocation
 }
 
-$simulation_id = if ($subset.Length -gt 0) { "s$($subset[0])" } else { "s0" }
-
-Log ("Simulation ID resolved: {0}" -f $simulation_id)
-
-# ------------------------------
-# CONFIG VALUES
-# ------------------------------
-
-$reboot_schedule = get_value 'simulation' 'reboot_schedule'
-$vh_server       = get_value 'simulation' 'vh_server'
-$sim_phy         = get_value 'simulation' 'sim_phy'
-
-# ------------------------------
-# NETWORK SETUP
-# ------------------------------
-
-Log "Bringing up interfaces"
-Get-NetAdapter | Enable-NetAdapter -ErrorAction SilentlyContinue
-
-$wladapter = Get-NetAdapter | Where-Object { $_.Name -match "wireless|wlan|wi-fi" } | Select-Object -First 1 -ExpandProperty Name
-$eadapter  = Get-NetAdapter | Where-Object { $_.Name -match "ethernet|eth" } | Select-Object -First 1 -ExpandProperty Name
-
-if ($wladapter) { Log ("Wi-Fi Adapter: {0}" -f $wladapter) }
-if ($eadapter)  { Log ("Ethernet Adapter: {0}" -f $eadapter) }
-
-# ------------------------------
-# UPDATE
-# ------------------------------
-
-Log "Updating Simulation from repo"
-. .\update.ps1
-
-# ------------------------------
-# VH SERVER
-# ------------------------------
-
-if ($vh_server -eq "on") {
-    Log "Starting VH client"
-    Start-Process "vhclientx86_64.exe" -ArgumentList "-n" -NoNewWindow
+$overrideVhServer = get_value $username 'vh_server'
+if (-not [string]::IsNullOrWhiteSpace($overrideVhServer)) {
+    $vh_server = $overrideVhServer
 }
 
-Log "Launching Simulation Script"
-. .\simulation.ps1
+$overrideSimPhy = get_value $username 'sim_phy'
+if (-not [string]::IsNullOrWhiteSpace($overrideSimPhy)) {
+    $sim_phy = $overrideSimPhy
+}
+
+# Syslog configuration is not applicable on Windows; Event Log is used instead.
+Write-StartupLog "Simulation ID resolved: $simulation_id"
+Write-StartupLog "Repo location: $repo_location"
+Write-StartupLog "VH server: $vh_server"
+Write-StartupLog "Simulation phy: $sim_phy"
+Write-StartupLog "Rapid update: $rapid_update"
+
+$rn = $reboot_schedule + (Get-Random -Minimum 0 -Maximum 600)
+Write-StartupLog "Scheduling reboot in $rn minutes"
+shutdown /r /t ([int]$rn * 60) | Out-Null
+
+Write-StartupLog 'Bringing up all interfaces online'
+Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
+    Enable-NetAdapter -Name $_.Name -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+}
+
+$wladapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match 'wireless|wlan|wi-fi' -or $_.InterfaceDescription -match 'wireless|wlan|wi-fi|802\.11' } |
+    Select-Object -First 1 -ExpandProperty Name
+$eadapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match 'ethernet|eth' -or $_.InterfaceDescription -match 'ethernet' } |
+    Select-Object -First 1 -ExpandProperty Name
+
+if ($wladapter) {
+    Write-StartupLog "WLAN Adapter name $wladapter"
+}
+if ($eadapter) {
+    Write-StartupLog "Wired Adapter name $eadapter"
+}
+
+Write-StartupLog 'Updating Simulation from repo'
+. 'C:\Scripts\update.ps1'
+
+if ($vh_server -eq 'on') {
+    Write-StartupLog 'Starting VH client'
+    Start-Process 'vhclientx86_64.exe' -ArgumentList '-n' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Seconds 5
+}
+
+Write-StartupLog 'Launching Simulation Script'
+. 'C:\Scripts\simulation.ps1'

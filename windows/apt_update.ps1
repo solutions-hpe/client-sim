@@ -1,23 +1,55 @@
-# PowerShell equivalent of apt_update.sh
-$version = "0.02"
-$logPath = "C:\Scripts\sim.log"
-"apt update Script Version $version" | Tee-Object -FilePath $logPath -Append
-Get-Date | Tee-Object -FilePath $logPath -Append
+$version = '.02'
+$logPath = 'C:\Scripts\sim.log'
+$debugPath = 'C:\Scripts\debug-apt-update.log'
 
-# Update packages (using winget)
-winget upgrade --all
+function Write-AptUpdateLog {
+    param([string]$Message)
+    $Message | Tee-Object -FilePath $debugPath -Append | Tee-Object -FilePath $logPath -Append | Out-Null
+}
 
-# Install packages (equivalents for Linux tools)
-winget install Git.Git
-winget install wget
-winget install Microsoft.WindowsTerminal  # gnome-terminal equivalent
-# network-manager: Windows built-in network settings
-# qemu-guest-agent: Not applicable on Windows
-# net-tools: Windows built-in (e.g., netstat, ipconfig)
-# smbclient: Windows built-in (SMB via PowerShell or net use)
-# dnsutils: Windows built-in (nslookup, Resolve-DnsName)
-winget install iperf3
-winget install Mozilla.Firefox  # firefox-esr equivalent
-# rsyslog: Windows Event Viewer built-in
+"apt update Script Version $version" | Tee-Object -FilePath $debugPath
+"apt update Script Version $version" | Tee-Object -FilePath $logPath -Append | Out-Null
+Get-Date | Tee-Object -FilePath $debugPath -Append | Tee-Object -FilePath $logPath -Append | Out-Null
 
-# Autoremove not directly applicable; winget handles cleanup
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-AptUpdateLog 'winget was not found. Skipping package updates.'
+    exit 0
+}
+
+function Invoke-WingetCommand {
+    param([string[]]$Arguments)
+
+    & winget @Arguments 2>&1 | Tee-Object -FilePath $debugPath -Append | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-AptUpdateLog "winget command failed: winget $($Arguments -join ' ')"
+    }
+}
+
+Write-AptUpdateLog 'Running system package upgrades'
+Invoke-WingetCommand -Arguments @('upgrade','--all','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing iperf3'
+Invoke-WingetCommand -Arguments @('install','--id','EsoftInteractive.iperf3','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing Git'
+Invoke-WingetCommand -Arguments @('install','--id','Git.Git','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing Firefox'
+Invoke-WingetCommand -Arguments @('install','--id','Mozilla.Firefox','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing Python 3.12'
+Invoke-WingetCommand -Arguments @('install','--id','Python.Python.3.12','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing GNU Wget'
+Invoke-WingetCommand -Arguments @('install','--id','JernejSimoncic.Wget','--silent','--accept-package-agreements','--accept-source-agreements')
+
+Write-AptUpdateLog 'Installing Windows Terminal'
+Invoke-WingetCommand -Arguments @('install','--id','Microsoft.WindowsTerminal','--silent','--accept-package-agreements','--accept-source-agreements')
+
+# Not applicable on Windows:
+# - network-manager, wpasupplicant: Windows handles WiFi natively via WlanAPI/netsh.
+# - rfkill: Windows manages radio state through device management and netsh.
+# - rsyslog: Windows uses Event Log instead.
+# - smbclient: Windows provides native SMB access with net use / New-PSDrive.
+# - dkms, kernel headers: Linux-only kernel module tooling.
+# - qemu-guest-agent: install separately with a QEMU guest agent MSI when needed.
