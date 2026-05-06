@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.21
-# PHASED ORDERING APPLIED – lifecycle complete, X-safe, network-safe
+# Client Simulator Installer v0.99.22
+# Baseline v0.99.21 + queued fixes:
+#  - WLAN driver status: INSTALLED / ALREADY_INSTALLED / FAILED
+#  - Ensure 'user' exists and is in sudoers (idempotent)
 ###############################################################################
 
 # ---------------- Bash enforcement ----------------
@@ -12,7 +14,7 @@ fi
 
 set -euo pipefail
 
-VERSION="0.99.21"
+VERSION="0.99.22"
 
 STATE_DIR="/var/lib/client-sim"
 LOG="/var/log/client-sim-install.log"
@@ -86,7 +88,27 @@ fi
 
 info "Client Simulator Installer v$VERSION"
 
-# ---------------- WLAN driver list ----------------
+###############################################################################
+# Ensure 'user' exists and is in sudoers (QUEUED FIX APPLIED)
+###############################################################################
+info "Ensuring 'user' account exists and has sudo privileges"
+if ! id user >/dev/null 2>&1; then
+  useradd -m -s /bin/bash user
+  info "Created user: user"
+fi
+
+# Debian-family admin group
+if getent group sudo >/dev/null 2>&1; then
+  usermod -aG sudo user
+else
+  # Fallback (should rarely be needed on Debian-family)
+  groupadd sudo || true
+  usermod -aG sudo user
+fi
+
+###############################################################################
+# WLAN driver list (single source of truth)
+###############################################################################
 WLAN_DRIVERS=(
   "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au"
   "8821cu|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu"
@@ -106,15 +128,19 @@ WLAN_DRIVERS=(
   "mt7601u|dkms|https://github.com/kuba-moo/mt7601u.git|mt7601u"
 )
 
-# ---------------- REMOVE / PURGE ----------------
+###############################################################################
+# REMOVE / PURGE
+###############################################################################
 if [ "$ACTION" = "remove" ]; then
   info "Removal mode"
   if [ -f "$WLAN_STATE" ] && [ "$IS_RPI" -eq 0 ]; then
-    while IFS=: read -r MOD TYPE; do
+    while IFS=: read -r MOD TYPE STATUS; do
+      info "Removing WLAN driver: $MOD ($TYPE)"
       case "$TYPE" in
         dkms|aircrack) dkms remove "$MOD" --all || true ;;
-        morrownr) [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] && \
-                  "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
+        morrownr)
+          [ -x "/usr/src/wifi-drivers/$MOD/remove-driver.sh" ] && \
+          "/usr/src/wifi-drivers/$MOD/remove-driver.sh" || true ;;
       esac
     done <"$WLAN_STATE"
     depmod -a || true
@@ -140,15 +166,17 @@ if [ "$ACTION" = "remove" ]; then
   exit 0
 fi
 
-# ---------------- BASE UPDATE ----------------
+###############################################################################
+# BASE UPDATE
+###############################################################################
 spin "Updating package index" apt update
 spin "Upgrading base system" apt upgrade -y || true
 dpkg --configure -a >>"$LOG" 2>&1 || true
 apt -f install -y >>"$LOG" 2>&1 || true
 
-# ======================================================================
+###############################################################################
 # PHASE 1 — DRIVER BUILD PREREQUISITES
-# ======================================================================
+###############################################################################
 info "Phase 1: GitHub driver prerequisites"
 
 HEADERS=()
@@ -161,9 +189,9 @@ install_pkgs \
   git \
   "${HEADERS[@]}"
 
-# ======================================================================
-# PHASE 2 — GITHUB WLAN DRIVERS
-# ======================================================================
+###############################################################################
+# PHASE 2 — GITHUB WLAN DRIVERS (STATUS FIX APPLIED)
+###############################################################################
 info "Phase 2: GitHub WLAN drivers"
 
 : >"$WLAN_STATE"
@@ -173,38 +201,57 @@ if [ "$IS_RPI" -eq 0 ]; then
   cd /usr/src/wifi-drivers
   for d in "${WLAN_DRIVERS[@]}"; do
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
-    info "Building WLAN driver: $NAME"
+    info "Installing WLAN driver: $NAME"
+
+    TMPLOG="$(mktemp)"
+    STATUS="FAILED"
+
     case "$TYPE" in
       morrownr)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" && ./install-driver.sh >>"$LOG" 2>&1 &&
-         echo "$NAME:morrownr" >>"$WLAN_STATE") || warn "$NAME failed"
+        if git clone "$REPO" "$NAME" &&
+           (cd "$NAME" && ./install-driver.sh >"$TMPLOG" 2>&1); then
+          STATUS="INSTALLED"
+        else
+          grep -qiE "already installed|already exists|nothing to do" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+        fi
         ;;
       aircrack)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" && ./dkms-install.sh >>"$LOG" 2>&1 &&
-         echo "$MOD:aircrack" >>"$WLAN_STATE") || warn "$NAME failed"
+        if git clone "$REPO" "$NAME" &&
+           (cd "$NAME" && ./dkms-install.sh >"$TMPLOG" 2>&1); then
+          STATUS="INSTALLED"
+        else
+          grep -qiE "already installed|already exists|nothing to do" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+        fi
         ;;
       dkms)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" &&
-         make >>"$LOG" 2>&1 &&
-         make install >>"$LOG" 2>&1 &&
-         dkms add . >>"$LOG" 2>&1 || true &&
-         dkms install "$MOD" >>"$LOG" 2>&1 || true &&
-         echo "$MOD:dkms" >>"$WLAN_STATE") || warn "$NAME failed"
+        if git clone "$REPO" "$NAME" &&
+           (cd "$NAME" &&
+            make >"$TMPLOG" 2>&1 &&
+            make install >>"$TMPLOG" 2>&1 &&
+            dkms add . >>"$TMPLOG" 2>&1 || true &&
+            dkms install "$MOD" >>"$TMPLOG" 2>&1 || true); then
+          STATUS="INSTALLED"
+        else
+          grep -qiE "already installed|already exists|dkms.*present|module.*exists" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
+        fi
         ;;
     esac
+
+    cat "$TMPLOG" >>"$LOG"
+    rm -f "$TMPLOG"
+
+    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
+    info "WLAN driver $NAME status: $STATUS"
   done
   depmod -a || true
 else
   warn "RPi detected — skipping external WLAN drivers"
 fi
 
-# ======================================================================
-# PHASE 3a — FIRMWARE
-# ======================================================================
-info "Phase 3a: Firmware (before network changes)"
+###############################################################################
+# PHASE 3a — FIRMWARE (before network)
+###############################################################################
+info "Phase 3a: Firmware"
 
 install_pkgs \
   firmware-linux \
@@ -213,9 +260,9 @@ install_pkgs \
   firmware-iwlwifi \
   firmware-atheros
 
-# ======================================================================
-# DESKTOP (LightDM authoritative fix)
-# ======================================================================
+###############################################################################
+# DESKTOP — AUTHORITATIVE LightDM FIX
+###############################################################################
 info "Configuring LightDM (non-interactive)"
 
 echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
@@ -236,9 +283,9 @@ ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.s
 systemctl enable lightdm
 '
 
-# ======================================================================
+###############################################################################
 # VIRTUALHERE + CLIENT SIM
-# ======================================================================
+###############################################################################
 spin "Installing VirtualHere" bash -c '
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64 &&
 wget -q https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service &&
@@ -265,9 +312,9 @@ Exec=/usr/local/scripts/start-sim.sh
 OnlyShowIn=LXQt;
 EOF
 
-# ======================================================================
+###############################################################################
 # PHASE 3b — NETWORK (LAST)
-# ======================================================================
+###############################################################################
 info "Phase 3b: Network services (last)"
 
 install_pkgs \
@@ -275,7 +322,23 @@ install_pkgs \
   systemd-resolved \
   iperf3
 
-# ---------------- FINAL ----------------
+###############################################################################
+# DRIVER SUMMARY
+###############################################################################
+echo
+echo "================= Wi‑Fi Driver Summary ================="
+if [ -f "$WLAN_STATE" ]; then
+  while IFS=: read -r MOD TYPE STATUS; do
+    printf " %-20s | %-10s | %s\n" "$MOD" "$TYPE" "$STATUS"
+  done <"$WLAN_STATE"
+else
+  echo "No external Wi‑Fi drivers processed"
+fi
+echo "========================================================"
+
+###############################################################################
+# FINAL
+###############################################################################
 ok "Installation complete"
-echo "Phased install complete; reboot recommended"
+echo "Reboot recommended"
 echo "Log: $LOG"
