@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.93
+version=.94
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
 echo Simulation Script Version $version | tee "$debug"
@@ -34,6 +34,8 @@ iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
 ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
 allow_offline=$(get_value 'simulation' 'allow_offline')
+web_server=$(get_value 'simulation' 'web_server')
+server_url=$(get_value 'server' 'server_url')
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -98,6 +100,67 @@ rn_offline_time=$((1 + RANDOM % 14400))
 rn_sim_load=$((1 + RANDOM % 99))
 #Global Variable Export Disable
 set +a
+hostname=$HOSTNAME
+platform=linux
+#------------------------------------------------------------
+#Status reporting
+#------------------------------------------------------------
+json_escape() {
+  local value="${1-}"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+report_status() {
+  local iteration="${1:-${z:-0}}"
+  [[ $web_server != "on" ]] && return 0
+  [[ -z ${server_url} ]] && return 0
+
+  local connected_ssid gateway_json=false first=true active_simulations=""
+  connected_ssid=$(nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d: -f2 | head -n1)
+  if [[ ${gateway_reachable} == "true" ]]; then
+    gateway_json=true
+  fi
+
+  local sim
+  for sim in dns_fail iperf download www_traffic ping_test ssidpw_fail auth_fail dhcp_fail; do
+    if [[ ${!sim} == "on" ]]; then
+      if [[ $first == true ]]; then
+        first=false
+      else
+        active_simulations+=","
+      fi
+      active_simulations+="\"$sim\""
+    fi
+  done
+
+  local payload
+  printf -v payload '{"hostname":"%s","simulation_id":"%s","platform":"%s","iteration":%s,"connected_ssid":"%s","gateway_reachable":%s,"vh_connected":false,"active_simulations":[%s],"config":{"sim_phy":"%s","kill_switch":"%s","dns_fail":"%s","iperf":"%s","www_traffic":"%s","download":"%s","ping_test":"%s","ssidpw_fail":"%s","auth_fail":"%s","dhcp_fail":"%s"}}' \
+    "$(json_escape "$hostname")" \
+    "$(json_escape "$simulation_id")" \
+    "$(json_escape "$platform")" \
+    "$iteration" \
+    "$(json_escape "$connected_ssid")" \
+    "$gateway_json" \
+    "$active_simulations" \
+    "$(json_escape "$sim_phy")" \
+    "$(json_escape "$kill_switch")" \
+    "$(json_escape "$dns_fail")" \
+    "$(json_escape "$iperf")" \
+    "$(json_escape "$www_traffic")" \
+    "$(json_escape "$download")" \
+    "$(json_escape "$ping_test")" \
+    "$(json_escape "$ssidpw_fail")" \
+    "$(json_escape "$auth_fail")" \
+    "$(json_escape "$dhcp_fail")"
+
+  curl -m 5 -s -o /dev/null -H "Content-Type: application/json" -X POST --data "$payload" "${server_url%/}/api/status" >/dev/null 2>&1 || true
+  return 0
+}
 #------------------------------------------------------------
 #Getting username from hostname extraction
 #changing DHCP Client configuration to send the username as the hostname
@@ -208,6 +271,12 @@ run_simulation() {
 #Attempting WiFi connection
 #------------------------------------------------------------
 connect_wifi
+gateway_reachable=false
+dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+if [[ -n ${dfgw} ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
+  gateway_reachable=true
+fi
+report_status 0
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
@@ -264,6 +333,12 @@ fi
 echo Kill Switch is $kill_switch | tee -a "$debug"
 if [ $kill_switch == "off" ]; then
  for z in {1..100}; do
+  gateway_reachable=false
+  dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+  if [[ -n ${dfgw} ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
+   gateway_reachable=true
+  fi
+  report_status "$z"
   #------------------------------------------------------------
   #SSID Incorrect Password Simulation or Auth Failure Simulation
   #since these are very similar they are in the same section one

@@ -725,7 +725,17 @@ export PATH="$SUPPRESS:$PATH"
 # ────────────────────────────────────────────────────────────────────────────
 
 # Format: "dir-name|type|repo-url|dkms-module|pinned-tag|modprobe-module"
+# Types:
+#   morrownr  — uses install-driver.sh NoPrompt
+#   aircrack  — uses install-driver.sh (with stdin echo)
+#   lwfinger  — bare Makefile; source copied to /usr/src then registered with DKMS
+#   dkms-only — bare Makefile + dkms.conf; DKMS-managed, no install-driver.sh
 # modprobe-module: use "-" if no explicit modprobe needed after install
+#
+# Bug fixes applied:
+#   - rtl8812au (aircrack-ng) removed — duplicate of 8812au-20210820 (same chipset, conflict)
+#   - rtw89 changed from type morrownr→dkms-only (repo has no install-driver.sh)
+#   - rtw89 skipped at runtime if kernel ≥ 5.16 (driver is in-tree on modern kernels)
 DRIVERS=(
   "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au|HEAD|-"
   "8821cu-20210916|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu|HEAD|-"
@@ -734,8 +744,7 @@ DRIVERS=(
   "rtl8852bu-20240418|morrownr|https://github.com/morrownr/rtl8852bu-20240418.git|8852bu|HEAD|-"
   "rtl8852cu-20240510|morrownr|https://github.com/morrownr/rtl8852cu-20240510.git|8852cu|HEAD|-"
   "88x2bu-20210702|morrownr|https://github.com/morrownr/88x2bu-20210702.git|88x2bu|HEAD|-"
-  "rtw89|morrownr|https://github.com/morrownr/rtw89.git|rtw89|HEAD|-"
-  "rtl8812au|aircrack|https://github.com/aircrack-ng/rtl8812au.git|rtl8812au|HEAD|-"
+  "rtw89|dkms-only|https://github.com/morrownr/rtw89.git|rtw89|HEAD|-"
   "rtl8188eu|lwfinger|https://github.com/lwfinger/rtl8188eu.git|8188eu|HEAD|-"
   "rtl8723au|lwfinger|https://github.com/lwfinger/rtl8723au.git|8723au|HEAD|8723au"
   "rtl8852au|lwfinger|https://github.com/lwfinger/rtl8852au.git|8852au|HEAD|-"
@@ -764,7 +773,7 @@ for entry in "${DRIVERS[@]}"; do
     stop_spinner
     cd "$NAME"
 
-    INSTALL_OK=true
+  INSTALL_OK=true
     case "$TYPE" in
       morrownr)
         if [[ -x ./install-driver.sh ]]; then
@@ -788,24 +797,67 @@ for entry in "${DRIVERS[@]}"; do
         fi
         ;;
 
+      dkms-only)
+        # Repos that have dkms.conf + Makefile but no install-driver.sh (e.g. morrownr/rtw89).
+        # Also skips rtw89 entirely on kernels >= 5.16 where it is already in-tree.
+        if [[ "$MOD" == "rtw89" ]]; then
+          KVER_MAJOR=$(uname -r | cut -d. -f1)
+          KVER_MINOR=$(uname -r | cut -d. -f2)
+          if (( KVER_MAJOR > 5 || ( KVER_MAJOR == 5 && KVER_MINOR >= 16 ) )); then
+            info "Skipping $NAME — rtw89 is built-in to kernel $(uname -r) (>= 5.16)"
+            echo "$NAME:SKIPPED_IN_TREE" >>"$DRIVER_STATE"
+            cd "$WIFI_SRC"; continue
+          fi
+        fi
+
+        DKMS_VER="0.0"
+        [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
+
+        SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
+        start_spinner "Installing $NAME via DKMS ($MOD/$DKMS_VER)"
+
+        # Copy source into /usr/src where dkms expects it
+        rm -rf "$SRC_DEST"
+        cp -r "$(pwd)" "$SRC_DEST"
+
+        dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
+        dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+          && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+          || { stop_spinner; INSTALL_OK=false; }
+        stop_spinner
+
+        if [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
+          start_spinner "Loading module: $MODPROBE"
+          modprobe "$MODPROBE" >>"$LOG" 2>&1 \
+            || warn "modprobe $MODPROBE failed (may need reboot)"
+          stop_spinner; ok "Module $MODPROBE loaded"
+        fi
+        ;;
+
       lwfinger)
+        # Build only (no make install) — DKMS manages the module lifecycle.
+        # Source must be copied to /usr/src/MOD-VER/ before dkms add.
         start_spinner "Building $NAME (lwfinger)"
-        if make all >>"$LOG" 2>&1 && make install >>"$LOG" 2>&1; then
+        if make all >>"$LOG" 2>&1; then
           stop_spinner
 
           DKMS_VER="0.0"
-          if [[ -f dkms.conf ]]; then
-            DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
-          fi
+          [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
 
-          start_spinner "DKMS install $NAME ($MOD/$DKMS_VER)"
-          dkms add -m "$MOD" -v "$DKMS_VER" --sourcetree "$(pwd)" >>"$LOG" 2>&1 || true
-          dkms install "${MOD}/${DKMS_VER}" >>"$LOG" 2>&1 \
-            || warn "$NAME: dkms install failed (non-fatal)"
+          SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
+          start_spinner "Registering $NAME with DKMS ($MOD/$DKMS_VER)"
+
+          # Copy source into /usr/src where dkms expects it, then register
+          rm -rf "$SRC_DEST"
+          cp -r "$(pwd)" "$SRC_DEST"
+
+          dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
+          dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+            && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+            || { stop_spinner; warn "$NAME: dkms build/install failed"; INSTALL_OK=false; }
           stop_spinner
 
-          # Explicit modprobe if specified in driver table
-          if [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
+          if $INSTALL_OK && [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
             start_spinner "Loading module: $MODPROBE"
             modprobe "$MODPROBE" >>"$LOG" 2>&1 \
               || warn "modprobe $MODPROBE failed (may need reboot)"
@@ -892,10 +944,11 @@ echo ""
 echo "  ---- Driver State ----"
 while IFS=: read -r drv status; do
   case "$status" in
-    INSTALLED)    _hc_drv_ok   "$drv" ;;
-    FAILED)       _hc_drv_fail "$drv" "FAILED" ;;
-    CLONE_FAILED) _hc_drv_fail "$drv" "CLONE FAILED" ;;
-    *)            printf "  ?  %-35s %s\n" "$drv" "$status" ;;
+    INSTALLED)        _hc_drv_ok   "$drv" ;;
+    SKIPPED_IN_TREE)  _hc_warn     "$drv (in-tree)" "SKIPPED — already in kernel" ;;
+    FAILED)           _hc_drv_fail "$drv" "FAILED" ;;
+    CLONE_FAILED)     _hc_drv_fail "$drv" "CLONE FAILED" ;;
+    *)                printf "  ?  %-35s %s\n" "$drv" "$status" ;;
   esac
 done < "$DRIVER_STATE"
 

@@ -1,6 +1,6 @@
 . 'C:\Scripts\ini-parser.ps1'
 
-$version = '.93'
+$version = '.94'
 $scriptRoot = 'C:\Scripts'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-simulation.log'
@@ -63,6 +63,57 @@ function Get-TargetSsid {
         return "$($script:wsite)-$($script:ssid)"
     }
     return $script:ssid
+}
+
+function Send-Status {
+    param([int]$Iteration = 0)
+
+    if ($script:web_server -ne 'on' -or [string]::IsNullOrWhiteSpace($script:server_url)) {
+        return
+    }
+
+    try {
+        $connectedSsid = $null
+        foreach ($line in ((netsh wlan show interfaces 2>$null) -match '^\s*SSID\s*:')) {
+            if ($line -match '^\s*SSID\s*:\s*(.+)$' -and $line -notmatch 'BSSID') {
+                $connectedSsid = $matches[1].Trim()
+                break
+            }
+        }
+
+        $activeSimulations = @()
+        foreach ($name in @('dns_fail','iperf','download','www_traffic','ping_test','ssidpw_fail','auth_fail','dhcp_fail')) {
+            if ((Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq 'on') {
+                $activeSimulations += $name
+            }
+        }
+
+        $payload = @{
+            hostname = $hostname
+            simulation_id = $script:simulation_id
+            platform = 'windows'
+            iteration = $Iteration
+            connected_ssid = $connectedSsid
+            gateway_reachable = [bool]$script:gateway_reachable
+            vh_connected = $false
+            active_simulations = $activeSimulations
+            config = @{
+                sim_phy = [string]$script:sim_phy
+                kill_switch = [string]$script:kill_switch
+                dns_fail = [string]$script:dns_fail
+                iperf = [string]$script:iperf
+                www_traffic = [string]$script:www_traffic
+                download = [string]$script:download
+                ping_test = [string]$script:ping_test
+                ssidpw_fail = [string]$script:ssidpw_fail
+                auth_fail = [string]$script:auth_fail
+                dhcp_fail = [string]$script:dhcp_fail
+            }
+        } | ConvertTo-Json -Depth 4 -Compress
+
+        Invoke-WebRequest -Uri ($script:server_url.TrimEnd('/') + '/api/status') -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop | Out-Null
+    } catch {
+    }
 }
 
 function New-WifiProfileXml {
@@ -338,6 +389,8 @@ while ($true) {
     $script:auth_fail = get_value 'simulation' 'auth_fail'
     $script:ssidpw_fail = get_value 'simulation' 'ssidpw_fail'
     $script:allow_offline = get_value 'simulation' 'allow_offline'
+    $script:web_server = get_value 'simulation' 'web_server'
+    $script:server_url = get_value 'server' 'server_url'
 
     $script:wsite = get_value $script:simulation_id 'wsite'
     $script:sim_phy = get_value $script:simulation_id 'sim_phy'
@@ -402,6 +455,9 @@ while ($true) {
     }
 
     [void](Connect-Wifi)
+    $gateway = Get-DefaultGateway
+    $script:gateway_reachable = Test-GatewayReachable -Gateway $gateway
+    Send-Status -Iteration 0
 
     Write-SimDebug 'Disabling unused interface'
     if ($script:sim_phy -eq 'ethernet' -and $wladapter) {
@@ -443,6 +499,9 @@ while ($true) {
     if ($script:kill_switch -eq 'off') {
         for ($z = 1; $z -le 100; $z++) {
             $wladapter = Get-WifiAdapter
+            $gateway = Get-DefaultGateway
+            $script:gateway_reachable = Test-GatewayReachable -Gateway $gateway
+            Send-Status -Iteration $z
             if ((($script:ssidpw_fail -eq 'on') -or ($script:auth_fail -eq 'on')) -and $null -ne $wladapter) {
                 $correctSsidpw = get_value $script:simulation_id 'ssidpw'
                 if ($script:ssidpw_fail -eq 'on') {
