@@ -32,7 +32,7 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.13"
+VERSION="0.14"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
@@ -588,14 +588,17 @@ elif [[ -f /usr/local/scripts/10-rsyslog.conf ]]; then
 fi
 
 if [[ -n "$RSYSLOG_SOURCE" ]]; then
-  start_spinner "Validating rsyslog config"
-  if rsyslogd -N1 -f "$RSYSLOG_SOURCE" >>"$LOG" 2>&1; then
-    cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
+  start_spinner "Installing rsyslog config"
+  cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
+  # Validate the full rsyslog config (including the new drop-in) not just the snippet
+  if rsyslogd -N1 >>"$LOG" 2>&1; then
     systemctl restart rsyslog || true
     systemctl enable  rsyslog || true
     stop_spinner; ok "rsyslog configured from $RSYSLOG_SOURCE"
   else
-    stop_spinner; warn "rsyslog config validation failed — skipping"
+    stop_spinner
+    warn "rsyslog config validation failed — reverting"
+    rm -f /etc/rsyslog.d/10-rsyslog.conf
   fi
 else
   warn "No rsyslog config source found — skipping"
@@ -859,9 +862,6 @@ echo "================ HEALTH CHECK ================"
 id "$SIM_USER" &>/dev/null \
   && _hc_ok   "User ($SIM_USER)" \
   || _hc_fail "User ($SIM_USER)" "MISSING"
-groups "$SIM_USER" | grep -q sudo \
-  && _hc_ok   "Sudo group" \
-  || _hc_warn "Sudo group" "NOT IN GROUP"
 [[ -f /etc/sudoers.d/99-simuser-nopasswd ]] \
   && _hc_ok   "Scoped sudoers" \
   || _hc_fail "Scoped sudoers" "MISSING"
@@ -871,9 +871,12 @@ systemctl is-active --quiet lightdm \
 systemctl is-active --quiet NetworkManager \
   && _hc_ok   "NetworkManager" \
   || _hc_fail "NetworkManager" "NOT ACTIVE"
-systemctl is-active --quiet virtualhereclient \
-  && _hc_ok   "VirtualHere" \
-  || _hc_warn "VirtualHere" "NOT ACTIVE"
+systemctl is-enabled --quiet virtualhereclient 2>/dev/null \
+  && _hc_ok   "VirtualHere (enabled)" \
+  || _hc_warn "VirtualHere" "NOT ENABLED"
+systemctl is-active --quiet virtualhereclient 2>/dev/null \
+  && _hc_ok   "VirtualHere (running)" \
+  || _hc_warn "VirtualHere (running)" "NOT ACTIVE — needs server on boot"
 lsmod | grep -qE '^(88|rtw|rtl)' \
   && _hc_ok   "WLAN modules" \
   || _hc_warn "WLAN modules" "NOT LOADED (reboot may be needed)"
