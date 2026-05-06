@@ -245,11 +245,13 @@ sudo depmod -a >>"$LOG" 2>&1
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
 
+info "Installing Network Related Applications"
 apt install -y --quiet=2 \
   net-tools dnsutils network-manager \
   >>"$LOG" 2>&1
 
 apt autoremove -y --quiet=2 >>"$LOG" 2>&1
+ok "Installing Network Related Applications"
 
 ###############################################################################
 # FINAL HEALTH SUMMARY
