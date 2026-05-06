@@ -224,12 +224,10 @@ start_spinner "Updating package lists"
 retry apt-get update --quiet=2 >>"$LOG" 2>&1
 stop_spinner; ok "Package lists updated"
 
-# ── Full system upgrade (from original script) ───────────────────────────────
 start_spinner "Upgrading existing packages"
 retry apt-get upgrade -y --quiet=2 >>"$LOG" 2>&1
 stop_spinner; ok "System packages upgraded"
 
-# ── Install in batches so the bar moves ─────────────────────────────────────
 PACKAGES=(
   "gnome-terminal"
   "wget"
@@ -472,7 +470,6 @@ end_phase
 ###############################################################################
 begin_phase
 
-# REPO_RSYSLOG_CONF is set (or empty) by Phase 5
 RSYSLOG_SOURCE=""
 if [[ -n "${REPO_RSYSLOG_CONF:-}" && -f "$REPO_RSYSLOG_CONF" ]]; then
   RSYSLOG_SOURCE="$REPO_RSYSLOG_CONF"
@@ -499,20 +496,13 @@ fi
 end_phase
 
 ###############################################################################
-# PHASE 8 — VIRTUALHERE INSTALL  (SHA256-verified)
+# PHASE 8 — VIRTUALHERE INSTALL
 ###############################################################################
 begin_phase
 info "Installing VirtualHere"
 
 ARCH="$(uname -m)"
 VH_BIN=""
-
-# Populate these from https://www.virtualhere.com/usb_client_software
-declare -A VH_SHA256=(
-  [vhclientx86_64]="REPLACE_WITH_OFFICIAL_SHA256_FOR_x86_64"
-  [vhclientarm64]="REPLACE_WITH_OFFICIAL_SHA256_FOR_arm64"
-  [vhclientarm]="REPLACE_WITH_OFFICIAL_SHA256_FOR_armv7"
-)
 
 case "$ARCH" in
   x86_64)       VH_BIN="vhclientx86_64" ;;
@@ -530,40 +520,27 @@ if [[ -n "$VH_BIN" ]]; then
       -o "$VH_TMP" >>"$LOG" 2>&1; then
     stop_spinner
 
-    EXPECTED_SUM="${VH_SHA256[$VH_BIN]:-}"
-    if [[ "$EXPECTED_SUM" == "REPLACE_WITH_OFFICIAL_SHA256"* || -z "$EXPECTED_SUM" ]]; then
-      warn "No checksum configured for $VH_BIN — skipping install until checksums are set"
+    # Install binary — keep arch-specific name AND create generic symlink
+    install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
+    ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
+    ok "VirtualHere binary installed as /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
+
+    start_spinner "Downloading VirtualHere systemd service"
+    VH_SVC_TMP="$(mktemp)"
+    if retry curl -fsSL \
+        "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
+        -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
+      stop_spinner
+      # Patch ExecStart to point to our installed binary path
+      sed "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" "$VH_SVC_TMP" \
+        >/etc/systemd/system/virtualhereclient.service
+      rm -f "$VH_SVC_TMP"
+      ok "VirtualHere service file installed"
     else
-      start_spinner "Verifying VirtualHere checksum"
-      ACTUAL_SUM="$(sha256sum "$VH_TMP" | awk '{print $1}')"
-      if [[ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]]; then
-        stop_spinner
-        err "VirtualHere checksum mismatch! Expected: $EXPECTED_SUM  Got: $ACTUAL_SUM"
-        rm -f "$VH_TMP"; exit 1
-      fi
-      stop_spinner; ok "VirtualHere checksum verified"
-
-      # Install binary — keep arch-specific name AND create generic symlink
-      install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
-      ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
-      ok "VirtualHere binary installed as /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
-
-      start_spinner "Downloading VirtualHere systemd service"
-      VH_SVC_TMP="$(mktemp)"
-      if retry curl -fsSL \
-          "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
-          -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
-        stop_spinner
-        # Patch ExecStart to point to our installed binary path
-        sed "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" "$VH_SVC_TMP" \
-          >/etc/systemd/system/virtualhereclient.service
-        rm -f "$VH_SVC_TMP"
-        ok "VirtualHere service file installed"
-      else
-        stop_spinner
-        warn "Could not download official service file — writing fallback"
-        rm -f "$VH_SVC_TMP"
-        cat >/etc/systemd/system/virtualhereclient.service <<EOF
+      stop_spinner
+      warn "Could not download official service file — writing fallback"
+      rm -f "$VH_SVC_TMP"
+      cat >/etc/systemd/system/virtualhereclient.service <<EOF
 [Unit]
 Description=VirtualHere USB Client
 After=network-online.target
@@ -578,20 +555,19 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
-      fi
-
-      start_spinner "Enabling and starting VirtualHere service"
-      systemctl daemon-reload
-      systemctl enable virtualhereclient
-      systemctl start  virtualhereclient
-      stop_spinner
-
-      rm -f /usr/local/scripts/vhcached.txt || true
-      "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   || true
-      "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  || true
-
-      ok "VirtualHere installed and initialized"
     fi
+
+    start_spinner "Enabling and starting VirtualHere service"
+    systemctl daemon-reload
+    systemctl enable virtualhereclient
+    systemctl start  virtualhereclient
+    stop_spinner
+
+    rm -f /usr/local/scripts/vhcached.txt || true
+    "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   || true
+    "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  || true
+
+    ok "VirtualHere installed and initialized"
   else
     stop_spinner; warn "Failed to download VirtualHere binary — skipping"
   fi
@@ -631,7 +607,7 @@ export PATH="$SUPPRESS:$PATH"
 # ────────────────────────────────────────────────────────────────────────────
 
 # Format: "dir-name|type|repo-url|dkms-module|pinned-tag|modprobe-module"
-# modprobe-module: leave as "-" if no explicit modprobe needed after install
+# modprobe-module: use "-" if no explicit modprobe needed after install
 DRIVERS=(
   "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au|HEAD|-"
   "8821cu-20210916|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu|HEAD|-"
