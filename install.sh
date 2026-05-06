@@ -117,7 +117,6 @@ mkdir -p /usr/local/scripts
 chmod 777 /usr/local/scripts
 
 touch /usr/local/scripts/sim.log
-echo "Installer Version ${VERSION}" | tee /usr/local/scripts/sim.log
 chmod 777 /usr/local/scripts/sim.log
 
 ###############################################################################
@@ -133,7 +132,7 @@ smbclient //nas/scripts -N -c \
 ###############################################################################
 if [ -f /usr/local/scripts/10-rsyslog.conf ]; then
   info "Installing custom rsyslog config"
-  cp /usr/local/scripts/10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+  sudo cp /usr/local/scripts/10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
   sudo systemctl restart rsyslog || true
   sudo systemctl enable rsyslog || true
   ok "rsyslog configured"
