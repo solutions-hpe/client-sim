@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client Simulator Installer v0.99.37
+# Client Simulator Installer v0.99.38
 #
-# PATCH NOTES
+# PATCH OVER v0.99.37
 # -----------------------------------------------------------------------------
-# ✅ Added post-install health check
-# ✅ All functionality from v0.99.36 preserved
+# ✅ Per‑driver spinner UI during WLAN installs (Phase 2 only)
+# ✅ Structured driver install log: driver-install.log
+#
+# ROLLBACK
+# -----------------------------------------------------------------------------
+# v0.99.37 remains the locked rollback baseline
 ###############################################################################
 
 ###############################################################################
@@ -18,7 +22,7 @@ fi
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 set -euo pipefail
 
-VERSION="0.99.37"
+VERSION="0.99.38"
 
 ###############################################################################
 # Global state and logging
@@ -27,6 +31,7 @@ STATE_DIR="/var/lib/client-sim"
 LOG="/var/log/client-sim-install.log"
 WLAN_STATE="$STATE_DIR/wlan-drivers.state"
 REBOOT_LOG="$STATE_DIR/reboot-requests.log"
+DRIVER_LOG="$STATE_DIR/driver-install.log"
 CLIENTSIM_DIR="/usr/local/scripts"
 CLIENTSIM_REPO="/home/user/client-sim"
 
@@ -34,8 +39,11 @@ ACTION="${1:-install}"
 PURGE="${2:-}"
 
 mkdir -p "$STATE_DIR" /var/log
-touch "$LOG" "$REBOOT_LOG"
-chmod 644 "$LOG" "$REBOOT_LOG"
+: >"$LOG"
+: >"$REBOOT_LOG"
+: >"$DRIVER_LOG"
+
+chmod 644 "$LOG" "$REBOOT_LOG" "$DRIVER_LOG"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -61,19 +69,24 @@ else
 fi
 
 ts(){ date "+%H:%M:%S"; }
+ts_epoch(){ date "+%s"; }
+
 info(){ echo "[$(ts)] $*" | tee -a "$LOG"; }
 warn(){ echo -e "[$(ts)] ${Y}WARN:${Z} $*" | tee -a "$LOG"; }
 ok(){   echo -e "[$(ts)] ${G}OK:${Z} $*" | tee -a "$LOG"; }
 
 SPIN_BLOCK_TIMEOUT=120
+
 spin() {
   local label="$1"; shift
   local frames=("." ".." "...")
   local i=0
+
   echo -ne "[$(ts)] ${B}[ ]${Z} $label"
   "$@" >>"$LOG" 2>&1 &
   pid=$!
-  elapsed=0 dumped=0
+
+  local elapsed=0 dumped=0
   while kill -0 "$pid" 2>/dev/null; do
     echo -ne "\r[$(ts)] ${B}[${frames[$i]}]${Z} $label"
     i=$(( (i+1) % 3 ))
@@ -85,6 +98,7 @@ spin() {
       journalctl -xe --no-pager -n 100 >>"$LOG" 2>&1 || true
     fi
   done
+
   wait "$pid" || true
   echo -e "\r[$(ts)] ${G}[✔]${Z} $label"
 }
@@ -168,9 +182,9 @@ apt-cache show "$HEADER" >/dev/null 2>&1 && HEADERS+=("$HEADER")
 install_pkgs build-essential dkms git rfkill "${HEADERS[@]}"
 
 ###############################################################################
-# Phase 2 — WLAN drivers (reboot suppressed)
+# Phase 2 — WLAN drivers (spinner-enhanced, reboot suppressed)
 ###############################################################################
-info "Phase 2: WLAN drivers (reboot suppressed)"
+info "Phase 2: WLAN drivers (spinner-enhanced)"
 
 SUPPRESS="$(mktemp -d)"
 for cmd in reboot shutdown poweroff halt; do
@@ -190,33 +204,43 @@ cd /usr/src/wifi-drivers
 if [ "$IS_RPI" -eq 0 ]; then
   for d in "${WLAN_DRIVERS[@]}"; do
     IFS='|' read -r NAME TYPE REPO MOD <<<"$d"
+
+    start_ts="$(ts_epoch)"
+    info "Starting WLAN driver: $NAME"
+
     TMPLOG="$(mktemp)"
     STATUS="FAILED"
-    info "Installing WLAN driver: $NAME"
 
-    case "$TYPE" in
-      morrownr)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" && ./install-driver.sh >"$TMPLOG" 2>&1) &&
-        STATUS="INSTALLED" ;;
-      aircrack)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" && ./dkms-install.sh >"$TMPLOG" 2>&1) &&
-        STATUS="INSTALLED" ;;
-      dkms)
-        git clone "$REPO" "$NAME" &&
-        (cd "$NAME" &&
-         make >"$TMPLOG" 2>&1 &&
-         make install >>"$TMPLOG" 2>&1 &&
-         dkms add . >>"$TMPLOG" 2>&1 || true &&
-         dkms install "$MOD" >>"$TMPLOG" 2>&1 || true) &&
-        STATUS="INSTALLED" ;;
-    esac
+    spin "Installing WLAN driver: $NAME" bash -c "
+      case \"$TYPE\" in
+        morrownr)
+          git clone \"$REPO\" \"$NAME\" &&
+          (cd \"$NAME\" && ./install-driver.sh)
+          ;;
+        aircrack)
+          git clone \"$REPO\" \"$NAME\" &&
+          (cd \"$NAME\" && ./dkms-install.sh)
+          ;;
+        dkms)
+          git clone \"$REPO\" \"$NAME\" &&
+          (cd \"$NAME\" &&
+           make &&
+           make install &&
+           dkms add . || true &&
+           dkms install \"$MOD\" || true)
+          ;;
+      esac
+    " >\"$TMPLOG\" 2>&1 && STATUS=\"INSTALLED\"
 
-    grep -qi "already" "$TMPLOG" && STATUS="ALREADY_INSTALLED"
-    cat "$TMPLOG" >>"$LOG"
-    echo "$MOD:$TYPE:$STATUS" >>"$WLAN_STATE"
-    rm -f "$TMPLOG"
+    grep -qi \"already\" \"$TMPLOG\" && STATUS=\"ALREADY_INSTALLED\"
+
+    end_ts=\"$(ts_epoch)\"
+    echo \"$start_ts,$end_ts,$NAME,$TYPE,$STATUS\" >>\"$DRIVER_LOG\"
+
+    cat \"$TMPLOG\" >>\"$LOG\"
+    rm -f \"$TMPLOG\"
+
+    echo \"$MOD:$TYPE:$STATUS\" >>\"$WLAN_STATE\"
   done
   depmod -a || true
 fi
@@ -245,7 +269,6 @@ autologin-user=user
 user-session=lxqt
 EOF
 
-info "Hardening LightDM systemd service"
 mkdir -p /etc/systemd/system/lightdm.service.d
 cat >/etc/systemd/system/lightdm.service.d/override.conf <<EOF
 [Service]
@@ -256,6 +279,7 @@ StartLimitIntervalSec=0
 Conflicts=getty@tty7.service
 After=systemd-user-sessions.service
 EOF
+
 systemctl daemon-reload
 systemctl enable lightdm
 
@@ -293,7 +317,7 @@ info "Phase 3b: Network"
 install_pkgs network-manager systemd-resolved iperf3
 
 ###############################################################################
-# Post-install health check ✅
+# Post-install health check
 ###############################################################################
 info "Running post-install health check"
 
