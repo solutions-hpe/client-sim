@@ -11,6 +11,7 @@
 - [Features](#features)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
+- [Web Dashboard](#web-dashboard)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Project Structure](#project-structure)

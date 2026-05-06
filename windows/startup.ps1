@@ -90,7 +90,8 @@ Write-StartupLog 'Updating Simulation from repo'
 
 if ($vh_server -eq 'on') {
     Write-StartupLog 'Starting VH client'
-    Start-Process 'vhclientx86_64.exe' -ArgumentList '-n' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    # Use the arch-neutral symlink created by install.ps1 (vhclient.exe → vhclientx86_64.exe or vhclientarm64.exe)
+    Start-Process 'vhclient.exe' -ArgumentList '-n' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Seconds 5
 }
 

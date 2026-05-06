@@ -15,12 +15,18 @@ source /usr/local/scripts/sys_mon.sh &
 #are applied. Some of these may be set during the installer but the 
 #installer is only ran one time.
 #------------------------------------------------------------
-gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
 xset s noblank
 xset -dpms
 xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
-sudo xrandr --output HDMI-1 --mode 1920x1080
+# Auto-detect connected display output — works on VM (Virtual-1), HDMI, DP, eDP, Pi (HDMI-A-1)
+_xout=$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')
+if [[ -n "${_xout}" ]]; then
+  sudo xrandr --output "$_xout" --mode 1920x1080 2>/dev/null \
+    || sudo xrandr --output "$_xout" --auto 2>/dev/null \
+    || true
+fi
 #------------------------------------------------------------
 #Figuring out username from hostname used to parse config
 #------------------------------------------------------------
@@ -99,7 +105,7 @@ echo Bringing up all interfaces online | tee -a "$debug"
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens\|end0" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a "$debug"; fi
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a "$debug"; fi
 #------------------------------------------------------------

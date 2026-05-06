@@ -656,19 +656,76 @@ try {
         warn "Failed to disable sleep or hibernate: $($_.Exception.Message)"
     }
 
-    Start-Spinner 'Setting display resolution to 1440x900'
+    Start-Spinner 'Setting display resolution to 1920x1080'
     try {
         if (Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue) {
-            Set-DisplayResolution -Width 1440 -Height 900 -Force
+            Set-DisplayResolution -Width 1920 -Height 1080 -Force
             Stop-Spinner
-            ok 'Display resolution set to 1440x900'
+            ok 'Display resolution set to 1920x1080'
         } else {
             Stop-Spinner
-            warn 'Set-DisplayResolution is unavailable on this system — skipping resolution change'
+            warn 'Set-DisplayResolution unavailable (Windows 10/11) — launch-terminals.ps1 will use native resolution'
         }
     } catch {
         Stop-Spinner
         warn "Display resolution change skipped: $($_.Exception.Message)"
+    }
+
+    # ── Windows AutoLogon (Registry) ─────────────────────────────────────────
+    # Equivalent of LightDM autologin-user on Linux.
+    # Sets AutoAdminLogon so the SIM_USER logs in automatically on boot.
+    # NOTE: DefaultPassword is stored in plaintext — acceptable for lab/sim devices.
+    Start-Spinner "Configuring AutoLogon for $SIM_USER"
+    try {
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon    -Value '1'         -Force
+        Set-ItemProperty -Path $winlogonPath -Name DefaultUserName    -Value $SIM_USER   -Force
+        Set-ItemProperty -Path $winlogonPath -Name DefaultDomainName  -Value $env:COMPUTERNAME -Force
+        Set-ItemProperty -Path $winlogonPath -Name DefaultPassword    -Value $SIM_PASS   -Force
+        Stop-Spinner
+        ok "AutoLogon configured for $SIM_USER"
+        Set-StateEntry -Key 'autologon' -Value 'CONFIGURED'
+    } catch {
+        Stop-Spinner
+        warn "AutoLogon configuration failed: $($_.Exception.Message)"
+        Set-StateEntry -Key 'autologon' -Value 'FAILED'
+    }
+
+    # ── Scheduled Task — launch-terminals.ps1 at logon ───────────────────────
+    # Equivalent of openbox autostart running launch-terminals.sh on Linux.
+    # Runs as the SIM_USER at logon, launches and positions all terminal windows.
+    Start-Spinner 'Registering ClientSim-Startup scheduled task'
+    try {
+        $launchScript = Join-Path $SCRIPTS_DIR 'launch-terminals.ps1'
+        $action = New-ScheduledTaskAction `
+            -Execute 'powershell.exe' `
+            -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"{0}`"" -f $launchScript)
+        $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $SIM_USER
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable
+        $principal = New-ScheduledTaskPrincipal `
+            -UserId $SIM_USER `
+            -LogonType Interactive `
+            -RunLevel Highest
+
+        Register-ScheduledTask `
+            -TaskName 'ClientSim-Startup' `
+            -TaskPath '\ClientSim\' `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Principal $principal `
+            -Force | Out-Null
+
+        Stop-Spinner
+        ok 'ClientSim-Startup scheduled task registered (runs launch-terminals.ps1 at logon)'
+        Set-StateEntry -Key 'startup-task' -Value 'REGISTERED'
+    } catch {
+        Stop-Spinner
+        warn "Scheduled task registration failed: $($_.Exception.Message)"
+        Set-StateEntry -Key 'startup-task' -Value 'FAILED'
     }
 
     Set-StateEntry -Key 'display-power' -Value 'CONFIGURED'
@@ -1086,6 +1143,18 @@ try {
     if ($wifiAdapters.Count -gt 0) { _hc_ok 'Wi-Fi adapters' } else { _hc_warn 'Wi-Fi adapters' 'NOT FOUND' }
     if (Test-Path (Join-Path $SCRIPTS_DIR 'simulation.conf')) { _hc_ok 'simulation.conf' } else { _hc_fail 'simulation.conf' 'MISSING' }
     if ([System.Diagnostics.EventLog]::SourceExists('ClientSim')) { _hc_ok 'Event Log source' } else { _hc_fail 'Event Log source' 'MISSING' }
+    if (Test-Path (Join-Path $SCRIPTS_DIR 'launch-terminals.ps1')) { _hc_ok 'launch-terminals.ps1' } else { _hc_fail 'launch-terminals.ps1' 'MISSING' }
+
+    # AutoLogon health check
+    try {
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        $autoAdminLogon = (Get-ItemProperty -Path $winlogonPath -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
+        if ($autoAdminLogon -eq '1') { _hc_ok 'AutoLogon' } else { _hc_warn 'AutoLogon' 'NOT SET' }
+    } catch { _hc_warn 'AutoLogon' 'NOT SET' }
+
+    # Startup scheduled task health check
+    $startupTask = Get-ScheduledTask -TaskName 'ClientSim-Startup' -TaskPath '\ClientSim\' -ErrorAction SilentlyContinue
+    if ($startupTask) { _hc_ok 'Startup Task' } else { _hc_warn 'Startup Task' 'NOT REGISTERED' }
 
     Write-Host ''
     Add-Content -Path $LOG_FILE -Value '' -Encoding UTF8

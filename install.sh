@@ -32,11 +32,23 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.15"
+VERSION="0.16"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
 PHASE_START=0
+
+###############################################################################
+# Platform detection
+###############################################################################
+IS_PI=false
+if grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
+  IS_PI=true
+fi
+# Also catch Pi via cpuinfo (older firmware / no device-tree)
+if ! $IS_PI && grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
+  IS_PI=true
+fi
 
 ###############################################################################
 # Logging
@@ -194,6 +206,11 @@ for (( i=0; i<${#PHASE_NAMES[@]}; i++ )); do
 done
 printf "\n"
 printf "${COL_DIM}  Log    : %s${COL_RESET}\n" "$LOG"
+if $IS_PI; then
+  printf "${COL_DIM}  Platform: Raspberry Pi (raspberrypi-kernel-headers, no qemu-guest-agent)${COL_RESET}\n"
+else
+  printf "${COL_DIM}  Platform: Debian x86/VM (linux-headers-$(uname -r))${COL_RESET}\n"
+fi
 printf "${COL_DIM}  Press Ctrl+C at any time to abort.${COL_RESET}\n"
 echo
 
@@ -313,12 +330,18 @@ retry apt_run upgrade -y --quiet \
   -o Dpkg::Options::="--force-confold"
 stop_spinner; ok "System packages upgraded"
 
+# Kernel headers package name differs between Debian x86 and Raspberry Pi OS
+if $IS_PI; then
+  KERNEL_HEADERS="raspberrypi-kernel-headers"
+else
+  KERNEL_HEADERS="linux-headers-$(uname -r)"
+fi
+
 PACKAGES=(
   "gnome-terminal"
   "wget"
-  "linux-headers-$(uname -r)"
+  "$KERNEL_HEADERS"
   "git"
-  "qemu-guest-agent"
   "smbclient"
   "rsyslog"
   "rfkill"
@@ -330,7 +353,12 @@ PACKAGES=(
   "dnsutils"
   "network-manager"
   "lightdm"
+  "openbox"
+  "xorg"
 )
+
+# qemu-guest-agent only needed in VM environments — skip on Raspberry Pi
+$IS_PI || PACKAGES+=("qemu-guest-agent")
 TOTAL_PKGS="${#PACKAGES[@]}"
 BATCH_SIZE=4
 INSTALLED_COUNT=0
@@ -383,31 +411,64 @@ else
 fi
 
 ###############################################################################
-# PHASE 3 — GNOME DISPLAY & POWER MANAGEMENT
+# PHASE 3 — DISPLAY MANAGER & POWER MANAGEMENT
 ###############################################################################
 begin_phase
 
-start_spinner "Disabling Wayland"
-if [[ -f /etc/gdm3/custom.conf ]]; then
-  sed -i 's/^#\(WaylandEnable=false\)/\1/' /etc/gdm3/custom.conf
-  stop_spinner; ok "Wayland disabled in gdm3"
-else
-  stop_spinner; warn "/etc/gdm3/custom.conf not found — skipping"
+# ── LightDM autologin ────────────────────────────────────────────────────────
+# Write the autologin config AFTER lightdm is installed (Phase 2).
+# Without this block LightDM always shows the greeter — autologin never fires.
+start_spinner "Configuring LightDM autologin for $SIM_USER"
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
+[Seat:*]
+autologin-user=$SIM_USER
+autologin-user-timeout=0
+autologin-session=openbox
+user-session=openbox
+greeter-session=lightdm-greeter
+LIGHTDM_EOF
+stop_spinner; ok "LightDM autologin → $SIM_USER (session: openbox)"
+
+# ── Openbox autostart — launch gnome-terminal on login ───────────────────────
+# Openbox is the window manager only (no taskbar/panels/icons).
+# gnome-terminal requires dbus-launch in a minimal session or it silently fails.
+start_spinner "Configuring Openbox autostart"
+OPENBOX_CFG="/home/$SIM_USER/.config/openbox"
+mkdir -p "$OPENBOX_CFG"
+cat >"$OPENBOX_CFG/autostart" <<'OB_EOF'
+# Ensure dbus session bus is running — gnome-terminal requires it
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+  eval $(dbus-launch --sh-syntax --exit-with-session)
 fi
 
+# Disable screen blanking and DPMS
+xset s noblank &
+xset -dpms &
+xset s off &
+
+# Set resolution for VM/QEMU display (safe no-op on physical hardware)
+xrandr --output Virtual-1 --mode 1440x900 2>/dev/null || true &
+
+# Launch gnome-terminal — the primary UI for client-sim
+# Retry loop handles the race where dbus isn't fully ready yet
+sleep 1
+for attempt in 1 2 3; do
+  gnome-terminal && break
+  sleep 1
+done &
+OB_EOF
+chown -R "$SIM_USER":"$SIM_USER" "/home/$SIM_USER/.config"
+stop_spinner; ok "Openbox autostart configured (dbus + gnome-terminal)"
+
 if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
-  start_spinner "Disabling screen blanking and DPMS"
-  sudo -u "$SIM_USER" gsettings set org.gnome.desktop.session idle-delay 0 || true
+  start_spinner "Applying screen power settings to current session"
   xset s noblank || true
   xset -dpms     || true
   xset s off     || true
   stop_spinner; ok "Screen power management disabled"
-
-  start_spinner "Setting screen resolution to 1440x900"
-  xrandr --output Virtual-1 --mode 1440x900 || true
-  stop_spinner; ok "Screen resolution set"
 else
-  warn "No graphical session — skipping gsettings/xset/xrandr"
+  info "No active graphical session — power settings will apply on next login"
 fi
 
 if command -v raspi-config &>/dev/null; then
@@ -921,6 +982,13 @@ id "$SIM_USER" &>/dev/null \
 systemctl is-active --quiet lightdm \
   && _hc_ok   "LightDM" \
   || _hc_warn "LightDM" "NOT ACTIVE"
+[[ -f /etc/lightdm/lightdm.conf.d/50-autologin.conf ]] \
+  && grep -q "autologin-user=$SIM_USER" /etc/lightdm/lightdm.conf.d/50-autologin.conf \
+  && _hc_ok   "LightDM autologin" \
+  || _hc_fail "LightDM autologin" "NOT CONFIGURED"
+[[ -f /home/$SIM_USER/.config/openbox/autostart ]] \
+  && _hc_ok   "Openbox autostart" \
+  || _hc_warn "Openbox autostart" "MISSING"
 systemctl is-active --quiet NetworkManager \
   && _hc_ok   "NetworkManager" \
   || _hc_fail "NetworkManager" "NOT ACTIVE"
