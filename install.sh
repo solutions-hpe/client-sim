@@ -32,7 +32,7 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.11"
+VERSION="0.13"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0
@@ -98,15 +98,12 @@ draw_bar() {
   local pct="$1" label="$2"
   local filled=$(( pct * BAR_WIDTH / 100 ))
   local empty=$(( BAR_WIDTH - filled ))
-  local bar="" col="$COL_GREEN"
+  local bar=""
 
   for (( i=0; i<filled; i++ )); do bar+="█"; done
   for (( i=0; i<empty;  i++ )); do bar+="░"; done
 
-  [[ "$pct" -lt 50 ]] && col="$COL_CYAN"
-  [[ "$pct" -lt 20 ]] && col="$COL_YELLOW"
-
-  printf "\r${COL_BOLD}%-20s${COL_RESET} ${col}%s${COL_RESET} ${COL_BOLD}%3d%%${COL_RESET}" \
+  printf "\r${COL_BOLD}%-20s${COL_RESET} %s ${COL_BOLD}%3d%%${COL_RESET}" \
     "${label:0:20}" "$bar" "$pct"
 }
 
@@ -215,17 +212,19 @@ retry() {
 
 ###############################################################################
 # HELPER: apt_run — silent normally, live output in --debug mode
+#         timeout baked in: APT_TIMEOUT seconds (default 300)
 # Usage: apt_run [apt-get args...]
 ###############################################################################
+APT_TIMEOUT=300
 apt_run() {
   if [[ "$DEBUG" -eq 1 ]]; then
     stop_spinner
     printf "\n${COL_DIM}  [DEBUG] apt-get %s${COL_RESET}\n" "$*"
-    apt-get "$@" 2>&1 | tee -a "$LOG"
+    timeout "$APT_TIMEOUT" apt-get "$@" 2>&1 | tee -a "$LOG"
     local rc=${PIPESTATUS[0]}
     return $rc
   else
-    apt-get "$@" >>"$LOG" 2>&1
+    timeout "$APT_TIMEOUT" apt-get "$@" >>"$LOG" 2>&1
   fi
 }
 
@@ -309,7 +308,7 @@ start_spinner "Pre-seeding debconf answers"
 stop_spinner; ok "debconf answers pre-seeded"
 
 start_spinner "Upgrading existing packages"
-retry timeout 300 apt_run upgrade -y --quiet \
+retry apt_run upgrade -y --quiet \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold"
 stop_spinner; ok "System packages upgraded"
@@ -345,7 +344,7 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
   start_spinner "Installing: ${BATCH[*]}"
   info "Batch install start [$(ts)]: ${BATCH[*]}"
-  if ! timeout 300 apt_run install -y --quiet \
+  if ! apt_run install -y --quiet \
       -o Dpkg::Options::="--force-confdef" \
       -o Dpkg::Options::="--force-confold" \
       "${BATCH[@]}"; then
@@ -353,12 +352,14 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
     warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
     for pkg in "${BATCH[@]}"; do
       info "Retrying individual install: $pkg"
-      timeout 180 apt_run install -y --quiet \
+      APT_TIMEOUT=180
+      apt_run install -y --quiet \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
         "$pkg" \
         && ok "Installed: $pkg" \
         || warn "Failed to install: $pkg (non-fatal, continuing)"
+      APT_TIMEOUT=300
     done
     start_spinner "Installing: ${BATCH[*]}"
   fi
