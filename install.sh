@@ -45,19 +45,19 @@ echo | tee -a "$LOG"
 ###############################################################################
 # PACKAGE PARITY
 ###############################################################################
-info "Installing full package parity"
+info "Installing apps needed for WiFi Driver Install"
 
 apt update --quiet=2 >>"$LOG" 2>&1
 apt install -y --quiet=2 \
-  gnome-core gnome-terminal \
-  wget qemu-guest-agent net-tools smbclient \
-  dnsutils firefox-esr rsyslog sysstat \
-  network-manager iperf3 git dkms sudo rfkill \
+  gnome-terminal wget sudo \
+  qemu-guest-agent smbclient \
+  dnsutils firefox-esr rsyslog \
+  iperf3 git dkms sysstat rfkill \
   build-essential linux-headers-$(uname -r) \
   >>"$LOG" 2>&1
 
 apt autoremove -y --quiet=2 >>"$LOG" 2>&1
-ok "Package parity installed"
+ok "Installing apps needed for WiFi Driver Install"
 
 ###############################################################################
 # Live GNOME terminal for installer log
@@ -244,6 +244,12 @@ done
 sudo depmod -a >>"$LOG" 2>&1
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
+
+apt install -y --quiet=2 \
+  net-tools dnsutils network-manager \
+  >>"$LOG" 2>&1
+
+apt autoremove -y --quiet=2 >>"$LOG" 2>&1
 
 ###############################################################################
 # FINAL HEALTH SUMMARY
