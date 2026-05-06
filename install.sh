@@ -87,7 +87,6 @@ PHASE_WEIGHTS=( 4 12 5 2 8 5 3 10 49 2 )
 
 CURRENT_PHASE=0
 CURRENT_PROGRESS=0
-SPINNER_PID=""
 
 # ── Terminal helpers ─────────────────────────────────────────────────────────
 TERM_WIDTH=80
@@ -121,7 +120,6 @@ draw_bar() {
 
 # ── Phase control ────────────────────────────────────────────────────────────
 begin_phase() {
-  stop_spinner
   PHASE_START=$(date +%s)
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
   draw_bar "$CURRENT_PROGRESS" "$name"
@@ -130,7 +128,6 @@ begin_phase() {
 }
 
 end_phase() {
-  stop_spinner
   local elapsed=$(( $(date +%s) - PHASE_START ))
   local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
   CURRENT_PROGRESS=$(( CURRENT_PROGRESS + weight ))
@@ -153,34 +150,9 @@ phase_step() {
   draw_bar "$frac_pct" "${PHASE_NAMES[$CURRENT_PHASE]:-}"
 }
 
-# ── Spinner ──────────────────────────────────────────────────────────────────
-SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 
-start_spinner() {
-  local label="${1:-Working...}"
-  stop_spinner
-  (
-    local i=0
-    while true; do
-      printf "\r  ${COL_CYAN}%s${COL_RESET}  %s " "${SPINNER_FRAMES[$i]}" "$label"
-      i=$(( (i + 1) % ${#SPINNER_FRAMES[@]} ))
-      sleep 0.1
-    done
-  ) &
-  SPINNER_PID=$!
-}
-
-stop_spinner() {
-  if [[ -n "${SPINNER_PID:-}" ]]; then
-    kill "$SPINNER_PID" 2>/dev/null || true
-    wait "$SPINNER_PID" 2>/dev/null || true
-    SPINNER_PID=""
-    printf "\r\033[K"
-  fi
-}
-
-trap 'stop_spinner; tput cnorm 2>/dev/null || true' EXIT
-trap 'echo; echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; stop_spinner; tput cnorm 2>/dev/null || true; exit 130' INT
+trap 'tput cnorm 2>/dev/null || true' EXIT
+trap 'echo; echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; tput cnorm 2>/dev/null || true; exit 130' INT
 
 ###############################################################################
 # Startup banner
@@ -195,8 +167,6 @@ echo "============================================================"
 echo
 } | tee -a "$LOG"
 
-# Hide cursor during install
-tput civis 2>/dev/null || true
 
 # ── Pre-flight summary ───────────────────────────────────────────────────────
 printf "${COL_DIM}  Phases : ${COL_RESET}"
@@ -235,7 +205,6 @@ retry() {
 APT_TIMEOUT=300
 apt_run() {
   if [[ "$DEBUG" -eq 1 ]]; then
-    stop_spinner
     printf "\n${COL_DIM}  [DEBUG] apt-get %s${COL_RESET}\n" "$*"
     timeout "$APT_TIMEOUT" apt-get "$@" 2>&1 | tee -a "$LOG"
     local rc=${PIPESTATUS[0]}
@@ -251,15 +220,15 @@ apt_run() {
 begin_phase
 SIM_USER="sim-user"
 
-start_spinner "Checking user '$SIM_USER'"
+info "Checking user '$SIM_USER'"
 if ! id "$SIM_USER" &>/dev/null; then
   useradd -m -s /bin/bash "$SIM_USER" >>"$LOG" 2>&1
-  stop_spinner; ok "Created user '$SIM_USER'"
+  ok "Created user '$SIM_USER'"
 else
-  stop_spinner; ok "User '$SIM_USER' already exists"
+  ok "User '$SIM_USER' already exists"
 fi
 
-start_spinner "Configuring sudoers"
+info "Configuring sudoers"
 
 # sim-user: scoped passwordless sudo for simulation operations
 cat >/etc/sudoers.d/99-simuser-nopasswd <<EOF
@@ -269,7 +238,6 @@ EOF
 chmod 0440 /etc/sudoers.d/99-simuser-nopasswd
 
 if ! visudo -cf /etc/sudoers.d/99-simuser-nopasswd >>"$LOG" 2>&1; then
-  stop_spinner
   err "sudoers fragment failed validation — removing"
   rm -f /etc/sudoers.d/99-simuser-nopasswd
   exit 1
@@ -284,7 +252,6 @@ user ALL=(ALL) NOPASSWD: ALL
 EOF
   chmod 0440 /etc/sudoers.d/99-user-nopasswd
   if ! visudo -cf /etc/sudoers.d/99-user-nopasswd >>"$LOG" 2>&1; then
-    stop_spinner
     err "sudoers fragment for 'user' failed validation — removing"
     rm -f /etc/sudoers.d/99-user-nopasswd
     exit 1
@@ -294,10 +261,8 @@ else
   warn "User 'user' does not exist — skipping its sudoers entry"
 fi
 
-stop_spinner
-
 # ── SMB credentials template ─────────────────────────────────────────────────
-start_spinner "Checking SMB credentials file"
+info "Checking SMB credentials file"
 SMB_CREDS_DIR="/etc/client-sim"
 SMB_CREDS="$SMB_CREDS_DIR/smb-credentials"
 mkdir -p "$SMB_CREDS_DIR"
@@ -309,11 +274,10 @@ if [[ ! -f "$SMB_CREDS" ]]; then
 # domain=your_domain
 CREDS
   chmod 600 "$SMB_CREDS"
-  stop_spinner
   warn "SMB credentials template created at $SMB_CREDS — edit it to enable SMB sync"
 else
   chmod 600 "$SMB_CREDS"
-  stop_spinner; ok "SMB credentials file already exists"
+  ok "SMB credentials file already exists"
 fi
 end_phase
 
@@ -322,13 +286,13 @@ end_phase
 ###############################################################################
 begin_phase
 
-start_spinner "Updating package lists"
+info "Updating package lists"
 retry apt_run update --quiet=2
-stop_spinner; ok "Package lists updated"
+ok "Package lists updated"
 
 # Pre-seed debconf answers for packages known to prompt interactively.
 # samba-common ignores DEBIAN_FRONTEND without do_debconf=false.
-start_spinner "Pre-seeding debconf answers"
+info "Pre-seeding debconf answers"
 {
   # samba-common: do_debconf=false prevents ALL interactive questions
   echo "samba-common samba-common/do_debconf boolean false"
@@ -342,13 +306,13 @@ start_spinner "Pre-seeding debconf answers"
   echo "lightdm shared/default-x-display-manager select lightdm"
   echo "gdm3 shared/default-x-display-manager select lightdm"
 } | debconf-set-selections >>"$LOG" 2>&1
-stop_spinner; ok "debconf answers pre-seeded"
+ok "debconf answers pre-seeded"
 
-start_spinner "Upgrading existing packages"
+info "Upgrading existing packages"
 retry apt_run upgrade -y --quiet \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold"
-stop_spinner; ok "System packages upgraded"
+ok "System packages upgraded"
 
 # Kernel headers package name differs between Debian x86 and Raspberry Pi OS
 if $IS_PI; then
@@ -388,15 +352,13 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   INSTALLED_COUNT=$(( i + ${#BATCH[@]} ))
   [[ "$INSTALLED_COUNT" -gt "$TOTAL_PKGS" ]] && INSTALLED_COUNT="$TOTAL_PKGS"
 
-  stop_spinner
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
-  start_spinner "Installing: ${BATCH[*]}"
+  info "Installing: ${BATCH[*]}"
   info "Batch install start [$(ts)]: ${BATCH[*]}"
   if ! apt_run install -y --quiet \
       -o Dpkg::Options::="--force-confdef" \
       -o Dpkg::Options::="--force-confold" \
       "${BATCH[@]}"; then
-    stop_spinner
     warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
     for pkg in "${BATCH[@]}"; do
       info "Retrying individual install: $pkg"
@@ -409,15 +371,13 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
         || warn "Failed to install: $pkg (non-fatal, continuing)"
       APT_TIMEOUT=300
     done
-    start_spinner "Installing: ${BATCH[*]}"
+    info "Installing: ${BATCH[*]}"
   fi
   info "Batch install end   [$(ts)]: ${BATCH[*]}"
 done
-
-stop_spinner
-start_spinner "Running autoremove"
+info "Running autoremove"
 apt_run autoremove -y --quiet=2
-stop_spinner; ok "Core dependencies installed"
+ok "Core dependencies installed"
 end_phase
 
 ###############################################################################
@@ -438,7 +398,7 @@ begin_phase
 # ── LightDM autologin ────────────────────────────────────────────────────────
 # Write the autologin config AFTER lightdm is installed (Phase 2).
 # Without this block LightDM always shows the greeter — autologin never fires.
-start_spinner "Configuring LightDM autologin for $SIM_USER"
+info "Configuring LightDM autologin for $SIM_USER"
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
 [Seat:*]
@@ -448,12 +408,12 @@ autologin-session=openbox
 user-session=openbox
 greeter-session=lightdm-greeter
 LIGHTDM_EOF
-stop_spinner; ok "LightDM autologin → $SIM_USER (session: openbox)"
+ok "LightDM autologin → $SIM_USER (session: openbox)"
 
 # ── Openbox autostart — launch gnome-terminal on login ───────────────────────
 # Openbox is the window manager only (no taskbar/panels/icons).
 # gnome-terminal requires dbus-launch in a minimal session or it silently fails.
-start_spinner "Configuring Openbox autostart"
+info "Configuring Openbox autostart"
 OPENBOX_CFG="/home/$SIM_USER/.config/openbox"
 mkdir -p "$OPENBOX_CFG"
 cat >"$OPENBOX_CFG/autostart" <<'OB_EOF'
@@ -479,23 +439,23 @@ for attempt in 1 2 3; do
 done &
 OB_EOF
 chown -R "$SIM_USER":"$SIM_USER" "/home/$SIM_USER/.config"
-stop_spinner; ok "Openbox autostart configured (dbus + gnome-terminal)"
+ok "Openbox autostart configured (dbus + gnome-terminal)"
 
 if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
-  start_spinner "Applying screen power settings to current session"
+  info "Applying screen power settings to current session"
   xset s noblank || true
   xset -dpms     || true
   xset s off     || true
-  stop_spinner; ok "Screen power management disabled"
+  ok "Screen power management disabled"
 else
   info "No active graphical session — power settings will apply on next login"
 fi
 
 if command -v raspi-config &>/dev/null; then
-  start_spinner "Configuring Raspberry Pi locale and Wi-Fi region"
+  info "Configuring Raspberry Pi locale and Wi-Fi region"
   raspi-config nonint do_change_locale en_US.UTF-8
   raspi-config nonint do_wifi_country US
-  stop_spinner; ok "Raspberry Pi locale and Wi-Fi region configured"
+  ok "Raspberry Pi locale and Wi-Fi region configured"
 fi
 
 end_phase
@@ -505,7 +465,7 @@ end_phase
 ###############################################################################
 begin_phase
 
-start_spinner "Preparing /usr/local/scripts"
+info "Preparing /usr/local/scripts"
 mkdir -p /usr/local/scripts
 chown root:"$SIM_USER" /usr/local/scripts
 chmod 775 /usr/local/scripts
@@ -517,7 +477,7 @@ chmod 664 /usr/local/scripts/sim.log
 # Write installer version to sim.log (from original script)
 echo "Installer Version $VERSION" | tee /usr/local/scripts/sim.log >>"$LOG"
 
-stop_spinner; ok "/usr/local/scripts prepared — version $VERSION written to sim.log"
+ok "/usr/local/scripts prepared — version $VERSION written to sim.log"
 end_phase
 
 ###############################################################################
@@ -528,10 +488,10 @@ begin_phase
 CLIENT_SIM_REPO="https://github.com/solutions-hpe/client-sim.git"
 CLIENT_SIM_DIR="$HOME/client-sim"
 
-start_spinner "Cloning solutions-hpe/client-sim"
+info "Cloning solutions-hpe/client-sim"
 rm -rf "$CLIENT_SIM_DIR"
 if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1; then
-  stop_spinner; ok "client-sim repo cloned"
+  ok "client-sim repo cloned"
 
   LINUX_DIR="$CLIENT_SIM_DIR/linux"
   CONFIGS_DIR="$CLIENT_SIM_DIR/configs"
@@ -540,73 +500,72 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
     cd "$LINUX_DIR"
 
     # ── .desktop autostart files ─────────────────────────────────────────────
-    start_spinner "Installing .desktop autostart files"
+    info "Installing .desktop autostart files"
     if compgen -G "*.desktop" &>/dev/null; then
       cp *.desktop /etc/xdg/autostart/ >>"$LOG" 2>&1
-      stop_spinner; ok ".desktop autostart files installed"
+      ok ".desktop autostart files installed"
     else
-      stop_spinner; warn "No .desktop files found in $LINUX_DIR"
+      warn "No .desktop files found in $LINUX_DIR"
     fi
 
     # ── Shell scripts ────────────────────────────────────────────────────────
-    start_spinner "Copying shell scripts to /usr/local/scripts"
+    info "Copying shell scripts to /usr/local/scripts"
     if compgen -G "*.sh" &>/dev/null; then
       cp *.sh /usr/local/scripts/ >>"$LOG" 2>&1
-      stop_spinner; ok "Shell scripts copied"
+      ok "Shell scripts copied"
     else
-      stop_spinner; warn "No .sh files found in $LINUX_DIR"
+      warn "No .sh files found in $LINUX_DIR"
     fi
 
     # ── Flat text files ──────────────────────────────────────────────────────
-    start_spinner "Copying text files to /usr/local/scripts"
+    info "Copying text files to /usr/local/scripts"
     if compgen -G "*.txt" &>/dev/null; then
       cp *.txt /usr/local/scripts/ >>"$LOG" 2>&1
-      stop_spinner; ok "Text files copied"
+      ok "Text files copied"
     else
-      stop_spinner; warn "No .txt files found in $LINUX_DIR"
+      warn "No .txt files found in $LINUX_DIR"
     fi
 
     # ── simulation.conf (conditional — don't overwrite existing) ─────────────
-    start_spinner "Checking simulation.conf"
+    info "Checking simulation.conf"
     if [[ -f /usr/local/scripts/simulation.conf ]]; then
-      stop_spinner; ok "simulation.conf already exists — not overwriting"
+      ok "simulation.conf already exists — not overwriting"
     else
       if [[ -f "$CONFIGS_DIR/simulation.conf" ]]; then
         cp "$CONFIGS_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
-        stop_spinner; ok "simulation.conf copied from configs directory"
+        ok "simulation.conf copied from configs directory"
       elif [[ -f "$LINUX_DIR/simulation.conf" ]]; then
         cp "$LINUX_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
-        stop_spinner; ok "simulation.conf copied from linux directory"
+        ok "simulation.conf copied from linux directory"
       else
-        stop_spinner; warn "simulation.conf not found in repo — skipping"
+        warn "simulation.conf not found in repo — skipping"
       fi
     fi
 
     # ── rsyslog config from repo ─────────────────────────────────────────────
-    start_spinner "Checking for rsyslog config in repo"
+    info "Checking for rsyslog config in repo"
     if [[ -f "$LINUX_DIR/10-rsyslog.conf" ]]; then
-      stop_spinner
       info "Found 10-rsyslog.conf in repo — will apply in rsyslog phase"
       REPO_RSYSLOG_CONF="$LINUX_DIR/10-rsyslog.conf"
     else
-      stop_spinner; warn "No 10-rsyslog.conf in repo linux directory"
+      warn "No 10-rsyslog.conf in repo linux directory"
       REPO_RSYSLOG_CONF=""
     fi
 
     # ── Final permissions ────────────────────────────────────────────────────
-    start_spinner "Setting permissions on /usr/local/scripts"
+    info "Setting permissions on /usr/local/scripts"
     find /usr/local/scripts -type d                -exec chmod 755 {} \; >>"$LOG" 2>&1
     find /usr/local/scripts -type f -name "*.sh"   -exec chmod 755 {} \; >>"$LOG" 2>&1
     find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} \; >>"$LOG" 2>&1
-    stop_spinner; ok "Permissions set on /usr/local/scripts"
+    ok "Permissions set on /usr/local/scripts"
 
     cd "$HOME"
   else
-    stop_spinner; warn "linux/ directory not found in client-sim repo — skipping file deployment"
+    warn "linux/ directory not found in client-sim repo — skipping file deployment"
     REPO_RSYSLOG_CONF=""
   fi
 else
-  stop_spinner; warn "Failed to clone client-sim repo — skipping file deployment"
+  warn "Failed to clone client-sim repo — skipping file deployment"
   REPO_RSYSLOG_CONF=""
 fi
 
@@ -627,27 +586,25 @@ elif grep -qE '^\s*#|^[[:space:]]*$' "$SMB_CREDS" && ! grep -qE '^username=' "$S
   warn "SMB credentials file is still a template — edit $SMB_CREDS to enable SMB sync"
 else
   chmod 600 "$SMB_CREDS"
-  start_spinner "Syncing config files from SMB share"
+  info "Syncing config files from SMB share"
   if smbclient "$SMB_SHARE" --authentication-file="$SMB_CREDS" -c \
       "lcd /usr/local/scripts; cd $SMB_REMOTE_DIR; prompt off; mget *.conf" \
       >>"$LOG" 2>&1; then
-    stop_spinner
 
     MANIFEST="/usr/local/scripts/checksums.sha256"
     if [[ -f "$MANIFEST" ]]; then
-      start_spinner "Verifying SMB file checksums"
+      info "Verifying SMB file checksums"
       if ! (cd /usr/local/scripts && sha256sum -c "$MANIFEST" >>"$LOG" 2>&1); then
-        stop_spinner
         err "Checksum verification FAILED — aborting"
         exit 1
       fi
-      stop_spinner; ok "SMB file checksums verified"
+      ok "SMB file checksums verified"
     else
       warn "No checksums.sha256 manifest found — skipping integrity check"
     fi
     ok "SMB config sync complete"
   else
-    stop_spinner; warn "SMB config sync failed — continuing without remote config"
+    warn "SMB config sync failed — continuing without remote config"
   fi
 fi
 
@@ -669,16 +626,15 @@ elif [[ -f /usr/local/scripts/10-rsyslog.conf ]]; then
 fi
 
 if [[ -n "$RSYSLOG_SOURCE" ]]; then
-  start_spinner "Installing rsyslog config"
+  info "Installing rsyslog config"
   mkdir -p /etc/rsyslog.d
   cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
   # Validate the full rsyslog config (including the new drop-in) not just the snippet
   if rsyslogd -N1 >>"$LOG" 2>&1; then
     systemctl restart rsyslog || true
     systemctl enable  rsyslog || true
-    stop_spinner; ok "rsyslog configured from $RSYSLOG_SOURCE"
+    ok "rsyslog configured from $RSYSLOG_SOURCE"
   else
-    stop_spinner
     warn "rsyslog config validation failed — reverting"
     rm -f /etc/rsyslog.d/10-rsyslog.conf
   fi
@@ -707,23 +663,21 @@ esac
 if [[ -n "$VH_BIN" ]]; then
   VH_TMP="$(mktemp)"
 
-  start_spinner "Downloading VirtualHere ($VH_BIN)"
+  info "Downloading VirtualHere ($VH_BIN)"
   if retry curl -fsSL \
       "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
       -o "$VH_TMP" >>"$LOG" 2>&1; then
-    stop_spinner
 
     # Install binary — keep arch-specific name AND create generic symlink
     install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
     ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
     ok "VirtualHere binary installed as /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
 
-    start_spinner "Downloading VirtualHere systemd service"
+    info "Downloading VirtualHere systemd service"
     VH_SVC_TMP="$(mktemp)"
     if retry curl -fsSL \
         "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
         -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
-      stop_spinner
       # Patch ExecStart and add start timeout so install never blocks
       sed -e "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" \
           -e '/\[Service\]/a TimeoutStartSec=15' \
@@ -731,7 +685,6 @@ if [[ -n "$VH_BIN" ]]; then
       rm -f "$VH_SVC_TMP"
       ok "VirtualHere service file installed"
     else
-      stop_spinner
       warn "Could not download official service file — writing fallback"
       rm -f "$VH_SVC_TMP"
       cat >/etc/systemd/system/virtualhereclient.service <<EOF
@@ -752,14 +705,13 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    start_spinner "Enabling VirtualHere service"
+    info "Enabling VirtualHere service"
     systemctl daemon-reload
     systemctl enable virtualhereclient >>"$LOG" 2>&1
     # Start non-blocking — VH client needs a server to connect to which may
     # not be present at install time; failure here is non-fatal.
     systemctl start virtualhereclient >>"$LOG" 2>&1 || \
       warn "VirtualHere service did not start (no server reachable yet) — will start on boot"
-    stop_spinner
 
     sleep 2
     rm -f /usr/local/scripts/vhcached.txt || true
@@ -768,7 +720,7 @@ EOF
 
     ok "VirtualHere installed and initialized"
   else
-    stop_spinner; warn "Failed to download VirtualHere binary — skipping"
+    warn "Failed to download VirtualHere binary — skipping"
   fi
   rm -f "$VH_TMP"
 fi
@@ -841,7 +793,6 @@ for entry in "${DRIVERS[@]}"; do
 
   DRIVER_NUM=$(( DRIVER_NUM + 1 ))
 
-  stop_spinner
   phase_step "$DRIVER_NUM" "$TOTAL_DRIVERS"
   info "Driver $DRIVER_NUM/$TOTAL_DRIVERS: $NAME"
 
@@ -849,18 +800,16 @@ for entry in "${DRIVERS[@]}"; do
   CLONE_ARGS=(--depth=1)
   [[ "$PIN" != "HEAD" ]] && CLONE_ARGS+=(--branch "$PIN")
 
-  start_spinner "Cloning $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
+  info "Cloning $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
   if git clone "${CLONE_ARGS[@]}" "$REPO" "$NAME" >>"$LOG" 2>&1; then
-    stop_spinner
     cd "$NAME"
 
   INSTALL_OK=true
     case "$TYPE" in
       morrownr)
         if [[ -x ./install-driver.sh ]]; then
-          start_spinner "Building $NAME (morrownr)"
+          info "Building $NAME (morrownr)"
           ./install-driver.sh NoPrompt >>"$LOG" 2>&1 || INSTALL_OK=false
-          stop_spinner
         else
           warn "$NAME: install-driver.sh not found or not executable"
           INSTALL_OK=false
@@ -869,9 +818,8 @@ for entry in "${DRIVERS[@]}"; do
 
       aircrack)
         if [[ -x ./install-driver.sh ]]; then
-          start_spinner "Building $NAME (aircrack-ng)"
+          info "Building $NAME (aircrack-ng)"
           echo "" | ./install-driver.sh >>"$LOG" 2>&1 || INSTALL_OK=false
-          stop_spinner
         else
           warn "$NAME: install-driver.sh not found or not executable"
           INSTALL_OK=false
@@ -895,7 +843,7 @@ for entry in "${DRIVERS[@]}"; do
         [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
 
         SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
-        start_spinner "Installing $NAME via DKMS ($MOD/$DKMS_VER)"
+        info "Installing $NAME via DKMS ($MOD/$DKMS_VER)"
 
         # Copy source into /usr/src where dkms expects it
         rm -rf "$SRC_DEST"
@@ -904,29 +852,27 @@ for entry in "${DRIVERS[@]}"; do
         dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
         dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
           && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
-          || { stop_spinner; INSTALL_OK=false; }
-        stop_spinner
+          || { INSTALL_OK=false; }
 
         if [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
-          start_spinner "Loading module: $MODPROBE"
+          info "Loading module: $MODPROBE"
           modprobe "$MODPROBE" >>"$LOG" 2>&1 \
             || warn "modprobe $MODPROBE failed (may need reboot)"
-          stop_spinner; ok "Module $MODPROBE loaded"
+          ok "Module $MODPROBE loaded"
         fi
         ;;
 
       lwfinger)
         # Build only (no make install) — DKMS manages the module lifecycle.
         # Source must be copied to /usr/src/MOD-VER/ before dkms add.
-        start_spinner "Building $NAME (lwfinger)"
+        info "Building $NAME (lwfinger)"
         if make all >>"$LOG" 2>&1; then
-          stop_spinner
 
           DKMS_VER="0.0"
           [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
 
           SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
-          start_spinner "Registering $NAME with DKMS ($MOD/$DKMS_VER)"
+          info "Registering $NAME with DKMS ($MOD/$DKMS_VER)"
 
           # Copy source into /usr/src where dkms expects it, then register
           rm -rf "$SRC_DEST"
@@ -935,17 +881,15 @@ for entry in "${DRIVERS[@]}"; do
           dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
           dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
             && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
-            || { stop_spinner; warn "$NAME: dkms build/install failed"; INSTALL_OK=false; }
-          stop_spinner
+            || { warn "$NAME: dkms build/install failed"; INSTALL_OK=false; }
 
           if $INSTALL_OK && [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
-            start_spinner "Loading module: $MODPROBE"
+            info "Loading module: $MODPROBE"
             modprobe "$MODPROBE" >>"$LOG" 2>&1 \
               || warn "modprobe $MODPROBE failed (may need reboot)"
-            stop_spinner; ok "Module $MODPROBE loaded"
+            ok "Module $MODPROBE loaded"
           fi
         else
-          stop_spinner
           INSTALL_OK=false
         fi
         ;;
@@ -961,15 +905,13 @@ for entry in "${DRIVERS[@]}"; do
       warn "✗ $NAME build/install failed [$DRIVER_NUM/$TOTAL_DRIVERS]"
     fi
   else
-    stop_spinner
     echo "$NAME:CLONE_FAILED" >>"$DRIVER_STATE"
     warn "✗ Failed to clone $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
   fi
 done
 
-start_spinner "Running depmod -a"
+info "Running depmod -a"
 depmod -a >>"$LOG" 2>&1
-stop_spinner
 
 export PATH="$OLD_PATH"
 rm -rf "$SUPPRESS"
