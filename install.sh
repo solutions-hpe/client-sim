@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
 # Client Simulator Installer v0.99.7
-#
-# TRUE CANONICAL SUPERSET
-# -----------------------------------------------------------------------------
-# Baseline : v0.99.55
-# Restores : All GNOME, SMB, logging, parity, and runtime behavior from v0.43
-# Rule     : No elisions, no placeholders, no summarized logic
 ###############################################################################
 
 set -euo pipefail
@@ -49,7 +43,7 @@ echo "============================================================"
 echo | tee -a "$LOG"
 
 ###############################################################################
-# PACKAGE PARITY (original + modern)
+# PACKAGE PARITY
 ###############################################################################
 info "Installing full package parity"
 
