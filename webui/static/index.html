@@ -15,14 +15,26 @@
           Client-Sim Dashboard
         </h1>
       </div>
-      <div class="ws-status" aria-live="polite">
-        <span id="ws-dot" class="status-dot offline"></span>
-        <span id="ws-text">Disconnected</span>
+      <div class="topbar-right">
+        <div id="repo-status" class="repo-status" title="GitHub sync status">
+          <span id="repo-dot" class="status-dot offline"></span>
+          <span id="repo-text">Syncing…</span>
+        </div>
+        <div class="ws-status" aria-live="polite">
+          <span id="ws-dot" class="status-dot offline"></span>
+          <span id="ws-text">Disconnected</span>
+        </div>
       </div>
     </div>
   </header>
 
-  <main class="page">
+  <nav class="tab-nav" role="tablist">
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="dashboard">Dashboard</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
+  </nav>
+
+  <!-- ── Dashboard tab ── -->
+  <main id="tab-dashboard" class="page tab-content">
     <section class="toolbar">
       <div class="toolbar-actions">
         <button id="kill-all" class="btn btn-danger" type="button">Kill All</button>
@@ -47,14 +59,68 @@
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody id="clients-body"></tbody>
+        <tbody id="clients-body">
+          <tr id="empty-row">
+            <td colspan="10" class="empty-state">No clients connected — waiting for beacons…</td>
+          </tr>
+        </tbody>
       </table>
     </section>
   </main>
 
+  <!-- ── Setup tab ── -->
+  <main id="tab-setup" class="page tab-content hidden">
+    <div class="setup-card">
+      <div class="setup-card-header">
+        <h2>Repository Settings</h2>
+        <p>Choose which branch of <strong>solutions-hpe/client-sim</strong> the dashboard syncs from.
+           The repository URL is fixed. Changes take effect immediately and persist across restarts.</p>
+      </div>
+
+      <div class="setup-form">
+        <div class="form-group">
+          <label class="form-label" for="repo-url-input">Repository</label>
+          <input id="repo-url-input" class="form-input input-readonly" type="text"
+                 value="https://github.com/solutions-hpe/client-sim.git" readonly>
+          <span class="form-hint">Fixed — only branch can be changed.</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="branch-input">Branch</label>
+          <input id="branch-input" class="form-input" type="text"
+                 placeholder="e.g. main, lrb, feature/test" autocomplete="off" spellcheck="false">
+          <span class="form-hint">Letters, numbers, hyphens, underscores, dots, and slashes only.</span>
+        </div>
+
+        <div class="form-actions">
+          <button id="save-settings" class="btn btn-primary" type="button">Save &amp; Sync</button>
+        </div>
+
+        <div id="settings-message" class="settings-message hidden" role="alert"></div>
+      </div>
+
+      <hr class="setup-divider">
+
+      <div class="setup-status-grid">
+        <div class="setup-status-item">
+          <span class="setup-status-label">Sync status</span>
+          <span id="setup-sync-state" class="setup-status-value">—</span>
+        </div>
+        <div class="setup-status-item">
+          <span class="setup-status-label">Active branch</span>
+          <span id="setup-active-branch" class="setup-status-value">—</span>
+        </div>
+        <div class="setup-status-item">
+          <span class="setup-status-label">Last error</span>
+          <span id="setup-sync-error" class="setup-status-value muted">—</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
   <script src="/app.js" defer></script>
 
-  <footer style="background:#1F2531;color:rgba(255,255,255,0.4);font-size:0.75rem;padding:8px 24px;display:flex;align-items:center;justify-content:space-between;">
+  <footer class="page-footer">
     <span>© Hewlett Packard Enterprise · Client-Sim Dashboard</span>
     <span id="footer-version">v0.1</span>
   </footer>

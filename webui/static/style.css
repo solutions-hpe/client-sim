@@ -444,3 +444,201 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   .page { padding: 14px; }
   .toolbar { flex-wrap: wrap; }
 }
+
+/* ── Topbar right cluster (repo + ws status) ────────────────────── */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.repo-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.75);
+  border-right: 1px solid var(--hpe-navy-mid);
+  padding-right: 20px;
+  cursor: default;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.page-footer {
+  background: var(--hpe-navy-dark);
+  color: rgba(255,255,255,0.4);
+  font-size: 0.75rem;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+  padding: 32px 16px !important;
+}
+
+/* ── Tab navigation ─────────────────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 0;
+  background: var(--panel);
+  border-bottom: 2px solid var(--border);
+  padding: 0 24px;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: 12px 20px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  color: var(--hpe-green);
+  border-bottom-color: var(--hpe-green);
+}
+
+.tab-content.hidden { display: none; }
+
+/* ── Setup card ─────────────────────────────────────────────────── */
+.setup-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+  max-width: 680px;
+  padding: 28px 32px;
+}
+
+.setup-card-header h2 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--hpe-navy);
+}
+
+.setup-card-header p {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* ── Setup form ─────────────────────────────────────────────────── */
+.setup-form { display: flex; flex-direction: column; gap: 18px; }
+
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.form-input {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--hpe-green);
+  box-shadow: 0 0 0 3px rgba(1,169,130,0.15);
+}
+
+.input-readonly {
+  background: #F5F5F5;
+  color: var(--muted);
+  cursor: default;
+}
+
+.form-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.form-actions { padding-top: 4px; }
+
+/* Settings save feedback */
+.settings-message {
+  border-radius: 3px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.settings-message.hidden { display: none; }
+
+.settings-message.success {
+  background: var(--hpe-green-light);
+  color: var(--hpe-green-dark);
+  border: 1px solid rgba(1,169,130,0.3);
+}
+
+.settings-message.error {
+  background: var(--hpe-red-bg);
+  color: #C0392B;
+  border: 1px solid rgba(252,90,90,0.3);
+}
+
+/* ── Setup status grid ──────────────────────────────────────────── */
+.setup-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.setup-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.setup-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #F8F8F8;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.setup-status-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.setup-status-value {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.setup-status-value.muted { color: var(--muted); font-weight: 400; }

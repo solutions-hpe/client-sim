@@ -256,8 +256,12 @@ Assign a **static IP** or DHCP reservation so clients always reach the same addr
 # On the Proxmox host
 pct enter <CTID>
 
-# Inside the container — one-liner install
+# Inside the container — one-liner install (defaults: branch=main, port=8000)
 curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh | sudo bash
+
+# One-liner with custom branch and port
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh \
+  | sudo bash -s -- --branch lrb --port 9000
 ```
 
 **Or clone and run manually:**
@@ -268,10 +272,29 @@ cd client-sim
 sudo bash webui/install-lxc.sh
 ```
 
-**Override defaults with environment variables before running:**
+**Common flags (can be combined):**
+
+| Flag | Description |
+|------|-------------|
+| `--branch <name>` | Git branch to sync from (e.g. `main`, `lrb`) |
+| `--port <number>` | TCP port to serve on (default: `8000`) |
+| `--reinstall` | Full wipe and fresh install (default is safe in-place update) |
+| `--help` | Show usage |
 
 ```bash
-# Example: custom branch, custom port
+# Custom branch and port
+sudo bash webui/install-lxc.sh --branch lrb --port 9000
+
+# Re-run to update an existing installation (safe, preserves .env and settings)
+sudo bash webui/install-lxc.sh
+
+# Force a full reinstall on a specific branch
+sudo bash webui/install-lxc.sh --reinstall --branch main
+```
+
+You can also override via environment variables before running (flags take priority):
+
+```bash
 export REPO_BRANCH=main
 export PORT=9000
 sudo bash webui/install-lxc.sh
@@ -348,12 +371,12 @@ uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REPO_URL` | `https://github.com/solutions-hpe/client-sim.git` | GitHub repo to sync from |
-| `REPO_BRANCH` | `lrb` | Branch to track |
+| `REPO_BRANCH` | `main` | Branch to track (override with `--branch` flag) |
 | `REPO_DIR` | `/opt/client-sim-repo` | Local repo checkout path |
 | `OFFLINE_TIMEOUT` | `60` | Seconds before a client shows as offline |
-| `PORT` | `8000` | TCP port (LXC installer only) |
+| `PORT` | `8000` | TCP port (LXC installer only; override with `--port` flag) |
 
-For Docker, set these in `docker-compose.yml`.  For the LXC install, set them as shell environment variables before running `install-lxc.sh` — they are written to `/opt/client-sim-dashboard/.env` and read by `systemd` at service start.
+For Docker, set these in `docker-compose.yml`.  For the LXC install, use `--branch`/`--port` CLI flags or set them as shell environment variables before running `install-lxc.sh` — they are written to `/opt/client-sim-dashboard/.env` and read by `systemd` at service start.
 
 ---
 

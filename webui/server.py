@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,12 +22,26 @@ logger = logging.getLogger("client_sim_dashboard")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+SETTINGS_FILE = BASE_DIR / "settings.json"
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
 REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
+
+# ── Runtime settings (persisted to settings.json, survives restarts) ─────────
+def _load_persisted_settings() -> dict[str, str]:
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+_persisted = _load_persisted_settings()
+settings: dict[str, str] = {
+    "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
+}
+
 ALLOWED_PLATFORMS = {"linux", "windows"}
 SIMULATION_SECTION_KEYS = {
     "wsite",
@@ -78,7 +93,19 @@ ADDRESS_SECTION_KEYS = {
     "vh_server_addr",
 }
 
-app = FastAPI(title="Client-Sim Dashboard")
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+    background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
+    yield
+    for task in background_tasks.values():
+        task.cancel()
+    for task in background_tasks.values():
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
 clients: dict[str, dict[str, Any]] = {}
 ws_connections: list[WebSocket] = []
 state_lock = asyncio.Lock()
@@ -102,6 +129,10 @@ class ClientControlResponse(BaseModel):
     hostname: str
     overrides: dict[str, str]
     client: dict[str, Any]
+
+
+class SettingsUpdate(BaseModel):
+    repo_branch: str
 
 
 def utcnow() -> datetime:
@@ -256,11 +287,12 @@ def apply_overrides(config_text: str, client: dict[str, Any]) -> str:
 
 
 def sync_repo_once() -> None:
+    branch = settings["repo_branch"]
     REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
 
     if not REPO_DIR.exists() or not any(REPO_DIR.iterdir()):
-        logger.info("Cloning %s (%s) into %s", REPO_URL, REPO_BRANCH, REPO_DIR)
-        Repo.clone_from(REPO_URL, REPO_DIR, branch=REPO_BRANCH, single_branch=True)
+        logger.info("Cloning %s (%s) into %s", REPO_URL, branch, REPO_DIR)
+        Repo.clone_from(REPO_URL, REPO_DIR, branch=branch, single_branch=True)
         return
 
     try:
@@ -269,11 +301,11 @@ def sync_repo_once() -> None:
         raise RuntimeError(f"{REPO_DIR} exists but is not a git repository") from exc
 
     origin = repo.remotes.origin
-    logger.info("Pulling latest repo state from %s", REPO_URL)
+    logger.info("Pulling latest repo state from %s branch %s", REPO_URL, branch)
     origin.fetch(prune=True)
-    repo.git.checkout(REPO_BRANCH)
-    origin.pull(REPO_BRANCH)
-    repo.git.reset("--hard", f"origin/{REPO_BRANCH}")
+    repo.git.checkout(branch)
+    origin.pull(branch)
+    repo.git.reset("--hard", f"origin/{branch}")
 
 
 async def sync_repo() -> None:
@@ -282,11 +314,13 @@ async def sync_repo() -> None:
             await asyncio.to_thread(sync_repo_once)
             repo_state["synced"] = True
             repo_state["error"] = None
+            await broadcast({"type": "repo_status", "synced": True, "error": None})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             repo_state["error"] = str(exc)
             logger.exception("Repository sync failed")
+            await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc)})
         await asyncio.sleep(SYNC_INTERVAL)
 
 
@@ -304,26 +338,47 @@ async def heartbeat_check() -> None:
             await broadcast_full_state()
 
 
-@app.on_event("startup")
-async def startup_event() -> None:
-    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
-    background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
+@app.get("/api/settings")
+async def api_settings_get() -> dict[str, str]:
+    return {"repo_url": REPO_URL, "repo_branch": settings["repo_branch"]}
 
 
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    for task in background_tasks.values():
-        task.cancel()
-    for task in background_tasks.values():
+@app.post("/api/settings")
+async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
+    branch = update.repo_branch.strip()
+    if not branch or not re.match(r'^[a-zA-Z0-9._/\-]+$', branch):
+        raise HTTPException(status_code=422, detail="Invalid branch name — use letters, numbers, hyphens, underscores, dots, or slashes only")
+
+    settings["repo_branch"] = branch
+
+    # Persist so the branch survives a service restart
+    try:
+        SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
+
+    # Restart sync task immediately on the new branch
+    if "repo_sync" in background_tasks:
+        background_tasks["repo_sync"].cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            await background_tasks["repo_sync"]
+    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+
+    payload = {"repo_url": REPO_URL, "repo_branch": branch}
+    await broadcast({"type": "settings_update", "settings": payload})
+    return {"status": "ok", "settings": payload}
 
 
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     async with state_lock:
         client_count = len(clients)
-    return {"status": "ok", "clients": client_count, "repo_synced": repo_state["synced"]}
+    return {
+        "status": "ok",
+        "clients": client_count,
+        "repo_synced": repo_state["synced"],
+        "repo_error": repo_state["error"],
+    }
 
 
 @app.get("/api/config", response_class=PlainTextResponse)
@@ -435,6 +490,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     ws_connections.append(websocket)
     await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}))
+    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"]}))
+    await websocket.send_text(json.dumps({"type": "settings_update", "settings": {"repo_url": REPO_URL, "repo_branch": settings["repo_branch"]}}))
 
     try:
         while True:

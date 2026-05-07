@@ -1,12 +1,55 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.01
-# Installs the FastAPI web server inside a Proxmox LXC container (Debian/Ubuntu)
+# Client-Sim Dashboard — LXC Installer v0.02
+#
+# Usage:
+#   sudo bash install-lxc.sh              # install or update in-place
+#   sudo bash install-lxc.sh --reinstall  # full wipe and reinstall
+#
+# Environment variable overrides (set before running):
+#   REPO_URL, REPO_BRANCH, INSTALL_DIR, REPO_CACHE, SERVICE_USER, PORT, OFFLINE_TIMEOUT
 ###############################################################################
 
 set -euo pipefail
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 export DEBIAN_FRONTEND=noninteractive
+
+###############################################################################
+# Flags
+###############################################################################
+REINSTALL=0
+CLI_BRANCH=""
+CLI_PORT=""
+
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --branch <name>     Git branch to sync from (overrides REPO_BRANCH env var)
+  --port   <number>   TCP port to serve on    (overrides PORT env var)
+  --reinstall         Full wipe and fresh install (default: safe in-place update)
+  --help              Show this message
+
+Examples:
+  sudo bash install-lxc.sh
+  sudo bash install-lxc.sh --branch lrb --port 9000
+  sudo bash install-lxc.sh --reinstall --branch main
+EOF
+  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reinstall|-r)   REINSTALL=1;              shift ;;
+    --branch=*)       CLI_BRANCH="${1#*=}";     shift ;;
+    --branch|-b)      CLI_BRANCH="${2:-}";      shift 2 ;;
+    --port=*)         CLI_PORT="${1#*=}";       shift ;;
+    --port|-p)        CLI_PORT="${2:-}";        shift 2 ;;
+    --help|-h)        usage ;;
+    *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
+  esac
+done
 
 ###############################################################################
 # Root check
@@ -20,7 +63,7 @@ fi
 # Config — override via environment variables before running
 ###############################################################################
 REPO_URL="${REPO_URL:-https://github.com/solutions-hpe/client-sim.git}"
-REPO_BRANCH="${REPO_BRANCH:-lrb}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/client-sim-dashboard}"
 REPO_CACHE="${REPO_CACHE:-/opt/client-sim-repo}"
 SERVICE_USER="${SERVICE_USER:-dashboard}"
@@ -28,15 +71,32 @@ PORT="${PORT:-8000}"
 OFFLINE_TIMEOUT="${OFFLINE_TIMEOUT:-60}"
 LOG="/var/log/client-sim-dashboard-install.log"
 
-VERSION="0.01"
+# CLI flags take priority over environment variables
+[[ -n "$CLI_BRANCH" ]] && REPO_BRANCH="$CLI_BRANCH"
+[[ -n "$CLI_PORT"   ]] && PORT="$CLI_PORT"
+
+# Validate branch name
+if [[ ! "$REPO_BRANCH" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
+  echo "ERROR: Invalid branch name '${REPO_BRANCH}'" >&2
+  exit 1
+fi
+
+# Validate port number
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+  echo "ERROR: Invalid port '${PORT}' — must be 1-65535." >&2
+  exit 1
+fi
+
+VERSION="0.02"
 INSTALL_START=$(date +%s)
+MODE="Update"
+[[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
 
 ###############################################################################
 # Colours & logging
 ###############################################################################
 COL_RESET="\033[0m"
 COL_GREEN="\033[0;32m"
-COL_CYAN="\033[0;36m"
 COL_YELLOW="\033[1;33m"
 COL_RED="\033[0;31m"
 COL_BOLD="\033[1m"
@@ -55,13 +115,14 @@ trap 'err "Installer failed at line $LINENO — check $LOG"' ERR
 ###############################################################################
 echo
 echo "============================================================"
-echo " Client-Sim Dashboard Installer v${VERSION}"
+echo " Client-Sim Dashboard Installer v${VERSION}  [${MODE}]"
 echo " $(date)"
 echo "============================================================"
 echo " Repo URL   : $REPO_URL"
 echo " Branch     : $REPO_BRANCH"
 echo " Install dir: $INSTALL_DIR"
 echo " Port       : $PORT"
+echo " Mode       : $MODE"
 echo " Log        : $LOG"
 echo "============================================================"
 echo
@@ -84,10 +145,10 @@ info "Updating package lists..."
 apt-get update --quiet=2 >>"$LOG" 2>&1
 ok "Package lists updated"
 
-info "Installing dependencies (python3, pip, venv, git, curl)..."
+info "Installing dependencies..."
 apt-get install -y --quiet=2 \
   python3 python3-pip python3-venv \
-  git curl \
+  git curl rsync \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold" \
   >>"$LOG" 2>&1
@@ -108,8 +169,19 @@ fi
 # STEP 4 — Clone / update client-sim repo
 ###############################################################################
 info "Setting up client-sim repo at $REPO_CACHE..."
+
+# Git 2.35.2+ rejects repos owned by a different user.
+# Mark the cache dir as safe at the system level so root can operate on it
+# even when it was previously chown'd to the service user.
+git config --system --add safe.directory "$REPO_CACHE" >>"$LOG" 2>&1 || true
+
+# Ensure root owns the repo dir before git operates on it; Step 9 re-chowns
+# everything to the service user once all git work is finished.
+[[ -d "$REPO_CACHE" ]] && chown -R root:root "$REPO_CACHE"
+
 if [[ -d "$REPO_CACHE/.git" ]]; then
   git -C "$REPO_CACHE" fetch origin >>"$LOG" 2>&1
+  git -C "$REPO_CACHE" checkout "$REPO_BRANCH" >>"$LOG" 2>&1
   git -C "$REPO_CACHE" reset --hard "origin/$REPO_BRANCH" >>"$LOG" 2>&1
   ok "Repo updated to latest $REPO_BRANCH"
 elif [[ -d "$REPO_CACHE" ]]; then
@@ -123,42 +195,104 @@ else
 fi
 
 ###############################################################################
-# STEP 5 — Install dashboard app
+# STEP 5 — Deploy dashboard application files
+#
+# --reinstall : wipe INSTALL_DIR first (settings.json is backed up / restored)
+# update      : rsync from repo so deleted files are removed; user data preserved
 ###############################################################################
-info "Installing dashboard app to $INSTALL_DIR..."
+info "Deploying dashboard app to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 
-# Copy webui files from cloned repo
-cp -r "$REPO_CACHE/webui/." "$INSTALL_DIR/"
-ok "Dashboard files copied"
+# Back up user-generated files that must survive a reinstall
+SETTINGS_BACKUP=""
+if [[ -f "$INSTALL_DIR/settings.json" ]]; then
+  SETTINGS_BACKUP=$(cat "$INSTALL_DIR/settings.json")
+fi
+
+if [[ "$REINSTALL" -eq 1 ]]; then
+  info "Reinstall mode — removing existing application files..."
+  # Remove app files only; keep venv dir removal for Step 6
+  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name 'venv' ! -name '.env' ! -name 'settings.json' \
+    -exec rm -rf {} + 2>/dev/null || true
+fi
+
+# Sync webui files from repo cache.
+# rsync --delete removes files in INSTALL_DIR that no longer exist in the repo.
+# venv/, .env, and settings.json are excluded so user data is never wiped.
+rsync -a --delete \
+  --exclude='venv/' \
+  --exclude='.env' \
+  --exclude='settings.json' \
+  "$REPO_CACHE/webui/" "$INSTALL_DIR/" >>"$LOG" 2>&1
+
+# Restore settings.json if it existed before sync
+if [[ -n "$SETTINGS_BACKUP" && ! -f "$INSTALL_DIR/settings.json" ]]; then
+  echo "$SETTINGS_BACKUP" > "$INSTALL_DIR/settings.json"
+fi
+
+ok "Dashboard files synced"
 
 ###############################################################################
 # STEP 6 — Python virtual environment + dependencies
+#
+# --reinstall : remove and recreate venv from scratch
+# update      : skip recreation; just upgrade deps
 ###############################################################################
-info "Creating Python virtual environment..."
-python3 -m venv "$INSTALL_DIR/venv" >>"$LOG" 2>&1
-ok "Virtual environment created"
+if [[ "$REINSTALL" -eq 1 && -d "$INSTALL_DIR/venv" ]]; then
+  info "Reinstall mode — removing existing virtual environment..."
+  rm -rf "$INSTALL_DIR/venv"
+fi
 
-info "Installing Python dependencies..."
+if [[ ! -d "$INSTALL_DIR/venv" ]]; then
+  info "Creating Python virtual environment..."
+  python3 -m venv "$INSTALL_DIR/venv" >>"$LOG" 2>&1
+  ok "Virtual environment created"
+else
+  ok "Virtual environment exists — skipping creation"
+fi
+
+info "Installing/updating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip >>"$LOG" 2>&1
 "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt" >>"$LOG" 2>&1
-ok "Python dependencies installed"
+ok "Python dependencies up to date"
 
 ###############################################################################
 # STEP 7 — Environment file
+#
+# --reinstall : overwrite with fresh defaults
+# update      : only write keys that are missing (preserves user customisations)
 ###############################################################################
-info "Writing environment config..."
-cat >"$INSTALL_DIR/.env" <<EOF
+write_env_key() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    : # key already set by user — leave it alone
+  else
+    echo "${key}=${value}" >> "$INSTALL_DIR/.env"
+  fi
+}
+
+if [[ "$REINSTALL" -eq 1 || ! -f "$INSTALL_DIR/.env" ]]; then
+  info "Writing fresh environment config..."
+  cat >"$INSTALL_DIR/.env" <<EOF
 REPO_URL=$REPO_URL
 REPO_BRANCH=$REPO_BRANCH
 REPO_DIR=$REPO_CACHE
 OFFLINE_TIMEOUT=$OFFLINE_TIMEOUT
 EOF
+  ok "Environment file written"
+else
+  info "Updating environment config (preserving existing values)..."
+  write_env_key "REPO_URL"        "$REPO_URL"
+  write_env_key "REPO_BRANCH"     "$REPO_BRANCH"
+  write_env_key "REPO_DIR"        "$REPO_CACHE"
+  write_env_key "OFFLINE_TIMEOUT" "$OFFLINE_TIMEOUT"
+  ok "Environment file checked — existing values preserved"
+fi
 chmod 640 "$INSTALL_DIR/.env"
-ok "Environment file written to $INSTALL_DIR/.env"
 
 ###############################################################################
-# STEP 8 — systemd service
+# STEP 8 — systemd service (always update — service config may change between versions)
 ###############################################################################
 info "Installing systemd service..."
 cat >/etc/systemd/system/client-sim-dashboard.service <<EOF
@@ -196,14 +330,19 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
 ok "Permissions set"
 
 ###############################################################################
-# STEP 10 — Start service
+# STEP 10 — Start / restart service
 ###############################################################################
-info "Starting client-sim-dashboard service..."
-systemctl start client-sim-dashboard
+if systemctl is-active --quiet client-sim-dashboard; then
+  info "Restarting client-sim-dashboard service..."
+  systemctl restart client-sim-dashboard
+else
+  info "Starting client-sim-dashboard service..."
+  systemctl start client-sim-dashboard
+fi
 sleep 3
 
 if systemctl is-active --quiet client-sim-dashboard; then
-  ok "Service started successfully"
+  ok "Service running"
 else
   warn "Service may not have started — check: journalctl -u client-sim-dashboard"
 fi
@@ -223,6 +362,10 @@ id "$SERVICE_USER" &>/dev/null \
   && echo -e "  ${COL_GREEN}✓${COL_RESET}  Python venv                   OK" \
   || echo -e "  ${COL_RED}✗${COL_RESET}  Python venv                   MISSING"
 
+[[ -f "$INSTALL_DIR/.env" ]] \
+  && echo -e "  ${COL_GREEN}✓${COL_RESET}  Environment file              OK" \
+  || echo -e "  ${COL_RED}✗${COL_RESET}  Environment file              MISSING"
+
 [[ -d "$REPO_CACHE/.git" ]] \
   && echo -e "  ${COL_GREEN}✓${COL_RESET}  Repo cache                    OK" \
   || echo -e "  ${COL_RED}✗${COL_RESET}  Repo cache                    MISSING"
@@ -235,7 +378,6 @@ systemctl is-enabled --quiet client-sim-dashboard \
   && echo -e "  ${COL_GREEN}✓${COL_RESET}  Auto-start on boot            ENABLED" \
   || echo -e "  ${COL_YELLOW}✗${COL_RESET}  Auto-start on boot            DISABLED"
 
-# Quick API health check
 if curl -fsSL --connect-timeout 5 "http://localhost:${PORT}/api/health" >>/dev/null 2>&1; then
   echo -e "  ${COL_GREEN}✓${COL_RESET}  API responding on :${PORT}         OK"
 else
@@ -246,14 +388,15 @@ echo "============================================="
 echo
 
 ELAPSED=$(( $(date +%s) - INSTALL_START ))
-echo -e "${COL_GREEN}${COL_BOLD}Installation complete${COL_RESET} in ${ELAPSED}s"
+echo -e "${COL_GREEN}${COL_BOLD}${MODE} complete${COL_RESET} in ${ELAPSED}s"
 echo
-echo -e "  Dashboard : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}${COL_RESET}"
-echo -e "  API docs  : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}/docs${COL_RESET}"
-echo -e "  Logs      : journalctl -u client-sim-dashboard -f"
+echo -e "  Dashboard  : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}${COL_RESET}"
+echo -e "  API docs   : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}/docs${COL_RESET}"
+echo -e "  Logs       : journalctl -u client-sim-dashboard -f"
 echo -e "  Install log: $LOG"
 echo
 echo -e "  ${COL_YELLOW}Set in simulation.conf on each client:${COL_RESET}"
 echo -e "  [server]"
 echo -e "  server_url=http://${CONTAINER_IP}:${PORT}"
 echo
+

@@ -30,12 +30,89 @@ const IMPACT_LABELS = {
 const clients = new Map();
 const rowRefs = new Map();
 const tbody = document.getElementById('clients-body');
+const emptyRow = document.getElementById('empty-row');
 const clientCount = document.getElementById('client-count');
 const wsDot = document.getElementById('ws-dot');
 const wsText = document.getElementById('ws-text');
+const repoDot = document.getElementById('repo-dot');
+const repoText = document.getElementById('repo-text');
 let socket = null;
 let reconnectTimer = null;
 let openControlHost = null;
+
+// ── Tab navigation ────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
+    document.querySelectorAll('.tab-content').forEach((c) => c.classList.add('hidden'));
+
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
+  });
+});
+
+// ── Repo sync status ──────────────────────────────────────────────
+function setRepoStatus(synced, error) {
+  repoDot.className = `status-dot ${synced ? 'online' : 'offline'}`;
+  repoText.textContent = error ? `Sync error` : synced ? 'Synced' : 'Syncing…';
+  repoText.title = error || '';
+
+  // Update setup tab status panel
+  const syncState = document.getElementById('setup-sync-state');
+  const syncError = document.getElementById('setup-sync-error');
+  if (syncState) syncState.textContent = synced ? '✓ Synced' : error ? '✗ Failed' : 'Syncing…';
+  if (syncError) syncError.textContent = error || '—';
+}
+
+// ── Setup tab — settings form ─────────────────────────────────────
+const branchInput = document.getElementById('branch-input');
+const saveBtn = document.getElementById('save-settings');
+const settingsMsg = document.getElementById('settings-message');
+const setupActiveBranch = document.getElementById('setup-active-branch');
+
+function applySettingsToUI(s) {
+  if (branchInput && !branchInput.matches(':focus')) branchInput.value = s.repo_branch || '';
+  if (setupActiveBranch) setupActiveBranch.textContent = s.repo_branch || '—';
+}
+
+function showSettingsMessage(text, isError) {
+  settingsMsg.textContent = text;
+  settingsMsg.className = `settings-message ${isError ? 'error' : 'success'}`;
+  clearTimeout(settingsMsg._timer);
+  settingsMsg._timer = setTimeout(() => {
+    settingsMsg.className = 'settings-message hidden';
+  }, 5000);
+}
+
+saveBtn.addEventListener('click', async () => {
+  const branch = branchInput.value.trim();
+  if (!branch) {
+    showSettingsMessage('Branch name cannot be empty.', true);
+    return;
+  }
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_branch: branch })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    showSettingsMessage(`Branch set to "${data.settings.repo_branch}" — sync started.`, false);
+    applySettingsToUI(data.settings);
+  } catch (err) {
+    showSettingsMessage(`Error: ${err.message}`, true);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save & Sync';
+  }
+});
 
 function normalizeFlagValue(value) {
   return String(value ?? 'off').toLowerCase() === 'on' ? 'on' : 'off';
@@ -66,6 +143,7 @@ function setWsStatus(connected, label) {
 
 function updateClientCount() {
   clientCount.textContent = `${clients.size} client${clients.size === 1 ? '' : 's'}`;
+  if (emptyRow) emptyRow.style.display = clients.size > 0 ? 'none' : '';
 }
 
 function createCell(className = '') {
@@ -369,6 +447,16 @@ function toggleControlRow(hostname) {
 function handleMessage(message) {
   if (message.type === 'full_state') {
     (message.clients || []).forEach((client) => upsertClient(client));
+    return;
+  }
+
+  if (message.type === 'repo_status') {
+    setRepoStatus(message.synced, message.error);
+    return;
+  }
+
+  if (message.type === 'settings_update') {
+    applySettingsToUI(message.settings);
     return;
   }
 
