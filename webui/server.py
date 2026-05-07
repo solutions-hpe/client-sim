@@ -223,44 +223,68 @@ def _can_refresh() -> bool:
     )
 
 
-async def _fetch_central_token(client: httpx.AsyncClient) -> bool:
-    """Load the user-provided access token into runtime state and verify it."""
+async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
+    """Load the user-provided access token into runtime state and verify it.
+
+    Returns (success, detail_message).
+    Tries /monitoring/v2/alerts first; if that endpoint returns 404/403 falls
+    back to /configuration/v2/groups so a valid token isn't falsely rejected
+    due to missing scopes on the alerts endpoint.
+    """
     cfg = _central_cfg()
     token = cfg.get("access_token", "").strip()
     if not token:
-        logger.warning("No access token configured for Aruba Central")
-        return False
+        return False, "No access token configured."
+
     central_token["access_token"] = token
     if cfg.get("refresh_token"):
         central_token["refresh_token"] = cfg["refresh_token"]
-    central_token["expires_at"] = time.time() + 7200  # assume 2 h; refresh will correct
+    central_token["expires_at"] = time.time() + 7200
 
-    # Validate the token with a lightweight API call
     base_url = cfg["cluster_url"].rstrip("/")
-    try:
-        resp = await client.get(
-            f"{base_url}/monitoring/v2/alerts",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"limit": 1},
-            timeout=15,
-        )
-        if resp.status_code == 401:
-            logger.warning("Aruba Central token rejected (401) — will attempt refresh")
-            central_token["access_token"] = None
-            return await _refresh_central_token(client)
-        resp.raise_for_status()
-        logger.info("Aruba Central token validated successfully")
-        return True
-    except Exception as exc:
-        logger.warning("Central token validation failed: %s", exc)
-        return False
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Try a sequence of lightweight endpoints; the first that returns 2xx wins.
+    probe_urls = [
+        (f"{base_url}/monitoring/v2/alerts", {"limit": 1}),
+        (f"{base_url}/configuration/v2/groups", {"limit": 1}),
+        (f"{base_url}/platform/v1/customer_id", {}),
+    ]
+    last_status: int = 0
+    last_body: str = ""
+    for url, params in probe_urls:
+        try:
+            resp = await client.get(url, headers=headers, params=params, timeout=15)
+            last_status = resp.status_code
+            last_body = resp.text[:400]
+            if resp.status_code == 200:
+                logger.info("Aruba Central token validated via %s", url)
+                return True, "Token validated successfully."
+            if resp.status_code == 401:
+                # Token is definitely invalid — try refresh before giving up
+                central_token["access_token"] = None
+                ok, msg = await _refresh_central_token(client)
+                if ok:
+                    return True, f"Access token was expired; successfully refreshed. {msg}"
+                return False, f"Token rejected (401). Central response: {last_body}"
+            # 403/404 = wrong scope or endpoint missing — try next probe
+            logger.debug("Central probe %s returned %s — trying next", url, resp.status_code)
+        except Exception as exc:
+            return False, f"Connection error reaching {base_url}: {exc}"
+
+    return False, (
+        f"Could not confirm token with Central (last HTTP status: {last_status}). "
+        f"Response: {last_body}. "
+        "Check the Cluster URL and that the token has monitoring or configuration scope."
+    )
 
 
-async def _refresh_central_token(client: httpx.AsyncClient) -> bool:
-    """Refresh access token using the stored refresh_token + client credentials."""
+async def _refresh_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
+    """Refresh access token using the stored refresh_token + client credentials.
+    Returns (success, detail_message).
+    """
     if not _can_refresh():
-        logger.warning("Cannot refresh: missing client_id, client_secret, or refresh_token")
-        return False
+        return False, "Cannot refresh: missing client_id, client_secret, or refresh_token."
     cfg = _central_cfg()
     token_url = cfg["cluster_url"].rstrip("/") + "/oauth2/token"
     refresh_tok = cfg.get("refresh_token") or central_token.get("refresh_token", "")
@@ -274,22 +298,21 @@ async def _refresh_central_token(client: httpx.AsyncClient) -> bool:
         data["customer_id"] = cfg["customer_id"]
     try:
         resp = await client.post(token_url, data=data, timeout=15)
-        resp.raise_for_status()
+        if not resp.is_success:
+            return False, f"Refresh failed (HTTP {resp.status_code}): {resp.text[:300]}"
         payload = resp.json()
         new_access = payload["access_token"]
         new_refresh = payload.get("refresh_token", refresh_tok)
         central_token["access_token"] = new_access
         central_token["refresh_token"] = new_refresh
         central_token["expires_at"] = time.time() + payload.get("expires_in", 7200) - 60
-        # Persist the new tokens so restarts don't lose them
         settings["central_config"]["access_token"] = new_access
         settings["central_config"]["refresh_token"] = new_refresh
         _save_settings()
         logger.info("Aruba Central token refreshed successfully")
-        return True
+        return True, "Token refreshed successfully."
     except Exception as exc:
-        logger.warning("Central token refresh failed: %s", exc)
-        return False
+        return False, f"Refresh request failed: {exc}"
 
 
 def _central_headers() -> dict[str, str]:
@@ -300,10 +323,7 @@ def _central_headers() -> dict[str, str]:
 
 
 async def central_token_manager() -> None:
-    """Background task: keep token valid. Runs every 5 minutes.
-    - If access_token is set but expires soon → refresh (requires client_id/secret/refresh_token).
-    - If no token at all but config has one stored → load it.
-    """
+    """Background task: keep token valid. Runs every 5 minutes."""
     async with httpx.AsyncClient() as client:
         while True:
             try:
@@ -311,9 +331,13 @@ async def central_token_manager() -> None:
                     no_token = not central_token.get("access_token")
                     expiring = time.time() >= central_token.get("expires_at", 0) - 300
                     if no_token:
-                        await _fetch_central_token(client)
+                        ok, msg = await _fetch_central_token(client)
+                        if not ok:
+                            logger.warning("Central token load failed: %s", msg)
                     elif expiring and _can_refresh():
-                        await _refresh_central_token(client)
+                        ok, msg = await _refresh_central_token(client)
+                        if not ok:
+                            logger.warning("Central token refresh failed: %s", msg)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -351,8 +375,9 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
                 timeout=20,
             )
             if resp.status_code == 401 and _can_refresh():
-                await _refresh_central_token(client)
-                headers = _central_headers()
+                ok, _ = await _refresh_central_token(client)
+                if ok:
+                    headers = _central_headers()
                 resp = await client.get(
                     f"{base_url}/monitoring/v2/alerts",
                     headers=headers,
@@ -798,7 +823,7 @@ async def api_central_test() -> dict[str, Any]:
             detail="Aruba Central not configured — enter your Cluster URL and Access Token in Setup.",
         )
     async with httpx.AsyncClient() as client:
-        ok = await _fetch_central_token(client)
+        ok, detail_msg = await _fetch_central_token(client)
     if ok:
         can_rf = _can_refresh()
         return {
@@ -810,10 +835,7 @@ async def api_central_test() -> dict[str, Any]:
                    "Auto-refresh not configured — add Refresh Token, Client ID, and Client Secret to enable it.")
             ),
         }
-    raise HTTPException(
-        status_code=502,
-        detail="Could not validate the access token against Aruba Central. Check the Cluster URL and that the token is current.",
-    )
+    raise HTTPException(status_code=502, detail=detail_msg)
 
 
 @app.get("/api/central/available")
