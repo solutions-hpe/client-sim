@@ -984,11 +984,42 @@ async def api_central_available() -> dict[str, Any]:
             "warning": None,
         }
 
+    # Static fallback list of well-known Aruba Central alert types (used when no live alerts exist)
+    KNOWN_ALERT_TYPES: dict[str, str] = {
+        "AP_DOWN": "AP Down",
+        "AP_UP": "AP Up",
+        "ACCESS_POINT_DOWN": "Access Point Down",
+        "CLIENT_ASSOCIATION_FAILURE": "Client Association Failure",
+        "CLIENT_DHCP_FAILURE": "Client DHCP Failure",
+        "CLIENT_DISCONNECTED": "Client Disconnected",
+        "DHCP_POOL_EXHAUSTED": "DHCP Pool Exhausted",
+        "IDS_AP_SPOOFED": "IDS AP Spoofed",
+        "PORTAL_DOWN": "Portal Down",
+        "RADIO_INTERFERENCE": "Radio Interference",
+        "ROGUE_AP_DETECTED": "Rogue AP Detected",
+        "SWITCH_DOWN": "Switch Down",
+        "SWITCH_PORT_DOWN": "Switch Port Down",
+        "TUNNEL_DOWN": "Tunnel Down",
+        "UPLINK_FAILURE": "Uplink Failure",
+        "VPN_TUNNEL_DOWN": "VPN Tunnel Down",
+        "WIRELESS_CLIENT_ROAM": "Wireless Client Roam",
+        "WIRELESS_INTERFERENCE": "Wireless Interference",
+    }
+    KNOWN_INSIGHT_CATEGORIES: dict[str, str] = {
+        "CONNECTIVITY": "Connectivity",
+        "PERFORMANCE": "Performance",
+        "RELIABILITY": "Reliability",
+        "SECURITY": "Security",
+    }
+
     headers = _central_headers()
     base_url = _central_cfg()["cluster_url"].rstrip("/")
     alert_types: dict[str, str] = {}
     insight_categories: dict[str, str] = {}
     warnings: list[str] = []
+
+    # 30-day lookback window to catch historical alert types even when none are active now
+    thirty_days_ago = int(time.time()) - 30 * 86400
 
     async with httpx.AsyncClient() as client:
         # Alerts — try v1 then v2 (v2 is 404 on some clusters)
@@ -997,7 +1028,7 @@ async def api_central_available() -> dict[str, Any]:
                 resp = await client.get(
                     f"{base_url}{alerts_path}",
                     headers=headers,
-                    params={"limit": 1000},
+                    params={"limit": 1000, "from_timestamp": thirty_days_ago},
                     timeout=20,
                 )
                 logger.info("Central available alerts %s → %s", alerts_path, resp.status_code)
@@ -1023,7 +1054,7 @@ async def api_central_available() -> dict[str, Any]:
             resp = await client.get(
                 f"{base_url}/aiops/v1/insights",
                 headers=headers,
-                params={"limit": 1000},
+                params={"limit": 1000, "from_timestamp": thirty_days_ago},
                 timeout=20,
             )
             logger.info("Central available insights → %s", resp.status_code)
@@ -1038,6 +1069,23 @@ async def api_central_available() -> dict[str, Any]:
         except Exception as exc:
             logger.warning("Could not fetch insight categories: %s", exc)
             warnings.append(f"Network error fetching insights: {exc}")
+
+    # If live API returned nothing, fall back to the known static list
+    using_fallback = False
+    if not alert_types:
+        alert_types = dict(KNOWN_ALERT_TYPES)
+        using_fallback = True
+    if not insight_categories:
+        insight_categories = dict(KNOWN_INSIGHT_CATEGORIES)
+        using_fallback = True
+    if using_fallback:
+        warnings.append("No live checks returned by Central — showing standard Aruba Central check types.")
+
+    return {
+        "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
+        "insights": [{"id": k, "name": v} for k, v in sorted(insight_categories.items())],
+        "warning": "; ".join(warnings) if warnings else None,
+    }
 
     return {
         "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
@@ -1072,7 +1120,59 @@ async def api_central_history(
     return {"records": records, "count": len(records)}
 
 
-@app.post("/api/central/poll")
+@app.get("/api/central/site-alerts")
+async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
+    """Fetch current alerts from Central for a specific site name. Always returns 200."""
+    if not _central_ready() or not central_token.get("access_token"):
+        return {"alerts": [], "warning": "Central not configured or no valid token."}
+    if _is_new_central_api():
+        return {"alerts": [], "warning": "Alert detail not available in New Central v1alpha1 yet."}
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    alerts: list[dict[str, Any]] = []
+    warning: str | None = None
+    thirty_days_ago = int(time.time()) - 30 * 86400
+
+    async with httpx.AsyncClient() as client:
+        for path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
+            try:
+                resp = await client.get(
+                    f"{base_url}{path}",
+                    headers=headers,
+                    params={"site": site, "limit": 500, "from_timestamp": thirty_days_ago},
+                    timeout=20,
+                )
+                logger.info("site-alerts %s for '%s' → %s", path, site, resp.status_code)
+                if resp.status_code == 200:
+                    for alert in resp.json().get("alerts", []):
+                        alerts.append({
+                            "type":     alert.get("alert_type") or alert.get("type", ""),
+                            "name":     alert.get("alert_type_name") or alert.get("alert_type", ""),
+                            "severity": alert.get("severity", ""),
+                            "state":    alert.get("state", ""),
+                            "site":     alert.get("site_name") or site,
+                            "device":   alert.get("device_name") or alert.get("hostname", ""),
+                            "ts":       alert.get("timestamp") or alert.get("raised_at", ""),
+                            "message":  alert.get("details") or alert.get("description", ""),
+                        })
+                    break
+                if resp.status_code == 404:
+                    continue
+                if resp.status_code == 401:
+                    warning = "Token rejected (401)."
+                    break
+            except Exception as exc:
+                logger.warning("site-alerts fetch error: %s", exc)
+                warning = str(exc)
+                break
+
+    if not alerts and not warning:
+        warning = "No alerts in the last 30 days for this site."
+
+    return {"alerts": alerts, "count": len(alerts), "warning": warning}
+
+
 async def api_central_poll() -> dict[str, Any]:
     """Trigger an immediate Central poll cycle."""
     if not _central_ready():

@@ -103,6 +103,8 @@ const centralDetailSub = document.getElementById('central-detail-sub');
 const centralSiteClients = document.getElementById('central-site-clients');
 const centralSiteChecks = document.getElementById('central-site-checks');
 const centralSiteHistory = document.getElementById('central-site-history');
+const centralSiteAlerts = document.getElementById('central-site-alerts');
+const centralSiteAlertsCount = document.getElementById('central-site-alerts-count');
 const centralClusterUrlInput = document.getElementById('central-cluster-url');
 const centralClusterUrlHint = document.getElementById('central-cluster-url-hint');
 const centralAccessTokenInput = document.getElementById('central-access-token');
@@ -875,7 +877,78 @@ function renderSiteHistory(records) {
   centralSiteHistory.appendChild(table);
 }
 
-function openSiteDetail(wsite) {
+async function loadSiteAlerts(wsite) {
+  if (!centralSiteAlerts) return;
+  centralSiteAlerts.textContent = 'Loading alerts…';
+  if (centralSiteAlertsCount) centralSiteAlertsCount.textContent = '';
+  const centralSite = currentSettings.site_mappings?.[wsite] || wsite;
+  try {
+    const data = await requestJson(`/api/central/site-alerts?site=${encodeURIComponent(centralSite)}`);
+    renderSiteAlerts(data.alerts || [], data.warning);
+    if (centralSiteAlertsCount) {
+      centralSiteAlertsCount.textContent = data.count ? `(${data.count})` : '';
+    }
+  } catch (err) {
+    centralSiteAlerts.textContent = `Could not load alerts: ${err.message}`;
+  }
+}
+
+function renderSiteAlerts(alerts, warning) {
+  if (!centralSiteAlerts) return;
+  centralSiteAlerts.textContent = '';
+
+  if (warning && !alerts.length) {
+    const msg = document.createElement('div');
+    msg.className = 'form-hint';
+    msg.textContent = warning;
+    centralSiteAlerts.appendChild(msg);
+    return;
+  }
+
+  if (warning) {
+    const msg = document.createElement('div');
+    msg.className = 'form-hint';
+    msg.textContent = `⚠ ${warning}`;
+    centralSiteAlerts.appendChild(msg);
+  }
+
+  const table = document.createElement('table');
+  table.className = 'history-table';
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  ['Time', 'Type', 'Severity', 'State', 'Device', 'Message'].forEach((label) => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbody = document.createElement('tbody');
+  alerts.forEach((alert) => {
+    const row = document.createElement('tr');
+    [
+      formatCentralDate(alert.ts),
+      alert.name || alert.type || '—',
+      alert.severity || '—',
+      alert.state || '—',
+      alert.device || '—',
+      alert.message || '—',
+    ].forEach((val) => {
+      const td = document.createElement('td');
+      td.textContent = val;
+      if (val === 'CRITICAL' || val === 'MAJOR') td.style.color = 'var(--color-error, #c0392b)';
+      row.appendChild(td);
+    });
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  centralSiteAlerts.appendChild(table);
+}
+
+
   centralSiteDetailOpen = wsite;
   if (centralOverview) centralOverview.classList.add('hidden');
   if (centralSiteDetail) centralSiteDetail.classList.remove('hidden');
@@ -886,6 +959,7 @@ function openSiteDetail(wsite) {
   renderSiteClients(wsite);
   renderSiteChecks(wsite, centralStatusData[wsite] || {});
   loadSiteHistory(wsite);
+  loadSiteAlerts(wsite);
 }
 
 function closeSiteDetail() {
