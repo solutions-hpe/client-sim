@@ -104,6 +104,8 @@ const centralSiteClients = document.getElementById('central-site-clients');
 const centralSiteChecks = document.getElementById('central-site-checks');
 const centralSiteHistory = document.getElementById('central-site-history');
 const centralClusterUrlInput = document.getElementById('central-cluster-url');
+const centralAccessTokenInput = document.getElementById('central-access-token');
+const centralRefreshTokenInput = document.getElementById('central-refresh-token');
 const centralClientIdInput = document.getElementById('central-client-id');
 const centralClientSecretInput = document.getElementById('central-client-secret');
 const centralCustomerIdInput = document.getElementById('central-customer-id');
@@ -168,6 +170,14 @@ function applySettingsToUI(s) {
   setInputValueIfIdle(centralClusterUrlInput, settings.central_config.cluster_url);
   setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
   setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
+
+  // Show "configured" hint for secrets without revealing values
+  const atStatus = document.getElementById('central-access-token-status');
+  const rtStatus = document.getElementById('central-refresh-token-status');
+  const csStatus = document.getElementById('central-client-secret-status');
+  if (atStatus) atStatus.textContent = settings.central_config.access_token_configured ? '✓ Token configured — paste new value to replace.' : 'No token saved yet.';
+  if (rtStatus) rtStatus.textContent = settings.central_config.refresh_token_configured ? '✓ Refresh token configured — paste new value to replace.' : 'Optional — enables automatic renewal when the access token expires.';
+  if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
   if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
@@ -466,6 +476,11 @@ function buildCentralConfigPayload() {
     client_id: centralClientIdInput?.value.trim() || '',
     customer_id: centralCustomerIdInput?.value.trim() || ''
   };
+  // Only send secrets when the user has typed something — blank = keep existing
+  const accessToken = centralAccessTokenInput?.value.trim();
+  if (accessToken) payload.access_token = accessToken;
+  const refreshToken = centralRefreshTokenInput?.value.trim();
+  if (refreshToken) payload.refresh_token = refreshToken;
   const secret = centralClientSecretInput?.value.trim();
   if (secret) payload.client_secret = secret;
   return payload;
@@ -478,7 +493,11 @@ function updateLocalCentralConfig(payload) {
       ...(currentSettings.central_config || {}),
       cluster_url: payload.cluster_url || '',
       client_id: payload.client_id || '',
-      customer_id: payload.customer_id || ''
+      customer_id: payload.customer_id || '',
+      // Update presence flags optimistically
+      access_token_configured: payload.access_token ? true : (currentSettings.central_config?.access_token_configured || false),
+      refresh_token_configured: payload.refresh_token ? true : (currentSettings.central_config?.refresh_token_configured || false),
+      client_secret_configured: payload.client_secret ? true : (currentSettings.central_config?.client_secret_configured || false),
     }
   };
 }
@@ -1119,7 +1138,12 @@ if (centralTestBtn) {
       centralTokenValid = true;
       updateCentralToolbar();
       showInlineMessage(centralTestMsg, result.message || 'Connected to Aruba Central successfully.', false);
+      // Clear secret fields — status hints show "configured" instead
       if (centralClientSecretInput) centralClientSecretInput.value = '';
+      if (centralAccessTokenInput) centralAccessTokenInput.value = '';
+      if (centralRefreshTokenInput) centralRefreshTokenInput.value = '';
+      // Refresh status hints
+      applySettingsToUI(currentSettings);
     } catch (error) {
       centralTokenValid = false;
       updateCentralToolbar();

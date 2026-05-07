@@ -170,15 +170,37 @@
 
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">
-        <h2>Central Connection</h2>
-        <p>Configure Aruba Central API access for status polling and historical visibility.</p>
+        <h2>Aruba Central Connection</h2>
+        <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.
+           Generate credentials in Central under <strong>Global Settings → API Gateway → System Apps &amp; Tokens</strong>.
+           Only the <strong>Cluster URL</strong> and <strong>Access Token</strong> are required to start.
+           Add the Refresh Token, Client ID, and Client Secret to enable automatic token renewal.</p>
       </div>
 
       <div class="setup-form">
         <div class="form-group">
           <label class="form-label" for="central-cluster-url">Cluster URL</label>
-          <input id="central-cluster-url" class="form-input" type="text" placeholder="https://apigw-*.central.arubanetworks.com" autocomplete="off" spellcheck="false">
+          <input id="central-cluster-url" class="form-input" type="text"
+                 placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
+          <span class="form-hint">Found in Central → API Gateway. Varies by region (US-1, EU-1, AP-1 …).</span>
         </div>
+
+        <div class="form-group">
+          <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
+          <input id="central-access-token" class="form-input" type="password"
+                 placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
+          <span class="form-hint" id="central-access-token-status"></span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
+          <input id="central-refresh-token" class="form-input" type="password"
+                 placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
+          <span class="form-hint" id="central-refresh-token-status"></span>
+        </div>
+
+        <hr class="setup-divider">
+        <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
 
         <div class="form-group">
           <label class="form-label" for="central-client-id">Client ID</label>
@@ -187,17 +209,19 @@
 
         <div class="form-group">
           <label class="form-label" for="central-client-secret">Client Secret</label>
-          <input id="central-client-secret" class="form-input" type="password" placeholder="Enter to update, blank to keep current" autocomplete="new-password">
+          <input id="central-client-secret" class="form-input" type="password"
+                 placeholder="Leave blank to keep current" autocomplete="new-password">
+          <span class="form-hint" id="central-client-secret-status"></span>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="central-customer-id">Customer ID</label>
           <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
-          <span class="form-hint">Required for MSP accounts; leave blank if not applicable</span>
+          <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
         </div>
 
         <div class="form-actions">
-          <button id="central-test-btn" class="btn btn-primary" type="button">Test Connection</button>
+          <button id="central-test-btn" class="btn btn-primary" type="button">Save &amp; Test Connection</button>
         </div>
 
         <div id="central-test-msg" class="settings-message hidden" role="alert"></div>

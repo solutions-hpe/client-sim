@@ -411,11 +411,70 @@ With this configured, each client will:
 | `POST` | `/api/clients/all/control` | Push override to all clients at once |
 | `GET` | `/api/scripts/list?platform=linux\|windows` | List available scripts |
 | `GET` | `/api/scripts/{platform}/{filename}` | Download a specific script |
+| `GET` | `/api/settings` | Get current settings (token presence flags, not values) |
+| `POST` | `/api/settings` | Update repo branch, Central config, site mappings, monitored checks |
+| `POST` | `/api/central/test-connection` | Validate access token against Central |
+| `GET` | `/api/central/available` | Fetch available alert types and insight categories |
+| `GET` | `/api/central/status` | Current OK/ERROR status per site per monitored check |
+| `GET` | `/api/central/history?site=<wsite>&hours=<1-24>` | Last N hours of poll history |
+| `POST` | `/api/central/poll` | Trigger an immediate poll cycle |
 | `WS` | `/ws` | WebSocket — browser dashboard live updates |
 
 Interactive API docs (Swagger UI): `http://<dashboard-ip>:8000/docs`
 
 ---
+
+### Aruba Central Integration
+
+The dashboard can connect to Aruba Central to monitor alerts and AI Insights per site.  It polls every 15 minutes and records whether selected alerts/insights were **present** (OK) or **absent** (ERROR), keeping a rolling 24-hour history in `/opt/client-sim-dashboard/central_history.jsonl`.
+
+#### Getting your API credentials from Aruba Central
+
+1. **Log in to Aruba Central** at `https://portal.central.arubanetworks.com` (or your regional URL)
+2. Go to **Global Settings → API Gateway → System Apps & Tokens**
+3. Click **Add Apps & Tokens**
+4. Give the app a name (e.g. `client-sim-dashboard`), select the required API scopes (`monitoring`, `aiops`)
+5. Click **Generate Token**
+6. Copy the **Access Token** and **Refresh Token** — these are shown only once; save them securely
+7. Note your **Client ID** and **Client Secret** from the app entry — needed for automatic token renewal
+
+#### Finding your Cluster URL
+
+The base URL depends on your region:
+
+| Region | Cluster URL |
+|--------|-------------|
+| US-1 | `https://apigw-prod2.central.arubanetworks.com` |
+| US-2 | `https://apigw-us-east-4.central.arubanetworks.com` |
+| EU-1 | `https://apigw-eucentral3.central.arubanetworks.com` |
+| AP-1 | `https://apigw-apnortheast1.central.arubanetworks.com` |
+
+Your exact URL is shown in **Global Settings → API Gateway → Base URL**.
+
+#### Configuring the dashboard
+
+Go to the **⚙ Setup** tab in the dashboard and fill in the **Aruba Central Connection** section:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| Cluster URL | ✅ | Base URL from API Gateway (see table above) |
+| Access Token | ✅ | Bearer token from Step 6 above |
+| Refresh Token | ➕ Recommended | Enables automatic renewal before the token expires |
+| Client ID | ➕ Recommended | Required for refresh flow |
+| Client Secret | ➕ Recommended | Required for refresh flow |
+| Customer ID | Only for MSP | Your Aruba Central customer/tenant ID |
+
+Click **Save & Test Connection**.  A successful test confirms the token is valid and shows whether auto-refresh is configured.
+
+> **Token lifetime:** Aruba Central access tokens expire after approximately 2 hours.  With a Refresh Token + Client ID + Client Secret configured, the dashboard renews tokens automatically.  Without them, you will need to paste a new Access Token every ~2 hours.
+
+#### Setting up site monitoring
+
+1. In **⚙ Setup → Site Mappings**, add a row mapping each `wsite` value from your clients' `simulation.conf` to the matching site name in Aruba Central
+2. In **⚙ Setup → Monitored Checks**, click **Load Available Checks** to fetch the alert types and AI Insight categories present in your Central instance, then tick the ones you want to monitor
+3. Click **Save Monitored Checks**
+
+The **🔗 Central** tab will now show a per-site overview grid.  Click any site card to see the clients at that site, their running simulations, and the current OK/ERROR status for each monitored check.
 
 ### Dashboard Troubleshooting
 
