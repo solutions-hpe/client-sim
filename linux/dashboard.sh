@@ -27,6 +27,7 @@ username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
 site_based_num=$(get_value 'simulation' 'site_based_num')
 server_url=$(get_value 'server' 'server_url')
+web_server=$(get_value 'simulation' 'web_server')
 simulation_id=s
 simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
 kill_switch=$(get_value 'simulation' 'kill_switch')
@@ -75,6 +76,10 @@ done
 # operator needs to know immediately — heartbeats and config updates will fail.
 #------------------------------------------------------------
 get_api_status() {
+  if [[ "$web_server" != "on" ]]; then
+    echo "${YLW}DISABLED${RST} (web_server=off in config)"
+    return
+  fi
   if [[ -z "$server_url" ]]; then
     echo "${YLW}NOT CONFIGURED${RST}"
     return
