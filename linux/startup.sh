@@ -43,6 +43,12 @@ source '/usr/local/scripts/ini-parser.sh'
 #------------------------------------------------------------
 process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
+#Loading user-specific overrides (keys here win over simulation.conf)
+#------------------------------------------------------------
+if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
+  process_ini_file '/usr/local/scripts/user-overrides.conf'
+fi
+#------------------------------------------------------------
 # Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------

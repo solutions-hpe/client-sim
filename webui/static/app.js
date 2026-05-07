@@ -88,6 +88,7 @@ const settingsMsg = document.getElementById('settings-message');
 const setupActiveBranch = document.getElementById('setup-active-branch');
 const repoUrlInput = document.getElementById('repo-url-input');
 const centralTabButton = document.querySelector('.tab[data-tab="central"]');
+const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-grid');
@@ -1292,6 +1293,202 @@ async function applyGlobalOverride(overrides) {
   } catch (error) {
     window.alert(`Global update failed: ${error.message}`);
   }
+}
+
+// ── Simulations tab ───────────────────────────────────────────────
+const simCardsGrid    = document.getElementById('sim-cards-grid');
+const simEmpty        = document.getElementById('sim-empty');
+const simOverview     = document.getElementById('sim-overview');
+const simDetail       = document.getElementById('sim-detail');
+const simDetailBack   = document.getElementById('sim-detail-back');
+const simDetailTitle  = document.getElementById('sim-detail-title');
+const simDetailSub    = document.getElementById('sim-detail-sub');
+const simDetailBadge  = document.getElementById('sim-detail-badge');
+const simDetailTotal  = document.getElementById('sim-detail-total');
+const simDetailActive = document.getElementById('sim-detail-active');
+const simDetailWsite  = document.getElementById('sim-detail-wsite');
+const simDetailCount  = document.getElementById('sim-detail-client-count');
+const simClientList   = document.getElementById('sim-client-list');
+const simLastRefreshed = document.getElementById('sim-last-refreshed');
+const simRefreshBtn   = document.getElementById('sim-refresh-btn');
+
+let simulationsData = [];
+let openSimId = null;
+
+function simStatusBadge(pf) {
+  if (!pf) return { label: 'No Alert Configured', cls: 'sim-unknown' };
+  if (pf.firing) return { label: '✓ PASS — Firing in Central', cls: 'sim-pass' };
+  return { label: '✗ FAIL — Not Firing', cls: 'sim-fail' };
+}
+
+function renderSimulationCards() {
+  if (!simCardsGrid) return;
+  simCardsGrid.textContent = '';
+
+  if (!simulationsData.length) {
+    if (simEmpty) simEmpty.classList.remove('hidden');
+    return;
+  }
+  if (simEmpty) simEmpty.classList.add('hidden');
+
+  simulationsData.forEach((sim) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'sim-card';
+    card.addEventListener('click', () => openSimDetail(sim.id));
+
+    const header = document.createElement('div');
+    header.className = 'sim-card-header';
+
+    const name = document.createElement('p');
+    name.className = 'sim-card-name';
+    name.textContent = sim.name || sim.id;
+
+    const { label, cls } = simStatusBadge(sim.central_pass_fail);
+    const badge = document.createElement('span');
+    badge.className = `sim-status-badge ${cls}`;
+    badge.textContent = label;
+
+    header.appendChild(name);
+    header.appendChild(badge);
+
+    const meta = document.createElement('div');
+    meta.className = 'sim-card-meta';
+    meta.textContent = `Bucket: ${sim.id}  ·  Site: ${sim.wsite || '—'}`;
+
+    const total = sim.configured_clients.length;
+    const active = sim.active_client_count;
+    const warn = total > 0 && active < total;
+
+    const clientsRow = document.createElement('div');
+    clientsRow.className = 'sim-card-clients';
+    clientsRow.innerHTML = warn
+      ? `<span class="sim-card-clients-warn">⚠ ${active}/${total} clients reporting</span>`
+      : `<span>${active}/${total} clients reporting</span>`;
+
+    card.appendChild(header);
+    card.appendChild(meta);
+    card.appendChild(clientsRow);
+    simCardsGrid.appendChild(card);
+  });
+}
+
+function openSimDetail(simId) {
+  const sim = simulationsData.find((s) => s.id === simId);
+  if (!sim || !simOverview || !simDetail) return;
+  openSimId = simId;
+  simOverview.classList.add('hidden');
+  simDetail.classList.remove('hidden');
+
+  if (simDetailTitle) simDetailTitle.textContent = sim.name || sim.id;
+  if (simDetailSub) simDetailSub.textContent = `Bucket: ${sim.id}  ·  Site: ${sim.wsite || '—'}`;
+
+  const { label, cls } = simStatusBadge(sim.central_pass_fail);
+  if (simDetailBadge) {
+    simDetailBadge.textContent = label;
+    simDetailBadge.className = `sim-status-badge ${cls}`;
+  }
+
+  const total = sim.configured_clients.length;
+  if (simDetailTotal) simDetailTotal.textContent = total;
+  if (simDetailActive) simDetailActive.textContent = sim.active_client_count;
+  if (simDetailWsite) simDetailWsite.textContent = sim.wsite || '—';
+  if (simDetailCount) simDetailCount.textContent = total;
+
+  if (simClientList) {
+    simClientList.textContent = '';
+    if (!total) {
+      const empty = document.createElement('div');
+      empty.className = 'sim-client-row';
+      empty.textContent = 'No clients configured for this simulation.';
+      simClientList.appendChild(empty);
+    } else {
+      sim.configured_clients.forEach((c) => {
+        const row = document.createElement('div');
+        const statusCls = c.online ? 'online' : c.reporting ? 'offline' : 'not-reporting';
+        row.className = `sim-client-row ${statusCls}`;
+
+        const hostname = document.createElement('span');
+        hostname.className = 'sim-client-hostname';
+        hostname.textContent = c.hostname;
+
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'sim-client-status';
+        if (c.online) {
+          statusSpan.textContent = '● Online';
+          statusSpan.style.color = 'var(--hpe-green-dark)';
+        } else if (c.reporting) {
+          statusSpan.textContent = '○ Offline';
+          statusSpan.style.color = '#999';
+        } else {
+          statusSpan.textContent = '⚠ Not Reporting';
+          statusSpan.style.color = '#e67e22';
+        }
+
+        const lastSeen = document.createElement('span');
+        lastSeen.className = 'sim-client-lastseen';
+        if (c.last_seen) {
+          const d = new Date(c.last_seen);
+          const ago = Math.round((Date.now() - d.getTime()) / 60000);
+          lastSeen.textContent = ago < 2 ? 'just now' : `${ago}m ago`;
+        } else {
+          lastSeen.textContent = 'never seen';
+        }
+
+        row.appendChild(hostname);
+        row.appendChild(statusSpan);
+        row.appendChild(lastSeen);
+        simClientList.appendChild(row);
+      });
+    }
+  }
+}
+
+function closeSimDetail() {
+  openSimId = null;
+  if (simDetail) simDetail.classList.add('hidden');
+  if (simOverview) simOverview.classList.remove('hidden');
+}
+
+async function loadSimulations() {
+  try {
+    const data = await requestJson('/api/simulations');
+    simulationsData = (data.simulations || []).sort((a, b) => a.id.localeCompare(b.id));
+    renderSimulationCards();
+    if (simLastRefreshed) {
+      simLastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
+    }
+    if (openSimId) {
+      openSimDetail(openSimId);
+    }
+  } catch (err) {
+    if (simEmpty) {
+      simEmpty.textContent = `Error loading simulations: ${err.message}`;
+      simEmpty.classList.remove('hidden');
+    }
+  }
+}
+
+if (simDetailBack) simDetailBack.addEventListener('click', closeSimDetail);
+
+if (simTabButton) {
+  simTabButton.addEventListener('click', () => {
+    loadSimulations();
+  });
+}
+
+if (simRefreshBtn) {
+  simRefreshBtn.addEventListener('click', async () => {
+    const orig = simRefreshBtn.textContent;
+    simRefreshBtn.disabled = true;
+    simRefreshBtn.textContent = 'Refreshing…';
+    try {
+      await loadSimulations();
+    } finally {
+      simRefreshBtn.disabled = false;
+      simRefreshBtn.textContent = orig;
+    }
+  });
 }
 
 document.getElementById('kill-all').addEventListener('click', () => applyGlobalOverride({ kill_switch: 'on' }));

@@ -31,6 +31,7 @@
 
   <nav class="tab-nav" role="tablist">
     <button class="tab active" role="tab" aria-selected="true"  data-tab="dashboard">Dashboard</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="simulations">⚡ Simulations</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
     <button class="tab"        role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
   </nav>
@@ -69,6 +70,55 @@
         </tbody>
       </table>
     </section>
+  </main>
+
+  <!-- ── Simulations tab ── -->
+  <main id="tab-simulations" class="page tab-content hidden">
+    <div id="sim-overview">
+      <section class="central-toolbar">
+        <div>
+          <h2>Simulations</h2>
+          <div id="sim-last-refreshed" class="central-last-synced">Last refreshed: —</div>
+        </div>
+        <div class="toolbar-actions">
+          <button id="sim-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
+        </div>
+      </section>
+      <div id="sim-cards-grid" class="sim-cards-grid"></div>
+      <div id="sim-empty" class="central-empty hidden">No simulation profiles found — check that simulation.conf is synced.</div>
+    </div>
+
+    <!-- Drill-down panel (hidden until a card is clicked) -->
+    <div id="sim-detail" class="central-detail-panel hidden">
+      <div class="central-detail-header">
+        <button id="sim-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+        <div>
+          <h2 id="sim-detail-title">Simulation Detail</h2>
+          <p id="sim-detail-sub" class="central-detail-sub">—</p>
+        </div>
+        <div id="sim-detail-badge" class="sim-status-badge sim-unknown">—</div>
+      </div>
+
+      <div class="sim-detail-summary">
+        <div class="sim-detail-stat">
+          <span class="sim-detail-stat-label">Configured</span>
+          <span id="sim-detail-total" class="sim-detail-stat-value">—</span>
+        </div>
+        <div class="sim-detail-stat">
+          <span class="sim-detail-stat-label">Reporting In</span>
+          <span id="sim-detail-active" class="sim-detail-stat-value">—</span>
+        </div>
+        <div class="sim-detail-stat">
+          <span class="sim-detail-stat-label">Central Site</span>
+          <span id="sim-detail-wsite" class="sim-detail-stat-value">—</span>
+        </div>
+      </div>
+
+      <section class="history-section">
+        <h3>Clients <span id="sim-detail-client-count" class="badge-count"></span></h3>
+        <div id="sim-client-list" class="sim-client-list"></div>
+      </section>
+    </div>
   </main>
 
   <!-- ── Central tab ── -->

@@ -825,3 +825,115 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   width: 1rem;
   height: 1rem;
 }
+
+/* ── Simulation cards ───────────────────────────────────────────── */
+.sim-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.sim-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.125rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.sim-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.09);
+  border-color: var(--hpe-green);
+}
+
+.sim-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.sim-card-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+/* PASS / FAIL / unconfigured badge */
+.sim-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sim-pass  { background: var(--hpe-green-light); color: var(--hpe-green-dark); border: 1px solid rgba(1,169,130,0.35); }
+.sim-fail  { background: #fff2f2; color: #c0392b; border: 1px solid rgba(192,57,43,0.3); }
+.sim-unknown { background: #f0f0f0; color: var(--muted); border: 1px solid var(--border); }
+
+.sim-card-meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.sim-card-clients {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sim-card-clients-warn { color: #e67e22; font-weight: 600; }
+
+/* ── Simulation drill-down ──────────────────────────────────────── */
+.sim-detail-summary {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem 0;
+  flex-wrap: wrap;
+}
+.sim-detail-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sim-detail-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.sim-detail-stat-value { font-size: 1.1rem; font-weight: 600; color: var(--text); }
+
+/* Client list in drill-down */
+.sim-client-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0.25rem 0;
+}
+.sim-client-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 7px 10px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.88rem;
+}
+.sim-client-row.online  { border-left: 3px solid var(--hpe-green); }
+.sim-client-row.offline { border-left: 3px solid #ccc; }
+.sim-client-row.not-reporting { border-left: 3px solid #f39c12; }
+
+.sim-client-hostname { flex: 1; font-family: monospace; font-size: 0.85rem; color: var(--text); }
+.sim-client-status   { font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+.sim-client-lastseen { font-size: 0.75rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+

@@ -1303,6 +1303,120 @@ async def api_local_wsites() -> dict[str, Any]:
     return {"wsites": sorted(wsites)}
 
 
+@app.get("/api/simulations")
+async def api_simulations() -> dict[str, Any]:
+    """Return simulation groups with client membership and Central PASS/FAIL status.
+
+    Reads configs/simulation.conf for bucket profiles and proxmox/client-setup.conf
+    for VMID→username mappings. Matches configured clients against live heartbeats
+    and looks up Central alert status per simulation wsite + central_check.
+    """
+    import configparser  # already available; re-import is safe inside function
+
+    sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
+    client_conf_path = REPO_DIR / "proxmox" / "client-setup.conf"
+
+    simulations: dict[str, dict[str, Any]] = {}
+    site_based_num = 2
+
+    # ── Parse simulation.conf ─────────────────────────────────────
+    if sim_conf_path.exists():
+        try:
+            parser = configparser.ConfigParser()
+            parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
+            site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
+
+            sim_section_re = re.compile(r"^s\d$")
+            for section in parser.sections():
+                if not sim_section_re.match(section):
+                    continue
+                simulations[section] = {
+                    "id": section,
+                    "name": parser.get(section, "name", fallback=section),
+                    "wsite": parser.get(section, "wsite", fallback=""),
+                    "central_check": parser.get(section, "central_check", fallback="").strip(),
+                    "configured_clients": [],
+                    "active_client_count": 0,
+                    "central_pass_fail": None,  # None = not configured
+                }
+        except Exception as exc:
+            logger.warning("api_simulations: could not parse simulation.conf: %s", exc)
+
+    # ── Parse client-setup.conf — build VMID→hostname mapping ────
+    if client_conf_path.exists():
+        try:
+            client_parser = configparser.ConfigParser()
+            client_parser.read_string(client_conf_path.read_text(encoding="utf-8"))
+
+            vmid_section_re = re.compile(r"^c(\d+)$")
+            for section in client_parser.sections():
+                m = vmid_section_re.match(section)
+                if not m:
+                    continue
+                vmid_str = m.group(1)
+                vmid = int(vmid_str)
+                vm_name = client_parser.get(section, "vm_name", fallback="").strip()
+                if not vm_name:
+                    continue
+
+                # Extract the Nth-from-last digit (same math as startup.sh)
+                digit_idx = -(site_based_num)
+                digit = vmid_str[digit_idx] if len(vmid_str) >= site_based_num else vmid_str[-1]
+                sim_id = f"s{digit}"
+
+                if sim_id in simulations:
+                    simulations[sim_id]["configured_clients"].append({
+                        "hostname": f"{vm_name}-{vmid}",
+                        "vmid": vmid,
+                        "username": vm_name,
+                        "reporting": False,
+                        "online": False,
+                        "last_seen": None,
+                    })
+        except Exception as exc:
+            logger.warning("api_simulations: could not parse client-setup.conf: %s", exc)
+
+    # ── Match active clients + compute Central PASS/FAIL ─────────
+    async with state_lock:
+        active_snap = {h: dict(c) for h, c in clients.items()}
+
+    for sim in simulations.values():
+        active_count = 0
+        for client_info in sim["configured_clients"]:
+            h = client_info["hostname"]
+            if h in active_snap:
+                c = active_snap[h]
+                online = compute_online(c.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
+                last_seen_dt = c.get("last_seen")
+                client_info["reporting"] = True
+                client_info["online"] = online
+                client_info["last_seen"] = last_seen_dt.isoformat() if last_seen_dt else None
+                if online:
+                    active_count += 1
+        sim["active_client_count"] = active_count
+
+        # Central PASS/FAIL — look up wsite + central_check in polled status
+        wsite = sim["wsite"]
+        check_id = sim["central_check"]
+        if wsite and check_id:
+            site_checks = central_status.get(wsite, {})
+            if check_id in site_checks:
+                info = site_checks[check_id]
+                sim["central_pass_fail"] = {
+                    "firing": info["status"] == "OK",
+                    "count": info["count"],
+                    "check_name": info["check_name"],
+                    "ts": info["ts"],
+                }
+            else:
+                sim["central_pass_fail"] = {"firing": False, "count": 0, "check_name": check_id, "ts": None}
+
+    return {
+        "site_based_num": site_based_num,
+        "simulations": list(simulations.values()),
+    }
+
+
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     async with state_lock:
@@ -1320,6 +1434,12 @@ async def api_health() -> dict[str, Any]:
 async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")
     config_text = config_path.read_text(encoding="utf-8")
+
+    # Append user-overrides.conf if present (overrides win at parse time)
+    overrides_path = REPO_DIR / "configs" / "user-overrides.conf"
+    if overrides_path.exists():
+        overrides_text = overrides_path.read_text(encoding="utf-8")
+        config_text = config_text.rstrip("\n") + "\n\n" + overrides_text
 
     if not hostname:
         return config_text
