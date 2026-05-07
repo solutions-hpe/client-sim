@@ -1225,7 +1225,10 @@ async def _run_self_update() -> None:
     if update_state["update_in_progress"]:
         return
     if not _INSTALLER_PATH.exists():
-        logger.error("Self-update: installer not found at %s", _INSTALLER_PATH)
+        msg = f"Self-update: installer not found at {_INSTALLER_PATH}"
+        logger.error(msg)
+        update_state["update_error"] = msg
+        await broadcast({"type": "version_status", **update_state})
         return
     update_state["update_in_progress"] = True
     update_state["update_log"] = []
@@ -1233,8 +1236,11 @@ async def _run_self_update() -> None:
     await broadcast({"type": "version_status", **update_state})
     try:
         logger.info("Self-update: running %s", _INSTALLER_PATH)
+        # Run as root directly if already root, otherwise use sudo
+        import os as _os
+        cmd = ["bash", str(_INSTALLER_PATH)] if _os.geteuid() == 0 else ["sudo", "bash", str(_INSTALLER_PATH)]
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "bash", str(_INSTALLER_PATH),
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -1243,15 +1249,15 @@ async def _run_self_update() -> None:
             line = raw.decode(errors="replace").rstrip()
             update_state["update_log"].append(line)
             logger.info("self-update: %s", line)
+            await broadcast({"type": "version_status", **update_state})
         await proc.wait()
         if proc.returncode != 0:
             logger.error("Self-update installer exited with code %s", proc.returncode)
             update_state["update_in_progress"] = False
-            update_state["update_error"] = f"Installer exited with code {proc.returncode}"
+            update_state["update_error"] = f"Installer exited with code {proc.returncode} — check logs"
             await broadcast({"type": "version_status", **update_state})
         else:
-            logger.info("Self-update process exited with code %s", proc.returncode)
-            # Systemd will restart us; if we're still running, clear the flag
+            logger.info("Self-update installer completed successfully")
             update_state["update_in_progress"] = False
             update_state["update_error"] = None
             await broadcast({"type": "version_status", **update_state})

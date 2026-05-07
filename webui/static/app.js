@@ -135,9 +135,9 @@ function setRelayStatus(data) {
 
   const statusEl = document.getElementById('relay-status');
   if (statusEl) {
-    if (!data.enabled) statusEl.title = 'Central relay is disabled';
-    else if (data.connected) statusEl.title = `Relay connected to ${data.url} (tenant: ${data.tenant_id || 'none'})`;
-    else statusEl.title = data.last_error ? `Relay error: ${data.last_error}` : 'Relay pending first push';
+    if (!data.enabled) statusEl.title = 'Client-Sim Cloud Platform: disabled';
+    else if (data.connected) statusEl.title = `CS Cloud: connected to ${data.url} (tenant: ${data.tenant_id || 'none'})`;
+    else statusEl.title = data.last_error ? `CS Cloud error: ${data.last_error}` : 'CS Cloud: enabled — pending first push';
   }
 
   if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : data.last_error ? '✗ Error' : 'Enabled (pending)';
@@ -444,13 +444,24 @@ function applyVersionStatus(data) {
   if (versionCurrent) versionCurrent.textContent = data.current_version ?? '—';
   if (versionAvailable) versionAvailable.textContent = data.available_version ?? '—';
   if (versionLastChecked) versionLastChecked.textContent = data.last_checked ?? '—';
+
+  const inProgress = !!data.update_in_progress;
   if (checkUpdateBtn) {
-    checkUpdateBtn.disabled = !!data.update_in_progress;
-    checkUpdateBtn.textContent = data.update_in_progress ? '🔄 Updating…' : '🔄 Check & Update Now';
+    checkUpdateBtn.disabled = inProgress;
+    checkUpdateBtn.textContent = inProgress ? '🔄 Updating…' : '🔄 Check & Update Now';
   }
-  if (data.update_in_progress && updateMsg) {
-    updateMsg.textContent = `Installing v${data.available_version}… service will restart.`;
+
+  if (!updateMsg) return;
+
+  if (data.update_error) {
+    updateMsg.textContent = `Update failed: ${data.update_error}`;
+    updateMsg.className = 'settings-message error';
+    updateMsg.classList.remove('hidden');
+  } else if (inProgress) {
+    const lastLine = data.update_log?.length ? ` — ${data.update_log[data.update_log.length - 1]}` : '';
+    updateMsg.textContent = `Installing v${data.available_version}… service will restart.${lastLine}`;
     updateMsg.className = 'settings-message success';
+    updateMsg.classList.remove('hidden');
   }
 }
 
@@ -459,22 +470,27 @@ checkUpdateBtn.addEventListener('click', async () => {
   checkUpdateBtn.textContent = '🔄 Checking…';
   updateMsg.textContent = 'Checking for updates…';
   updateMsg.className = 'settings-message success';
+  updateMsg.classList.remove('hidden');
+  clearTimeout(updateMsg._timer);
   try {
     const res = await fetch('/api/self-update', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     updateMsg.textContent = data.message;
     updateMsg.className = data.message.includes('up to date') ? 'settings-message success' : 'settings-message success';
+    // If update started, applyVersionStatus via WS will drive state from here
+    if (!data.message.includes('started')) {
+      checkUpdateBtn.disabled = false;
+      checkUpdateBtn.textContent = '🔄 Check & Update Now';
+      updateMsg._timer = setTimeout(() => { updateMsg.className = 'settings-message hidden'; }, 8000);
+    }
   } catch (err) {
     updateMsg.textContent = `Error: ${err.message}`;
     updateMsg.className = 'settings-message error';
     checkUpdateBtn.disabled = false;
     checkUpdateBtn.textContent = '🔄 Check & Update Now';
+    updateMsg._timer = setTimeout(() => { updateMsg.className = 'settings-message hidden'; }, 10000);
   }
-  clearTimeout(updateMsg._timer);
-  updateMsg._timer = setTimeout(() => {
-    updateMsg.className = 'settings-message hidden';
-  }, 8000);
 });
 
 // Load initial version status on page load
