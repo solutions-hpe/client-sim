@@ -27,8 +27,46 @@ for i in $(seq 1 15); do
   sleep 1
 done
 
+# ── Write X11 resolution config (takes effect on next X session start) ───────
+# Standard VGA on QEMU/Proxmox requires the modesetting driver — the Raspberry Pi
+# GPU driver won't talk to QEMU's virtual VGA correctly. This config forces the
+# right driver and sets a 1920x1080 virtual screen.
+XCONF_DIR="/etc/X11/xorg.conf.d"
+XCONF_FILE="$XCONF_DIR/99-client-sim-resolution.conf"
+if [[ ! -f "$XCONF_FILE" ]]; then
+  sudo mkdir -p "$XCONF_DIR" 2>/dev/null
+  sudo tee "$XCONF_FILE" >/dev/null <<EOF
+# Client-Sim: force ${TARGET_W}x${TARGET_H} on QEMU standard VGA (Raspberry Pi OS in VM)
+# Written by launch-terminals.sh — delete this file to regenerate.
+Section "Device"
+    Identifier  "QEMU VGA"
+    Driver      "modesetting"
+    Option      "ModeDebug" "true"
+EndSection
+
+Section "Monitor"
+    Identifier  "Default Monitor"
+    Modeline    "1920x1080" 173.00 1920 2048 2248 2576 1080 1083 1088 1120 -hsync +vsync
+    Option      "PreferredMode" "1920x1080"
+EndSection
+
+Section "Screen"
+    Identifier  "Default Screen"
+    Device      "QEMU VGA"
+    Monitor     "Default Monitor"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth   24
+        Virtual ${TARGET_W} ${TARGET_H}
+        Modes   "1920x1080"
+    EndSubSection
+EndSection
+EOF
+  echo "$(date) launch-terminals: wrote X11 config ${XCONF_FILE} — reboot for full effect" >>"$LOG"
+fi
+
 # ── Auto-detect connected display output ─────────────────────────────────────
-# Covers: Virtual-1 (QEMU/Proxmox VM), HDMI-1, HDMI-0 (Pi), DP-1, eDP-1, VGA-1
+# Covers: Virtual-1 (QEMU/Proxmox VM), HDMI-A-1 (RPi), HDMI-1, DP-1, eDP-1
 OUTPUT=$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')
 if [[ -z "$OUTPUT" ]]; then
   echo "$(date) launch-terminals: WARNING — no connected display found, skipping xrandr" \
@@ -36,14 +74,11 @@ if [[ -z "$OUTPUT" ]]; then
 else
   MODE_NAME="${TARGET_W}x${TARGET_H}"
 
-  # Check whether the mode already exists in xrandr's mode list
-  if ! xrandr --query 2>/dev/null | grep -q "^   ${TARGET_W}x${TARGET_H}"; then
-    # Mode doesn't exist — create it (required on QEMU/Proxmox Virtual-1 displays).
-    # Use cvt to generate the modeline if available; fall back to a known-good value.
+  # Create the mode if it isn't already listed (needed on QEMU Virtual-1 displays)
+  if ! xrandr --query 2>/dev/null | grep -q "   ${TARGET_W}x${TARGET_H}"; then
     if command -v cvt &>/dev/null; then
       MODELINE=$(cvt "$TARGET_W" "$TARGET_H" 60 | awk '/Modeline/{$1=$2=""; print $0}' | xargs)
     else
-      # 1920x1080 @ 60 Hz — standard VESA modeline
       MODELINE="173.00 1920 2048 2248 2576 1080 1083 1088 1120 -hsync +vsync"
     fi
     xrandr --newmode "$MODE_NAME" $MODELINE 2>/dev/null || true
@@ -51,12 +86,16 @@ else
     echo "$(date) launch-terminals: created mode ${MODE_NAME} on ${OUTPUT}" >>"$LOG"
   fi
 
-  # Now set the mode
-  if xrandr --output "$OUTPUT" --mode "$MODE_NAME" 2>/dev/null; then
+  # Set the mode, then force the framebuffer size.
+  # --fb forces the virtual framebuffer to the target dimensions even if the
+  # underlying driver reports a smaller preferred size (common on Raspberry Pi OS).
+  if xrandr --output "$OUTPUT" --mode "$MODE_NAME" --fb "${TARGET_W}x${TARGET_H}" 2>/dev/null; then
     echo "$(date) launch-terminals: set ${OUTPUT} to ${MODE_NAME}" >>"$LOG"
   else
-    xrandr --output "$OUTPUT" --auto 2>/dev/null
-    echo "$(date) launch-terminals: WARNING — could not set ${MODE_NAME} on ${OUTPUT}, using native" \
+    # Last resort: just force the framebuffer size without changing the named mode
+    xrandr --fb "${TARGET_W}x${TARGET_H}" 2>/dev/null || true
+    xrandr --output "$OUTPUT" --auto 2>/dev/null || true
+    echo "$(date) launch-terminals: WARNING — mode set failed, forced --fb ${TARGET_W}x${TARGET_H}" \
       >>"$LOG"
   fi
 fi
