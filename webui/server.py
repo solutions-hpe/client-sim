@@ -246,8 +246,9 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
 
     # Try a sequence of lightweight endpoints; the first that returns 2xx wins.
     probe_urls = [
+        (f"{base_url}/configuration/v2/groups", {"limit": 1, "offset": 0}),
+        (f"{base_url}/monitoring/v1/alerts", {"limit": 1}),
         (f"{base_url}/monitoring/v2/alerts", {"limit": 1}),
-        (f"{base_url}/configuration/v2/groups", {"limit": 1}),
         (f"{base_url}/platform/v1/customer_id", {}),
     ]
     last_status: int = 0
@@ -269,6 +270,11 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
                 if ok:
                     return True, f"Access token was expired; successfully refreshed. {msg}"
                 return False, f"Token rejected (401). Central response: {last_body}"
+            if resp.status_code == 400:
+                # 400 means the endpoint exists and accepted our token but wants different params.
+                # That's enough to confirm the token is valid.
+                logger.info("Central token confirmed via %s (400 = endpoint live, token accepted)", url)
+                return True, "Token validated successfully (endpoint reachable, token accepted)."
             # 403/404 = wrong scope or endpoint missing — try next probe
             logger.info("Central probe %s returned %s — trying next", url, resp.status_code)
         except Exception as exc:
@@ -369,31 +375,36 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
 
         # ── Fetch alerts for this site ────────────────────────────
         alert_type_counts: dict[str, int] = {}
-        try:
-            resp = await client.get(
-                f"{base_url}/monitoring/v2/alerts",
-                headers=headers,
-                params={"site": central_site, "limit": 1000},
-                timeout=20,
-            )
-            if resp.status_code == 401 and _can_refresh():
-                ok, _ = await _refresh_central_token(client)
-                if ok:
-                    headers = _central_headers()
+        for alerts_path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
+            try:
                 resp = await client.get(
-                    f"{base_url}/monitoring/v2/alerts",
+                    f"{base_url}{alerts_path}",
                     headers=headers,
                     params={"site": central_site, "limit": 1000},
                     timeout=20,
                 )
-            if resp.status_code == 200:
-                data = resp.json()
-                for alert in data.get("alerts", []):
-                    atype = alert.get("alert_type") or alert.get("type", "")
-                    if atype:
-                        alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
-        except Exception as exc:
-            logger.warning("Central alerts fetch failed for site %s: %s", central_site, exc)
+                if resp.status_code == 401 and _can_refresh():
+                    ok, _ = await _refresh_central_token(client)
+                    if ok:
+                        headers = _central_headers()
+                    resp = await client.get(
+                        f"{base_url}{alerts_path}",
+                        headers=headers,
+                        params={"site": central_site, "limit": 1000},
+                        timeout=20,
+                    )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for alert in data.get("alerts", []):
+                        atype = alert.get("alert_type") or alert.get("type", "")
+                        if atype:
+                            alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
+                    break  # found a working endpoint
+                if resp.status_code == 404:
+                    continue  # try next path version
+            except Exception as exc:
+                logger.warning("Central alerts fetch failed for site %s: %s", central_site, exc)
+                break
 
         # ── Fetch insights for this site ──────────────────────────
         insight_cat_counts: dict[str, int] = {}
