@@ -11,19 +11,18 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
+smb_repo=$(get_value 'simulation' 'smb_repo')
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
+smb_address=$(get_value 'address' 'smb_address')
 #------------------------------------------------------------
 echo "Updating Scripts" | tee -a "$debug" "$log"
 
 #------------------------------------------------------------
 # Source priority:
 #   1. Web server (web_server=on and server reachable) — preferred
-#   2. GitHub (public_repo=on) — fallback when web server is off/unreachable
-#   3. SMB — fallback when public_repo is off
-#
-# If the web server is enabled and reachable, GitHub clone is skipped entirely.
-# The web server is the source of truth (it already mirrors GitHub).
+#   2. SMB      (smb_repo=on) — local network share, faster than internet
+#   3. GitHub   (public_repo=on) — last resort / internet fallback
 #------------------------------------------------------------
 
 web_server_used=false
@@ -64,22 +63,37 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                 fi
             done
             sudo chmod +x /usr/local/scripts/*.sh 2>/dev/null || true
+            sudo chmod -R 777 /usr/local/scripts 2>/dev/null || true
             echo "Linux script sync complete" | tee -a "$debug" "$log"
         else
             echo "WARNING: Could not get script list from web server" | tee -a "$debug" "$log"
         fi
 
     else
-        echo "WARNING: Web server not reachable — falling back to GitHub/SMB" | tee -a "$debug" "$log"
+        echo "WARNING: Web server not reachable — falling back to SMB/GitHub" | tee -a "$debug" "$log"
     fi
 fi
 
 #------------------------------------------------------------
-# GitHub / SMB fallback — only used when web server is off or unreachable
+# SMB fallback — local network share; faster than internet, used before GitHub
+#------------------------------------------------------------
+if [[ "$web_server_used" == false && "$smb_repo" == "on" && -n "$smb_address" ]]; then
+    echo "Trying SMB repository: $smb_address" | tee -a "$debug"
+    if smbclient "$smb_address" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' 2>>"$debug"; then
+        echo "SMB sync complete" | tee -a "$debug" "$log"
+        sudo chmod -R 777 /usr/local/scripts
+        web_server_used=true   # reuse flag — signals that a source was found, skip GitHub
+    else
+        echo "WARNING: SMB sync failed — falling back to GitHub" | tee -a "$debug" "$log"
+    fi
+fi
+
+#------------------------------------------------------------
+# GitHub fallback — last resort, requires internet access
 #------------------------------------------------------------
 if [[ "$web_server_used" == false ]]; then
     if [[ "$public_repo" == "on" ]]; then
-        echo "Using remote GitHub repo" | tee -a "$debug"
+        echo "Using remote GitHub repo (last resort)" | tee -a "$debug"
         cd ~ || echo "WARNING: Failed to cd to home directory" | tee -a "$debug"
         repo_dir="client-sim"
         shopt -s nullglob
@@ -178,8 +192,7 @@ if [[ "$web_server_used" == false ]]; then
             echo "ERROR: Could not enter repo directory" | tee -a "$debug" "$log"
         fi
     else
-        echo "Using local SMB repository" | tee -a "$debug"
-        smbclient "$smb_location" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *'
+        echo "WARNING: No fallback source available (public_repo=off, smb_repo=off, web server unreachable)" | tee -a "$debug" "$log"
     fi
 fi
 
