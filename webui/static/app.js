@@ -1230,6 +1230,31 @@ if (centralTestBtn) {
   });
 }
 
+async function loadSiteMappingSources() {
+  if (loadSitesBtn) { loadSitesBtn.disabled = true; loadSitesBtn.textContent = 'Loading…'; }
+  if (sitesLoadStatus) sitesLoadStatus.textContent = '';
+  try {
+    const [wsiteData, centralData] = await Promise.all([
+      requestJson('/api/local-wsites'),
+      requestJson('/api/central/sites'),
+    ]);
+    localWsites = wsiteData.wsites || [];
+    centralSites = centralData.sites || [];
+    renderSiteMappingsTable();
+    if (sitesLoadStatus) {
+      sitesLoadStatus.textContent = `Loaded ${localWsites.length} local wsite(s), ${centralSites.length} Central site(s).`;
+    }
+  } catch (err) {
+    if (sitesLoadStatus) sitesLoadStatus.textContent = `Error: ${err.message}`;
+  } finally {
+    if (loadSitesBtn) { loadSitesBtn.disabled = false; loadSitesBtn.textContent = '🔄 Load Sites'; }
+  }
+}
+
+if (loadSitesBtn) {
+  loadSitesBtn.addEventListener('click', loadSiteMappingSources);
+}
+
 if (addMappingBtn) {
   addMappingBtn.addEventListener('click', () => addMappingRow());
 }
@@ -1239,9 +1264,9 @@ if (saveMappingsBtn) {
     const rows = siteMappingsBody ? [...siteMappingsBody.querySelectorAll('tr')] : [];
     const siteMappings = {};
     rows.forEach((row) => {
-      const inputs = row.querySelectorAll('input');
-      const wsite = inputs[0]?.value.trim() || '';
-      const centralSite = inputs[1]?.value.trim() || '';
+      const cells = row.querySelectorAll('td');
+      const wsite = cells[0]?.querySelector('.mapping-val')?.value?.trim() || '';
+      const centralSite = cells[1]?.querySelector('.mapping-val')?.value?.trim() || '';
       if (wsite && centralSite) siteMappings[wsite] = centralSite;
     });
     const originalLabel = saveMappingsBtn.textContent;

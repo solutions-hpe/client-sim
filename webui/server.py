@@ -302,12 +302,20 @@ async def _probe_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
     token = central_token.get("access_token", "")
     headers = {"Authorization": f"Bearer {token}"}
 
-    probe_urls = [
-        (f"{base_url}/configuration/v2/groups", {"limit": 1, "offset": 0}),
-        (f"{base_url}/monitoring/v1/alerts", {"limit": 1}),
-        (f"{base_url}/monitoring/v2/alerts", {"limit": 1}),
-        (f"{base_url}/platform/v1/customer_id", {}),
-    ]
+    if _is_new_central_api():
+        # New Central v1alpha1 — sites-health is the lightest reliable endpoint
+        probe_urls = [
+            (f"{base_url}/network-monitoring/v1alpha1/sites-health", {}),
+            (f"{base_url}/network-monitoring/v1alpha1/devices", {"limit": 1}),
+        ]
+    else:
+        # Classic Central
+        probe_urls = [
+            (f"{base_url}/configuration/v2/groups", {"limit": 1, "offset": 0}),
+            (f"{base_url}/monitoring/v1/alerts", {"limit": 1}),
+            (f"{base_url}/monitoring/v2/alerts", {"limit": 1}),
+            (f"{base_url}/platform/v1/customer_id", {}),
+        ]
     last_status: int = 0
     last_body: str = ""
     for url, params in probe_urls:
@@ -437,12 +445,15 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
 
         # ── Fetch alerts for this site ────────────────────────────
         alert_type_counts: dict[str, int] = {}
-        for alerts_path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
+        site_health: dict[str, Any] = {}
+
+        if _is_new_central_api():
+            # New Central v1alpha1: no alerts endpoint yet — use sites-health
+            # and AP status per site for monitoring
             try:
                 resp = await client.get(
-                    f"{base_url}{alerts_path}",
+                    f"{base_url}/network-monitoring/v1alpha1/sites-health",
                     headers=headers,
-                    params={"site": central_site, "limit": 1000},
                     timeout=20,
                 )
                 if resp.status_code == 401 and _can_refresh():
@@ -450,41 +461,76 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
                     if ok:
                         headers = _central_headers()
                     resp = await client.get(
+                        f"{base_url}/network-monitoring/v1alpha1/sites-health",
+                        headers=headers,
+                        timeout=20,
+                    )
+                if resp.status_code == 200:
+                    for item in resp.json().get("items", []):
+                        sname = item.get("siteName") or item.get("site_name") or ""
+                        if sname.lower() == central_site.lower():
+                            site_health = item
+                            # Map health fields to synthetic alert_type_counts
+                            # so existing check evaluation logic still works
+                            score = item.get("healthScore", item.get("health_score", 100))
+                            ap_count = item.get("apCount", item.get("ap_count", 0))
+                            alert_type_counts["SITE_HEALTH"] = int(score)
+                            alert_type_counts["AP_COUNT"] = int(ap_count)
+                            break
+            except Exception as exc:
+                logger.warning("New Central sites-health fetch failed for site %s: %s", central_site, exc)
+
+            # New Central: no insights endpoint either — skip
+            insight_cat_counts: dict[str, int] = {}
+        else:
+            for alerts_path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
+                try:
+                    resp = await client.get(
                         f"{base_url}{alerts_path}",
                         headers=headers,
                         params={"site": central_site, "limit": 1000},
                         timeout=20,
                     )
+                    if resp.status_code == 401 and _can_refresh():
+                        ok, _ = await _refresh_central_token(client)
+                        if ok:
+                            headers = _central_headers()
+                        resp = await client.get(
+                            f"{base_url}{alerts_path}",
+                            headers=headers,
+                            params={"site": central_site, "limit": 1000},
+                            timeout=20,
+                        )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for alert in data.get("alerts", []):
+                            atype = alert.get("alert_type") or alert.get("type", "")
+                            if atype:
+                                alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
+                        break
+                    if resp.status_code == 404:
+                        continue
+                except Exception as exc:
+                    logger.warning("Central alerts fetch failed for site %s: %s", central_site, exc)
+                    break
+
+            # ── Fetch insights for this site ──────────────────────────
+            insight_cat_counts: dict[str, int] = {}
+            try:
+                resp = await client.get(
+                    f"{base_url}/aiops/v1/insights",
+                    headers=headers,
+                    params={"site_name": central_site, "limit": 1000},
+                    timeout=20,
+                )
                 if resp.status_code == 200:
                     data = resp.json()
-                    for alert in data.get("alerts", []):
-                        atype = alert.get("alert_type") or alert.get("type", "")
-                        if atype:
-                            alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
-                    break  # found a working endpoint
-                if resp.status_code == 404:
-                    continue  # try next path version
+                    for insight in data.get("insights", []):
+                        cat = insight.get("category") or insight.get("type", "")
+                        if cat:
+                            insight_cat_counts[cat] = insight_cat_counts.get(cat, 0) + 1
             except Exception as exc:
-                logger.warning("Central alerts fetch failed for site %s: %s", central_site, exc)
-                break
-
-        # ── Fetch insights for this site ──────────────────────────
-        insight_cat_counts: dict[str, int] = {}
-        try:
-            resp = await client.get(
-                f"{base_url}/aiops/v1/insights",
-                headers=headers,
-                params={"site_name": central_site, "limit": 1000},
-                timeout=20,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                for insight in data.get("insights", []):
-                    cat = insight.get("category") or insight.get("type", "")
-                    if cat:
-                        insight_cat_counts[cat] = insight_cat_counts.get(cat, 0) + 1
-        except Exception as exc:
-            logger.warning("Central insights fetch failed for site %s: %s", central_site, exc)
+                logger.warning("Central insights fetch failed for site %s: %s", central_site, exc)
 
         # ── Evaluate each monitored check ─────────────────────────
         for check in monitored:
@@ -1009,27 +1055,45 @@ async def api_central_sites() -> dict[str, Any]:
     sites: list[str] = []
 
     async with httpx.AsyncClient() as client:
-        for path in ["/monitoring/v2/sites", "/monitoring/v1/sites"]:
+        if _is_new_central_api():
+            # New Central: sites come from sites-health (keyed as siteName)
             try:
                 resp = await client.get(
-                    f"{base_url}{path}",
+                    f"{base_url}/network-monitoring/v1alpha1/sites-health",
                     headers=headers,
-                    params={"limit": 1000, "offset": 0},
                     timeout=20,
                 )
-                logger.info("Central sites %s → %s", path, resp.status_code)
+                logger.info("New Central sites-health → %s", resp.status_code)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    for site in data.get("sites", []):
-                        name = site.get("site_name") or site.get("name", "")
+                    for item in resp.json().get("items", []):
+                        name = item.get("siteName") or item.get("site_name") or item.get("name", "")
                         if name:
                             sites.append(name)
-                    break
-                if resp.status_code == 404:
-                    continue
             except Exception as exc:
-                logger.warning("Could not fetch Central sites from %s: %s", path, exc)
-                break
+                logger.warning("Could not fetch New Central sites-health: %s", exc)
+        else:
+            # Classic Central: try v2 then v1
+            for path in ["/monitoring/v2/sites", "/monitoring/v1/sites"]:
+                try:
+                    resp = await client.get(
+                        f"{base_url}{path}",
+                        headers=headers,
+                        params={"limit": 1000, "offset": 0},
+                        timeout=20,
+                    )
+                    logger.info("Classic Central sites %s → %s", path, resp.status_code)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for site in data.get("sites", []):
+                            name = site.get("site_name") or site.get("name", "")
+                            if name:
+                                sites.append(name)
+                        break
+                    if resp.status_code == 404:
+                        continue
+                except Exception as exc:
+                    logger.warning("Could not fetch Classic Central sites from %s: %s", path, exc)
+                    break
 
     return {"sites": sorted(set(sites))}
 
