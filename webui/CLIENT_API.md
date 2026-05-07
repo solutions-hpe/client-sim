@@ -16,17 +16,17 @@ Set `server_url` in `simulation.conf` on each client:
 
 ```ini
 [server]
-server_url=http://10.255.255.1:8000
+server_url=http://169.254.1.1:8000
 ```
 
-Replace `10.255.255.1` with the dashboard server's IP address. For the standard Proxmox deployment this is the `eth1` address of the WebUI LXC on `vmbr255`. For a development/test server use the host IP and port `8000`.
+Replace `169.254.1.1` with the dashboard server's IP address. For the standard Proxmox deployment this is the `eth1` address of the WebUI LXC on `vmbr255`. For a development/test server use the host IP and port `8000`.
 
 If `server_url` is blank or unreachable, all API calls are skipped and the client runs in standalone mode — it continues to use whatever scripts and config it last downloaded.
 
 ### 2. Verify the server is reachable
 
 ```bash
-curl http://10.255.255.1:8000/api/health
+curl http://169.254.1.1:8000/api/health
 ```
 
 Expected response:
@@ -46,7 +46,7 @@ Expected response:
 ### 3. Confirm config is being served
 
 ```bash
-curl "http://10.255.255.1:8000/api/config?hostname=$(hostname)"
+curl "http://169.254.1.1:8000/api/config?hostname=$(hostname)"
 ```
 
 This returns the INI-format `simulation.conf` with any per-client overrides already merged in. If the output looks correct, the client is ready to sync automatically.
