@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.02
+version=.03
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -41,6 +41,9 @@ copy_local_files() {
 
     if [[ -f "$src_dir/10-rsyslog.conf" ]]; then
         sudo cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf
+    fi
+    if [[ -f "$src_dir/VERSION" ]]; then
+        sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
     fi
     sudo chmod -R 777 /usr/local/scripts
 }
@@ -96,50 +99,61 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
     echo "Tier 1: Trying Web Server ($server_url)..." | tee -a "$debug"
 
     if check_api_up "$server_url"; then
-        tmp_web=$(mktemp -d)
-        sync_ok=true
-
-        # Pull simulation.conf with hostname-specific overrides
-        http_code=$(curl -sS --max-time 10 \
-            -o "$tmp_web/simulation.conf" \
-            -w "%{http_code}" \
-            "$server_url/api/config?hostname=$(hostname)" 2>/dev/null)
-        if [[ "$http_code" != "200" || ! -s "$tmp_web/simulation.conf" ]]; then
-            echo "Config download failed (code: $http_code)" | tee -a "$debug" "$log"
-            sync_ok=false
-        fi
-
-        # Pull script list and download each file
-        if [[ "$sync_ok" == true ]]; then
-            script_list=$(curl -sS --max-time 10 \
-                "$server_url/api/scripts/list?platform=linux" 2>/dev/null)
-            if [[ -z "$script_list" ]]; then
-                echo "Script list empty or unreachable — falling through" | tee -a "$debug" "$log"
-                sync_ok=false
-            else
-                for fname in $(echo "$script_list" | tr -d '[]"' | tr ',' '\n' | tr -d ' '); do
-                    [[ -z "$fname" ]] && continue
-                    fcode=$(curl -sS --max-time 15 \
-                        -o "$tmp_web/$fname" \
-                        -w "%{http_code}" \
-                        "$server_url/api/scripts/linux/$fname" 2>/dev/null)
-                    if [[ "$fcode" != "200" ]]; then
-                        echo "Failed to download $fname (code: $fcode)" | tee -a "$debug" "$log"
-                        sync_ok=false
-                        break
-                    fi
-                done
-            fi
-        fi
-
-        if [[ "$sync_ok" == true ]]; then
-            echo "Web server sync succeeded" | tee -a "$debug" "$log"
-            copy_local_files "$tmp_web"
+        # Version check — only do full sync if remote VERSION differs from local
+        local_ver=$(cat /usr/local/scripts/VERSION 2>/dev/null | tr -d '[:space:]')
+        remote_ver=$(curl -sS --max-time 5 \
+            "$server_url/api/scripts/linux/VERSION" 2>/dev/null | tr -d '[:space:]')
+        echo "Version check: local=$local_ver remote=$remote_ver" | tee -a "$debug"
+        if [[ -n "$remote_ver" && "$remote_ver" == "$local_ver" ]]; then
+            echo "Already up to date (v$local_ver) — skipping full sync" | tee -a "$debug" "$log"
             source_found=true
         else
-            echo "Web server reachable but sync incomplete — falling through" | tee -a "$debug" "$log"
+            echo "Update available ($local_ver → $remote_ver) — syncing..." | tee -a "$debug" "$log"
+            tmp_web=$(mktemp -d)
+            sync_ok=true
+
+            # Pull simulation.conf with hostname-specific overrides
+            http_code=$(curl -sS --max-time 10 \
+                -o "$tmp_web/simulation.conf" \
+                -w "%{http_code}" \
+                "$server_url/api/config?hostname=$(hostname)" 2>/dev/null)
+            if [[ "$http_code" != "200" || ! -s "$tmp_web/simulation.conf" ]]; then
+                echo "Config download failed (code: $http_code)" | tee -a "$debug" "$log"
+                sync_ok=false
+            fi
+
+            # Pull script list and download each file
+            if [[ "$sync_ok" == true ]]; then
+                script_list=$(curl -sS --max-time 10 \
+                    "$server_url/api/scripts/list?platform=linux" 2>/dev/null)
+                if [[ -z "$script_list" ]]; then
+                    echo "Script list empty or unreachable — falling through" | tee -a "$debug" "$log"
+                    sync_ok=false
+                else
+                    for fname in $(echo "$script_list" | tr -d '[]"' | tr ',' '\n' | tr -d ' '); do
+                        [[ -z "$fname" ]] && continue
+                        fcode=$(curl -sS --max-time 15 \
+                            -o "$tmp_web/$fname" \
+                            -w "%{http_code}" \
+                            "$server_url/api/scripts/linux/$fname" 2>/dev/null)
+                        if [[ "$fcode" != "200" ]]; then
+                            echo "Failed to download $fname (code: $fcode)" | tee -a "$debug" "$log"
+                            sync_ok=false
+                            break
+                        fi
+                    done
+                fi
+            fi
+
+            if [[ "$sync_ok" == true ]]; then
+                echo "Web server sync succeeded" | tee -a "$debug" "$log"
+                copy_local_files "$tmp_web"
+                source_found=true
+            else
+                echo "Web server reachable but sync incomplete — falling through" | tee -a "$debug" "$log"
+            fi
+            rm -rf "$tmp_web"
         fi
-        rm -rf "$tmp_web"
     else
         echo "Web server unreachable — skipping Tier 1" | tee -a "$debug" "$log"
     fi
@@ -211,30 +225,41 @@ if [[ "$source_found" == false && "$public_repo" == "on" ]]; then
 
         git reset --hard "origin/$repo_branch"
 
-        if cd linux 2>/dev/null; then
-            shopt -s nullglob
-            desktop_files=( *.desktop )
-            sh_files=( *.sh )
-            txt_files=( *.txt )
-            [[ -f "10-rsyslog.conf" ]] && sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
-            (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
-            (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
-            (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
-            cd ..
+        # Version check before copying — skip if already at this version
+        local_ver=$(cat /usr/local/scripts/VERSION 2>/dev/null | tr -d '[:space:]')
+        remote_ver=$(cat linux/VERSION 2>/dev/null | tr -d '[:space:]')
+        echo "Version check: local=$local_ver remote=$remote_ver" | tee -a "$debug"
+        if [[ -n "$remote_ver" && "$remote_ver" == "$local_ver" ]]; then
+            echo "Already up to date (v$local_ver) — skipping file copy" | tee -a "$debug" "$log"
+            source_found=true
         else
-            echo "WARNING: linux directory not found" | tee -a "$debug"
-        fi
+            echo "Update available ($local_ver → $remote_ver) — copying files..." | tee -a "$debug" "$log"
+            if cd linux 2>/dev/null; then
+                shopt -s nullglob
+                desktop_files=( *.desktop )
+                sh_files=( *.sh )
+                txt_files=( *.txt )
+                [[ -f "10-rsyslog.conf" ]] && sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+                (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
+                (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
+                (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
+                [[ -f "VERSION" ]]         && sudo cp VERSION               /usr/local/scripts/VERSION
+                cd ..
+            else
+                echo "WARNING: linux directory not found" | tee -a "$debug"
+            fi
 
-        if cd configs 2>/dev/null; then
-            [[ -f "simulation.conf" ]] && sudo cp simulation.conf /usr/local/scripts/simulation.conf
-            cd ..
-        else
-            echo "WARNING: configs directory not found" | tee -a "$debug"
-        fi
+            if cd configs 2>/dev/null; then
+                [[ -f "simulation.conf" ]] && sudo cp simulation.conf /usr/local/scripts/simulation.conf
+                cd ..
+            else
+                echo "WARNING: configs directory not found" | tee -a "$debug"
+            fi
 
-        sudo chmod -R 777 /usr/local/scripts
-        echo "GitHub sync succeeded" | tee -a "$debug" "$log"
-        source_found=true
+            sudo chmod -R 777 /usr/local/scripts
+            echo "GitHub sync succeeded" | tee -a "$debug" "$log"
+            source_found=true
+        fi
     else
         echo "ERROR: Could not enter repo directory" | tee -a "$debug" "$log"
     fi

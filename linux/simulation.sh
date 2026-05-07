@@ -372,7 +372,6 @@ if [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
 else
   [[ -n "$dfgw" ]] && report_error "Gateway $dfgw unreachable after initial connect" "warning"
 fi
-report_status 0
 #------------------------------------------------------------
 #Dumping Current Device List
 #------------------------------------------------------------
@@ -441,7 +440,7 @@ echo "Kill Switch is $kill_switch" | tee -a "$debug"
 if [ "$kill_switch" == "off" ]; then
  for z in {1..100}; do
   #----------------------------------------------------------
-  # Per-iteration gateway check — used by report_status() and to decide
+  # Per-iteration gateway check — used by report_error() and to decide
   # whether to skip simulations this cycle.
   #----------------------------------------------------------
   gateway_reachable=false
@@ -449,7 +448,6 @@ if [ "$kill_switch" == "off" ]; then
   if [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
    gateway_reachable=true
   fi
-  report_status "$z"
   #------------------------------------------------------------
   # SSID auth-failure simulations (ssidpw_fail / auth_fail)
   # WHY: Grouped together because both deliberately fail the connection.
@@ -573,6 +571,9 @@ if [ "$kill_switch" == "off" ]; then
     www_traffic="on"
    fi
    echo "End of simulation loop iteration $z/100" | tee -a "$debug"
+   # rapid_update=on  → update every iteration (dev/testing; version check keeps it lightweight)
+   # rapid_update=off → update only at exec-restart every 100 iterations (production default;
+   #                    avoids hammering update services during normal operation)
    if [ "$rapid_update" == "on" ]; then source '/usr/local/scripts/update.sh'; fi
    echo "Sleeping 5 seconds" | tee -a "$debug"
    sleep 5

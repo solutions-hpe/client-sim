@@ -526,6 +526,14 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
       warn "No .txt files found in $LINUX_DIR"
     fi
 
+    # ── VERSION file ─────────────────────────────────────────────────────────
+    if [[ -f "VERSION" ]]; then
+      cp VERSION /usr/local/scripts/VERSION >>"$LOG" 2>&1
+      ok "VERSION $(cat VERSION | tr -d '[:space:]') written to /usr/local/scripts"
+    else
+      warn "VERSION file not found in linux/ — update.sh will always sync"
+    fi
+
     # ── simulation.conf (conditional — don't overwrite existing) ─────────────
     info "Checking simulation.conf"
     if [[ -f /usr/local/scripts/simulation.conf ]]; then

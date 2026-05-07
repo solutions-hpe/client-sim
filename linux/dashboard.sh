@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.02
+version=.03
 # WHY: dashboard.sh is a read-only live monitor. It runs in its own terminal
 # window (launched by launch-terminals.sh) so the operator can always see
 # what's happening without interrupting the simulation loop in the other pane.
@@ -94,6 +94,64 @@ get_api_status() {
     echo "${RED}UNREACHABLE${RST} (${server_url})"
   fi
 }
+#------------------------------------------------------------
+# Heartbeat: POST current client state to the webUI API every dashboard refresh.
+# WHY: Keeps the server's client list alive independent of the simulation loop,
+# which may have long-running steps between iterations.
+#------------------------------------------------------------
+send_heartbeat() {
+  [[ "$web_server" != "on" ]] && return 0
+  [[ -z "$server_url" ]] && return 0
+
+  local connected_ssid gateway_reachable=false vh_connected=false
+  local active_sims_json="[]"
+  connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
+  local dfgw
+  dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+  [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1 && gateway_reachable=true
+  pgrep -f "vhclientx86_64" >/dev/null 2>&1 && vh_connected=true
+
+  # Build active simulations list from flags
+  local active_sims=()
+  [[ "$dhcp_fail"   == "on" ]] && active_sims+=("dhcp_fail")
+  [[ "$dns_fail"    == "on" ]] && active_sims+=("dns_fail")
+  [[ "$assoc_fail"  == "on" ]] && active_sims+=("assoc_fail")
+  [[ "$port_flap"   == "on" ]] && active_sims+=("port_flap")
+  [[ "$ping_test"   == "on" ]] && active_sims+=("ping_test")
+  [[ "$download"    == "on" ]] && active_sims+=("download")
+  [[ "$iperf"       == "on" ]] && active_sims+=("iperf")
+  [[ "$www_traffic" == "on" ]] && active_sims+=("www_traffic")
+  [[ "$ssidpw_fail" == "on" ]] && active_sims+=("ssidpw_fail")
+  [[ "$auth_fail"   == "on" ]] && active_sims+=("auth_fail")
+  if [[ ${#active_sims[@]} -gt 0 ]]; then
+    active_sims_json=$(printf '"%s",' "${active_sims[@]}" | sed 's/,$//')
+    active_sims_json="[$active_sims_json]"
+  fi
+
+  local ssid_json="null"
+  [[ -n "$connected_ssid" ]] && ssid_json="\"$connected_ssid\""
+
+  curl -s -X POST "${server_url%/}/api/status" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"hostname\": \"$HOSTNAME\",
+      \"simulation_id\": \"$simulation_id\",
+      \"platform\": \"linux\",
+      \"iteration\": 0,
+      \"connected_ssid\": $ssid_json,
+      \"gateway_reachable\": $gateway_reachable,
+      \"vh_connected\": $vh_connected,
+      \"active_simulations\": $active_sims_json,
+      \"config\": {
+        \"kill_switch\": \"$kill_switch\",
+        \"sim_load\": \"$sim_load\",
+        \"ssid\": \"$ssid\",
+        \"wsite\": \"$wsite\"
+      },
+      \"errors\": []
+    }" >/dev/null 2>&1 || true
+}
+
 get_wifi_status() {
   local connected_ssid
   connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
@@ -192,5 +250,6 @@ while true; do
   printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
   printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
+  send_heartbeat
   sleep "$refresh_rate"
 done
