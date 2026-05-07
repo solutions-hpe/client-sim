@@ -1044,19 +1044,27 @@ async def api_central_poll() -> dict[str, Any]:
 
 @app.get("/api/central/sites")
 async def api_central_sites() -> dict[str, Any]:
-    """Fetch site list from Aruba Central API."""
+    """Fetch site list from Aruba Central API. Always returns 200 with sites[] and optional warning."""
     if not _central_ready():
-        raise HTTPException(status_code=422, detail="Central not configured — enter Cluster URL and Access Token first.")
+        return {"sites": [], "warning": "Central not configured — enter Cluster URL and token in Setup first."}
     if not central_token.get("access_token"):
-        raise HTTPException(status_code=503, detail="No valid token — click 'Save & Test Connection' in Setup first.")
+        return {"sites": [], "warning": "No valid token — click 'Save & Test Connection' in Setup first."}
 
     headers = _central_headers()
     base_url = _central_cfg()["cluster_url"].rstrip("/")
     sites: list[str] = []
+    warning: str | None = None
+
+    # Classic Central — try multiple known site endpoints
+    CLASSIC_SITE_PATHS = [
+        ("/monitoring/v2/sites", {"limit": 1000, "offset": 0}),
+        ("/monitoring/v1/sites", {"limit": 1000, "offset": 0}),
+        ("/central/v2/sites", {"limit": 1000, "offset": 0}),
+    ]
 
     async with httpx.AsyncClient() as client:
         if _is_new_central_api():
-            # New Central: sites come from sites-health (keyed as siteName)
+            # New Central: sites come from sites-health
             try:
                 resp = await client.get(
                     f"{base_url}/network-monitoring/v1alpha1/sites-health",
@@ -1069,33 +1077,53 @@ async def api_central_sites() -> dict[str, Any]:
                         name = item.get("siteName") or item.get("site_name") or item.get("name", "")
                         if name:
                             sites.append(name)
+                elif resp.status_code == 401:
+                    warning = "Token rejected (401) — re-save settings to refresh."
+                else:
+                    warning = f"sites-health returned HTTP {resp.status_code}."
             except Exception as exc:
                 logger.warning("Could not fetch New Central sites-health: %s", exc)
+                warning = f"Network error fetching sites: {exc}"
         else:
-            # Classic Central: try v2 then v1
-            for path in ["/monitoring/v2/sites", "/monitoring/v1/sites"]:
+            # Classic Central: try each known path, stop on first 200
+            last_status: int | None = None
+            tried: list[str] = []
+            for path, params in CLASSIC_SITE_PATHS:
+                tried.append(path)
                 try:
                     resp = await client.get(
                         f"{base_url}{path}",
                         headers=headers,
-                        params={"limit": 1000, "offset": 0},
+                        params=params,
                         timeout=20,
                     )
-                    logger.info("Classic Central sites %s → %s", path, resp.status_code)
+                    last_status = resp.status_code
+                    logger.info("Classic Central sites %s → %s: %s", path, resp.status_code, resp.text[:200])
                     if resp.status_code == 200:
                         data = resp.json()
-                        for site in data.get("sites", []):
-                            name = site.get("site_name") or site.get("name", "")
-                            if name:
-                                sites.append(name)
+                        # Response may use "sites", "items", or root list
+                        raw = data.get("sites") or data.get("items") or (data if isinstance(data, list) else [])
+                        for site in raw:
+                            if isinstance(site, str):
+                                sites.append(site)
+                            else:
+                                name = site.get("site_name") or site.get("siteName") or site.get("name", "")
+                                if name:
+                                    sites.append(name)
                         break
-                    if resp.status_code == 404:
-                        continue
+                    elif resp.status_code == 401:
+                        warning = "Token rejected (401) — re-save settings."
+                        break
+                    # 404 = path doesn't exist on this cluster, try next
                 except Exception as exc:
                     logger.warning("Could not fetch Classic Central sites from %s: %s", path, exc)
+                    warning = f"Network error fetching sites: {exc}"
                     break
 
-    return {"sites": sorted(set(sites))}
+            if not sites and not warning:
+                warning = f"No sites found — tried {', '.join(tried)} (last HTTP {last_status}). Your cluster may not expose a sites list API."
+
+    return {"sites": sorted(set(sites)), "warning": warning}
 
 
 @app.get("/api/local-wsites")

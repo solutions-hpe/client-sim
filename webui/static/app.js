@@ -1233,22 +1233,28 @@ if (centralTestBtn) {
 async function loadSiteMappingSources() {
   if (loadSitesBtn) { loadSitesBtn.disabled = true; loadSitesBtn.textContent = 'Loading…'; }
   if (sitesLoadStatus) sitesLoadStatus.textContent = '';
-  try {
-    const [wsiteData, centralData] = await Promise.all([
-      requestJson('/api/local-wsites'),
-      requestJson('/api/central/sites'),
-    ]);
-    localWsites = wsiteData.wsites || [];
-    centralSites = centralData.sites || [];
-    renderSiteMappingsTable();
-    if (sitesLoadStatus) {
-      sitesLoadStatus.textContent = `Loaded ${localWsites.length} local wsite(s), ${centralSites.length} Central site(s).`;
-    }
-  } catch (err) {
-    if (sitesLoadStatus) sitesLoadStatus.textContent = `Error: ${err.message}`;
-  } finally {
-    if (loadSitesBtn) { loadSitesBtn.disabled = false; loadSitesBtn.textContent = '🔄 Load Sites'; }
+  const [wsiteResult, centralResult] = await Promise.allSettled([
+    requestJson('/api/local-wsites'),
+    requestJson('/api/central/sites'),
+  ]);
+
+  localWsites = wsiteResult.status === 'fulfilled' ? (wsiteResult.value.wsites || []) : [];
+  centralSites = centralResult.status === 'fulfilled' ? (centralResult.value.sites || []) : [];
+  renderSiteMappingsTable();
+
+  const msgs = [];
+  if (wsiteResult.status === 'rejected') msgs.push(`Local: ${wsiteResult.reason?.message}`);
+  else msgs.push(`${localWsites.length} local wsite(s)`);
+
+  if (centralResult.status === 'rejected') {
+    msgs.push(`Central: ${centralResult.reason?.message}`);
+  } else {
+    const warn = centralResult.value?.warning;
+    msgs.push(warn ? `Central: ⚠ ${warn}` : `${centralSites.length} Central site(s)`);
   }
+
+  if (sitesLoadStatus) sitesLoadStatus.textContent = msgs.join(' | ');
+  if (loadSitesBtn) { loadSitesBtn.disabled = false; loadSitesBtn.textContent = '🔄 Load Sites'; }
 }
 
 if (loadSitesBtn) {
