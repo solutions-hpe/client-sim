@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.33
+version=.01
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
 echo Startup Script Version $version

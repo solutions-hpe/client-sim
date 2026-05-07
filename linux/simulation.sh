@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.94
+version=.01
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
 echo Simulation Script Version $version | tee "$debug"

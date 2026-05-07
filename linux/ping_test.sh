@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.02
+version=.01
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-ping-test.log"
 echo Ping_Test Script Version $version | tee "$debug"
