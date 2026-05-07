@@ -34,12 +34,29 @@ if [[ -z "$OUTPUT" ]]; then
   echo "$(date) launch-terminals: WARNING — no connected display found, skipping xrandr" \
     >>"$LOG"
 else
-  # Try to set 1920x1080; fall back to native if the mode isn't available
-  if xrandr --output "$OUTPUT" --mode ${TARGET_W}x${TARGET_H} 2>/dev/null; then
-    echo "$(date) launch-terminals: set ${OUTPUT} to ${TARGET_W}x${TARGET_H}" >>"$LOG"
+  MODE_NAME="${TARGET_W}x${TARGET_H}"
+
+  # Check whether the mode already exists in xrandr's mode list
+  if ! xrandr --query 2>/dev/null | grep -q "^   ${TARGET_W}x${TARGET_H}"; then
+    # Mode doesn't exist — create it (required on QEMU/Proxmox Virtual-1 displays).
+    # Use cvt to generate the modeline if available; fall back to a known-good value.
+    if command -v cvt &>/dev/null; then
+      MODELINE=$(cvt "$TARGET_W" "$TARGET_H" 60 | awk '/Modeline/{$1=$2=""; print $0}' | xargs)
+    else
+      # 1920x1080 @ 60 Hz — standard VESA modeline
+      MODELINE="173.00 1920 2048 2248 2576 1080 1083 1088 1120 -hsync +vsync"
+    fi
+    xrandr --newmode "$MODE_NAME" $MODELINE 2>/dev/null || true
+    xrandr --addmode "$OUTPUT" "$MODE_NAME" 2>/dev/null || true
+    echo "$(date) launch-terminals: created mode ${MODE_NAME} on ${OUTPUT}" >>"$LOG"
+  fi
+
+  # Now set the mode
+  if xrandr --output "$OUTPUT" --mode "$MODE_NAME" 2>/dev/null; then
+    echo "$(date) launch-terminals: set ${OUTPUT} to ${MODE_NAME}" >>"$LOG"
   else
     xrandr --output "$OUTPUT" --auto 2>/dev/null
-    echo "$(date) launch-terminals: ${TARGET_W}x${TARGET_H} not available on ${OUTPUT}, using native" \
+    echo "$(date) launch-terminals: WARNING — could not set ${MODE_NAME} on ${OUTPUT}, using native" \
       >>"$LOG"
   fi
 fi
