@@ -967,43 +967,82 @@ async def api_central_test() -> dict[str, Any]:
 
 @app.get("/api/central/available")
 async def api_central_available() -> dict[str, Any]:
-    """Return available alert types and insight categories from Central."""
+    """Return available alert types and insight categories from Central. Always returns 200."""
     if not _central_ready():
-        raise HTTPException(status_code=422, detail="Central not configured — enter Cluster URL and Access Token first.")
+        return {"alerts": [], "insights": [], "warning": "Central not configured."}
     if not central_token.get("access_token"):
-        raise HTTPException(status_code=503, detail="No valid token — click 'Save & Test Connection' in Setup first.")
+        return {"alerts": [], "insights": [], "warning": "No valid token — save & test connection first."}
+
+    # New Central v1alpha1 has no alerts/insights endpoints — return static synthetic checks
+    if _is_new_central_api():
+        return {
+            "alerts": [
+                {"id": "SITE_HEALTH", "name": "Site Health Score"},
+                {"id": "AP_COUNT",    "name": "AP Count"},
+            ],
+            "insights": [],
+            "warning": None,
+        }
 
     headers = _central_headers()
     base_url = _central_cfg()["cluster_url"].rstrip("/")
     alert_types: dict[str, str] = {}
     insight_categories: dict[str, str] = {}
+    warnings: list[str] = []
 
     async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(f"{base_url}/monitoring/v2/alerts", headers=headers, params={"limit": 1000}, timeout=20)
-            if resp.status_code == 200:
-                for alert in resp.json().get("alerts", []):
-                    atype = alert.get("alert_type") or alert.get("type", "")
-                    aname = alert.get("alert_type_name") or atype.replace("_", " ").title()
-                    if atype:
-                        alert_types[atype] = aname
-        except Exception as exc:
-            logger.warning("Could not fetch alert types: %s", exc)
+        # Alerts — try v1 then v2 (v2 is 404 on some clusters)
+        for alerts_path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
+            try:
+                resp = await client.get(
+                    f"{base_url}{alerts_path}",
+                    headers=headers,
+                    params={"limit": 1000},
+                    timeout=20,
+                )
+                logger.info("Central available alerts %s → %s", alerts_path, resp.status_code)
+                if resp.status_code == 200:
+                    for alert in resp.json().get("alerts", []):
+                        atype = alert.get("alert_type") or alert.get("type", "")
+                        aname = alert.get("alert_type_name") or atype.replace("_", " ").title()
+                        if atype:
+                            alert_types[atype] = aname
+                    break  # success — stop trying
+                if resp.status_code == 404:
+                    continue  # try next path
+                if resp.status_code == 401:
+                    warnings.append("Token rejected (401) fetching alerts.")
+                    break
+            except Exception as exc:
+                logger.warning("Could not fetch alert types from %s: %s", alerts_path, exc)
+                warnings.append(f"Network error fetching alerts: {exc}")
+                break
 
+        # Insights
         try:
-            resp = await client.get(f"{base_url}/aiops/v1/insights", headers=headers, params={"limit": 1000}, timeout=20)
+            resp = await client.get(
+                f"{base_url}/aiops/v1/insights",
+                headers=headers,
+                params={"limit": 1000},
+                timeout=20,
+            )
+            logger.info("Central available insights → %s", resp.status_code)
             if resp.status_code == 200:
                 for insight in resp.json().get("insights", []):
                     cat = insight.get("category") or insight.get("type", "")
                     cat_name = insight.get("category_name") or cat.replace("_", " ").title()
                     if cat:
                         insight_categories[cat] = cat_name
+            elif resp.status_code not in (404,):
+                warnings.append(f"Insights endpoint returned HTTP {resp.status_code}.")
         except Exception as exc:
             logger.warning("Could not fetch insight categories: %s", exc)
+            warnings.append(f"Network error fetching insights: {exc}")
 
     return {
         "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
         "insights": [{"id": k, "name": v} for k, v in sorted(insight_categories.items())],
+        "warning": "; ".join(warnings) if warnings else None,
     }
 
 

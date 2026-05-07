@@ -1309,7 +1309,9 @@ if (loadChecksBtn) {
         insights: data.insights || []
       };
       renderAvailableChecks();
-      showInlineMessage(centralChecksMsg, 'Available checks loaded.', false);
+      const total = availableChecks.alerts.length + availableChecks.insights.length;
+      const warn = data.warning ? ` ⚠ ${data.warning}` : '';
+      showInlineMessage(centralChecksMsg, `${total} check(s) loaded.${warn}`, !!data.warning, data.warning ? 10000 : 3000);
     } catch (error) {
       availableChecks = { alerts: [], insights: [] };
       if (availableChecksContainer) {
