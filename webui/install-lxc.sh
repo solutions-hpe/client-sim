@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.01
+# Client-Sim Dashboard — LXC Installer v0.03
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
 #   sudo bash install-lxc.sh --reinstall  # full wipe and reinstall
 #
 # Environment variable overrides (set before running):
-#   REPO_URL, REPO_BRANCH, INSTALL_DIR, REPO_CACHE, SERVICE_USER, PORT, OFFLINE_TIMEOUT
+#   REPO_URL, REPO_BRANCH, INSTALL_DIR, REPO_CACHE, SERVICE_USER, PORT,
+#   OFFLINE_TIMEOUT, DHCP_IFACE, DHCP_SUBNET, DHCP_GATEWAY, DHCP_RANGE_START,
+#   DHCP_RANGE_END, DHCP_LEASE_TIME
+#
+# DHCP (dnsmasq on vmbr255 second NIC):
+#   Set DHCP_IFACE="" to skip DHCP setup entirely.
+#   The interface must already be attached to the LXC in Proxmox.
 ###############################################################################
 
 set -euo pipefail
@@ -71,6 +77,17 @@ PORT="${PORT:-8000}"
 OFFLINE_TIMEOUT="${OFFLINE_TIMEOUT:-60}"
 LOG="/var/log/client-sim-dashboard-install.log"
 
+# DHCP / dnsmasq — auto-detected: only enabled if a second NIC is present.
+# Override any value via environment variable before running.
+# Leave DHCP_IFACE unset (default) to auto-detect.
+DHCP_IFACE="${DHCP_IFACE:-}"           # auto-detected below after logging starts
+DHCP_SUBNET="${DHCP_SUBNET:-10.255.255.0}"
+DHCP_PREFIX="${DHCP_PREFIX:-24}"
+DHCP_GATEWAY="${DHCP_GATEWAY:-10.255.255.1}"
+DHCP_RANGE_START="${DHCP_RANGE_START:-10.255.255.100}"
+DHCP_RANGE_END="${DHCP_RANGE_END:-10.255.255.200}"
+DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-12h}"
+
 # CLI flags take priority over environment variables
 [[ -n "$CLI_BRANCH" ]] && REPO_BRANCH="$CLI_BRANCH"
 [[ -n "$CLI_PORT"   ]] && PORT="$CLI_PORT"
@@ -87,7 +104,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.01"
+VERSION="0.03"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -124,6 +141,8 @@ echo " Install dir: $INSTALL_DIR"
 echo " Port       : $PORT"
 echo " Mode       : $MODE"
 echo " Log        : $LOG"
+echo " DHCP iface : auto-detect (2nd NIC) — default subnet ${DHCP_SUBNET}/${DHCP_PREFIX}"
+echo " DHCP range : ${DHCP_RANGE_START} — ${DHCP_RANGE_END}  (${DHCP_LEASE_TIME})"
 echo "============================================================"
 echo
 
@@ -155,7 +174,99 @@ apt-get install -y --quiet=2 \
 ok "System packages installed"
 
 ###############################################################################
-# STEP 3 — Service user
+# STEP 3 — Auto-detect second NIC; configure DHCP if present
+###############################################################################
+info "Detecting network interfaces..."
+
+# Build list of ethernet interfaces excluding loopback
+IFACES=( $(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | grep -v '@') )
+NIC_COUNT=${#IFACES[@]}
+info "Found ${NIC_COUNT} interface(s): ${IFACES[*]}"
+
+# Determine DHCP interface:
+#   - If DHCP_IFACE was explicitly set by user, honour it
+#   - If only 1 NIC exists, skip DHCP
+#   - If 2+ NICs exist, use the second one (index 1)
+if [[ -z "$DHCP_IFACE" ]]; then
+  if (( NIC_COUNT >= 2 )); then
+    DHCP_IFACE="${IFACES[1]}"
+    info "Second NIC detected: ${DHCP_IFACE} — DHCP will be configured"
+  else
+    info "Only one NIC found — DHCP setup skipped"
+  fi
+fi
+
+if [[ -n "$DHCP_IFACE" ]]; then
+  # Install dnsmasq only when we actually need it
+  info "Installing dnsmasq..."
+  apt-get install -y --quiet=2 dnsmasq \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    >>"$LOG" 2>&1
+  ok "dnsmasq installed"
+
+  info "Configuring DHCP on ${DHCP_IFACE} (${DHCP_GATEWAY}/${DHCP_PREFIX})..."
+
+  # ── Static IP on the internal interface ───────────────────────────────────
+  IFACE_CFG="/etc/network/interfaces.d/${DHCP_IFACE}.conf"
+  cat >"$IFACE_CFG" <<EOF
+auto ${DHCP_IFACE}
+iface ${DHCP_IFACE} inet static
+    address ${DHCP_GATEWAY}
+    netmask $(python3 -c "import ipaddress; print(ipaddress.IPv4Network('${DHCP_SUBNET}/${DHCP_PREFIX}',False).netmask)")
+EOF
+  ok "Interface config written to ${IFACE_CFG}"
+
+  # Bring the interface up (ignore errors if already up)
+  ip link set "$DHCP_IFACE" up 2>/dev/null || true
+  ip addr flush dev "$DHCP_IFACE" 2>/dev/null || true
+  ip addr add "${DHCP_GATEWAY}/${DHCP_PREFIX}" dev "$DHCP_IFACE" 2>/dev/null || true
+  ok "${DHCP_IFACE} configured with ${DHCP_GATEWAY}/${DHCP_PREFIX}"
+
+  # ── dnsmasq config scoped only to the internal interface ──────────────────
+  DNSMASQ_CONF="/etc/dnsmasq.d/client-sim.conf"
+  cat >"$DNSMASQ_CONF" <<EOF
+# Client-Sim isolated network DHCP — managed by install-lxc.sh
+# Only listen on the internal interface; never touches eth0 or other NICs
+interface=${DHCP_IFACE}
+bind-interfaces
+except-interface=lo
+
+# DHCP scope
+dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_LEASE_TIME}
+
+# Tell clients the gateway is this LXC (webUI address)
+dhcp-option=option:router,${DHCP_GATEWAY}
+
+# No DNS forwarding — isolated network has no upstream
+port=0
+
+# Lease file
+dhcp-leasefile=/var/lib/misc/dnsmasq.leases
+
+log-dhcp
+EOF
+  ok "dnsmasq config written to ${DNSMASQ_CONF}"
+
+  # Ensure dnsmasq default config doesn't conflict
+  if [[ -f /etc/dnsmasq.conf ]]; then
+    sed -i 's/^#\?interface=.*$//' /etc/dnsmasq.conf 2>/dev/null || true
+  fi
+
+  systemctl enable dnsmasq >>"$LOG" 2>&1
+  systemctl restart dnsmasq >>"$LOG" 2>&1
+
+  if systemctl is-active --quiet dnsmasq; then
+    ok "dnsmasq running — DHCP active on ${DHCP_IFACE}"
+  else
+    warn "dnsmasq failed to start — check: journalctl -u dnsmasq"
+  fi
+else
+  ok "Single NIC — dnsmasq not installed"
+fi
+
+###############################################################################
+# STEP 3b — Service user
 ###############################################################################
 info "Checking service user '$SERVICE_USER'..."
 if ! id "$SERVICE_USER" &>/dev/null; then
@@ -386,6 +497,15 @@ else
   echo -e "  ${COL_YELLOW}✗${COL_RESET}  API not yet responding on :${PORT}  (may still be starting)"
 fi
 
+if [[ -n "$DHCP_IFACE" ]]; then
+  systemctl is-active --quiet dnsmasq \
+    && echo -e "  ${COL_GREEN}✓${COL_RESET}  dnsmasq DHCP (${DHCP_IFACE})       RUNNING" \
+    || echo -e "  ${COL_YELLOW}✗${COL_RESET}  dnsmasq DHCP (${DHCP_IFACE})       NOT RUNNING"
+  ip addr show "$DHCP_IFACE" 2>/dev/null | grep -q "${DHCP_GATEWAY}" \
+    && echo -e "  ${COL_GREEN}✓${COL_RESET}  ${DHCP_IFACE} IP (${DHCP_GATEWAY})   OK" \
+    || echo -e "  ${COL_YELLOW}✗${COL_RESET}  ${DHCP_IFACE} IP (${DHCP_GATEWAY})   NOT SET (attach NIC in Proxmox first)"
+fi
+
 echo "============================================="
 echo
 
@@ -397,8 +517,14 @@ echo -e "  API docs   : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}/docs${COL_RESE
 echo -e "  Logs       : journalctl -u client-sim-dashboard -f"
 echo -e "  Install log: $LOG"
 echo
+if [[ -n "$DHCP_IFACE" ]]; then
+echo -e "  ${COL_YELLOW}Client network (vmbr255):${COL_RESET}"
+echo -e "  WebUI address : ${DHCP_GATEWAY}"
+echo -e "  DHCP range    : ${DHCP_RANGE_START} — ${DHCP_RANGE_END}"
+echo
+fi
 echo -e "  ${COL_YELLOW}Set in simulation.conf on each client:${COL_RESET}"
 echo -e "  [server]"
-echo -e "  server_url=http://${CONTAINER_IP}:${PORT}"
+echo -e "  server_url=http://${DHCP_GATEWAY:-${CONTAINER_IP}}:${PORT}"
 echo
 

@@ -2,7 +2,176 @@
 
 A FastAPI web dashboard for monitoring client-sim beacons, viewing client status, and pushing in-memory simulation overrides without a database or authentication layer.
 
-## Run with Docker
+---
+
+## Deployment on Proxmox (Recommended)
+
+Client-Sim is designed to run on Proxmox VE. The webUI runs inside an LXC container and optionally provides DHCP service to client VMs/LXCs over an isolated internal bridge (`vmbr255`).
+
+### Architecture
+
+```
+Proxmox Host
+├── vmbr255  (internal bridge — no uplink, isolated)
+│   ├── WebUI LXC
+│   │   ├── eth0 → management network  (internet, admin access)
+│   │   └── eth1 → vmbr255  static 10.255.255.1/24
+│   │        └── dnsmasq: hands out 10.255.255.100–200
+│   └── Client VMs / LXCs
+│       └── NIC → vmbr255  (DHCP → 10.255.255.x)
+│                simulation.conf: server_url=http://10.255.255.1:8000
+```
+
+### Step 1 — Create vmbr255 on the Proxmox host
+
+Run **once** on the Proxmox host itself (not inside an LXC):
+
+```bash
+bash proxmox_setup.sh
+```
+
+Located at the root of the `client-sim` repo. This creates the `vmbr255` bridge with no uplink — a fully isolated L2 network. All configuration is at the top of the script and can be overridden:
+
+```bash
+BRIDGE=vmbr255 bash proxmox_setup.sh
+```
+
+### Step 2 — Create the WebUI LXC
+
+Run on the Proxmox host to download the latest Debian template and provision the LXC:
+
+```bash
+bash proxmox_create_lxc.sh
+```
+
+This will prompt for a root password and then create the container with sensible defaults. All options can be passed as flags:
+
+```bash
+bash proxmox_create_lxc.sh \
+  --id 200 \
+  --storage local-lvm \
+  --hostname webui \
+  --ip 192.168.1.50/24 \
+  --gw 192.168.1.1 \
+  --memory 2048 \
+  --disk 16
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--id` | `1000` | Proxmox container ID (CTID) |
+| `--storage` | `local-lvm` | Disk storage pool |
+| `--tmpl-storage` | `local` | Where to store the downloaded template |
+| `--bridge` | `vmbr0` | Management bridge (eth0 — internet/admin) |
+| `--client-bridge` | `vmbr255` | Isolated client bridge (eth1) |
+| `--hostname` | `client-sim` | Container hostname |
+| `--password` | *(prompted)* | Root password |
+| `--cores` | `2` | vCPU count |
+| `--memory` | `1024` | RAM in MB |
+| `--disk` | `8` | Root disk size in GB |
+| `--ip` | `dhcp` | eth0 IP — `dhcp` or CIDR e.g. `192.168.1.50/24` |
+| `--gw` | *(none)* | Default gateway for eth0 |
+
+The script will:
+- Pull the latest **Debian 12 (Bookworm)** template from the Proxmox mirror
+- Create an unprivileged LXC with `nesting=1` (required for some tools)
+- Attach **eth0** to the management bridge and **eth1** to `vmbr255`
+- Start the container and install `curl` + `git`
+- Print the exact command to run the Client-Sim installer inside it
+
+### Step 3 — Run the LXC installer
+
+Inside the WebUI LXC:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui/install-lxc.sh | sudo bash
+```
+
+Or download and run with custom options:
+
+```bash
+sudo bash install-lxc.sh --branch lrb --port 8000
+```
+
+The installer will:
+1. Install Python, git, and dnsmasq
+2. Assign `10.255.255.1/24` to `eth1`
+3. Configure dnsmasq to serve DHCP `10.255.255.100–200` on `eth1` only
+4. Deploy the FastAPI dashboard and set up a systemd service
+5. Print a health check summary and the `server_url` to use in `simulation.conf`
+
+The **installer version** is written to `INSTALLER_VERSION` and displayed in the top-right corner of the dashboard UI.
+
+### Step 4 — Attach client VMs/LXCs to vmbr255
+
+For each client VM or LXC:
+- Add a NIC on bridge `vmbr255`, set to DHCP
+- It will receive an IP in `10.255.255.100–200`
+- Set in `simulation.conf`:
+
+```ini
+[server]
+server_url=http://10.255.255.1:8000
+```
+
+---
+
+## DHCP Configuration
+
+All DHCP settings are configurable via environment variables before running the installer:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DHCP_IFACE` | `eth1` | Interface connected to vmbr255. Set to `""` to skip DHCP setup |
+| `DHCP_GATEWAY` | `10.255.255.1` | Static IP assigned to this LXC on vmbr255 (also the gateway clients receive) |
+| `DHCP_SUBNET` | `10.255.255.0` | Network address |
+| `DHCP_PREFIX` | `24` | Subnet prefix length |
+| `DHCP_RANGE_START` | `10.255.255.100` | First DHCP address |
+| `DHCP_RANGE_END` | `10.255.255.200` | Last DHCP address |
+| `DHCP_LEASE_TIME` | `12h` | DHCP lease duration |
+
+Example — custom subnet:
+
+```bash
+DHCP_GATEWAY=192.168.99.1 \
+DHCP_SUBNET=192.168.99.0 \
+DHCP_RANGE_START=192.168.99.50 \
+DHCP_RANGE_END=192.168.99.150 \
+bash install-lxc.sh
+```
+
+To install the webUI **without** DHCP (e.g. if another device handles DHCP):
+
+```bash
+DHCP_IFACE="" bash install-lxc.sh
+```
+
+dnsmasq is scoped **only** to `eth1` — it never touches `eth0` or any other interface.
+
+---
+
+## General Installer Options
+
+| Variable | Default | Description |
+|---|---|---|
+| `REPO_URL` | `https://github.com/solutions-hpe/client-sim.git` | Git repo to sync |
+| `REPO_BRANCH` | `main` | Branch to keep synced |
+| `INSTALL_DIR` | `/opt/client-sim-dashboard` | Where the app is deployed |
+| `REPO_CACHE` | `/opt/client-sim-repo` | Local git checkout |
+| `SERVICE_USER` | `dashboard` | System user the service runs as |
+| `PORT` | `8000` | TCP port to serve on |
+| `OFFLINE_TIMEOUT` | `60` | Seconds before a client is shown as offline |
+
+CLI flags (override env vars):
+
+```bash
+sudo bash install-lxc.sh --branch lrb --port 9000
+sudo bash install-lxc.sh --reinstall          # full wipe and fresh install
+```
+
+---
+
+## Run with Docker (Development)
 
 ```bash
 cd webui
@@ -11,7 +180,7 @@ docker compose up --build
 
 Open `http://localhost:8000`.
 
-## Run with Python
+## Run with Python (Development)
 
 ```bash
 cd webui
@@ -21,42 +190,19 @@ pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-## LXC Installer (Recommended for Production)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh | sudo bash
-```
-
-Or with options:
-
-```bash
-sudo bash install-lxc.sh --branch lrb --port 8000
-```
-
-The installer version is displayed in the top-right corner of the dashboard UI.
-
----
-
-## Environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `REPO_URL` | `https://github.com/solutions-hpe/client-sim.git` | Git repo to sync |
-| `REPO_BRANCH` | `main` | Branch to keep synced |
-| `REPO_DIR` | `/app/client-sim` | Local checkout path |
-| `OFFLINE_TIMEOUT` | `60` | Seconds before a client is shown offline |
-| `PORT` | `8000` | TCP port to serve on |
-
 ---
 
 ## Client connection
 
-Clients should point `simulation.conf` to the dashboard:
+Clients point `simulation.conf` at the dashboard:
 
 ```ini
 [server]
-server_url=http://sim-dashboard:8000
+server_url=http://10.255.255.1:8000
 ```
+
+Clients POST beacons to `/api/status` and pull `/api/config?hostname=<hostname>` each cycle. See [`CLIENT_API.md`](CLIENT_API.md) for the full API reference.
+
 
 Clients POST beacons to `/api/status`, then pull `/api/config?hostname=<hostname>` on update cycles to receive any per-client overrides.
 
