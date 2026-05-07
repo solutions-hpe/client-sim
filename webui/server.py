@@ -41,6 +41,19 @@ SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
 HISTORY_HOURS = 24
+UPDATE_CHECK_INTERVAL = 86400  # 24 hours
+
+# Self-update: the installer lives inside the synced repo
+_INSTALLER_PATH = REPO_DIR / "webui" / "install-lxc.sh"
+
+update_state: dict[str, Any] = {
+    "current_version": INSTALLER_VERSION,
+    "available_version": None,
+    "update_available": False,
+    "last_checked": None,
+    "update_in_progress": False,
+    "update_log": [],
+}
 
 
 # ── Runtime settings (persisted to settings.json) ────────────────────────────
@@ -624,6 +637,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
     background_tasks["central_poller"] = asyncio.create_task(central_poller())
+    background_tasks["update_checker"] = asyncio.create_task(check_for_update())
     yield
     for task in background_tasks.values():
         task.cancel()
@@ -861,6 +875,77 @@ async def sync_repo() -> None:
             logger.exception("Repository sync failed")
             await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc)})
         await asyncio.sleep(SYNC_INTERVAL)
+
+
+def _get_repo_version() -> str | None:
+    """Read VERSION= from the synced install-lxc.sh in the repo."""
+    try:
+        text = _INSTALLER_PATH.read_text()
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("VERSION="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return None
+
+
+async def check_for_update() -> None:
+    """Background task: check for a new installer version every 24 hours."""
+    while True:
+        available = await asyncio.to_thread(_get_repo_version)
+        import datetime
+        update_state["available_version"] = available
+        update_state["last_checked"] = datetime.datetime.now().isoformat(timespec="seconds")
+        update_state["update_available"] = (
+            available is not None
+            and available != update_state["current_version"]
+        )
+        logger.info(
+            "Version check: installed=%s repo=%s update_available=%s",
+            update_state["current_version"],
+            available,
+            update_state["update_available"],
+        )
+        await broadcast({"type": "version_status", **update_state})
+        if update_state["update_available"]:
+            logger.info("New version %s available — triggering self-update", available)
+            await _run_self_update()
+        await asyncio.sleep(UPDATE_CHECK_INTERVAL)
+
+
+async def _run_self_update() -> None:
+    """Re-run the installer from the synced repo. Systemd will restart the service."""
+    if update_state["update_in_progress"]:
+        return
+    if not _INSTALLER_PATH.exists():
+        logger.error("Self-update: installer not found at %s", _INSTALLER_PATH)
+        return
+    update_state["update_in_progress"] = True
+    update_state["update_log"] = []
+    await broadcast({"type": "version_status", **update_state})
+    try:
+        logger.info("Self-update: running %s", _INSTALLER_PATH)
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "bash", str(_INSTALLER_PATH),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip()
+            update_state["update_log"].append(line)
+            logger.info("self-update: %s", line)
+        await proc.wait()
+        logger.info("Self-update process exited with code %s", proc.returncode)
+        # Systemd will restart us; if we're still running, clear the flag
+        update_state["update_in_progress"] = False
+        await broadcast({"type": "version_status", **update_state})
+    except Exception as exc:
+        logger.exception("Self-update failed")
+        update_state["update_in_progress"] = False
+        update_state["update_log"].append(f"ERROR: {exc}")
+        await broadcast({"type": "version_status", **update_state})
 
 
 async def heartbeat_check() -> None:

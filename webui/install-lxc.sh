@@ -86,7 +86,7 @@ DHCP_PREFIX="${DHCP_PREFIX:-24}"
 DHCP_GATEWAY="${DHCP_GATEWAY:-169.254.1.1}"
 DHCP_RANGE_START="${DHCP_RANGE_START:-169.254.1.11}"
 DHCP_RANGE_END="${DHCP_RANGE_END:-169.254.1.254}"
-DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-12h}"
+DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-1h}"
 
 # CLI flags take priority over environment variables
 [[ -n "$CLI_BRANCH" ]] && REPO_BRANCH="$CLI_BRANCH"
@@ -104,7 +104,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.03"
+VERSION="0.05"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -450,8 +450,12 @@ ok "systemd service installed and enabled"
 info "Setting permissions..."
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
-# Write installer version so the dashboard can display it
+# Write installer version so the dashboard can display it and detect updates
 echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
+# Allow service user to self-update by re-running this installer as root
+SUDOERS_FILE="/etc/sudoers.d/client-sim-dashboard"
+echo "${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh" > "$SUDOERS_FILE"
+chmod 440 "$SUDOERS_FILE"
 ok "Permissions set"
 
 ###############################################################################
