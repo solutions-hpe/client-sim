@@ -22,7 +22,7 @@ Proxmox Host
 │                simulation.conf: server_url=http://10.255.255.1:8000
 ```
 
-### Step 1 — Create vmbr255 on the Proxmox host
+### Step 1 — Run the Proxmox host setup script
 
 Run **once** on the Proxmox host itself (not inside an LXC):
 
@@ -30,11 +30,45 @@ Run **once** on the Proxmox host itself (not inside an LXC):
 bash proxmox_setup.sh
 ```
 
-Located at the root of the `client-sim` repo. This creates the `vmbr255` bridge with no uplink — a fully isolated L2 network. All configuration is at the top of the script and can be overridden:
+Located at the root of the `client-sim` repo. This does everything needed to prepare a fresh Proxmox host:
+
+1. Creates the `vmbr255` isolated internal bridge (no uplink)
+2. Installs `git`
+3. Clones the repo and copies all `proxmox/` scripts to `/etc/pve/scripts/`
+4. Creates a daily cron job (`/etc/cron.d/client-sim-sync`) that pulls the latest scripts from GitHub every morning at 2am
+
+> **Note:** `/etc/pve` is Proxmox's cluster filesystem (pmxcfs) and does not support execute permissions. All scripts there are always invoked as `bash /etc/pve/scripts/<name>.sh` — never directly.
+
+#### Options
+
+| Flag | Env var | Default | Description |
+|---|---|---|---|
+| `--branch <name>` | `REPO_BRANCH` | `lrb` | Git branch to sync scripts from |
+| `--bridge <name>` | `BRIDGE` | `vmbr255` | Name of the isolated client bridge to create |
+
+All three override methods work:
 
 ```bash
-BRIDGE=vmbr255 bash proxmox_setup.sh
+# CLI flags
+bash proxmox_setup.sh --branch main
+bash proxmox_setup.sh --branch main --bridge vmbr100
+
+# Environment variables
+REPO_BRANCH=main bash proxmox_setup.sh
+BRIDGE=vmbr100 REPO_BRANCH=main bash proxmox_setup.sh
 ```
+
+The selected branch is written into the cron job so the daily sync continues pulling from the same branch automatically. To change branch after initial setup, re-run the script with the new `--branch` value — the cron file will be updated.
+
+#### Keeping scripts up to date
+
+After initial setup, scripts update themselves automatically via cron. To trigger a manual sync at any time:
+
+```bash
+bash /etc/pve/scripts/sync-scripts.sh
+```
+
+Sync activity is logged to `/var/log/client-sim-sync.log`.
 
 ### Step 2 — Create the WebUI LXC
 

@@ -1,5 +1,9 @@
 #!/bin/bash
-# sync-scripts.sh — Pull the latest proxmox scripts from GitHub and install them.
+# sync-scripts.sh — Pull the latest proxmox scripts and config from GitHub and install them.
+#
+# Syncs all .sh and .conf files from the proxmox/ folder in the repo to
+# /etc/pve/scripts/ so clone.sh, check_guest.sh, ini-parser.sh, and
+# client-setup.conf are always current without manual copying.
 #
 # NOTE: /etc/pve is Proxmox's cluster filesystem (pmxcfs) and does not support
 # chmod. Never set the execute bit on files here. Always invoke scripts with:
@@ -23,7 +27,7 @@ set -euo pipefail
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
-log "Starting client-sim script sync (branch: $REPO_BRANCH)"
+log "Starting client-sim sync (branch: $REPO_BRANCH)"
 
 # Install git if missing (Proxmox Debian base has it, but just in case)
 if ! command -v git &>/dev/null; then
@@ -46,21 +50,22 @@ else
     log "Repo updated to $(git -C "$REPO_CACHE" rev-parse --short HEAD)"
 fi
 
-# Copy every .sh from proxmox/ into /etc/pve/scripts and make executable
-# Using cp --update so unchanged files don't get a new mtime (avoids unnecessary writes)
+# Sync all .sh and .conf files from proxmox/ into /etc/pve/scripts/
+# .sh  — executable scripts (clone.sh, check_guest.sh, ini-parser.sh, etc.)
+# .conf — config files (client-setup.conf with VM name→VMID mappings)
+# cmp -s skips files that haven't changed so mtime noise is avoided.
+# chmod +x is intentionally omitted — pmxcfs does not support execute permissions.
 mkdir -p "$SCRIPT_DST"
 updated=0
-for f in "$SCRIPT_SRC"/*.sh; do
+for f in "$SCRIPT_SRC"/*.sh "$SCRIPT_SRC"/*.conf; do
     [[ -f "$f" ]] || continue
     dest="$SCRIPT_DST/$(basename "$f")"
     if ! cmp -s "$f" "$dest" 2>/dev/null; then
         cp "$f" "$dest"
-        # NOTE: chmod +x is intentionally omitted — /etc/pve is pmxcfs and
-        # does not support execute permissions. Always call: bash /etc/pve/scripts/<name>.sh
         log "Updated: $(basename "$f")"
         (( updated++ )) || true
     fi
 done
 
-[[ $updated -eq 0 ]] && log "All scripts already up to date" || log "$updated script(s) updated"
+[[ $updated -eq 0 ]] && log "All files already up to date" || log "$updated file(s) updated"
 log "Sync complete"
