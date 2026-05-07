@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.03
+# Client-Sim Dashboard — LXC Installer v0.04
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
@@ -245,8 +245,10 @@ except-interface=lo
 # DHCP scope
 dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_LEASE_TIME}
 
-# Tell clients the gateway is this LXC (webUI address)
-dhcp-option=option:router,${DHCP_GATEWAY}
+# Explicitly suppress default gateway — clients must not receive a router option.
+# Sim clients route through their own WiFi/USB adapter; an injected gateway
+# would override that and break traffic generation.
+dhcp-option=option:router
 
 # No DNS forwarding — isolated network has no upstream
 port=0
@@ -256,7 +258,7 @@ dhcp-leasefile=/var/lib/misc/dnsmasq.leases
 
 log-dhcp
 EOF
-  ok "dnsmasq config written to ${DNSMASQ_CONF}"
+  ok "dnsmasq config written to ${DNSMASQ_CONF} (no default gateway advertised)"
 
   # Ensure dnsmasq default config doesn't conflict
   if [[ -f /etc/dnsmasq.conf ]]; then

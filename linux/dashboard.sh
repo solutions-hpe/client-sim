@@ -5,6 +5,9 @@ version=.02
 # what's happening without interrupting the simulation loop in the other pane.
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
+if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
+  process_ini_file '/usr/local/scripts/user-overrides.conf'
+fi
 #------------------------------------------------------------
 # Simulation Dashboard (Read-only live monitor)
 #------------------------------------------------------------
@@ -130,9 +133,9 @@ while true; do
   # Read the global kill switch from the flat file (may differ from config-based one)
   gkill=$(cat /usr/local/scripts/kill_switch.txt 2>/dev/null || echo "off")
 
-  printf "%s══════════════════════════════════════════════════════════%s\n" "$BOLD" "$RST"
+  printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
   printf "%s  SIMULATION DASHBOARD   %s%-20s%s  %s%s\n" "$BOLD" "$CYN" "$HOSTNAME" "$RST" "$(date '+%H:%M:%S')" "$RST"
-  printf "%s══════════════════════════════════════════════════════════%s\n" "$BOLD" "$RST"
+  printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
   echo ""
   printf "  %sSite:%s    %-22s  %sSim-ID:%s %s\n" "$BOLD" "$RST" "$wsite" "$BOLD" "$RST" "$simulation_id"
   printf "  %sPHY:%s     %-22s  %sLoad:%s   %s%%\n" "$BOLD" "$RST" "$sim_phy" "$BOLD" "$RST" "$sim_load"
@@ -176,6 +179,6 @@ while true; do
   echo ""
   printf "%s  Recent Log (last 6 lines):%s\n" "$BOLD" "$RST"
   tail -n 6 "$log" 2>/dev/null | sed 's/^/  /'
-  printf "%s══════════════════════════════════════════════════════════%s\n" "$BOLD" "$RST"
+  printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
   sleep "$refresh_rate"
 done

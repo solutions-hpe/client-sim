@@ -53,19 +53,36 @@ SCREEN_H=${SCREEN_H:-$TARGET_H}
 echo "$(date) launch-terminals: screen=${SCREEN_W}x${SCREEN_H} output=${OUTPUT}" >>"$LOG"
 
 # ── Calculate pixel offsets proportional to actual resolution ────────────────
-# Baseline offsets are from the original 1920x1080 layout:
-#   Journal X  = 500  → 500/1920  = 26.04%
-#   Startup X  = 1400 → 1400/1920 = 72.92%
+# Baseline offsets are from the original 1920x1080 layout.
+# Dashboard is 58 cols wide — at 10px/char = 580px right edge → Journal at +580.
+# Journal (88 cols, 20 rows) bottom ≈ 525px at 24px/row → Startup Y at +525.
+# Startup X = Journal right edge = 580 + 880 = 1460.
+#   Journal X  = 580  → 580/1920  = 30.21%
+#   Startup X  = 1460 → 1460/1920 = 76.04%
 #   Startup Y  = 525  → 525/1080  = 48.61%
-#   Update  Y  = 525  → 525/1080  = 48.61%
-JOUR_X=$(( SCREEN_W * 500  / TARGET_W ))
-START_X=$(( SCREEN_W * 1400 / TARGET_W ))
+JOUR_X=$(( SCREEN_W * 580  / TARGET_W ))
+START_X=$(( SCREEN_W * 1460 / TARGET_W ))
 START_Y=$(( SCREEN_H * 525  / TARGET_H ))
-UPDT_Y=$(( SCREEN_H * 525  / TARGET_H ))
 
 # ── Ensure dbus session is available (gnome-terminal requires it) ────────────
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   eval "$(dbus-launch --sh-syntax --exit-with-session 2>/dev/null)" || true
+fi
+
+# ── Lock gnome-terminal font so pixel offsets stay consistent ────────────────
+# Layout designed for Monospace 13 at 96 dpi (≈10px wide × 24px tall per cell):
+#   Dashboard (50 cols) right edge ≈ 500px  → Journal starts at +500
+#   Journal   (20 rows) bottom     ≈ 525px  → Startup starts at +525 (Y)
+# If windows have gaps/overlaps, change the font size here to match your display.
+GTERM_PROFILE=$(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null \
+  | tr -d "'" || true)
+if [[ -n "$GTERM_PROFILE" ]]; then
+  dconf write \
+    "/org/gnome/terminal/legacy/profiles:/:${GTERM_PROFILE}/font" \
+    "'Monospace 13'" 2>/dev/null || true
+  dconf write \
+    "/org/gnome/terminal/legacy/profiles:/:${GTERM_PROFILE}/use-system-font" \
+    "false" 2>/dev/null || true
 fi
 
 # ── Launch helper with retry (handles dbus race at session start) ─────────────
@@ -83,10 +100,10 @@ _launch() {
 
 # ── Open terminal windows ─────────────────────────────────────────────────────
 
-# Dashboard — left column, full height
+# Dashboard — left column, full height (58 cols matches dashboard.sh content width)
 _launch "Dashboard" \
   --title="Dashboard" \
-  --geometry="50x80+0+0" \
+  --geometry="58x43+0+0" \
   -- bash -c "$SCRIPTS/dashboard.sh" &
 
 # Journal viewer — center, top
