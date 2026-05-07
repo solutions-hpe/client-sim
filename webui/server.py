@@ -632,6 +632,9 @@ async def central_poller() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     global central_history
+    logger.info("=" * 60)
+    logger.info("Client-Sim Dashboard  v%s  starting up", INSTALLER_VERSION)
+    logger.info("=" * 60)
     central_history = await asyncio.to_thread(_load_history)
     background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())

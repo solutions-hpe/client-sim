@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.01
+# Client-Sim Dashboard — LXC Installer v0.03
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
@@ -104,7 +104,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.02"
+VERSION="0.03"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
