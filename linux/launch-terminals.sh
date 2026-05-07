@@ -27,42 +27,60 @@ for i in $(seq 1 15); do
   sleep 1
 done
 
+# ── Remove stale X11 config that used the wrong driver ───────────────────────
+# Prior versions wrote a modesetting config; fbdev is correct for RPi OS in VM.
+sudo rm -f /etc/X11/xorg.conf.d/99-client-sim-resolution.conf 2>/dev/null || true
+
+# ── Set framebuffer resolution in /boot/config.txt (Raspberry Pi OS) ─────────
+# On RPi OS the framebuffer is controlled by the firmware at boot, not by the
+# kernel driver. xrandr and X11 configs have no effect until this is set.
+# We update config.txt once and log that a reboot is needed.
+for BOOT_CONF in /boot/firmware/config.txt /boot/config.txt; do
+  [[ -f "$BOOT_CONF" ]] || continue
+  NEEDS_REBOOT=false
+  for PARAM in "framebuffer_width=${TARGET_W}" "framebuffer_height=${TARGET_H}"; do
+    KEY="${PARAM%%=*}"
+    if grep -q "^${KEY}=" "$BOOT_CONF" 2>/dev/null; then
+      sudo sed -i "s|^${KEY}=.*|${PARAM}|" "$BOOT_CONF" 2>/dev/null && NEEDS_REBOOT=true
+    else
+      echo "$PARAM" | sudo tee -a "$BOOT_CONF" >/dev/null && NEEDS_REBOOT=true
+    fi
+  done
+  if $NEEDS_REBOOT; then
+    echo "$(date) launch-terminals: updated ${BOOT_CONF} with ${TARGET_W}x${TARGET_H} — reboot required" >>"$LOG"
+  fi
+  break  # only update the first config.txt found
+done
+
 # ── Write X11 resolution config (takes effect on next X session start) ───────
-# Standard VGA on QEMU/Proxmox requires the modesetting driver — the Raspberry Pi
-# GPU driver won't talk to QEMU's virtual VGA correctly. This config forces the
-# right driver and sets a 1920x1080 virtual screen.
+# Use the fbdev driver — Raspberry Pi OS ARM kernel does not ship bochs-drm so
+# the modesetting driver has no DRM device to attach to.  fbdev reads from
+# /dev/fb0 whose resolution is set by /boot/config.txt above.
 XCONF_DIR="/etc/X11/xorg.conf.d"
 XCONF_FILE="$XCONF_DIR/99-client-sim-resolution.conf"
 if [[ ! -f "$XCONF_FILE" ]]; then
   sudo mkdir -p "$XCONF_DIR" 2>/dev/null
   sudo tee "$XCONF_FILE" >/dev/null <<EOF
-# Client-Sim: force ${TARGET_W}x${TARGET_H} on QEMU standard VGA (Raspberry Pi OS in VM)
-# Written by launch-terminals.sh — delete this file to regenerate.
+# Client-Sim: force ${TARGET_W}x${TARGET_H} — written by launch-terminals.sh
+# Delete this file to regenerate.
 Section "Device"
-    Identifier  "QEMU VGA"
-    Driver      "modesetting"
-    Option      "ModeDebug" "true"
-EndSection
-
-Section "Monitor"
-    Identifier  "Default Monitor"
-    Modeline    "1920x1080" 173.00 1920 2048 2248 2576 1080 1083 1088 1120 -hsync +vsync
-    Option      "PreferredMode" "1920x1080"
+    Identifier  "RPi VGA"
+    Driver      "fbdev"
+    Option      "fbdev" "/dev/fb0"
 EndSection
 
 Section "Screen"
     Identifier  "Default Screen"
-    Device      "QEMU VGA"
-    Monitor     "Default Monitor"
+    Device      "RPi VGA"
     DefaultDepth 24
     SubSection "Display"
         Depth   24
         Virtual ${TARGET_W} ${TARGET_H}
-        Modes   "1920x1080"
+        Modes   "${TARGET_W}x${TARGET_H}"
     EndSubSection
 EndSection
 EOF
-  echo "$(date) launch-terminals: wrote X11 config ${XCONF_FILE} — reboot for full effect" >>"$LOG"
+  echo "$(date) launch-terminals: wrote fbdev X11 config ${XCONF_FILE}" >>"$LOG"
 fi
 
 # ── Auto-detect connected display output ─────────────────────────────────────
