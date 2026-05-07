@@ -1235,16 +1235,18 @@ async def _run_self_update() -> None:
     update_state["update_error"] = None
     await broadcast({"type": "version_status", **update_state})
     try:
-        logger.info("Self-update: running %s", _INSTALLER_PATH)
-        # Resolve bash absolute path — systemd units run with a minimal PATH
-        import shutil as _shutil, os as _os
-        bash = _shutil.which("bash") or "/bin/bash"
-        cmd = [bash, str(_INSTALLER_PATH)] if _os.geteuid() == 0 else ["sudo", bash, str(_INSTALLER_PATH)]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
+        import shlex as _shlex, os as _os
+        # Use create_subprocess_shell so /bin/sh resolves bash via its own PATH.
+        # This is more robust than exec when systemd strips the PATH env.
+        full_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        installer = _shlex.quote(str(_INSTALLER_PATH))
+        shell_cmd = f'bash {installer}' if _os.geteuid() == 0 else f'sudo bash {installer}'
+        logger.info("Self-update: shell_cmd=%s", shell_cmd)
+        proc = await asyncio.create_subprocess_shell(
+            shell_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+            env={**os.environ, "PATH": full_path},
         )
         assert proc.stdout is not None
         async for raw in proc.stdout:
