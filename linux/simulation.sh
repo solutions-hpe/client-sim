@@ -418,7 +418,7 @@ fi
 #------------------------------------------------------------
 #Begin Setting up simulation load
 #------------------------------------------------------------
-if [ $sim_load -lt $rn_sim_load ]; then
+if [ "${sim_load:-100}" -lt "${rn_sim_load:-0}" ]; then
   echo Simulation load under threshold | tee -a "$debug"
   echo Skipping Simulations but staying associated | tee -a "$debug"
   if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
