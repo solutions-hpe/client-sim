@@ -12,7 +12,7 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 # Read config values
 #------------------------------------------------------------
 web_server=$(get_value 'simulation' 'web_server')
-server_url=$(get_value 'simulation' 'server_url')
+server_url=$(get_value 'server' 'server_url')
 smb_repo=$(get_value 'simulation' 'smb_repo')
 smb_address=$(get_value 'address' 'smb_address')
 public_repo=$(get_value 'simulation' 'public_repo')
