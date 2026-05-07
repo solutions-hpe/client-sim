@@ -1529,6 +1529,39 @@ async def api_sync_now() -> dict[str, Any]:
     return {"status": "ok", "message": "GitHub sync started"}
 
 
+@app.get("/api/version")
+async def api_version() -> dict[str, Any]:
+    """Return installed and available installer versions."""
+    return {
+        "status": "ok",
+        "current_version": update_state["current_version"],
+        "available_version": update_state["available_version"],
+        "update_available": update_state["update_available"],
+        "last_checked": update_state["last_checked"],
+        "update_in_progress": update_state["update_in_progress"],
+    }
+
+
+@app.post("/api/self-update")
+async def api_self_update() -> dict[str, Any]:
+    """Manually trigger a self-update check and apply if a new version is available."""
+    if update_state["update_in_progress"]:
+        raise HTTPException(status_code=409, detail="Update already in progress")
+    # Refresh the available version first
+    available = await asyncio.to_thread(_get_repo_version)
+    import datetime
+    update_state["available_version"] = available
+    update_state["last_checked"] = datetime.datetime.now().isoformat(timespec="seconds")
+    update_state["update_available"] = (
+        available is not None and available != update_state["current_version"]
+    )
+    await broadcast({"type": "version_status", **update_state})
+    if not update_state["update_available"]:
+        return {"status": "ok", "message": f"Already up to date (v{update_state['current_version']})"}
+    asyncio.create_task(_run_self_update())
+    return {"status": "ok", "message": f"Update to v{available} started — service will restart shortly"}
+
+
 @app.get("/api/config", response_class=PlainTextResponse)
 async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")

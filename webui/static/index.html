@@ -230,6 +230,34 @@
       </div>
     </div>
 
+    <!-- ── WebUI Version / Auto-Update ── -->
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>WebUI Version</h2>
+        <p>The WebUI checks for a new installer version every 24 hours and updates automatically. Use the button below to check and apply immediately.</p>
+      </div>
+      <div class="setup-status-grid">
+        <div class="setup-status-item">
+          <span class="setup-status-label">Installed version</span>
+          <span id="version-current" class="setup-status-value">—</span>
+        </div>
+        <div class="setup-status-item">
+          <span class="setup-status-label">Available version</span>
+          <span id="version-available" class="setup-status-value">—</span>
+        </div>
+        <div class="setup-status-item">
+          <span class="setup-status-label">Last checked</span>
+          <span id="version-last-checked" class="setup-status-value muted">—</span>
+        </div>
+      </div>
+      <div class="setup-form">
+        <div class="form-actions">
+          <button id="check-update-btn" class="btn btn-primary" type="button">🔄 Check &amp; Update Now</button>
+        </div>
+        <div id="update-message" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">
         <h2>Aruba Central Connection</h2>

@@ -87,6 +87,11 @@ const saveBtn = document.getElementById('save-settings');
 const syncNowBtn = document.getElementById('sync-now-btn');
 const syncNowMsg = document.getElementById('sync-now-message');
 const settingsMsg = document.getElementById('settings-message');
+const checkUpdateBtn = document.getElementById('check-update-btn');
+const updateMsg = document.getElementById('update-message');
+const versionCurrent = document.getElementById('version-current');
+const versionAvailable = document.getElementById('version-available');
+const versionLastChecked = document.getElementById('version-last-checked');
 const setupActiveBranch = document.getElementById('setup-active-branch');
 const repoUrlInput = document.getElementById('repo-url-input');
 const centralTabButton = document.querySelector('.tab[data-tab="central"]');
@@ -294,7 +299,50 @@ syncNowBtn.addEventListener('click', async () => {
   }
 });
 
+function applyVersionStatus(data) {
+  if (versionCurrent) versionCurrent.textContent = data.current_version ?? '—';
+  if (versionAvailable) versionAvailable.textContent = data.available_version ?? '—';
+  if (versionLastChecked) versionLastChecked.textContent = data.last_checked ?? '—';
+  if (checkUpdateBtn) {
+    checkUpdateBtn.disabled = !!data.update_in_progress;
+    checkUpdateBtn.textContent = data.update_in_progress ? '🔄 Updating…' : '🔄 Check & Update Now';
+  }
+  if (data.update_in_progress && updateMsg) {
+    updateMsg.textContent = `Installing v${data.available_version}… service will restart.`;
+    updateMsg.className = 'settings-message success';
+  }
+}
+
+checkUpdateBtn.addEventListener('click', async () => {
+  checkUpdateBtn.disabled = true;
+  checkUpdateBtn.textContent = '🔄 Checking…';
+  updateMsg.textContent = 'Checking for updates…';
+  updateMsg.className = 'settings-message success';
+  try {
+    const res = await fetch('/api/self-update', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    updateMsg.textContent = data.message;
+    updateMsg.className = data.message.includes('up to date') ? 'settings-message success' : 'settings-message success';
+  } catch (err) {
+    updateMsg.textContent = `Error: ${err.message}`;
+    updateMsg.className = 'settings-message error';
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '🔄 Check & Update Now';
+  }
+  clearTimeout(updateMsg._timer);
+  updateMsg._timer = setTimeout(() => {
+    updateMsg.className = 'settings-message hidden';
+  }, 8000);
+});
+
+// Load initial version status on page load
+fetch('/api/version').then(r => r.json()).then(applyVersionStatus).catch(() => {});
+
 function normalizeFlagValue(value) {
+  return String(value ?? 'off').toLowerCase() === 'on' ? 'on' : 'off';
+}
+
   return String(value ?? 'off').toLowerCase() === 'on' ? 'on' : 'off';
 }
 
@@ -1255,6 +1303,11 @@ function handleMessage(message) {
 
   if (message.type === 'repo_status') {
     setRepoStatus(message.synced, message.error);
+    return;
+  }
+
+  if (message.type === 'version_status') {
+    applyVersionStatus(message);
     return;
   }
 
