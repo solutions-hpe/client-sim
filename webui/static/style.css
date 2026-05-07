@@ -165,6 +165,7 @@ a:hover { color: var(--hpe-green-dark); text-decoration: underline; }
 }
 
 .status-dot.offline { background: var(--hpe-red); }
+.status-dot.warning { background: var(--warning); }
 
 /* ── Main page area ─────────────────────────────────────────────── */
 .page {
@@ -591,6 +592,17 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   font-size: 0.78rem;
   color: var(--muted);
 }
+
+.form-static {
+  padding: 7px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: var(--text);
+  font-family: monospace;
+}
+.form-static.muted { color: var(--muted); font-family: inherit; }
 
 .form-actions { padding-top: 4px; }
 

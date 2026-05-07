@@ -83,7 +83,8 @@ let currentSettings = {
   github_token_configured: false,
   central_config: { cluster_url: '', client_id: '', customer_id: '' },
   site_mappings: {},
-  monitored_checks: []
+  monitored_checks: [],
+  relay: { enabled: false, url: '', site_id: '', interval: 900, token_configured: false }
 };
 let configData = {};
 let configLoaded = false;
@@ -107,16 +108,65 @@ document.querySelectorAll('.tab').forEach((tab) => {
 });
 
 // ── Repo sync status ──────────────────────────────────────────────
+let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
+
+function setRelayStatus(data) {
+  const dot = document.getElementById('relay-dot');
+  const text = document.getElementById('relay-text');
+  const stateText = document.getElementById('relay-state-text');
+  const lastTime = document.getElementById('relay-last-time');
+  const lastError = document.getElementById('relay-last-error');
+  const tokenStatus = document.getElementById('relay-token-status');
+  const tenantIdEl = document.getElementById('relay-tenant-id');
+
+  if (!dot || !text) return;
+
+  if (!data.enabled) {
+    dot.className = 'status-dot warning';
+    text.textContent = 'Disabled';
+  } else if (data.connected) {
+    dot.className = 'status-dot online';
+    text.textContent = 'Connected';
+  } else {
+    dot.className = 'status-dot offline';
+    text.textContent = data.last_error ? 'Error' : 'Pending';
+  }
+
+  const statusEl = document.getElementById('relay-status');
+  if (statusEl) {
+    if (!data.enabled) statusEl.title = 'Central relay is disabled';
+    else if (data.connected) statusEl.title = `Relay connected to ${data.url} (tenant: ${data.tenant_id || 'none'})`;
+    else statusEl.title = data.last_error ? `Relay error: ${data.last_error}` : 'Relay pending first push';
+  }
+
+  if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : data.last_error ? '✗ Error' : 'Enabled (pending)';
+  if (lastTime) {
+    lastTime.textContent = data.last_relay
+      ? new Date(data.last_relay * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : '—';
+  }
+  if (lastError) lastError.textContent = data.last_error || '—';
+  if (tokenStatus) tokenStatus.textContent = data.token_configured ? '✓ Token configured' : 'No token — auth disabled';
+  if (tenantIdEl) {
+    tenantIdEl.textContent = data.tenant_id || 'Not configured — set customer ID in Central settings';
+    tenantIdEl.className = `form-static ${data.tenant_id ? '' : 'muted'}`;
+  }
+}
+
 function setRepoStatus(synced, error, lastSync) {
+  if (lastSync) lastKnownSyncTime = lastSync;   // only update when we have a real value
+
   repoDot.className = `status-dot ${synced ? 'online' : error ? 'offline' : 'warning'}`;
   repoText.textContent = error ? 'Error' : synced ? 'Synced' : 'Syncing…';
 
   // Build tooltip: show error or last-synced timestamp
   let tip = 'GitHub Sync Status';
   if (error) {
-    tip = `Error: ${error}`;
-  } else if (lastSync) {
-    const d = new Date(lastSync * 1000);
+    tip = lastKnownSyncTime
+      ? `Error: ${error} — last successful sync: ${new Date(lastKnownSyncTime * 1000).toLocaleTimeString()}`
+      : `Error: ${error}`;
+  } else if (lastKnownSyncTime) {
+    const d = new Date(lastKnownSyncTime * 1000);
     tip = `Last synced: ${d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})} on ${d.toLocaleDateString()}`;
   }
   const repoStatus = document.getElementById('repo-status');
@@ -129,8 +179,8 @@ function setRepoStatus(synced, error, lastSync) {
   const syncTime = document.getElementById('setup-sync-time');
   if (syncState) syncState.textContent = synced ? '✓ Synced' : error ? '✗ Failed' : 'Syncing…';
   if (syncError) syncError.textContent = error || '—';
-  if (syncTime && lastSync) {
-    const d = new Date(lastSync * 1000);
+  if (syncTime && lastKnownSyncTime) {
+    const d = new Date(lastKnownSyncTime * 1000);
     syncTime.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
   }
 }
@@ -183,6 +233,15 @@ const centralClassicFields = document.getElementById('central-classic-fields');
 const centralNewFields = document.getElementById('central-new-fields');
 const centralClientIdBadge = document.getElementById('central-client-id-badge');
 const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
+const relayEnabledCheck = document.getElementById('relay-enabled-check');
+const relayUrlInput = document.getElementById('relay-url-input');
+const relaySiteIdInput = document.getElementById('relay-site-id-input');
+const relayIntervalInput = document.getElementById('relay-interval-input');
+const relayTokenInput = document.getElementById('relay-token-input');
+const relayTokenStatus = document.getElementById('relay-token-status');
+const saveRelayBtn = document.getElementById('save-relay-btn');
+const relayNowBtn = document.getElementById('relay-now-btn');
+const relayMsg = document.getElementById('relay-message');
 
 function getCentralApiVersion() {
   const checked = document.querySelector('input[name="central-api-version"]:checked');
@@ -243,7 +302,16 @@ function mergeSettings(next = {}) {
     site_mappings: next.site_mappings ?? currentSettings.site_mappings ?? {},
     monitored_checks: Array.isArray(next.monitored_checks)
       ? next.monitored_checks
-      : (currentSettings.monitored_checks || [])
+      : (currentSettings.monitored_checks || []),
+    relay: {
+      enabled: false,
+      url: '',
+      site_id: '',
+      interval: 900,
+      token_configured: false,
+      ...(currentSettings.relay || {}),
+      ...(next.relay || {})
+    }
   };
   currentSettings = merged;
   return merged;
@@ -293,6 +361,12 @@ function applySettingsToUI(s) {
   if (atStatus) atStatus.textContent = settings.central_config.access_token_configured ? '✓ Token configured — paste new value to replace.' : 'No token saved yet.';
   if (rtStatus) rtStatus.textContent = settings.central_config.refresh_token_configured ? '✓ Refresh token configured — paste new value to replace.' : 'Optional — enables automatic renewal when the access token expires.';
   if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
+  const relay = settings.relay || {};
+  if (relayEnabledCheck) relayEnabledCheck.checked = !!relay.enabled;
+  setInputValueIfIdle(relayUrlInput, relay.url || '');
+  setInputValueIfIdle(relaySiteIdInput, relay.site_id || '');
+  if (relayIntervalInput && !relayIntervalInput.matches(':focus')) relayIntervalInput.value = relay.interval || 900;
+  if (relayTokenStatus) relayTokenStatus.textContent = relay.token_configured ? '✓ Token configured' : 'No token — auth disabled';
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
   if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
@@ -1604,6 +1678,11 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'relay_status') {
+    setRelayStatus(message);
+    return;
+  }
+
   if (message.type === 'version_status') {
     applyVersionStatus(message);
     return;
@@ -1907,6 +1986,54 @@ if (setupTabButton) {
   setupTabButton.addEventListener('click', () => {
     if (!currentSettings.repo_url && !currentSettings.repo_branch) {
       loadSettings();
+    }
+  });
+}
+
+if (saveRelayBtn) {
+  saveRelayBtn.addEventListener('click', async () => {
+    const originalLabel = saveRelayBtn.textContent;
+    const payload = {
+      relay_enabled: relayEnabledCheck?.checked ?? false,
+      relay_url: relayUrlInput?.value?.trim() || null,
+      relay_site_id: relaySiteIdInput?.value?.trim() || null,
+      relay_interval: parseInt(relayIntervalInput?.value || '900', 10)
+    };
+    const tokenVal = relayTokenInput?.value?.trim();
+    if (tokenVal) payload.relay_token = tokenVal;
+    saveRelayBtn.disabled = true;
+    saveRelayBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      showInlineMessage(relayMsg, 'Relay settings saved.', false);
+      if (relayTokenInput) relayTokenInput.value = '';
+      await loadSettings();
+    } catch (error) {
+      showInlineMessage(relayMsg, `Error: ${error.message}`, true);
+    } finally {
+      saveRelayBtn.disabled = false;
+      saveRelayBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (relayNowBtn) {
+  relayNowBtn.addEventListener('click', async () => {
+    const originalLabel = relayNowBtn.textContent;
+    try {
+      relayNowBtn.disabled = true;
+      relayNowBtn.textContent = '⬆ Relaying…';
+      await requestJson('/api/relay/trigger', { method: 'POST' });
+      showInlineMessage(relayMsg, 'Relay push triggered — status will update shortly.', false);
+    } catch (error) {
+      showInlineMessage(relayMsg, `Error: ${error.message}`, true);
+    } finally {
+      relayNowBtn.disabled = false;
+      relayNowBtn.textContent = originalLabel;
     }
   });
 }

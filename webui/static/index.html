@@ -30,6 +30,11 @@
           <span class="repo-label">Central API:</span>
           <span id="central-api-text">Unknown</span>
         </div>
+        <div id="relay-status" class="repo-status" title="Central relay status" aria-live="polite">
+          <span id="relay-dot" class="status-dot offline"></span>
+          <span class="repo-label">Relay:</span>
+          <span id="relay-text">Disabled</span>
+        </div>
         <div class="ws-status" aria-live="polite">
           <span id="ws-dot" class="status-dot offline"></span>
           <span class="repo-label">API Status:</span>
@@ -271,6 +276,65 @@
         <div class="setup-status-item">
           <span class="setup-status-label">Last error</span>
           <span id="setup-sync-error" class="setup-status-value muted">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Central Relay</h2>
+        <p>Push site snapshots to a central aggregation server. Configure the URL, site identifier, and push interval.</p>
+      </div>
+
+      <div class="setup-form">
+        <div class="form-group">
+          <label class="form-label" for="relay-enabled-check">
+            <input type="checkbox" id="relay-enabled-check"> Enable relay to central server
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="relay-url-input">Central Server URL</label>
+          <input id="relay-url-input" class="form-input" type="url" placeholder="http://central-server:8000">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="relay-site-id-input">Site ID</label>
+          <input id="relay-site-id-input" class="form-input" type="text" placeholder="lab-01">
+          <span class="form-hint">Unique name for this site in the central dashboard.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tenant ID</label>
+          <div class="form-static" id="relay-tenant-id">—</div>
+          <span class="form-hint">Derived from Aruba Central customer ID — not user-configurable.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="relay-interval-input">Relay Interval (seconds)</label>
+          <input id="relay-interval-input" class="form-input" type="number" min="60" max="86400" value="900">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="relay-token-input">Relay Token</label>
+          <input id="relay-token-input" class="form-input" type="password" placeholder="Leave blank — auth not required yet" autocomplete="new-password">
+          <span class="form-hint" id="relay-token-status"></span>
+        </div>
+
+        <div class="form-actions">
+          <button id="save-relay-btn" class="btn btn-primary" type="button">Save Relay Settings</button>
+          <button id="relay-now-btn" class="btn btn-secondary" type="button">⬆ Relay Now</button>
+        </div>
+        <div id="relay-message" class="settings-message hidden" role="alert"></div>
+
+        <div class="setup-status-grid" style="margin-top: 1rem;">
+          <div class="setup-status-item">
+            <span class="setup-status-label">Status</span>
+            <span id="relay-state-text" class="setup-status-value">—</span>
+          </div>
+          <div class="setup-status-item">
+            <span class="setup-status-label">Last Relay</span>
+            <span id="relay-last-time" class="setup-status-value">—</span>
+          </div>
+          <div class="setup-status-item">
+            <span class="setup-status-label">Last Error</span>
+            <span id="relay-last-error" class="setup-status-value muted">—</span>
+          </div>
         </div>
       </div>
     </div>
