@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.02
+# Client-Sim Dashboard — LXC Installer v0.01
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
@@ -87,7 +87,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.02"
+VERSION="0.01"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -327,6 +327,8 @@ ok "systemd service installed and enabled"
 info "Setting permissions..."
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
+# Write installer version so the dashboard can display it
+echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
 ok "Permissions set"
 
 ###############################################################################

@@ -949,6 +949,7 @@ function renderSiteAlerts(alerts, warning) {
 }
 
 
+function openSiteDetail(wsite) {
   centralSiteDetailOpen = wsite;
   if (centralOverview) centralOverview.classList.add('hidden');
   if (centralSiteDetail) centralSiteDetail.classList.remove('hidden');
@@ -1438,3 +1439,14 @@ if (saveChecksBtn) {
 loadSettings();
 updateCentralToolbar();
 connectWebSocket();
+
+// Fetch installer version once on load and display in header
+(async () => {
+  try {
+    const health = await requestJson('/api/health');
+    const badge = document.getElementById('installer-version');
+    if (badge && health.installer_version) {
+      badge.textContent = `v${health.installer_version}`;
+    }
+  } catch (_) { /* silent — version badge is non-critical */ }
+})();

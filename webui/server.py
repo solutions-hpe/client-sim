@@ -28,6 +28,10 @@ SETTINGS_FILE = BASE_DIR / "settings.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
+
+# Installer version — written by install-lxc.sh at install time
+_version_file = BASE_DIR / "INSTALLER_VERSION"
+INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exists() else "dev"
 REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 SYNC_INTERVAL = 300
@@ -1296,6 +1300,7 @@ async def api_health() -> dict[str, Any]:
         "clients": client_count,
         "repo_synced": repo_state["synced"],
         "repo_error": repo_state["error"],
+        "installer_version": INSTALLER_VERSION,
     }
 
 
