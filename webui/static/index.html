@@ -25,19 +25,20 @@
           <span id="ws-text">Disconnected</span>
         </div>
         <span id="installer-version" class="installer-version-badge" title="Installer version"></span>
+        <img src="/hpe-logo.svg" class="hpe-logo-img" alt="Hewlett Packard Enterprise">
       </div>
     </div>
   </header>
 
   <nav class="tab-nav" role="tablist">
-    <button class="tab active" role="tab" aria-selected="true"  data-tab="dashboard">Dashboard</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="simulations">⚡ Simulations</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Dashboard</button>
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="simulations">⚡ Simulations</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
     <button class="tab"        role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
   </nav>
 
   <!-- ── Dashboard tab ── -->
-  <main id="tab-dashboard" class="page tab-content">
+  <main id="tab-dashboard" class="page tab-content hidden">
     <section class="toolbar">
       <div class="toolbar-actions">
         <button id="kill-all" class="btn btn-danger" type="button">Kill All</button>
@@ -73,7 +74,7 @@
   </main>
 
   <!-- ── Simulations tab ── -->
-  <main id="tab-simulations" class="page tab-content hidden">
+  <main id="tab-simulations" class="page tab-content">
     <div id="sim-overview">
       <section class="central-toolbar">
         <div>

@@ -1702,6 +1702,7 @@ if (saveChecksBtn) {
 loadSettings();
 updateCentralToolbar();
 connectWebSocket();
+loadSimulations();
 
 // Fetch installer version once on load and display in header
 (async () => {
