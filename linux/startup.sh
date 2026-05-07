@@ -20,13 +20,10 @@ xset s noblank
 xset -dpms
 xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
-# Auto-detect connected display output — works on VM (Virtual-1), HDMI, DP, eDP, Pi (HDMI-A-1)
-_xout=$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')
-if [[ -n "${_xout}" ]]; then
-  sudo xrandr --output "$_xout" --mode 1920x1080 2>/dev/null \
-    || sudo xrandr --output "$_xout" --auto 2>/dev/null \
-    || true
-fi
+# NOTE: xrandr / display setup is handled exclusively by launch-terminals.sh,
+# which runs before this script and owns the resolution.  Do NOT call xrandr
+# here — a mode-switch event after terminals are placed causes the window
+# manager to reposition every window.
 #------------------------------------------------------------
 #Figuring out username from hostname used to parse config
 #------------------------------------------------------------

@@ -1,5 +1,5 @@
 #!/bin/bash
-# launch-terminals.sh v0.02
+# launch-terminals.sh v0.03
 # Launches and positions gnome-terminal windows for client-sim.
 # Called from openbox autostart — replaces individual .desktop autostart entries.
 #
@@ -8,11 +8,13 @@
 #   2. Try to set 1920x1080 — if supported, use original fixed pixel offsets
 #   3. If not supported (smaller display), scale offsets proportionally
 #
-# Original layout designed for 1920x1080:
-#   Dashboard  (50x80)  +0+0       — left column, full height
-#   Journal    (88x20)  +500+0     — center, top
-#   Startup    (88x15)  +1400+525  — right, lower half
-#   Update     (35x15)  +0+525     — bottom left (uncomment to enable)
+# Layout designed for 1920x1080 @ Monospace 13 (≈10px wide × 24px tall per cell):
+#   Dashboard  (58x43)  +0+0       — left column  (58×10 = 580px right edge)
+#   Journal    (88x20)  +580+0     — center, top   (580+88×10 = 1460px right edge)
+#   Startup    (88x15)  +1460+525  — right, lower  (20×24+chrome ≈ 525px Y start)
+#
+# IMPORTANT: startup.sh must NOT call xrandr — it runs after windows are placed
+# and a mode-switch event repositions every window. Resolution is set here only.
 
 SCRIPTS="/usr/local/scripts"
 LOG="$SCRIPTS/sim.log"
@@ -53,13 +55,8 @@ SCREEN_H=${SCREEN_H:-$TARGET_H}
 echo "$(date) launch-terminals: screen=${SCREEN_W}x${SCREEN_H} output=${OUTPUT}" >>"$LOG"
 
 # ── Calculate pixel offsets proportional to actual resolution ────────────────
-# Baseline offsets are from the original 1920x1080 layout.
-# Dashboard is 58 cols wide — at 10px/char = 580px right edge → Journal at +580.
-# Journal (88 cols, 20 rows) bottom ≈ 525px at 24px/row → Startup Y at +525.
-# Startup X = Journal right edge = 580 + 880 = 1460.
-#   Journal X  = 580  → 580/1920  = 30.21%
-#   Startup X  = 1460 → 1460/1920 = 76.04%
-#   Startup Y  = 525  → 525/1080  = 48.61%
+# Baseline values match the 1920x1080 layout above (TARGET_W/H = 1920×1080).
+# On smaller screens the offsets scale down proportionally.
 JOUR_X=$(( SCREEN_W * 580  / TARGET_W ))
 START_X=$(( SCREEN_W * 1460 / TARGET_W ))
 START_Y=$(( SCREEN_H * 525  / TARGET_H ))
