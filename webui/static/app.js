@@ -26,6 +26,41 @@ const IMPACT_LABELS = {
   www_traffic: 'ℹ Web Traffic',
   ping_test: 'ℹ Ping Traffic'
 };
+const CONFIG_SIMULATION_FIELDS = [
+  { section: 'simulation', key: 'sim_load', type: 'number' },
+  { section: 'simulation', key: 'ssid', type: 'text' },
+  { section: 'simulation', key: 'ssidpw', type: 'text' },
+  { section: 'simulation', key: 'iperf_bw', type: 'text' },
+  { section: 'simulation', key: 'reboot_schedule', type: 'number' },
+  { section: 'server', key: 'server_url', type: 'text' },
+  { section: 'address', key: 'syslog_server', type: 'text' },
+  { section: 'address', key: 'ping_address', type: 'text' },
+  { section: 'address', key: 'iperf_server', type: 'text' }
+];
+const CONFIG_SIMULATION_TOGGLES = [
+  { section: 'simulation', key: 'kill_switch' },
+  { section: 'simulation', key: 'web_server' },
+  { section: 'simulation', key: 'vh_server' },
+  { section: 'simulation', key: 'site_based_ssid' },
+  { section: 'simulation', key: 'syslog' },
+  { section: 'simulation', key: 'allow_offline' },
+  { section: 'simulation', key: 'rapid_update' },
+  { section: 'simulation', key: 'public_repo' },
+  { section: 'simulation', key: 'smb_repo' }
+];
+const CONFIG_BUCKET_TEXT_FIELDS = ['name', 'wsite', 'ssid', 'ssidpw'];
+const CONFIG_BUCKET_TOGGLE_FIELDS = [
+  'dns_fail',
+  'dhcp_fail',
+  'assoc_fail',
+  'port_flap',
+  'ssidpw_fail',
+  'auth_fail',
+  'ping_test',
+  'download',
+  'www_traffic',
+  'iperf'
+];
 
 const clients = new Map();
 const rowRefs = new Map();
@@ -45,10 +80,13 @@ let availableChecks = { alerts: [], insights: [] };
 let currentSettings = {
   repo_url: '',
   repo_branch: '',
+  github_token_configured: false,
   central_config: { cluster_url: '', client_id: '', customer_id: '' },
   site_mappings: {},
   monitored_checks: []
 };
+let configData = {};
+let configLoaded = false;
 let centralTokenValid = null;
 let centralLastSyncedTs = null;
 let centralStatusInitialized = false;
@@ -69,20 +107,38 @@ document.querySelectorAll('.tab').forEach((tab) => {
 });
 
 // ── Repo sync status ──────────────────────────────────────────────
-function setRepoStatus(synced, error) {
-  repoDot.className = `status-dot ${synced ? 'online' : 'offline'}`;
-  repoText.textContent = error ? `Sync error` : synced ? 'Synced' : 'Syncing…';
-  repoText.title = error || '';
+function setRepoStatus(synced, error, lastSync) {
+  repoDot.className = `status-dot ${synced ? 'online' : error ? 'offline' : 'warning'}`;
+  repoText.textContent = error ? 'Error' : synced ? 'Synced' : 'Syncing…';
+
+  // Build tooltip: show error or last-synced timestamp
+  let tip = 'GitHub Sync Status';
+  if (error) {
+    tip = `Error: ${error}`;
+  } else if (lastSync) {
+    const d = new Date(lastSync * 1000);
+    tip = `Last synced: ${d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})} on ${d.toLocaleDateString()}`;
+  }
+  const repoStatus = document.getElementById('repo-status');
+  if (repoStatus) repoStatus.title = tip;
+  repoText.title = '';
 
   // Update setup tab status panel
   const syncState = document.getElementById('setup-sync-state');
   const syncError = document.getElementById('setup-sync-error');
+  const syncTime = document.getElementById('setup-sync-time');
   if (syncState) syncState.textContent = synced ? '✓ Synced' : error ? '✗ Failed' : 'Syncing…';
   if (syncError) syncError.textContent = error || '—';
+  if (syncTime && lastSync) {
+    const d = new Date(lastSync * 1000);
+    syncTime.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  }
 }
 
 // ── Setup tab — settings form ─────────────────────────────────────
 const branchInput = document.getElementById('branch-input');
+const githubTokenInput = document.getElementById('github-token-input');
+const githubTokenStatus = document.getElementById('github-token-status');
 const saveBtn = document.getElementById('save-settings');
 const syncNowBtn = document.getElementById('sync-now-btn');
 const syncNowMsg = document.getElementById('sync-now-message');
@@ -95,6 +151,7 @@ const versionLastChecked = document.getElementById('version-last-checked');
 const setupActiveBranch = document.getElementById('setup-active-branch');
 const repoUrlInput = document.getElementById('repo-url-input');
 const centralTabButton = document.querySelector('.tab[data-tab="central"]');
+const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const centralOverview = document.getElementById('central-overview');
@@ -165,11 +222,17 @@ const loadChecksBtn = document.getElementById('central-load-checks-btn');
 const saveChecksBtn = document.getElementById('save-checks-btn');
 const availableChecksContainer = document.getElementById('available-checks-container');
 const centralChecksMsg = document.getElementById('central-checks-msg');
+const configSimulationForm = document.getElementById('config-simulation-form');
+const configSimulationSaveBtn = document.getElementById('config-simulation-save');
+const configSimulationMsg = document.getElementById('config-simulation-message');
+const configBucketsContainer = document.getElementById('config-buckets-container');
+const configBucketsMsg = document.getElementById('config-buckets-message');
 
 function mergeSettings(next = {}) {
   const merged = {
     repo_url: next.repo_url ?? currentSettings.repo_url ?? repoUrlInput?.value ?? '',
     repo_branch: next.repo_branch ?? currentSettings.repo_branch ?? '',
+    github_token_configured: next.github_token_configured ?? currentSettings.github_token_configured ?? false,
     central_config: {
       cluster_url: '',
       client_id: '',
@@ -212,6 +275,7 @@ function applySettingsToUI(s) {
   if (repoUrlInput) repoUrlInput.value = settings.repo_url || repoUrlInput.value;
   if (branchInput && !branchInput.matches(':focus')) branchInput.value = settings.repo_branch || '';
   if (setupActiveBranch) setupActiveBranch.textContent = settings.repo_branch || '—';
+  if (githubTokenStatus) githubTokenStatus.textContent = settings.github_token_configured ? '✓ Token configured' : 'Not configured';
   setInputValueIfIdle(centralClusterUrlInput, settings.central_config.cluster_url);
   setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
   setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
@@ -256,18 +320,20 @@ saveBtn.addEventListener('click', async () => {
     showSettingsMessage('Branch name cannot be empty.', true);
     return;
   }
+  const payload = { repo_branch: branch };
+  const githubToken = githubTokenInput?.value.trim() || '';
+  if (githubToken) payload.github_token = githubToken;
   saveBtn.disabled = true;
   saveBtn.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/settings', {
+    const data = await requestJson('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo_branch: branch })
+      body: JSON.stringify(payload)
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     showSettingsMessage(`Branch set to "${data.settings.repo_branch}" — sync started.`, false);
     applySettingsToUI(data.settings);
+    if (githubTokenInput) githubTokenInput.value = '';
   } catch (err) {
     showSettingsMessage(`Error: ${err.message}`, true);
   } finally {
@@ -364,6 +430,25 @@ function badgeClass(simulation) {
 function setWsStatus(connected, label) {
   wsDot.className = `status-dot ${connected ? 'online' : 'offline'}`;
   wsText.textContent = label;
+}
+
+function setCentralApiStatus(valid) {
+  const dot = document.getElementById('central-api-dot');
+  const text = document.getElementById('central-api-text');
+  if (!dot || !text) return;
+  if (valid === null) {
+    dot.className = 'status-dot warning';
+    text.textContent = 'Unknown';
+    document.getElementById('central-api-status').title = 'Central API: token status not yet checked';
+  } else if (valid) {
+    dot.className = 'status-dot online';
+    text.textContent = 'Connected';
+    document.getElementById('central-api-status').title = 'Central API: token valid and connected';
+  } else {
+    dot.className = 'status-dot offline';
+    text.textContent = 'No Token';
+    document.getElementById('central-api-status').title = 'Central API: token missing or invalid — check Setup tab';
+  }
 }
 
 function updateClientCount() {
@@ -1097,11 +1182,13 @@ async function loadCentralStatus() {
       monitored_checks: data.monitored_checks || []
     });
     centralTokenValid = Boolean(data.token_valid);
+    setCentralApiStatus(centralTokenValid);
     handleCentralUpdate(data.status || {}, Date.now() / 1000);
     renderSelectedChecksPreview();
     renderSiteMappingsTable();
   } catch (error) {
     centralTokenValid = false;
+    setCentralApiStatus(false);
     updateCentralToolbar();
     if (centralEmpty) {
       centralEmpty.textContent = `Could not load Central status: ${error.message}`;
@@ -1220,9 +1307,29 @@ function renderControlPanel(hostname) {
     }
   });
 
+  const saveOverridesButton = document.createElement('button');
+  saveOverridesButton.type = 'button';
+  saveOverridesButton.className = 'btn btn-secondary';
+  saveOverridesButton.textContent = 'Save to user-overrides';
+  saveOverridesButton.addEventListener('click', async () => {
+    try {
+      const username = hostname.split('-')[0] || hostname;
+      const flags = collectPanelState(panel);
+      const result = await requestJson('/api/config/overrides/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, flags })
+      });
+      window.alert(result?.pushed ? 'Saved to user-overrides and pushed to GitHub.' : 'Saved to user-overrides locally.');
+    } catch (error) {
+      window.alert(`Save to user-overrides failed: ${error.message}`);
+    }
+  });
+
   actions.appendChild(applyButton);
   actions.appendChild(clearButton);
   actions.appendChild(applyAllButton);
+  actions.appendChild(saveOverridesButton);
 
   panel.appendChild(header);
   panel.appendChild(toggles);
@@ -1292,6 +1399,200 @@ function toggleControlRow(hostname) {
   }
 }
 
+function buildConfigInput(field, value = '') {
+  const group = document.createElement('div');
+  group.className = 'form-group';
+
+  const label = document.createElement('label');
+  label.className = 'form-label';
+  label.textContent = field.key;
+
+  const input = document.createElement('input');
+  input.className = 'form-input';
+  input.type = field.type || 'text';
+  input.value = value || '';
+  input.dataset.configSection = field.section;
+  input.dataset.configKey = field.key;
+
+  group.appendChild(label);
+  group.appendChild(input);
+  return { group, input };
+}
+
+function buildConfigSelect(section, key, options, value = '') {
+  const group = document.createElement('div');
+  group.className = 'form-group';
+
+  const label = document.createElement('label');
+  label.className = 'form-label';
+  label.textContent = key;
+
+  const select = document.createElement('select');
+  select.className = 'form-input';
+  select.dataset.configSection = section;
+  select.dataset.configKey = key;
+
+  options.forEach((optionValue) => {
+    const option = document.createElement('option');
+    option.value = optionValue;
+    option.textContent = optionValue;
+    option.selected = optionValue === value;
+    select.appendChild(option);
+  });
+
+  group.appendChild(label);
+  group.appendChild(select);
+  return { group, select };
+}
+
+function buildConfigToggle(field, value) {
+  const toggle = buildToggle(field.key, normalizeFlagValue(value) === 'on');
+  const input = toggle.querySelector('input');
+  if (input) {
+    input.dataset.configSection = field.section;
+    input.dataset.configKey = field.key;
+  }
+  return toggle;
+}
+
+function collectSectionedConfigState(root) {
+  const payloads = {};
+  if (!root) return payloads;
+  root.querySelectorAll('[data-config-section][data-config-key]').forEach((input) => {
+    const section = input.dataset.configSection;
+    const key = input.dataset.configKey;
+    if (!section || !key) return;
+    if (!payloads[section]) payloads[section] = {};
+    payloads[section][key] = input.type === 'checkbox' ? (input.checked ? 'on' : 'off') : input.value;
+  });
+  return payloads;
+}
+
+function buildBucketSummary(section, values = {}) {
+  return `${section} — ${values.name || values.wsite || 'Unnamed bucket'}`;
+}
+
+function renderSimulationConfigForm() {
+  if (!configSimulationForm) return;
+  configSimulationForm.textContent = '';
+
+  CONFIG_SIMULATION_FIELDS.forEach((field) => {
+    const values = configData[field.section] || {};
+    const { group } = buildConfigInput(field, values[field.key] || '');
+    configSimulationForm.appendChild(group);
+  });
+
+  const toggleTitle = document.createElement('h3');
+  toggleTitle.textContent = 'Feature Toggles';
+  configSimulationForm.appendChild(toggleTitle);
+
+  const toggleGrid = document.createElement('div');
+  toggleGrid.className = 'toggle-grid';
+  CONFIG_SIMULATION_TOGGLES.forEach((field) => {
+    const values = configData[field.section] || {};
+    toggleGrid.appendChild(buildConfigToggle(field, values[field.key]));
+  });
+  configSimulationForm.appendChild(toggleGrid);
+}
+
+function renderBucketEditors() {
+  if (!configBucketsContainer) return;
+  configBucketsContainer.textContent = '';
+
+  for (let index = 0; index < 10; index += 1) {
+    const section = `s${index}`;
+    const values = configData[section] || {};
+    const details = document.createElement('details');
+    details.className = 'setup-card setup-section-gap';
+    if (index === 0) details.open = true;
+
+    const summary = document.createElement('summary');
+    summary.textContent = buildBucketSummary(section, values);
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'setup-form';
+
+    const trackedValues = { ...values };
+    CONFIG_BUCKET_TEXT_FIELDS.forEach((key) => {
+      const { group, input } = buildConfigInput({ section, key, type: 'text' }, values[key] || '');
+      input.addEventListener('input', () => {
+        trackedValues[key] = input.value.trim();
+        summary.textContent = buildBucketSummary(section, trackedValues);
+      });
+      body.appendChild(group);
+    });
+
+    const { group: simPhyGroup } = buildConfigSelect(section, 'sim_phy', ['wireless', 'ethernet'], values.sim_phy || 'wireless');
+    body.appendChild(simPhyGroup);
+
+    const toggleTitle = document.createElement('h3');
+    toggleTitle.textContent = 'Flags';
+    body.appendChild(toggleTitle);
+
+    const toggleGrid = document.createElement('div');
+    toggleGrid.className = 'toggle-grid';
+    CONFIG_BUCKET_TOGGLE_FIELDS.forEach((key) => {
+      toggleGrid.appendChild(buildConfigToggle({ section, key }, values[key]));
+    });
+    body.appendChild(toggleGrid);
+
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'btn btn-primary';
+    saveButton.textContent = 'Save Bucket';
+    actions.appendChild(saveButton);
+    body.appendChild(actions);
+
+    const message = document.createElement('div');
+    message.className = 'settings-message hidden';
+    body.appendChild(message);
+
+    saveButton.addEventListener('click', async () => {
+      const originalLabel = saveButton.textContent;
+      saveButton.disabled = true;
+      saveButton.textContent = 'Saving…';
+      try {
+        const updates = collectSectionedConfigState(body)[section] || {};
+        const result = await requestJson('/api/config/simulation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section, updates })
+        });
+        showInlineMessage(message, result?.pushed ? `Saved ${section} and pushed to GitHub.` : `Saved ${section}. GitHub push skipped.`, false, 7000);
+        await loadConfigEditor(true);
+      } catch (error) {
+        showInlineMessage(message, `Error: ${error.message}`, true, 7000);
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = originalLabel;
+      }
+    });
+
+    details.appendChild(body);
+    configBucketsContainer.appendChild(details);
+  }
+}
+
+async function loadConfigEditor(force = false) {
+  if (!force && configLoaded) return configData;
+  try {
+    const data = await requestJson('/api/config/parsed');
+    configData = data || {};
+    configLoaded = true;
+    renderSimulationConfigForm();
+    renderBucketEditors();
+    return configData;
+  } catch (error) {
+    configLoaded = false;
+    showInlineMessage(configSimulationMsg, `Error: ${error.message}`, true, 7000);
+    showInlineMessage(configBucketsMsg, `Error: ${error.message}`, true, 7000);
+    throw error;
+  }
+}
+
 function handleMessage(message) {
   if (message.type === 'full_state') {
     (message.clients || []).forEach((client) => upsertClient(client));
@@ -1299,7 +1600,7 @@ function handleMessage(message) {
   }
 
   if (message.type === 'repo_status') {
-    setRepoStatus(message.synced, message.error);
+    setRepoStatus(message.synced, message.error, message.last_sync);
     return;
   }
 
@@ -1569,6 +1870,39 @@ if (centralTabButton) {
   });
 }
 
+if (configTabButton) {
+  configTabButton.addEventListener('click', () => {
+    loadConfigEditor(true).catch(() => {});
+  });
+}
+
+if (configSimulationSaveBtn) {
+  configSimulationSaveBtn.addEventListener('click', async () => {
+    const originalLabel = configSimulationSaveBtn.textContent;
+    configSimulationSaveBtn.disabled = true;
+    configSimulationSaveBtn.textContent = 'Saving…';
+    try {
+      const payloads = collectSectionedConfigState(configSimulationForm);
+      const results = [];
+      for (const [section, updates] of Object.entries(payloads)) {
+        results.push(await requestJson('/api/config/simulation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section, updates })
+        }));
+      }
+      const pushed = results.some((result) => result?.pushed);
+      showInlineMessage(configSimulationMsg, pushed ? 'Simulation settings saved and pushed to GitHub.' : 'Simulation settings saved. GitHub push skipped.', false, 7000);
+      await loadConfigEditor(true);
+    } catch (error) {
+      showInlineMessage(configSimulationMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      configSimulationSaveBtn.disabled = false;
+      configSimulationSaveBtn.textContent = originalLabel;
+    }
+  });
+}
+
 if (setupTabButton) {
   setupTabButton.addEventListener('click', () => {
     if (!currentSettings.repo_url && !currentSettings.repo_branch) {
@@ -1610,6 +1944,7 @@ if (centralTestBtn) {
       });
       const result = await requestJson('/api/central/test-connection', { method: 'POST' });
       centralTokenValid = true;
+      setCentralApiStatus(true);
       updateCentralToolbar();
       showInlineMessage(centralTestMsg, result.message || 'Connected to Aruba Central successfully.', false);
       // Clear secret fields — status hints show "configured" instead
@@ -1620,6 +1955,7 @@ if (centralTestBtn) {
       applySettingsToUI(currentSettings);
     } catch (error) {
       centralTokenValid = false;
+      setCentralApiStatus(false);
       updateCentralToolbar();
       showInlineMessage(centralTestMsg, `Error: ${error.message}`, true, 7000);
     } finally {

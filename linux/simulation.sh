@@ -36,6 +36,47 @@ ea_down() {
   fi
 }
 #------------------------------------------------------------
+# Hardware type detection — reported to the WebUI API so operators can see
+# whether each client is a Pi4, Pi5, KVM VM, x86 physical box, etc.
+# Priority: Raspberry Pi (device tree) → systemd-detect-virt → DMI product name → arch fallback
+#------------------------------------------------------------
+detect_hardware() {
+  # Raspberry Pi: device tree model file is the most reliable source
+  if [[ -f /sys/firmware/devicetree/base/model ]]; then
+    local model
+    model=$(tr -d '\0' < /sys/firmware/devicetree/base/model 2>/dev/null)
+    if [[ "$model" == *"Raspberry Pi"* ]]; then
+      # Shorten to e.g. "Pi 4 Model B" or "Pi 5 Model B"
+      echo "$model" | sed 's/Raspberry Pi /Pi /'
+      return
+    fi
+  fi
+  # Virtual machine detection via systemd-detect-virt
+  if command -v systemd-detect-virt &>/dev/null; then
+    local virt
+    virt=$(systemd-detect-virt 2>/dev/null)
+    case "$virt" in
+      kvm)    echo "KVM/QEMU"; return ;;
+      qemu)   echo "QEMU";     return ;;
+      vmware) echo "VMware";   return ;;
+      xen)    echo "Xen";      return ;;
+      lxc)    echo "LXC";      return ;;
+      none)   ;;  # physical hardware — fall through to DMI
+    esac
+  fi
+  # Physical x86: read DMI product name
+  if [[ -f /sys/class/dmi/id/product_name ]]; then
+    local product
+    product=$(tr -d '\0' < /sys/class/dmi/id/product_name 2>/dev/null | xargs)
+    if [[ -n "$product" && "$product" != "To Be Filled By O.E.M." && "$product" != "System Product Name" ]]; then
+      echo "${product:0:40}"
+      return
+    fi
+  fi
+  echo "Unknown ($(uname -m))"
+}
+hw_type=$(detect_hardware)
+#------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------

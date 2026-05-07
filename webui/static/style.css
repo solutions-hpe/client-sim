@@ -137,7 +137,7 @@ a:hover { color: var(--hpe-green-dark); text-decoration: underline; }
 .ws-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 0.85rem;
   font-weight: 400;
   color: rgba(255,255,255,0.85);
@@ -463,12 +463,17 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .repo-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 0.85rem;
   color: rgba(255,255,255,0.75);
   border-right: 1px solid var(--hpe-navy-mid);
   padding-right: 20px;
   cursor: default;
+}
+.repo-label {
+  color: rgba(255,255,255,0.5);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────── */

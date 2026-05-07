@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import configparser
 import contextlib
 import json
 import logging
@@ -53,6 +54,7 @@ update_state: dict[str, Any] = {
     "last_checked": None,
     "update_in_progress": False,
     "update_log": [],
+    "update_error": None,
 }
 
 
@@ -74,6 +76,7 @@ def _save_settings() -> None:
 _persisted = _load_persisted_settings()
 settings: dict[str, Any] = {
     "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
+    "github_token": _persisted.get("github_token", ""),
     "central_config": _persisted.get("central_config", {
         "api_version": "classic",   # "classic" | "new_central"
         "cluster_url": "",
@@ -158,6 +161,7 @@ ADDRESS_SECTION_KEYS = {
     "syslog_server",
     "vh_server_addr",
 }
+ALLOWED_CONFIG_SECTIONS = {"simulation", "address", "server", *(f"s{i}" for i in range(10))}
 
 
 # ── Aruba Central state ───────────────────────────────────────────────────────
@@ -653,7 +657,7 @@ app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
 clients: dict[str, dict[str, Any]] = {}
 ws_connections: list[WebSocket] = []
 state_lock = asyncio.Lock()
-repo_state = {"synced": False, "error": None}
+repo_state = {"synced": False, "error": None, "last_sync": None}
 background_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
@@ -661,6 +665,7 @@ class ClientStatus(BaseModel):
     hostname: str
     simulation_id: str
     platform: str
+    hw_type: str | None = None
     iteration: int
     connected_ssid: str | None = None
     gateway_reachable: bool
@@ -682,9 +687,20 @@ class ClientControlResponse(BaseModel):
 
 class SettingsUpdate(BaseModel):
     repo_branch: str | None = None
+    github_token: str | None = None
     central_config: dict[str, str] | None = None
     site_mappings: dict[str, str] | None = None
     monitored_checks: list[dict[str, str]] | None = None
+
+
+class SimulationConfigUpdate(BaseModel):
+    section: str
+    updates: dict[str, str] = Field(default_factory=dict)
+
+
+class OverridesSaveRequest(BaseModel):
+    username: str
+    flags: dict[str, str] = Field(default_factory=dict)
 
 
 def utcnow() -> datetime:
@@ -706,6 +722,7 @@ def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
         "hostname": hostname,
         "simulation_id": client.get("simulation_id", ""),
         "platform": client.get("platform", ""),
+        "hw_type": client.get("hw_type") or "",
         "iteration": client.get("iteration", 0),
         "connected_ssid": client.get("connected_ssid") or "",
         "gateway_reachable": bool(client.get("gateway_reachable", False)),
@@ -842,6 +859,97 @@ def apply_overrides(config_text: str, client: dict[str, Any]) -> str:
     return "\n".join(updated_lines)
 
 
+def _push_to_github(files_changed: list[str], commit_message: str) -> bool:
+    token = settings.get("github_token", "").strip()
+    if not token:
+        raise ValueError("GitHub token not configured")
+
+    try:
+        repo = Repo(REPO_DIR)
+    except InvalidGitRepositoryError as exc:
+        raise RuntimeError(f"{REPO_DIR} exists but is not a git repository") from exc
+
+    authed_url = REPO_URL.replace("https://", f"https://{token}@", 1)
+    origin = repo.remote("origin")
+
+    reader = repo.config_reader()
+    has_name = reader.has_option("user", "name")
+    has_email = reader.has_option("user", "email")
+    reader.release()
+    if not has_name or not has_email:
+        writer = repo.config_writer()
+        if not has_name:
+            writer.set_value("user", "name", "Client-Sim Dashboard")
+        if not has_email:
+            writer.set_value("user", "email", "client-sim@localhost")
+        writer.release()
+
+    origin.set_url(authed_url)
+    try:
+        repo.index.add(files_changed)
+        staged_changes = list(repo.index.diff("HEAD")) if repo.head.is_valid() else list(repo.index.entries)
+        if not staged_changes:
+            return False
+        repo.index.commit(commit_message)
+        origin.push()
+        return True
+    finally:
+        origin.set_url(REPO_URL)
+
+
+def _update_ini_section(filepath: Path, section: str, updates: dict[str, str]) -> None:
+    text = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines()
+    normalized_updates = {str(key).strip(): str(value) for key, value in updates.items() if str(key).strip()}
+
+    updated_lines: list[str] = []
+    found_keys: set[str] = set()
+    section_found = False
+    in_target_section = False
+
+    def append_missing_keys() -> None:
+        for key, value in normalized_updates.items():
+            if key not in found_keys:
+                updated_lines.append(f"{key}={value}")
+
+    for line in lines:
+        match = re.match(r"^\s*\[(?P<section>[^\]]+)\]\s*$", line)
+        if match:
+            if in_target_section:
+                append_missing_keys()
+            current_section = match.group("section")
+            in_target_section = current_section == section
+            section_found = section_found or in_target_section
+            updated_lines.append(line)
+            continue
+
+        if in_target_section:
+            key_match = re.match(r"^(?P<indent>\s*)(?P<key>[^=\s#;][^=]*?)\s*=.*$", line)
+            if key_match:
+                key = key_match.group("key").strip()
+                if key in normalized_updates:
+                    updated_lines.append(f"{key_match.group('indent')}{key}={normalized_updates[key]}")
+                    found_keys.add(key)
+                    continue
+
+        updated_lines.append(line)
+
+    if in_target_section:
+        append_missing_keys()
+
+    if not section_found:
+        if updated_lines and updated_lines[-1].strip():
+            updated_lines.append("")
+        updated_lines.append(f"[{section}]")
+        append_missing_keys()
+
+    output = newline.join(updated_lines)
+    if updated_lines and (text.endswith("\n") or not text):
+        output += newline
+    filepath.write_text(output, encoding="utf-8")
+
+
 def sync_repo_once() -> None:
     branch = settings["repo_branch"]
     REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
@@ -870,7 +978,8 @@ async def sync_repo() -> None:
             await asyncio.to_thread(sync_repo_once)
             repo_state["synced"] = True
             repo_state["error"] = None
-            await broadcast({"type": "repo_status", "synced": True, "error": None})
+            repo_state["last_sync"] = __import__("time").time()
+            await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"]})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -926,6 +1035,7 @@ async def _run_self_update() -> None:
         return
     update_state["update_in_progress"] = True
     update_state["update_log"] = []
+    update_state["update_error"] = None
     await broadcast({"type": "version_status", **update_state})
     try:
         logger.info("Self-update: running %s", _INSTALLER_PATH)
@@ -940,13 +1050,21 @@ async def _run_self_update() -> None:
             update_state["update_log"].append(line)
             logger.info("self-update: %s", line)
         await proc.wait()
-        logger.info("Self-update process exited with code %s", proc.returncode)
-        # Systemd will restart us; if we're still running, clear the flag
-        update_state["update_in_progress"] = False
-        await broadcast({"type": "version_status", **update_state})
+        if proc.returncode != 0:
+            logger.error("Self-update installer exited with code %s", proc.returncode)
+            update_state["update_in_progress"] = False
+            update_state["update_error"] = f"Installer exited with code {proc.returncode}"
+            await broadcast({"type": "version_status", **update_state})
+        else:
+            logger.info("Self-update process exited with code %s", proc.returncode)
+            # Systemd will restart us; if we're still running, clear the flag
+            update_state["update_in_progress"] = False
+            update_state["update_error"] = None
+            await broadcast({"type": "version_status", **update_state})
     except Exception as exc:
         logger.exception("Self-update failed")
         update_state["update_in_progress"] = False
+        update_state["update_error"] = str(exc)
         update_state["update_log"].append(f"ERROR: {exc}")
         await broadcast({"type": "version_status", **update_state})
 
@@ -977,6 +1095,7 @@ async def api_settings_get() -> dict[str, Any]:
     return {
         "repo_url": REPO_URL,
         "repo_branch": settings["repo_branch"],
+        "github_token_configured": bool(settings.get("github_token")),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
         "monitored_checks": settings["monitored_checks"],
@@ -993,6 +1112,11 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             raise HTTPException(status_code=422, detail="Invalid branch name")
         settings["repo_branch"] = branch
         changed_branch = True
+
+    if update.github_token is not None:
+        token = update.github_token.strip()
+        if token:  # blank = keep existing
+            settings["github_token"] = token
 
     if update.central_config is not None:
         merged = dict(settings["central_config"])
@@ -1040,6 +1164,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     payload = {
         "repo_url": REPO_URL,
         "repo_branch": settings["repo_branch"],
+        "github_token_configured": bool(settings.get("github_token")),
     }
     await broadcast({"type": "settings_update", "settings": payload})
     return {"status": "ok", "settings": payload}
@@ -1555,7 +1680,8 @@ async def api_self_update() -> dict[str, Any]:
         await asyncio.to_thread(sync_repo_once)
         repo_state["synced"] = True
         repo_state["error"] = None
-        await broadcast({"type": "repo_status", "synced": True, "error": None})
+        repo_state["last_sync"] = __import__("time").time()
+        await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"]})
     except Exception as exc:
         repo_state["error"] = str(exc)
         await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc)})
@@ -1594,6 +1720,63 @@ async def api_config(hostname: str | None = Query(default=None)) -> str:
 async def api_config_overrides() -> str:
     overrides_path = repo_path("configs", "user-overrides.conf")
     return overrides_path.read_text(encoding="utf-8")
+
+
+@app.get("/api/config/parsed")
+async def api_config_parsed() -> dict[str, dict[str, str]]:
+    config_path = repo_path("configs", "simulation.conf")
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    parser.read(config_path, encoding="utf-8")
+    return {section: dict(parser.items(section)) for section in parser.sections()}
+
+
+@app.post("/api/config/simulation")
+async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any]:
+    section = update.section.strip()
+    if section not in ALLOWED_CONFIG_SECTIONS:
+        raise HTTPException(status_code=422, detail="Invalid section name")
+
+    config_path = repo_path("configs", "simulation.conf")
+    updates = {str(key).strip(): str(value) for key, value in update.updates.items() if str(key).strip()}
+    await asyncio.to_thread(_update_ini_section, config_path, section, updates)
+
+    pushed = False
+    try:
+        pushed = await asyncio.to_thread(
+            _push_to_github,
+            ["configs/simulation.conf"],
+            f"WebUI: update [{section}] settings",
+        )
+    except ValueError:
+        pushed = False
+
+    return {"status": "ok", "pushed": pushed}
+
+
+@app.post("/api/config/overrides/save")
+async def api_config_overrides_save(update: OverridesSaveRequest) -> dict[str, Any]:
+    ensure_repo_ready()
+    username = update.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username is required")
+
+    overrides_path = REPO_DIR / "configs" / "user-overrides.conf"
+    section = "simulation" if username == "__global__" else username
+    flags = {str(key).strip(): str(value) for key, value in update.flags.items() if str(key).strip()}
+    await asyncio.to_thread(_update_ini_section, overrides_path, section, flags)
+
+    pushed = False
+    try:
+        pushed = await asyncio.to_thread(
+            _push_to_github,
+            ["configs/user-overrides.conf"],
+            f"WebUI: update overrides for {username}",
+        )
+    except ValueError:
+        pushed = False
+
+    return {"status": "ok", "pushed": pushed}
 
 
 @app.get("/api/scripts/list")
@@ -1649,6 +1832,7 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
             "hostname": status.hostname,
             "simulation_id": status.simulation_id,
             "platform": status.platform,
+            "hw_type": status.hw_type or existing.get("hw_type", ""),
             "iteration": status.iteration,
             "connected_ssid": status.connected_ssid,
             "gateway_reachable": status.gateway_reachable,
@@ -1714,7 +1898,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     ws_connections.append(websocket)
     await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}))
-    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"]}))
+    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"]}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": {"repo_url": REPO_URL, "repo_branch": settings["repo_branch"]}}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "ts": time.time()}))
 

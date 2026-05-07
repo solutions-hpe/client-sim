@@ -22,10 +22,17 @@
       <div class="topbar-right">
         <div id="repo-status" class="repo-status" title="GitHub sync status">
           <span id="repo-dot" class="status-dot offline"></span>
+          <span id="repo-label" class="repo-label">GitHub Sync:</span>
           <span id="repo-text">Syncing…</span>
+        </div>
+        <div id="central-api-status" class="repo-status" title="Aruba Central API connection status" aria-live="polite">
+          <span id="central-api-dot" class="status-dot offline"></span>
+          <span class="repo-label">Central API:</span>
+          <span id="central-api-text">Unknown</span>
         </div>
         <div class="ws-status" aria-live="polite">
           <span id="ws-dot" class="status-dot offline"></span>
+          <span class="repo-label">API Status:</span>
           <span id="ws-text">Disconnected</span>
         </div>
         <span id="installer-version" class="installer-version-badge" title="Installer version"></span>
@@ -37,6 +44,7 @@
     <button class="tab active" role="tab" aria-selected="true"  data-tab="simulations">⚡ Simulations</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Clients</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="config">⚙ Config</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
   </nav>
 
@@ -178,6 +186,32 @@
 
   </main>
 
+  <!-- ── Config tab ── -->
+  <main id="tab-config" class="page tab-content hidden">
+    <div class="setup-card">
+      <div class="setup-card-header">
+        <h2>Simulation Settings</h2>
+        <p>Edit the shared settings stored in <strong>configs/simulation.conf</strong> and push updates to GitHub.</p>
+      </div>
+      <div id="config-simulation-form" class="setup-form"></div>
+      <div class="setup-form">
+        <div class="form-actions">
+          <button id="config-simulation-save" class="btn btn-primary" type="button">Save to GitHub</button>
+        </div>
+        <div id="config-simulation-message" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Bucket Profiles</h2>
+        <p>Review and save individual <strong>s0-s9</strong> simulation buckets.</p>
+      </div>
+      <div id="config-buckets-container"></div>
+      <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
+    </div>
+  </main>
+
   <!-- ── Setup tab ── -->
   <main id="tab-setup" class="page tab-content hidden">
     <div class="setup-card">
@@ -202,6 +236,13 @@
           <span class="form-hint">Letters, numbers, hyphens, underscores, dots, and slashes only.</span>
         </div>
 
+        <div class="form-group">
+          <label class="form-label" for="github-token-input">GitHub Token</label>
+          <input id="github-token-input" class="form-input" type="password"
+                 placeholder="Paste token — leave blank to keep current" autocomplete="new-password">
+          <span class="form-hint" id="github-token-status"></span>
+        </div>
+
         <div class="form-actions">
           <button id="save-settings" class="btn btn-primary" type="button">Save &amp; Sync</button>
           <button id="sync-now-btn" class="btn btn-secondary" type="button">⬇ Sync from GitHub Now</button>
@@ -216,8 +257,12 @@
 
       <div class="setup-status-grid">
         <div class="setup-status-item">
-          <span class="setup-status-label">Sync status</span>
+          <span class="setup-status-label">GitHub Sync Status</span>
           <span id="setup-sync-state" class="setup-status-value">—</span>
+        </div>
+        <div class="setup-status-item">
+          <span class="setup-status-label">Last Synced</span>
+          <span id="setup-sync-time" class="setup-status-value">—</span>
         </div>
         <div class="setup-status-item">
           <span class="setup-status-label">Active branch</span>
