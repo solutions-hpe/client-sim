@@ -1766,21 +1766,108 @@ const simDetailBack   = document.getElementById('sim-detail-back');
 const simDetailTitle  = document.getElementById('sim-detail-title');
 const simDetailSub    = document.getElementById('sim-detail-sub');
 const simDetailBadge  = document.getElementById('sim-detail-badge');
-const simDetailTotal  = document.getElementById('sim-detail-total');
-const simDetailActive = document.getElementById('sim-detail-active');
-const simDetailWsite  = document.getElementById('sim-detail-wsite');
-const simDetailCount  = document.getElementById('sim-detail-client-count');
-const simClientList   = document.getElementById('sim-client-list');
 const simLastRefreshed = document.getElementById('sim-last-refreshed');
 const simRefreshBtn   = document.getElementById('sim-refresh-btn');
 
 let simulationsData = [];
-let openSimId = null;
+let openSimId = null;   // key into getSimGroups() map
 
 function simStatusBadge(pf) {
-  if (!pf) return { label: 'No Alert Configured', cls: 'sim-unknown' };
-  if (pf.firing) return { label: '✓ PASS — Firing in Central', cls: 'sim-pass' };
-  return { label: '✗ FAIL — Not Firing', cls: 'sim-fail' };
+  if (!pf) return { label: 'No Check', cls: 'sim-unknown' };
+  if (pf.firing) return { label: '✓ Firing', cls: 'sim-pass' };
+  return { label: '✗ Not Firing', cls: 'sim-fail' };
+}
+
+/** Build a map of checkKey → { checkId, label, sims[], aggLabel, aggCls } */
+function getSimGroups() {
+  const monitoredChecks = currentSettings.monitored_checks || [];
+  const checkLabelMap = {};
+  for (const c of monitoredChecks) checkLabelMap[c.id] = c.name || c.id;
+  for (const type of ['alerts', 'insights']) {
+    for (const c of availableChecks[type] || []) {
+      if (!checkLabelMap[c.id]) checkLabelMap[c.id] = c.name || c.id;
+    }
+  }
+
+  const groups = new Map();
+  for (const sim of simulationsData) {
+    const key = sim.central_check || `__${sim.name || sim.id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        checkId: sim.central_check || null,
+        label: sim.central_check
+          ? (checkLabelMap[sim.central_check] || sim.central_check)
+          : (sim.name || sim.id),
+        sims: [],
+      });
+    }
+    groups.get(key).sims.push(sim);
+  }
+
+  // Compute aggregate firing status per group
+  for (const group of groups.values()) {
+    let anyFiring = false, anyFail = false, anyConfigured = false;
+    for (const sim of group.sims) {
+      const pf = sim.central_pass_fail;
+      if (pf) { anyConfigured = true; if (pf.firing) anyFiring = true; else anyFail = true; }
+    }
+    if (!anyConfigured) {
+      group.aggLabel = group.checkId ? 'Pending' : 'No Check'; group.aggCls = 'sim-unknown';
+    } else if (anyFiring && !anyFail) {
+      group.aggLabel = '✓ Firing'; group.aggCls = 'sim-pass';
+    } else if (anyFail && !anyFiring) {
+      group.aggLabel = '✗ Not Firing'; group.aggCls = 'sim-fail';
+    } else {
+      group.aggLabel = '⚠ Partial'; group.aggCls = 'sim-warn';
+    }
+  }
+  return groups;
+}
+
+/** Build client rows into a container element */
+function buildClientRows(sim, container) {
+  container.textContent = '';
+  const clients = sim.configured_clients || [];
+  if (!clients.length) {
+    const empty = document.createElement('div');
+    empty.className = 'sim-client-row';
+    empty.textContent = 'No clients configured.';
+    container.appendChild(empty);
+    return;
+  }
+  clients.forEach((c) => {
+    const row = document.createElement('div');
+    const statusCls = c.online ? 'online' : c.reporting ? 'offline' : 'not-reporting';
+    row.className = `sim-client-row ${statusCls}`;
+
+    const hostname = document.createElement('span');
+    hostname.className = 'sim-client-hostname';
+    hostname.textContent = c.hostname;
+
+    const statusSpan = document.createElement('span');
+    statusSpan.className = 'sim-client-status';
+    if (c.online) {
+      statusSpan.textContent = '● Online'; statusSpan.style.color = 'var(--hpe-green-dark)';
+    } else if (c.reporting) {
+      statusSpan.textContent = '○ Offline'; statusSpan.style.color = '#999';
+    } else {
+      statusSpan.textContent = '⚠ Not Reporting'; statusSpan.style.color = '#e67e22';
+    }
+
+    const lastSeen = document.createElement('span');
+    lastSeen.className = 'sim-client-lastseen';
+    if (c.last_seen) {
+      const ago = Math.round((Date.now() - new Date(c.last_seen).getTime()) / 60000);
+      lastSeen.textContent = ago < 2 ? 'just now' : `${ago}m ago`;
+    } else {
+      lastSeen.textContent = 'never seen';
+    }
+
+    row.appendChild(hostname);
+    row.appendChild(statusSpan);
+    row.appendChild(lastSeen);
+    container.appendChild(row);
+  });
 }
 
 function renderSimulationCards() {
@@ -1793,129 +1880,117 @@ function renderSimulationCards() {
   }
   if (simEmpty) simEmpty.classList.add('hidden');
 
-  simulationsData.forEach((sim) => {
+  const groups = getSimGroups();
+
+  for (const [key, group] of groups) {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'sim-card';
-    card.addEventListener('click', () => openSimDetail(sim.id));
+    card.addEventListener('click', () => openSimGroup(key));
 
     const header = document.createElement('div');
     header.className = 'sim-card-header';
 
-    const name = document.createElement('p');
-    name.className = 'sim-card-name';
-    name.textContent = sim.name || sim.id;
+    const nameEl = document.createElement('p');
+    nameEl.className = 'sim-card-name';
+    nameEl.textContent = group.label;
 
-    const { label, cls } = simStatusBadge(sim.central_pass_fail);
     const badge = document.createElement('span');
-    badge.className = `sim-status-badge ${cls}`;
-    badge.textContent = label;
+    badge.className = `sim-status-badge ${group.aggCls}`;
+    badge.textContent = group.aggLabel;
 
-    header.appendChild(name);
+    header.appendChild(nameEl);
     header.appendChild(badge);
 
+    const sites = [...new Set(group.sims.map(s => s.wsite).filter(Boolean))];
     const meta = document.createElement('div');
     meta.className = 'sim-card-meta';
-    meta.textContent = `Bucket: ${sim.id}  ·  Site: ${sim.wsite || '—'}`;
+    meta.textContent = sites.length ? sites.join('  ·  ') : '— no sites configured';
 
-    const apiReporting = sim.active_client_count;
-    const centralSeen = sim.central_client_count;   // null if Central not polled yet
-    const hasCentral = centralSeen !== null && centralSeen !== undefined;
-    const warn = hasCentral && apiReporting > centralSeen;
-
+    const totalActive = group.sims.reduce((a, s) => a + (s.active_client_count || 0), 0);
+    const totalConfigured = group.sims.reduce((a, s) => a + (s.configured_clients?.length || 0), 0);
     const clientsRow = document.createElement('div');
     clientsRow.className = 'sim-card-clients';
-    if (hasCentral) {
-      clientsRow.innerHTML = warn
-        ? `<span class="sim-card-clients-warn">⚠ ${centralSeen} Central / ${apiReporting} reporting</span>`
-        : `<span>${centralSeen} Central / ${apiReporting} reporting</span>`;
-      clientsRow.title = 'Central-seen clients / Clients reporting to local API';
-    } else {
-      clientsRow.innerHTML = `<span>${apiReporting} reporting (Central not configured)</span>`;
-    }
+    clientsRow.innerHTML = `<span>${totalActive}/${totalConfigured} clients reporting</span>`;
 
     card.appendChild(header);
     card.appendChild(meta);
     card.appendChild(clientsRow);
     simCardsGrid.appendChild(card);
-  });
+  }
 }
 
-function openSimDetail(simId) {
-  const sim = simulationsData.find((s) => s.id === simId);
-  if (!sim || !simOverview || !simDetail) return;
-  openSimId = simId;
+function openSimGroup(key) {
+  const groups = getSimGroups();
+  const group = groups.get(key);
+  if (!group || !simOverview || !simDetail) return;
+  openSimId = key;
   simOverview.classList.add('hidden');
   simDetail.classList.remove('hidden');
 
-  if (simDetailTitle) simDetailTitle.textContent = sim.name || sim.id;
-  if (simDetailSub) simDetailSub.textContent = `Bucket: ${sim.id}  ·  Site: ${sim.wsite || '—'}`;
-
-  const { label, cls } = simStatusBadge(sim.central_pass_fail);
+  if (simDetailTitle) simDetailTitle.textContent = group.label;
+  if (simDetailSub) {
+    const sites = group.sims.map(s => s.wsite).filter(Boolean);
+    simDetailSub.textContent = sites.length
+      ? `Sites: ${sites.join(', ')}`
+      : `${group.sims.length} bucket(s) — no sites mapped`;
+  }
   if (simDetailBadge) {
-    simDetailBadge.textContent = label;
-    simDetailBadge.className = `sim-status-badge ${cls}`;
+    simDetailBadge.textContent = group.aggLabel;
+    simDetailBadge.className = `sim-status-badge ${group.aggCls}`;
   }
 
-  const total = sim.configured_clients.length;
-  const simDetailCentralClients = document.getElementById('sim-detail-central-clients');
-  if (simDetailTotal) simDetailTotal.textContent = total;
-  if (simDetailActive) simDetailActive.textContent = sim.active_client_count;
-  if (simDetailCentralClients) {
-    simDetailCentralClients.textContent = sim.central_client_count !== null && sim.central_client_count !== undefined
-      ? sim.central_client_count
-      : '—';
-  }
-  if (simDetailWsite) simDetailWsite.textContent = sim.wsite || '—';
-  if (simDetailCount) simDetailCount.textContent = total;
+  const siteList = document.getElementById('sim-site-list');
+  if (!siteList) return;
+  siteList.textContent = '';
 
-  if (simClientList) {
-    simClientList.textContent = '';
-    if (!total) {
-      const empty = document.createElement('div');
-      empty.className = 'sim-client-row';
-      empty.textContent = 'No clients configured for this simulation.';
-      simClientList.appendChild(empty);
-    } else {
-      sim.configured_clients.forEach((c) => {
-        const row = document.createElement('div');
-        const statusCls = c.online ? 'online' : c.reporting ? 'offline' : 'not-reporting';
-        row.className = `sim-client-row ${statusCls}`;
+  group.sims.forEach((sim) => {
+    const total = sim.configured_clients?.length || 0;
+    const active = sim.active_client_count || 0;
+    const { label, cls } = simStatusBadge(sim.central_pass_fail);
 
-        const hostname = document.createElement('span');
-        hostname.className = 'sim-client-hostname';
-        hostname.textContent = c.hostname;
+    const siteRow = document.createElement('div');
+    siteRow.className = 'sim-site-row';
 
-        const statusSpan = document.createElement('span');
-        statusSpan.className = 'sim-client-status';
-        if (c.online) {
-          statusSpan.textContent = '● Online';
-          statusSpan.style.color = 'var(--hpe-green-dark)';
-        } else if (c.reporting) {
-          statusSpan.textContent = '○ Offline';
-          statusSpan.style.color = '#999';
-        } else {
-          statusSpan.textContent = '⚠ Not Reporting';
-          statusSpan.style.color = '#e67e22';
-        }
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'sim-site-toggle';
 
-        const lastSeen = document.createElement('span');
-        lastSeen.className = 'sim-client-lastseen';
-        if (c.last_seen) {
-          const d = new Date(c.last_seen);
-          const ago = Math.round((Date.now() - d.getTime()) / 60000);
-          lastSeen.textContent = ago < 2 ? 'just now' : `${ago}m ago`;
-        } else {
-          lastSeen.textContent = 'never seen';
-        }
+    const siteName = document.createElement('span');
+    siteName.className = 'sim-site-name';
+    siteName.textContent = sim.wsite || sim.id;
 
-        row.appendChild(hostname);
-        row.appendChild(statusSpan);
-        row.appendChild(lastSeen);
-        simClientList.appendChild(row);
-      });
-    }
-  }
+    const siteCount = document.createElement('span');
+    siteCount.className = 'sim-site-count';
+    siteCount.textContent = `${active}/${total} reporting`;
+
+    const siteBadge = document.createElement('span');
+    siteBadge.className = `sim-status-badge ${cls}`;
+    siteBadge.textContent = label;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'sim-site-chevron';
+    chevron.textContent = '▶';
+
+    toggle.appendChild(siteName);
+    toggle.appendChild(siteCount);
+    toggle.appendChild(siteBadge);
+    toggle.appendChild(chevron);
+
+    const clientContainer = document.createElement('div');
+    clientContainer.className = 'sim-site-clients hidden';
+    buildClientRows(sim, clientContainer);
+
+    toggle.addEventListener('click', () => {
+      const wasHidden = clientContainer.classList.contains('hidden');
+      clientContainer.classList.toggle('hidden', !wasHidden);
+      chevron.textContent = wasHidden ? '▼' : '▶';
+    });
+
+    siteRow.appendChild(toggle);
+    siteRow.appendChild(clientContainer);
+    siteList.appendChild(siteRow);
+  });
 }
 
 function closeSimDetail() {
@@ -1933,7 +2008,7 @@ async function loadSimulations() {
       simLastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
     }
     if (openSimId) {
-      openSimDetail(openSimId);
+      openSimGroup(openSimId);
     }
   } catch (err) {
     if (simEmpty) {

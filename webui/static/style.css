@@ -897,6 +897,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 }
 .sim-pass  { background: var(--hpe-green-light); color: var(--hpe-green-dark); border: 1px solid rgba(1,169,130,0.35); }
 .sim-fail  { background: #fff2f2; color: #c0392b; border: 1px solid rgba(192,57,43,0.3); }
+.sim-warn  { background: #fff8e6; color: #b7690a; border: 1px solid rgba(183,105,10,0.3); }
 .sim-unknown { background: #f0f0f0; color: var(--muted); border: 1px solid var(--border); }
 
 .sim-card-meta {
@@ -915,21 +916,40 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .sim-card-clients-warn { color: #e67e22; font-weight: 600; }
 
 /* ── Simulation drill-down ──────────────────────────────────────── */
-.sim-detail-summary {
-  display: flex;
-  gap: 1.5rem;
-  padding: 0.75rem 1.25rem 0;
-  flex-wrap: wrap;
-}
-.sim-detail-stat {
+.sim-site-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+  padding: 1rem 1.25rem;
 }
-.sim-detail-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.sim-detail-stat-value { font-size: 1.1rem; font-weight: 600; color: var(--text); }
+.sim-site-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.sim-site-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--card-bg, #fff);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+.sim-site-toggle:hover { background: #f5fdf9; }
+.sim-site-name { font-weight: 700; font-size: 1rem; color: var(--text); flex: 0 0 auto; min-width: 80px; }
+.sim-site-count { font-size: 0.88rem; color: var(--muted); flex: 1; }
+.sim-site-chevron { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+.sim-site-clients {
+  padding: 0.5rem 1rem 0.75rem;
+  border-top: 1px solid var(--border);
+  background: #fafafa;
+}
 
-/* Client list in drill-down */
+/* ── Client list (shared between old detail and new site rows) ── */
 .sim-client-list {
   display: flex;
   flex-direction: column;
