@@ -171,53 +171,85 @@
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">
         <h2>Aruba Central Connection</h2>
-        <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.
-           Generate credentials in Central under <strong>Global Settings → API Gateway → System Apps &amp; Tokens</strong>.
-           Only the <strong>Cluster URL</strong> and <strong>Access Token</strong> are required to start.
-           Add the Refresh Token, Client ID, and Client Secret to enable automatic token renewal.</p>
+        <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.</p>
       </div>
 
       <div class="setup-form">
+        <!-- API Version toggle -->
+        <div class="form-group">
+          <label class="form-label">API Version</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="central-api-version" id="central-api-classic" value="classic" checked>
+              <span>Classic Central</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="central-api-version" id="central-api-new" value="new_central">
+              <span>New Central (CNX)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Cluster URL — shared by both but hint changes -->
         <div class="form-group">
           <label class="form-label" for="central-cluster-url">Cluster URL</label>
           <input id="central-cluster-url" class="form-input" type="text"
                  placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
-          <span class="form-hint">Found in Central → API Gateway. Varies by region (US-1, EU-1, AP-1 …).</span>
+          <span class="form-hint" id="central-cluster-url-hint">
+            Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>
+          </span>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
-          <input id="central-access-token" class="form-input" type="password"
-                 placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
-          <span class="form-hint" id="central-access-token-status"></span>
+        <!-- Classic-only fields -->
+        <div id="central-classic-fields">
+          <div class="form-group">
+            <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
+            <input id="central-access-token" class="form-input" type="password"
+                   placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
+            <span class="form-hint" id="central-access-token-status"></span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
+            <input id="central-refresh-token" class="form-input" type="password"
+                   placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
+            <span class="form-hint" id="central-refresh-token-status"></span>
+          </div>
+
+          <hr class="setup-divider">
+          <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
+
+          <div class="form-group">
+            <label class="form-label" for="central-customer-id">Customer ID</label>
+            <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+            <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
-          <input id="central-refresh-token" class="form-input" type="password"
-                 placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
-          <span class="form-hint" id="central-refresh-token-status"></span>
+        <!-- New Central (CNX) fields -->
+        <div id="central-new-fields" class="hidden">
+          <p class="form-hint" style="margin:0 0 12px">
+            New Central uses HPE GreenLake client credentials. Go to <strong>Manage Workspace → Personal API clients</strong>
+            and create a credential scoped to your Central instance.
+            Tokens are fetched and renewed automatically using your Client ID and Secret — no manual token pasting needed.
+          </p>
         </div>
 
-        <hr class="setup-divider">
-        <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
-
+        <!-- Client ID + Secret — shown for both (Classic: optional refresh; New Central: required) -->
         <div class="form-group">
-          <label class="form-label" for="central-client-id">Client ID</label>
+          <label class="form-label" for="central-client-id">
+            Client ID <span id="central-client-id-badge" class="token-optional-badge">optional — for auto-renewal</span>
+          </label>
           <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="central-client-secret">Client Secret</label>
+          <label class="form-label" for="central-client-secret">
+            Client Secret <span id="central-client-secret-badge" class="token-optional-badge">optional — for auto-renewal</span>
+          </label>
           <input id="central-client-secret" class="form-input" type="password"
                  placeholder="Leave blank to keep current" autocomplete="new-password">
           <span class="form-hint" id="central-client-secret-status"></span>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="central-customer-id">Customer ID</label>
-          <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
-          <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
         </div>
 
         <div class="form-actions">
@@ -231,23 +263,28 @@
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">
         <h2>Site Mappings</h2>
-        <p>Map the wsite value from simulation.conf to the site name used in Aruba Central.</p>
+        <p>Match your simulation.conf wsite values to Aruba Central site names. Click <strong>Load Sites</strong> to populate dropdowns from both sources.</p>
       </div>
 
       <div class="setup-form">
+        <div class="form-actions" style="margin-bottom:0.75rem;">
+          <button id="load-sites-btn" class="btn btn-secondary" type="button">🔄 Load Sites</button>
+          <span id="sites-load-status" class="form-hint" style="margin-left:0.75rem;"></span>
+        </div>
+
         <table class="mapping-table">
           <thead>
             <tr>
-              <th>wsite</th>
-              <th>Central Site Name</th>
-              <th>Remove</th>
+              <th>simulation.conf wsite</th>
+              <th>Aruba Central Site</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="site-mappings-body"></tbody>
         </table>
 
         <div class="form-actions">
-          <button id="add-mapping-btn" class="btn btn-secondary" type="button">Add Mapping</button>
+          <button id="add-mapping-btn" class="btn btn-secondary" type="button">+ Add Row</button>
           <button id="save-mappings-btn" class="btn btn-primary" type="button">Save Mappings</button>
         </div>
 

@@ -749,3 +749,22 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   margin-left: 6px;
   vertical-align: middle;
 }
+
+/* API version radio toggle */
+.radio-group {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.radio-option input[type="radio"] {
+  accent-color: var(--hpe-green, #01a982);
+  width: 1rem;
+  height: 1rem;
+}

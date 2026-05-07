@@ -104,6 +104,7 @@ const centralSiteClients = document.getElementById('central-site-clients');
 const centralSiteChecks = document.getElementById('central-site-checks');
 const centralSiteHistory = document.getElementById('central-site-history');
 const centralClusterUrlInput = document.getElementById('central-cluster-url');
+const centralClusterUrlHint = document.getElementById('central-cluster-url-hint');
 const centralAccessTokenInput = document.getElementById('central-access-token');
 const centralRefreshTokenInput = document.getElementById('central-refresh-token');
 const centralClientIdInput = document.getElementById('central-client-id');
@@ -111,10 +112,44 @@ const centralClientSecretInput = document.getElementById('central-client-secret'
 const centralCustomerIdInput = document.getElementById('central-customer-id');
 const centralTestBtn = document.getElementById('central-test-btn');
 const centralTestMsg = document.getElementById('central-test-msg');
+const centralClassicFields = document.getElementById('central-classic-fields');
+const centralNewFields = document.getElementById('central-new-fields');
+const centralClientIdBadge = document.getElementById('central-client-id-badge');
+const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
+
+function getCentralApiVersion() {
+  const checked = document.querySelector('input[name="central-api-version"]:checked');
+  return checked ? checked.value : 'classic';
+}
+
+function applyCentralVersionUI(version) {
+  const isNew = version === 'new_central';
+  if (centralClassicFields) centralClassicFields.classList.toggle('hidden', isNew);
+  if (centralNewFields) centralNewFields.classList.toggle('hidden', !isNew);
+  if (centralClusterUrlHint) {
+    centralClusterUrlHint.innerHTML = isNew
+      ? 'New Central: found in <strong>Menu → API Gateway → REST API</strong>. e.g. <code>us1.api.central.arubanetworks.com</code>'
+      : 'Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>';
+  }
+  if (centralClientIdBadge) {
+    centralClientIdBadge.textContent = isNew ? 'required' : 'optional — for auto-renewal';
+    centralClientIdBadge.className = isNew ? 'token-required-badge' : 'token-optional-badge';
+  }
+  if (centralClientSecretBadge) {
+    centralClientSecretBadge.textContent = isNew ? 'required' : 'optional — for auto-renewal';
+    centralClientSecretBadge.className = isNew ? 'token-required-badge' : 'token-optional-badge';
+  }
+}
+
+document.querySelectorAll('input[name="central-api-version"]').forEach((radio) => {
+  radio.addEventListener('change', () => applyCentralVersionUI(getCentralApiVersion()));
+});
 const siteMappingsBody = document.getElementById('site-mappings-body');
 const addMappingBtn = document.getElementById('add-mapping-btn');
 const saveMappingsBtn = document.getElementById('save-mappings-btn');
 const centralMappingsMsg = document.getElementById('central-mappings-msg');
+const loadSitesBtn = document.getElementById('load-sites-btn');
+const sitesLoadStatus = document.getElementById('sites-load-status');
 const selectedChecksPreview = document.getElementById('selected-checks-preview');
 const loadChecksBtn = document.getElementById('central-load-checks-btn');
 const saveChecksBtn = document.getElementById('save-checks-btn');
@@ -170,6 +205,12 @@ function applySettingsToUI(s) {
   setInputValueIfIdle(centralClusterUrlInput, settings.central_config.cluster_url);
   setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
   setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
+
+  // Set API version radio + toggle UI
+  const version = settings.central_config.api_version || 'classic';
+  const radio = document.querySelector(`input[name="central-api-version"][value="${version}"]`);
+  if (radio) radio.checked = true;
+  applyCentralVersionUI(version);
 
   // Show "configured" hint for secrets without revealing values
   const atStatus = document.getElementById('central-access-token-status');
@@ -471,16 +512,20 @@ function buildCheckBadge(label, kind) {
 }
 
 function buildCentralConfigPayload() {
+  const version = getCentralApiVersion();
   const payload = {
+    api_version: version,
     cluster_url: centralClusterUrlInput?.value.trim() || '',
     client_id: centralClientIdInput?.value.trim() || '',
-    customer_id: centralCustomerIdInput?.value.trim() || ''
   };
-  // Only send secrets when the user has typed something — blank = keep existing
-  const accessToken = centralAccessTokenInput?.value.trim();
-  if (accessToken) payload.access_token = accessToken;
-  const refreshToken = centralRefreshTokenInput?.value.trim();
-  if (refreshToken) payload.refresh_token = refreshToken;
+  if (version === 'classic') {
+    payload.customer_id = centralCustomerIdInput?.value.trim() || '';
+    // Only send secrets when typed — blank = keep existing
+    const accessToken = centralAccessTokenInput?.value.trim();
+    if (accessToken) payload.access_token = accessToken;
+    const refreshToken = centralRefreshTokenInput?.value.trim();
+    if (refreshToken) payload.refresh_token = refreshToken;
+  }
   const secret = centralClientSecretInput?.value.trim();
   if (secret) payload.client_secret = secret;
   return payload;
@@ -502,23 +547,53 @@ function updateLocalCentralConfig(payload) {
   };
 }
 
+// Site mapping source lists (populated by Load Sites)
+let localWsites = [];
+let centralSites = [];
+
+function buildMappingSelect(options, selected, placeholder) {
+  const sel = document.createElement('select');
+  sel.className = 'mapping-val form-control';
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = placeholder;
+  sel.appendChild(blank);
+  options.forEach((val) => {
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = val;
+    opt.selected = val === selected;
+    sel.appendChild(opt);
+  });
+  return sel;
+}
+
+function buildMappingInput(value, placeholder) {
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'mapping-val';
+  inp.value = value;
+  inp.placeholder = placeholder;
+  return inp;
+}
+
 function addMappingRow(wsite = '', centralSite = '') {
   if (!siteMappingsBody) return;
   const row = document.createElement('tr');
 
   const wsiteCell = document.createElement('td');
-  const wsiteInput = document.createElement('input');
-  wsiteInput.type = 'text';
-  wsiteInput.value = wsite;
-  wsiteInput.placeholder = 'e.g. branch-a';
-  wsiteCell.appendChild(wsiteInput);
+  wsiteCell.appendChild(
+    localWsites.length
+      ? buildMappingSelect(localWsites, wsite, '— select wsite —')
+      : buildMappingInput(wsite, 'e.g. MIA')
+  );
 
   const centralCell = document.createElement('td');
-  const centralInput = document.createElement('input');
-  centralInput.type = 'text';
-  centralInput.value = centralSite;
-  centralInput.placeholder = 'Central site name';
-  centralCell.appendChild(centralInput);
+  centralCell.appendChild(
+    centralSites.length
+      ? buildMappingSelect(centralSites, centralSite, '— select Central site —')
+      : buildMappingInput(centralSite, 'Central site name')
+  );
 
   const removeCell = document.createElement('td');
   const removeBtn = document.createElement('button');

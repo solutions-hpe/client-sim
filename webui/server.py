@@ -55,6 +55,7 @@ _persisted = _load_persisted_settings()
 settings: dict[str, Any] = {
     "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
     "central_config": _persisted.get("central_config", {
+        "api_version": "classic",   # "classic" | "new_central"
         "cluster_url": "",
         "access_token": "",
         "refresh_token": "",
@@ -71,15 +72,16 @@ settings: dict[str, Any] = {
 # Initialise in-memory token from persisted values so a restart
 # doesn't require the user to re-enter credentials.
 _stored_cfg = settings["central_config"]
-if _stored_cfg.get("access_token"):
+_is_new_central = _stored_cfg.get("api_version") == "new_central"
+if not _is_new_central and _stored_cfg.get("access_token"):
+    # Classic: restore pasted token from disk
     central_token: dict[str, Any] = {
         "access_token": _stored_cfg["access_token"],
         "refresh_token": _stored_cfg.get("refresh_token"),
-        # Assume token valid for 2 h from start; first 5-min tick will refresh
-        # proactively if client_id + client_secret are also configured.
         "expires_at": time.time() + 7200,
     }
 else:
+    # New Central: token will be fetched automatically via client_credentials
     central_token: dict[str, Any] = {
         "access_token": None,
         "refresh_token": None,
@@ -206,31 +208,80 @@ def _central_cfg() -> dict[str, str]:
     return settings.get("central_config", {})
 
 
+def _is_new_central_api() -> bool:
+    return _central_cfg().get("api_version") == "new_central"
+
+
 def _central_ready() -> bool:
-    """Minimum config needed: cluster URL + an access token to use."""
+    """Minimum config needed to make API calls."""
     cfg = _central_cfg()
-    return bool(cfg.get("cluster_url") and (cfg.get("access_token") or central_token.get("access_token")))
+    if not cfg.get("cluster_url"):
+        return False
+    if _is_new_central_api():
+        # New Central: need client_id + client_secret to auto-fetch tokens
+        return bool(cfg.get("client_id") and cfg.get("client_secret"))
+    # Classic: need a token already loaded or stored
+    return bool(cfg.get("access_token") or central_token.get("access_token"))
 
 
 def _can_refresh() -> bool:
-    """True when we have everything needed to do a token refresh."""
+    """True when we can obtain a fresh token automatically."""
     cfg = _central_cfg()
-    return bool(
-        cfg.get("cluster_url")
-        and cfg.get("client_id")
-        and cfg.get("client_secret")
-        and (cfg.get("refresh_token") or central_token.get("refresh_token"))
-    )
+    if not cfg.get("cluster_url") or not cfg.get("client_id") or not cfg.get("client_secret"):
+        return False
+    if _is_new_central_api():
+        return True  # New Central uses client_credentials — no refresh token needed
+    return bool(cfg.get("refresh_token") or central_token.get("refresh_token"))
+
+
+# New Central GLP SSO token endpoint
+_NEW_CENTRAL_TOKEN_URL = "https://sso.common.cloud.hpe.com/as/token.oauth2"
+
+
+async def _fetch_new_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
+    """Obtain a token for New Central via HPE GreenLake client_credentials grant."""
+    cfg = _central_cfg()
+    try:
+        resp = await client.post(
+            _NEW_CENTRAL_TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        if not resp.is_success:
+            return False, f"Token request failed (HTTP {resp.status_code}): {resp.text[:300]}"
+        payload = resp.json()
+        token = payload.get("access_token")
+        if not token:
+            return False, f"No access_token in GLP response: {resp.text[:300]}"
+        expires_in = payload.get("expires_in", 7200)
+        central_token["access_token"] = token
+        central_token["refresh_token"] = None
+        central_token["expires_at"] = time.time() + expires_in - 60
+        logger.info("New Central token obtained via client_credentials (expires in %ss)", expires_in)
+        return True, "Token obtained via client_credentials."
+    except Exception as exc:
+        return False, f"GLP token request error: {exc}"
 
 
 async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
-    """Load the user-provided access token into runtime state and verify it.
+    """Load/obtain the access token and verify it against a probe endpoint.
 
+    For New Central: obtains a token via GLP client_credentials grant.
+    For Classic: loads the user-pasted token from settings and probes the API.
     Returns (success, detail_message).
-    Tries /monitoring/v2/alerts first; if that endpoint returns 404/403 falls
-    back to /configuration/v2/groups so a valid token isn't falsely rejected
-    due to missing scopes on the alerts endpoint.
     """
+    if _is_new_central_api():
+        ok, msg = await _fetch_new_central_token(client)
+        if not ok:
+            return False, msg
+        # Probe to confirm the token works against the base URL
+        return await _probe_central_token(client)
+
     cfg = _central_cfg()
     token = cfg.get("access_token", "").strip()
     if not token:
@@ -241,10 +292,16 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         central_token["refresh_token"] = cfg["refresh_token"]
     central_token["expires_at"] = time.time() + 7200
 
+    return await _probe_central_token(client)
+
+
+async def _probe_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
+    """Probe the Central API to confirm the in-memory token is accepted."""
+    cfg = _central_cfg()
     base_url = cfg["cluster_url"].rstrip("/")
+    token = central_token.get("access_token", "")
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Try a sequence of lightweight endpoints; the first that returns 2xx wins.
     probe_urls = [
         (f"{base_url}/configuration/v2/groups", {"limit": 1, "offset": 0}),
         (f"{base_url}/monitoring/v1/alerts", {"limit": 1}),
@@ -288,11 +345,16 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
 
 
 async def _refresh_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
-    """Refresh access token using the stored refresh_token + client credentials.
+    """Refresh/renew the access token.
+
+    New Central: re-requests via GLP client_credentials (no refresh token).
+    Classic: uses refresh_token grant against Central's OAuth endpoint.
     Returns (success, detail_message).
     """
     if not _can_refresh():
-        return False, "Cannot refresh: missing client_id, client_secret, or refresh_token."
+        return False, "Cannot refresh: missing client_id or client_secret."
+    if _is_new_central_api():
+        return await _fetch_new_central_token(client)
     cfg = _central_cfg()
     token_url = cfg["cluster_url"].rstrip("/") + "/oauth2/token"
     refresh_tok = cfg.get("refresh_token") or central_token.get("refresh_token", "")
@@ -785,20 +847,26 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if update.central_config is not None:
         merged = dict(settings["central_config"])
         # Only update keys that are explicitly provided and non-empty for secrets
-        for key in ("cluster_url", "client_id", "customer_id"):
+        for key in ("cluster_url", "client_id", "customer_id", "api_version"):
             if key in update.central_config:
                 merged[key] = update.central_config[key].strip()
         for secret_key in ("client_secret", "access_token", "refresh_token"):
             val = update.central_config.get(secret_key, "").strip()
             if val:  # blank = keep existing
                 merged[secret_key] = val
+        # Switching to New Central — clear stale classic tokens from runtime
+        if merged.get("api_version") == "new_central":
+            central_token["access_token"] = None
+            central_token["refresh_token"] = None
+            central_token["expires_at"] = 0.0
         settings["central_config"] = merged
-        # Load new tokens into runtime state immediately
-        if merged.get("access_token"):
-            central_token["access_token"] = merged["access_token"]
-            central_token["expires_at"] = time.time() + 7200
-        if merged.get("refresh_token"):
-            central_token["refresh_token"] = merged["refresh_token"]
+        # Classic: load new tokens into runtime state immediately
+        if merged.get("api_version", "classic") == "classic":
+            if merged.get("access_token"):
+                central_token["access_token"] = merged["access_token"]
+                central_token["expires_at"] = time.time() + 7200
+            if merged.get("refresh_token"):
+                central_token["refresh_token"] = merged["refresh_token"]
 
     if update.site_mappings is not None:
         settings["site_mappings"] = {k.strip(): v.strip() for k, v in update.site_mappings.items() if k.strip()}
@@ -926,6 +994,66 @@ async def api_central_poll() -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Central not configured.")
     asyncio.create_task(_poll_central_once(httpx.AsyncClient()))
     return {"status": "ok", "message": "Poll started."}
+
+
+@app.get("/api/central/sites")
+async def api_central_sites() -> dict[str, Any]:
+    """Fetch site list from Aruba Central API."""
+    if not _central_ready():
+        raise HTTPException(status_code=422, detail="Central not configured — enter Cluster URL and Access Token first.")
+    if not central_token.get("access_token"):
+        raise HTTPException(status_code=503, detail="No valid token — click 'Save & Test Connection' in Setup first.")
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    sites: list[str] = []
+
+    async with httpx.AsyncClient() as client:
+        for path in ["/monitoring/v2/sites", "/monitoring/v1/sites"]:
+            try:
+                resp = await client.get(
+                    f"{base_url}{path}",
+                    headers=headers,
+                    params={"limit": 1000, "offset": 0},
+                    timeout=20,
+                )
+                logger.info("Central sites %s → %s", path, resp.status_code)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for site in data.get("sites", []):
+                        name = site.get("site_name") or site.get("name", "")
+                        if name:
+                            sites.append(name)
+                    break
+                if resp.status_code == 404:
+                    continue
+            except Exception as exc:
+                logger.warning("Could not fetch Central sites from %s: %s", path, exc)
+                break
+
+    return {"sites": sorted(set(sites))}
+
+
+@app.get("/api/local-wsites")
+async def api_local_wsites() -> dict[str, Any]:
+    """Extract unique wsite values from simulation.conf in the repo."""
+    import configparser
+    config_path = repo_path("configs", "simulation.conf")
+    if not config_path.exists():
+        return {"wsites": []}
+    parser = configparser.ConfigParser()
+    try:
+        parser.read_string(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Could not parse simulation.conf: %s", exc)
+        return {"wsites": []}
+    wsites: set[str] = set()
+    for section in parser.sections():
+        if parser.has_option(section, "wsite"):
+            val = parser.get(section, "wsite").strip()
+            if val:
+                wsites.add(val)
+    return {"wsites": sorted(wsites)}
 
 
 @app.get("/api/health")
