@@ -1969,10 +1969,10 @@ function openSimGroup(key) {
 
   if (simDetailTitle) simDetailTitle.textContent = group.label;
   if (simDetailSub) {
-    const sites = group.sims.map(s => s.wsite).filter(Boolean);
-    simDetailSub.textContent = sites.length
-      ? `Sites: ${sites.join(', ')}`
-      : `${group.sims.length} bucket(s) — no sites mapped`;
+    const uniqueSites = [...new Set(group.sims.map(s => s.wsite).filter(Boolean))];
+    simDetailSub.textContent = uniqueSites.length
+      ? `Running at: ${uniqueSites.join(', ')}`
+      : 'No sites configured';
   }
   if (simDetailBadge) {
     simDetailBadge.textContent = group.aggLabel;
@@ -1983,53 +1983,42 @@ function openSimGroup(key) {
   if (!siteList) return;
   siteList.textContent = '';
 
-  group.sims.forEach((sim) => {
-    const total = sim.configured_clients?.length || 0;
-    const active = sim.active_client_count || 0;
-    const { label, cls } = simStatusBadge(sim.central_pass_fail);
+  // Aggregate buckets by site — user only cares about sites + reporting count
+  const siteMap = new Map();
+  for (const sim of group.sims) {
+    const site = sim.wsite || '(no site)';
+    if (!siteMap.has(site)) {
+      siteMap.set(site, { active: 0, centralPf: null });
+    }
+    const entry = siteMap.get(site);
+    entry.active += sim.active_client_count || 0;
+    // Use Central pass/fail if any bucket at this site has it configured
+    if (sim.central_pass_fail && !entry.centralPf) entry.centralPf = sim.central_pass_fail;
+  }
+
+  for (const [site, { active, centralPf }] of siteMap) {
+    const { label, cls } = simStatusBadge(centralPf);
 
     const siteRow = document.createElement('div');
     siteRow.className = 'sim-site-row';
 
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'sim-site-toggle';
-
     const siteName = document.createElement('span');
     siteName.className = 'sim-site-name';
-    siteName.textContent = sim.wsite ? `${sim.wsite} (${sim.id})` : sim.id;
+    siteName.textContent = site;
 
     const siteCount = document.createElement('span');
     siteCount.className = 'sim-site-count';
-    siteCount.textContent = `${active}/${total} reporting`;
+    siteCount.textContent = `${active} reporting`;
 
     const siteBadge = document.createElement('span');
     siteBadge.className = `sim-status-badge ${cls}`;
     siteBadge.textContent = label;
 
-    const chevron = document.createElement('span');
-    chevron.className = 'sim-site-chevron';
-    chevron.textContent = '▶';
-
-    toggle.appendChild(siteName);
-    toggle.appendChild(siteCount);
-    toggle.appendChild(siteBadge);
-    toggle.appendChild(chevron);
-
-    const clientContainer = document.createElement('div');
-    clientContainer.className = 'sim-site-clients hidden';
-    buildClientRows(sim, clientContainer);
-
-    toggle.addEventListener('click', () => {
-      const wasHidden = clientContainer.classList.contains('hidden');
-      clientContainer.classList.toggle('hidden', !wasHidden);
-      chevron.textContent = wasHidden ? '▼' : '▶';
-    });
-
-    siteRow.appendChild(toggle);
-    siteRow.appendChild(clientContainer);
+    siteRow.appendChild(siteName);
+    siteRow.appendChild(siteCount);
+    siteRow.appendChild(siteBadge);
     siteList.appendChild(siteRow);
-  });
+  }
 }
 
 function closeSimDetail() {
