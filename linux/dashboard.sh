@@ -11,7 +11,6 @@ fi
 #------------------------------------------------------------
 # Simulation Dashboard (Read-only live monitor)
 #------------------------------------------------------------
-log="/usr/local/scripts/sim.log"
 refresh_rate=5
 
 # Terminal colors — degrade gracefully if tput is unavailable (e.g. SSH without TERM)
@@ -187,19 +186,6 @@ while true; do
   echo ""
   printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
-  echo ""
-  printf "%s  Recent Errors (sim.log):%s\n" "$BOLD" "$RST"
-  # Show last 5 lines that contain [error] or [warning] — surface problems fast
-  # WHY: Operators don't want to read all 10 log lines; they want errors first.
-  errors_shown=$(grep -i '\[error\]\|\[warning\]' "$log" 2>/dev/null | tail -n 5)
-  if [[ -n "$errors_shown" ]]; then
-    echo "$errors_shown" | sed "s/^/  ${RED}/" | sed "s/$/${RST}/"
-  else
-    printf "  ${GRN}No recent errors${RST}\n"
-  fi
-  echo ""
-  printf "%s  Recent Log (last 6 lines):%s\n" "$BOLD" "$RST"
-  tail -n 6 "$log" 2>/dev/null | sed 's/^/  /'
   printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
   sleep "$refresh_rate"
 done
