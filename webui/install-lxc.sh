@@ -81,11 +81,11 @@ LOG="/var/log/client-sim-dashboard-install.log"
 # Override any value via environment variable before running.
 # Leave DHCP_IFACE unset (default) to auto-detect.
 DHCP_IFACE="${DHCP_IFACE:-}"           # auto-detected below after logging starts
-DHCP_SUBNET="${DHCP_SUBNET:-169.254.1.0}"
+DHCP_SUBNET="${DHCP_SUBNET:-169.253.1.0}"
 DHCP_PREFIX="${DHCP_PREFIX:-24}"
-DHCP_GATEWAY="${DHCP_GATEWAY:-169.254.1.1}"
-DHCP_RANGE_START="${DHCP_RANGE_START:-169.254.1.11}"
-DHCP_RANGE_END="${DHCP_RANGE_END:-169.254.1.254}"
+DHCP_GATEWAY="${DHCP_GATEWAY:-169.253.1.1}"
+DHCP_RANGE_START="${DHCP_RANGE_START:-169.253.1.11}"
+DHCP_RANGE_END="${DHCP_RANGE_END:-169.253.1.254}"
 DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-1h}"
 
 # CLI flags take priority over environment variables

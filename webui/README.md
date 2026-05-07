@@ -15,11 +15,11 @@ Proxmox Host
 ├── vmbr255  (internal bridge — no uplink, isolated)
 │   ├── WebUI LXC
 │   │   ├── eth0 → management network  (internet, admin access)
-│   │   └── eth1 → vmbr255  static 169.254.1.1/24
-│   │        └── dnsmasq: hands out 169.254.1.11–254
+│   │   └── eth1 → vmbr255  static 169.253.1.1/24
+│   │        └── dnsmasq: hands out 169.253.1.11–254
 │   └── Client VMs / LXCs
-│       └── NIC → vmbr255  (DHCP → 169.254.1.x)
-│                simulation.conf: server_url=http://169.254.1.1:8000
+│       └── NIC → vmbr255  (DHCP → 169.253.1.x)
+│                simulation.conf: server_url=http://169.253.1.1:8000
 ```
 
 ### Step 1 — Run the Proxmox host setup script
@@ -129,8 +129,8 @@ sudo bash install-lxc.sh --branch lrb --port 8000
 
 The installer will:
 1. Install Python, git, and dnsmasq
-2. Assign `169.254.1.1/24` to `eth1`
-3. Configure dnsmasq to serve DHCP `169.254.1.11–254` on `eth1` only
+2. Assign `169.253.1.1/24` to `eth1`
+3. Configure dnsmasq to serve DHCP `169.253.1.11–254` on `eth1` only
 4. Deploy the FastAPI dashboard and set up a systemd service
 5. Print a health check summary and the `server_url` to use in `simulation.conf`
 
@@ -140,12 +140,12 @@ The **installer version** is written to `INSTALLER_VERSION` and displayed in the
 
 For each client VM or LXC:
 - Add a NIC on bridge `vmbr255`, set to DHCP
-- It will receive an IP in `169.254.1.11–254`
+- It will receive an IP in `169.253.1.11–254`
 - Set in `simulation.conf`:
 
 ```ini
 [server]
-server_url=http://169.254.1.1:8000
+server_url=http://169.253.1.1:8000
 ```
 
 ---
@@ -157,11 +157,11 @@ All DHCP settings are configurable via environment variables before running the 
 | Variable | Default | Description |
 |---|---|---|
 | `DHCP_IFACE` | `eth1` | Interface connected to vmbr255. Set to `""` to skip DHCP setup |
-| `DHCP_GATEWAY` | `169.254.1.1` | Static IP assigned to this LXC on vmbr255 (also the gateway clients receive) |
-| `DHCP_SUBNET` | `169.254.1.0` | Network address |
+| `DHCP_GATEWAY` | `169.253.1.1` | Static IP assigned to this LXC on vmbr255 (also the gateway clients receive) |
+| `DHCP_SUBNET` | `169.253.1.0` | Network address |
 | `DHCP_PREFIX` | `24` | Subnet prefix length |
-| `DHCP_RANGE_START` | `169.254.1.11` | First DHCP address (first 10 IPs reserved) |
-| `DHCP_RANGE_END` | `169.254.1.254` | Last DHCP address |
+| `DHCP_RANGE_START` | `169.253.1.11` | First DHCP address (first 10 IPs reserved) |
+| `DHCP_RANGE_END` | `169.253.1.254` | Last DHCP address |
 | `DHCP_LEASE_TIME` | `12h` | DHCP lease duration |
 
 Example — custom subnet:
@@ -318,10 +318,10 @@ Clients connect to the dashboard by setting `server_url` in their `simulation.co
 
 ```ini
 [server]
-server_url=http://169.254.1.1:8000
+server_url=http://169.253.1.1:8000
 ```
 
-Replace `169.254.1.1` with the dashboard IP on your network. If using the standard Proxmox deployment (Step 4 above), this is the `eth1` address of the WebUI LXC on `vmbr255`.
+Replace `169.253.1.1` with the dashboard IP on your network. If using the standard Proxmox deployment (Step 4 above), this is the `eth1` address of the WebUI LXC on `vmbr255`.
 
 If `server_url` is blank or the server is unreachable, clients skip all sync calls and run in **standalone mode** using their local scripts and config — no crash, no error loop.
 

@@ -3,231 +3,216 @@ version=.01
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
-echo Update Script Version $version | tee "$debug"
+echo "Update Script Version $version" | tee "$debug"
 echo "$(date)" | tee -a "$debug"
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
+
 #------------------------------------------------------------
+# Read config values
+#------------------------------------------------------------
+web_server=$(get_value 'simulation' 'web_server')
+server_url=$(get_value 'simulation' 'server_url')
+smb_repo=$(get_value 'simulation' 'smb_repo')
+smb_address=$(get_value 'address' 'smb_address')
 public_repo=$(get_value 'simulation' 'public_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
-smb_repo=$(get_value 'simulation' 'smb_repo')
-web_server=$(get_value 'simulation' 'web_server')
-server_url=$(get_value 'server' 'server_url')
-smb_address=$(get_value 'address' 'smb_address')
-#------------------------------------------------------------
-echo "Updating Scripts" | tee -a "$debug" "$log"
-
-#------------------------------------------------------------
-# Source priority:
-#   1. Web server (web_server=on and server reachable) — preferred
-#   2. SMB      (smb_repo=on) — local network share, faster than internet
-#   3. GitHub   (public_repo=on) — last resort / internet fallback
-#------------------------------------------------------------
 
 source_found=false
 
+#------------------------------------------------------------
+# Helper: copy files from a local directory into /usr/local/scripts
+# Called after a successful web or SMB sync
+#------------------------------------------------------------
+copy_local_files() {
+    local src_dir="$1"
+    echo "Copying files from $src_dir..." | tee -a "$debug"
+    shopt -s nullglob
+    local sh_files=( "$src_dir"/*.sh )
+    local txt_files=( "$src_dir"/*.txt )
+    local desktop_files=( "$src_dir"/*.desktop )
+    local conf_files=( "$src_dir"/simulation.conf )
+
+    (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
+    (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
+    (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
+    (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
+
+    if [[ -f "$src_dir/10-rsyslog.conf" ]]; then
+        sudo cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf
+    fi
+    sudo chmod -R 777 /usr/local/scripts
+}
+
+#------------------------------------------------------------
+# Helper: check if the web server API is genuinely up
+# Step 1 - TCP port reachable (rules out ICMP-only responses and dead IPs)
+# Step 2 - HTTP 200 + JSON body contains "status":"ok"
+# Ping is intentionally NOT used; a pingable IP does not mean the API is up.
+#------------------------------------------------------------
+check_api_up() {
+    local url="$1"
+    # Parse host and port from URL (http://host:port[/path])
+    local host port
+    host=$(echo "$url" | sed -E 's|https?://([^:/]+).*|\1|')
+    port=$(echo "$url" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
+    [[ -z "$port" ]] && port=80
+
+    echo "Checking TCP $host:$port ..." | tee -a "$debug"
+    if ! timeout 3 bash -c "cat < /dev/null > /dev/tcp/$host/$port" 2>/dev/null; then
+        echo "TCP port $port on $host is not open — API is DOWN" | tee -a "$debug" "$log"
+        return 1
+    fi
+
+    echo "TCP open. Checking HTTP response..." | tee -a "$debug"
+    local tmp
+    tmp=$(mktemp)
+    local http_code
+    http_code=$(curl -sS --max-time 5 -o "$tmp" -w "%{http_code}" "$url/health" 2>/dev/null)
+    local body
+    body=$(cat "$tmp")
+    rm -f "$tmp"
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "HTTP check failed (code: $http_code) — API is DOWN" | tee -a "$debug" "$log"
+        return 1
+    fi
+    if ! echo "$body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        echo "HTTP 200 but body missing status:ok — API is DOWN" | tee -a "$debug" "$log"
+        return 1
+    fi
+
+    echo "API confirmed UP" | tee -a "$debug"
+    return 0
+}
+
+#============================================================
+# TIER 1 — Web Server
+#============================================================
+echo "Updating Scripts" | tee -a "$debug" "$log"
+
 if [[ "$web_server" == "on" && -n "$server_url" ]]; then
-    echo "Web server enabled — checking reachability: $server_url" | tee -a "$debug"
+    echo "Tier 1: Trying Web Server ($server_url)..." | tee -a "$debug"
 
-    # ── Step 1: TCP port check — fastest definitive test ────────────────────
-    # Strips http(s):// and path, extracts host and port
-    _stripped="${server_url#http://}"; _stripped="${_stripped#https://}"
-    _server_host="${_stripped%%[:/?]*}"
-    _server_port="${_stripped#*:}"; _server_port="${_server_port%%/*}"
-    [[ "$_server_port" == "$_stripped" ]] && _server_port="80"  # no port in URL
+    if check_api_up "$server_url"; then
+        tmp_web=$(mktemp -d)
+        # Download linux scripts tarball from WebUI
+        http_code=$(curl -sS --max-time 30 -o "$tmp_web/scripts.tar.gz" \
+            -w "%{http_code}" "$server_url/api/scripts/download" 2>/dev/null)
 
-    echo "TCP check: ${_server_host}:${_server_port}" | tee -a "$debug"
-    if ! timeout 3 bash -c ">/dev/tcp/${_server_host}/${_server_port}" 2>/dev/null; then
-        echo "WARNING: TCP port ${_server_host}:${_server_port} not open — web server unreachable, falling back to SMB/GitHub" | tee -a "$debug" "$log"
-    else
-        # ── Step 2: HTTP health check — verify it is the client-sim API ─────
-        # Uses -w to capture HTTP code separately; no -L (no redirect following);
-        # no -f (we check http_code ourselves) so we always get the response body.
-        _health_tmp=$(mktemp)
-        _http_code=$(curl -sS --connect-timeout 5 --max-time 10 \
-            -o "$_health_tmp" \
-            -w "%{http_code}" \
-            "${server_url}/api/health" 2>>"$debug" || echo "000")
-        _health_body=$(cat "$_health_tmp" 2>/dev/null || echo "")
-        rm -f "$_health_tmp"
-
-        echo "health HTTP ${_http_code}: ${_health_body}" >>"$debug"
-
-        if [[ "$_http_code" == "200" ]] && \
-           echo "$_health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-
-            echo "Web server confirmed — attempting sync" | tee -a "$debug" "$log"
-            ws_sync_ok=true
-
-        # ── simulation.conf ──────────────────────────────────────────────────
-        if curl -fsSL --connect-timeout 5 --max-time 15 \
-                "${server_url}/api/config" \
-                -o /tmp/simulation.conf.webserver 2>>"$debug"; then
-            sudo cp /tmp/simulation.conf.webserver /usr/local/scripts/simulation.conf
-            rm -f /tmp/simulation.conf.webserver
-            echo "simulation.conf synced from web server" | tee -a "$debug" "$log"
-        else
-            echo "WARNING: Failed to fetch simulation.conf from web server" | tee -a "$debug" "$log"
-            ws_sync_ok=false
-        fi
-
-        # ── Linux scripts (.sh, .txt) ────────────────────────────────────────
-        file_list=$(curl -fsSL --connect-timeout 5 --max-time 10 \
-            "${server_url}/api/scripts/list?platform=linux" 2>>"$debug" || echo "")
-
-        if [[ -n "$file_list" ]]; then
-            echo "Syncing linux scripts from web server..." | tee -a "$debug"
-            for filename in $file_list; do
-                if curl -fsSL --connect-timeout 5 --max-time 30 \
-                        "${server_url}/api/scripts/linux/${filename}" \
-                        -o "/usr/local/scripts/${filename}" 2>>"$debug"; then
-                    echo "  ✓ $filename" | tee -a "$debug"
-                else
-                    echo "  ✗ WARNING: Failed to fetch $filename" | tee -a "$debug" "$log"
-                    ws_sync_ok=false
-                fi
-            done
-            sudo chmod +x /usr/local/scripts/*.sh 2>/dev/null || true
-            sudo chmod -R 777 /usr/local/scripts 2>/dev/null || true
-            echo "Linux script sync complete" | tee -a "$debug" "$log"
-        else
-            echo "WARNING: Could not get script list from web server" | tee -a "$debug" "$log"
-            ws_sync_ok=false
-        fi
-
-        if [[ "$ws_sync_ok" == true ]]; then
+        if [[ "$http_code" == "200" ]] && tar -xzf "$tmp_web/scripts.tar.gz" -C "$tmp_web" 2>/dev/null; then
+            echo "Web server sync succeeded" | tee -a "$debug" "$log"
+            copy_local_files "$tmp_web"
             source_found=true
         else
-            echo "WARNING: Web server sync incomplete — will attempt SMB/GitHub fallback" | tee -a "$debug" "$log"
+            echo "Web server reachable but file download failed (code: $http_code) — falling through" | tee -a "$debug" "$log"
         fi
+        rm -rf "$tmp_web"
+    else
+        echo "Web server unreachable — skipping Tier 1" | tee -a "$debug" "$log"
+    fi
+fi
 
-        else
-            echo "WARNING: Health check failed (HTTP ${_http_code}) — not the client-sim API, falling back to SMB/GitHub" | tee -a "$debug" "$log"
-        fi  # end HTTP check
-    fi  # end TCP check
-fi  # end web_server block
-
-#------------------------------------------------------------
-# SMB fallback — local network share; faster than internet, used before GitHub
-#------------------------------------------------------------
+#============================================================
+# TIER 2 — SMB Share
+#============================================================
 if [[ "$source_found" == false && "$smb_repo" == "on" && -n "$smb_address" ]]; then
-    echo "Trying SMB repository: $smb_address" | tee -a "$debug"
-    if smbclient "$smb_address" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' 2>>"$debug"; then
-        echo "SMB sync complete" | tee -a "$debug" "$log"
-        sudo chmod -R 777 /usr/local/scripts
+    echo "Tier 2: Trying SMB ($smb_address)..." | tee -a "$debug"
+    tmp_smb=$(mktemp -d)
+    if smbclient "$smb_address" -N -c "lcd $tmp_smb; cd Scripts; prompt; mget *" 2>/dev/null; then
+        echo "SMB sync succeeded" | tee -a "$debug" "$log"
+        copy_local_files "$tmp_smb"
         source_found=true
     else
-        echo "WARNING: SMB sync failed — falling back to GitHub" | tee -a "$debug" "$log"
+        echo "SMB sync failed — falling through" | tee -a "$debug" "$log"
     fi
+    rm -rf "$tmp_smb"
 fi
 
-#------------------------------------------------------------
-# GitHub fallback — last resort, requires internet access
-#------------------------------------------------------------
-if [[ "$source_found" == false ]]; then
-    if [[ "$public_repo" == "on" ]]; then
-        echo "Using remote GitHub repo (last resort)" | tee -a "$debug"
-        cd ~ || echo "WARNING: Failed to cd to home directory" | tee -a "$debug"
-        repo_dir="client-sim"
-        shopt -s nullglob
-        if [[ -d "$repo_dir" && ! -d "$repo_dir/.git" ]]; then
-            echo "Directory exists but is not a git repo. Removing directory" | tee -a "$debug"
+#============================================================
+# TIER 3 — GitHub (last resort)
+#============================================================
+if [[ "$source_found" == false && "$public_repo" == "on" ]]; then
+    echo "Tier 3: Trying GitHub ($repo_location)..." | tee -a "$debug"
+    cd ~ || { echo "WARNING: Failed to cd to home directory" | tee -a "$debug"; exit 1; }
+    repo_dir="client-sim"
+    shopt -s nullglob
+
+    if [[ -d "$repo_dir" && ! -d "$repo_dir/.git" ]]; then
+        echo "Directory exists but is not a git repo. Removing..." | tee -a "$debug"
+        rm -rf "$repo_dir"
+    fi
+    if [[ ! -d "$repo_dir" ]]; then
+        echo "Cloning repository..." | tee -a "$debug"
+        git clone "$repo_location" "$repo_dir" || { echo "ERROR: Clone failed" | tee -a "$debug" "$log"; }
+    fi
+
+    if cd "$repo_dir" 2>/dev/null; then
+        current_remote=$(git remote get-url origin 2>/dev/null || echo "")
+        if [[ "$current_remote" != "$repo_location" ]]; then
+            echo "Remote URL mismatch. Fixing..." | tee -a "$debug" "$log"
+            git remote set-url origin "$repo_location"
+        fi
+
+        if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            echo "Repo corrupted. Re-cloning..." | tee -a "$debug" "$log"
+            cd ~
             rm -rf "$repo_dir"
+            git clone "$repo_location" "$repo_dir"
+            cd "$repo_dir" || { echo "ERROR: Cannot enter repo" | tee -a "$debug" "$log"; }
         fi
-        if [[ ! -d "$repo_dir" ]]; then
-            echo "Cloning repository..." | tee -a "$debug"
-            git clone "$repo_location" "$repo_dir" || echo "ERROR: Clone failed" | tee -a "$debug" "$log"
+
+        git config --global http.connectTimeout 5
+        git config http.lowSpeedLimit 100
+        git config http.lowSpeedTime 30
+        git config http.maxRequests 2
+        git config pull.rebase true
+        git fetch origin
+
+        if git show-ref --verify --quiet "refs/heads/$repo_branch"; then
+            git switch "$repo_branch"
+        elif git ls-remote --exit-code --heads origin "$repo_branch" >/dev/null 2>&1; then
+            git switch -c "$repo_branch" "origin/$repo_branch"
         else
-            echo "Repository already exists, skipping clone" | tee -a "$debug"
+            echo "ERROR: Branch '$repo_branch' not found" | tee -a "$debug" "$log"
         fi
-        #------------------------------------------------------------
-        #Checking to see if the URL is mis-matched
-        if cd "$repo_dir"; then
-            current_remote=$(git remote get-url origin 2>/dev/null || echo "")
-            if [[ "$current_remote" != "$repo_location" ]]; then
-                echo "Remote URL mismatch. Fixing..." | tee -a "$debug" "$log"
-                git remote set-url origin "$repo_location"
-            fi
-            #------------------------------------------------------------
-            #Checking to see if the repo is corrupted
-            if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-                echo "Repo appears corrupted. Re-cloning..." | tee -a "$debug" "$log"
-                cd ~
-                rm -rf "$repo_dir"
-                git clone "$repo_location" "$repo_dir"
-                cd "$repo_dir" || echo "ERROR: Failed to re-enter repo" | tee -a "$debug" "$log"
-            fi
-            git config --global http.connectTimeout 5
-            git config http.lowSpeedLimit 100
-            git config http.lowSpeedTime 30
-            git config http.maxRequests 2
-            git config pull.rebase true
-            git fetch origin
-            if git show-ref --verify --quiet "refs/heads/$repo_branch"; then
-                echo "Switching to branch: $repo_branch" | tee -a "$debug"
-                git switch "$repo_branch"
-            elif git ls-remote --exit-code --heads origin "$repo_branch" >/dev/null 2>&1; then
-                echo "Creating branch: $repo_branch" | tee -a "$debug"
-                git switch -c "$repo_branch" "origin/$repo_branch"
-            else
-                echo "ERROR: Branch '$repo_branch' not found" | tee -a "$debug" "$log"
-            fi
-            #------------------------------------------------------------
-            #Updating the Repository based on the Branch configured in simulation.conf
-            echo "Updating repository..." | tee -a "$debug"
-            git reset --hard "origin/$repo_branch"
-            if cd linux; then
-                echo "Copying rsyslog config..." | tee -a "$debug"
-                if [[ -f "10-rsyslog.conf" ]]; then
-                    sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
-                else
-                    echo "No rsyslog config file found" | tee -a "$debug" "$log"
-                fi
-                echo "Copying desktop startup files..." | tee -a "$debug"
-                desktop_files=( *.desktop )
-                if (( ${#desktop_files[@]} )); then
-                    sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
-                else
-                    echo "No .desktop files found to copy" | tee -a "$debug" "$log"
-                fi
-                echo "Copying shell scripts..." | tee -a "$debug"
-                sh_files=( *.sh )
-                if (( ${#sh_files[@]} )); then
-                    sudo cp "${sh_files[@]}" /usr/local/scripts/
-                else
-                    echo "No .sh files found to copy" | tee -a "$debug" "$log"
-                fi
-                echo "Copying text files..." | tee -a "$debug"
-                txt_files=( *.txt )
-                if (( ${#txt_files[@]} )); then
-                    sudo cp "${txt_files[@]}" /usr/local/scripts/
-                else
-                    echo "No .txt files found to copy" | tee -a "$debug" "$log"
-                fi
-                cd ..
-            else
-                echo "WARNING: linux directory not found, skipping file copy section" | tee -a "$debug"
-            fi
-            if cd configs; then
-                echo "Updating simulation.conf..." | tee -a "$debug"
-                if [[ -f "simulation.conf" ]]; then
-                    sudo cp simulation.conf /usr/local/scripts/simulation.conf
-                else
-                    echo "No simulation.conf found in configs" | tee -a "$debug" "$log"
-                fi
-                cd ..
-            else
-                echo "WARNING: configs directory not found" | tee -a "$debug" "$log"
-            fi
-            echo "Setting permissions..." | tee -a "$debug"
-            sudo chmod -R 777 /usr/local/scripts
+
+        git reset --hard "origin/$repo_branch"
+
+        if cd linux 2>/dev/null; then
+            shopt -s nullglob
+            desktop_files=( *.desktop )
+            sh_files=( *.sh )
+            txt_files=( *.txt )
+            [[ -f "10-rsyslog.conf" ]] && sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
+            (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
+            (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
+            (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
+            cd ..
         else
-            echo "ERROR: Could not enter repo directory" | tee -a "$debug" "$log"
+            echo "WARNING: linux directory not found" | tee -a "$debug"
         fi
+
+        if cd configs 2>/dev/null; then
+            [[ -f "simulation.conf" ]] && sudo cp simulation.conf /usr/local/scripts/simulation.conf
+            cd ..
+        else
+            echo "WARNING: configs directory not found" | tee -a "$debug"
+        fi
+
+        sudo chmod -R 777 /usr/local/scripts
+        echo "GitHub sync succeeded" | tee -a "$debug" "$log"
+        source_found=true
     else
-        echo "WARNING: No fallback source available (public_repo=off, smb_repo=off, web server unreachable)" | tee -a "$debug" "$log"
+        echo "ERROR: Could not enter repo directory" | tee -a "$debug" "$log"
     fi
 fi
 
+#============================================================
+# Result
+#============================================================
+if [[ "$source_found" == false ]]; then
+    echo "ERROR: All update sources failed — no files updated" | tee -a "$debug" "$log"
+fi
 echo "Update complete" | tee -a "$debug"
