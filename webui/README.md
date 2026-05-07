@@ -16,7 +16,7 @@ Proxmox Host
 │   ├── WebUI LXC
 │   │   ├── eth0 → management network  (internet, admin access)
 │   │   └── eth1 → vmbr255  static 169.254.1.1/24
-│   │        └── dnsmasq: hands out 169.254.1.100–200
+│   │        └── dnsmasq: hands out 169.254.1.11–254
 │   └── Client VMs / LXCs
 │       └── NIC → vmbr255  (DHCP → 169.254.1.x)
 │                simulation.conf: server_url=http://169.254.1.1:8000
@@ -130,7 +130,7 @@ sudo bash install-lxc.sh --branch lrb --port 8000
 The installer will:
 1. Install Python, git, and dnsmasq
 2. Assign `169.254.1.1/24` to `eth1`
-3. Configure dnsmasq to serve DHCP `169.254.1.100–200` on `eth1` only
+3. Configure dnsmasq to serve DHCP `169.254.1.11–254` on `eth1` only
 4. Deploy the FastAPI dashboard and set up a systemd service
 5. Print a health check summary and the `server_url` to use in `simulation.conf`
 
@@ -140,7 +140,7 @@ The **installer version** is written to `INSTALLER_VERSION` and displayed in the
 
 For each client VM or LXC:
 - Add a NIC on bridge `vmbr255`, set to DHCP
-- It will receive an IP in `169.254.1.100–200`
+- It will receive an IP in `169.254.1.11–254`
 - Set in `simulation.conf`:
 
 ```ini
@@ -160,8 +160,8 @@ All DHCP settings are configurable via environment variables before running the 
 | `DHCP_GATEWAY` | `169.254.1.1` | Static IP assigned to this LXC on vmbr255 (also the gateway clients receive) |
 | `DHCP_SUBNET` | `169.254.1.0` | Network address |
 | `DHCP_PREFIX` | `24` | Subnet prefix length |
-| `DHCP_RANGE_START` | `169.254.1.100` | First DHCP address |
-| `DHCP_RANGE_END` | `169.254.1.11` | Last DHCP address |
+| `DHCP_RANGE_START` | `169.254.1.11` | First DHCP address (first 10 IPs reserved) |
+| `DHCP_RANGE_END` | `169.254.1.254` | Last DHCP address |
 | `DHCP_LEASE_TIME` | `12h` | DHCP lease duration |
 
 Example — custom subnet:

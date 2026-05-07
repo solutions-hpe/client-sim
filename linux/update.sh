@@ -25,16 +25,19 @@ echo "Updating Scripts" | tee -a "$debug" "$log"
 #   3. GitHub   (public_repo=on) — last resort / internet fallback
 #------------------------------------------------------------
 
-web_server_used=false
+source_found=false
 
 if [[ "$web_server" == "on" && -n "$server_url" ]]; then
     echo "Web server enabled — checking reachability: $server_url" | tee -a "$debug"
 
-    if curl -fsSL --connect-timeout 5 --max-time 10 \
-            "${server_url}/api/health" 2>>"$debug" | grep -q '"status".*"ok"'; then
+    health_body=$(curl -fsSL --connect-timeout 5 --max-time 10 \
+        "${server_url}/api/health" 2>>"$debug")
+    health_exit=$?
 
-        echo "Web server reachable — using as primary source, skipping GitHub clone" | tee -a "$debug" "$log"
-        web_server_used=true
+    if [[ $health_exit -eq 0 ]] && echo "$health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+
+        echo "Web server reachable — attempting sync" | tee -a "$debug" "$log"
+        ws_sync_ok=true
 
         # ── simulation.conf ──────────────────────────────────────────────────
         if curl -fsSL --connect-timeout 5 --max-time 15 \
@@ -45,6 +48,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             echo "simulation.conf synced from web server" | tee -a "$debug" "$log"
         else
             echo "WARNING: Failed to fetch simulation.conf from web server" | tee -a "$debug" "$log"
+            ws_sync_ok=false
         fi
 
         # ── Linux scripts (.sh, .txt) ────────────────────────────────────────
@@ -60,6 +64,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                     echo "  ✓ $filename" | tee -a "$debug"
                 else
                     echo "  ✗ WARNING: Failed to fetch $filename" | tee -a "$debug" "$log"
+                    ws_sync_ok=false
                 fi
             done
             sudo chmod +x /usr/local/scripts/*.sh 2>/dev/null || true
@@ -67,22 +72,29 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             echo "Linux script sync complete" | tee -a "$debug" "$log"
         else
             echo "WARNING: Could not get script list from web server" | tee -a "$debug" "$log"
+            ws_sync_ok=false
+        fi
+
+        if [[ "$ws_sync_ok" == true ]]; then
+            source_found=true
+        else
+            echo "WARNING: Web server sync incomplete — will attempt SMB/GitHub fallback" | tee -a "$debug" "$log"
         fi
 
     else
-        echo "WARNING: Web server not reachable — falling back to SMB/GitHub" | tee -a "$debug" "$log"
+        echo "WARNING: Web server not reachable (curl_exit=${health_exit}) — falling back to SMB/GitHub" | tee -a "$debug" "$log"
     fi
 fi
 
 #------------------------------------------------------------
 # SMB fallback — local network share; faster than internet, used before GitHub
 #------------------------------------------------------------
-if [[ "$web_server_used" == false && "$smb_repo" == "on" && -n "$smb_address" ]]; then
+if [[ "$source_found" == false && "$smb_repo" == "on" && -n "$smb_address" ]]; then
     echo "Trying SMB repository: $smb_address" | tee -a "$debug"
     if smbclient "$smb_address" -N -c 'lcd /usr/local/scripts/; cd Scripts; prompt; mget *' 2>>"$debug"; then
         echo "SMB sync complete" | tee -a "$debug" "$log"
         sudo chmod -R 777 /usr/local/scripts
-        web_server_used=true   # reuse flag — signals that a source was found, skip GitHub
+        source_found=true
     else
         echo "WARNING: SMB sync failed — falling back to GitHub" | tee -a "$debug" "$log"
     fi
@@ -91,7 +103,7 @@ fi
 #------------------------------------------------------------
 # GitHub fallback — last resort, requires internet access
 #------------------------------------------------------------
-if [[ "$web_server_used" == false ]]; then
+if [[ "$source_found" == false ]]; then
     if [[ "$public_repo" == "on" ]]; then
         echo "Using remote GitHub repo (last resort)" | tee -a "$debug"
         cd ~ || echo "WARNING: Failed to cd to home directory" | tee -a "$debug"
