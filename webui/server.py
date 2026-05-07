@@ -254,9 +254,11 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
     last_body: str = ""
     for url, params in probe_urls:
         try:
+            logger.info("Central probe → GET %s params=%s", url, params)
             resp = await client.get(url, headers=headers, params=params, timeout=15)
             last_status = resp.status_code
             last_body = resp.text[:400]
+            logger.info("Central probe ← %s: %s", resp.status_code, last_body[:200])
             if resp.status_code == 200:
                 logger.info("Aruba Central token validated via %s", url)
                 return True, "Token validated successfully."
@@ -268,7 +270,7 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
                     return True, f"Access token was expired; successfully refreshed. {msg}"
                 return False, f"Token rejected (401). Central response: {last_body}"
             # 403/404 = wrong scope or endpoint missing — try next probe
-            logger.debug("Central probe %s returned %s — trying next", url, resp.status_code)
+            logger.info("Central probe %s returned %s — trying next", url, resp.status_code)
         except Exception as exc:
             return False, f"Connection error reaching {base_url}: {exc}"
 
