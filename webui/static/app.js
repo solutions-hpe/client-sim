@@ -1803,13 +1803,17 @@ function getSimGroups() {
 
   const groups = new Map();
   for (const sim of simulationsData) {
-    const key = sim.central_check || `__${sim.name || sim.id}`;
+    // Strip site suffix from name (convention: "DNS Fail — MIA" → "DNS Fail")
+    const baseName = sim.name
+      ? sim.name.split(/\s+[—\-]+\s+/)[0].trim()
+      : sim.id;
+    const key = sim.central_check || baseName;
     if (!groups.has(key)) {
       groups.set(key, {
         checkId: sim.central_check || null,
         label: sim.central_check
           ? (checkLabelMap[sim.central_check] || sim.central_check)
-          : (sim.name || sim.id),
+          : baseName,
         sims: [],
       });
     }
