@@ -192,19 +192,121 @@ uvicorn server:app --host 0.0.0.0 --port 8000
 
 ---
 
+## Webserver as Sync Hub
+
+The dashboard server acts as a **central sync point** for all client devices. It serves scripts and configuration files to clients automatically, so you never need to push files to each client individually. Changes pushed to git become available to all clients within 5 minutes.
+
+### How it works
+
+```
+GitHub repo  ──git pull──►  WebUI server  ──/api/config──►  Client
+ (configs/                  (every 5 min)  ──/api/scripts──► Client
+  linux/                                   ──/api/status◄──  Client
+  windows/)                                    (beacon)
+```
+
+1. The dashboard server clones the configured git repo on first start and **pulls every 5 minutes** automatically.
+2. Clients call `GET /api/config?hostname=<hostname>` on each update cycle to receive the latest `simulation.conf` (with any in-dashboard per-client overrides merged in).
+3. Clients call `GET /api/scripts/list` + `GET /api/scripts/{platform}/{filename}` to download updated scripts.
+4. Clients POST a beacon to `POST /api/status` each cycle so the dashboard can track their state.
+
+### Sync status indicator
+
+The **top-right corner** of the dashboard UI shows the current repo sync state:
+
+| Indicator | Meaning |
+|---|---|
+| 🟢 Synced | Repo pulled successfully; scripts and configs are current |
+| 🔄 Syncing | First clone or pull in progress |
+| 🔴 Disconnected | Last sync attempt failed (see error in Setup tab → Repo section) |
+
+A **Disconnected** status means clients will continue running with whatever scripts they last downloaded, but they will not receive updates until the server can reach the repo again. Check network connectivity and the repo URL/branch in the Setup tab.
+
+### Configuring the git repo
+
+The repo URL is baked in at install time via the `REPO_URL` environment variable (default: `https://github.com/solutions-hpe/client-sim.git`). The **branch** can be changed at any time without restarting:
+
+**Via the Setup tab:**
+1. Open the dashboard → **Setup** tab
+2. Find the **Sync / Repository** card
+3. Change the **Branch** field and click **Save**
+4. The server cancels the current sync loop and immediately starts a fresh pull of the new branch
+
+**Via environment variable (install time):**
+```bash
+REPO_URL=https://github.com/your-org/client-sim.git \
+REPO_BRANCH=my-branch \
+bash install-lxc.sh
+```
+
+**Via CLI flag:**
+```bash
+bash install-lxc.sh --branch my-branch
+```
+
+The active branch is persisted in `settings.json` and survives service restarts.
+
+### Private repository access
+
+If your repo requires authentication, configure git credentials **before** installing or starting the service. The recommended approach for a private GitHub repo is a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens):
+
+```bash
+# Store credentials for the dashboard service user
+git config --global credential.helper store
+echo "https://<username>:<token>@github.com" > ~/.git-credentials
+chmod 600 ~/.git-credentials
+```
+
+Then set `REPO_URL` to include the token inline (if credential store is not available):
+```bash
+REPO_URL=https://<token>@github.com/your-org/client-sim.git bash install-lxc.sh
+```
+
+> ⚠️ Tokens embedded in URLs are visible in process listings. The credential store approach is preferred for production use.
+
+### What is served from the repo
+
+| API endpoint | Served from repo path |
+|---|---|
+| `GET /api/config?hostname=<h>` | `configs/simulation.conf` |
+| `GET /api/scripts/list?platform=linux` | `linux/` directory listing |
+| `GET /api/scripts/linux/<file>` | `linux/<file>` |
+| `GET /api/scripts/list?platform=windows` | `windows/` directory listing |
+| `GET /api/scripts/windows/<file>` | `windows/<file>` |
+
+Scripts are served as-is (raw file content). Config is served with any in-dashboard per-client overrides merged in before delivery.
+
+---
+
 ## Client connection
 
-Clients point `simulation.conf` at the dashboard:
+Clients connect to the dashboard by setting `server_url` in their `simulation.conf`:
 
 ```ini
 [server]
 server_url=http://10.255.255.1:8000
 ```
 
-Clients POST beacons to `/api/status` and pull `/api/config?hostname=<hostname>` each cycle. See [`CLIENT_API.md`](CLIENT_API.md) for the full API reference.
+Replace `10.255.255.1` with the dashboard IP on your network. If using the standard Proxmox deployment (Step 4 above), this is the `eth1` address of the WebUI LXC on `vmbr255`.
 
+If `server_url` is blank or the server is unreachable, clients skip all sync calls and run in **standalone mode** using their local scripts and config — no crash, no error loop.
 
-Clients POST beacons to `/api/status`, then pull `/api/config?hostname=<hostname>` on update cycles to receive any per-client overrides.
+### Client update cycle
+
+Every iteration, a client (`update.sh` + `simulation.sh`) performs:
+
+```
+1. curl GET /api/health          ← is the server up?
+2. curl GET /api/config          ← pull latest simulation.conf (with overrides)
+3. curl GET /api/scripts/list    ← check for updated scripts
+4. curl GET /api/scripts/<file>  ← download any changed files
+5. [run simulations]
+6. curl POST /api/status         ← send beacon (hostname, SSID, counters, errors)
+```
+
+Steps 1–4 are handled by `update.sh` at startup and on a configurable interval. Step 6 runs inside `simulation.sh` every loop.
+
+See [`CLIENT_API.md`](CLIENT_API.md) for the full API reference including all request/response schemas.
 
 ---
 

@@ -178,8 +178,18 @@ ok "System packages installed"
 ###############################################################################
 info "Detecting network interfaces..."
 
-# Build list of ethernet interfaces excluding loopback
-IFACES=( $(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | grep -v '@') )
+# Build list of ethernet interfaces excluding loopback.
+# WHY: In LXC containers, interfaces from Proxmox bridge attachments often appear
+# as "eth0@if5" (veth pair notation). We strip the @suffix so eth0 is still
+# detected. Using mapfile instead of $(...) avoids word-splitting issues and
+# prevents grep exit-code 1 (no matches) from tripping set -euo pipefail.
+mapfile -t IFACES < <(
+  ip -o link show \
+    | awk -F': ' '{print $2}' \
+    | sed 's/@.*//' \
+    | grep -v '^lo$' \
+    || true
+)
 NIC_COUNT=${#IFACES[@]}
 info "Found ${NIC_COUNT} interface(s): ${IFACES[*]}"
 

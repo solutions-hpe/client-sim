@@ -10,14 +10,46 @@ This document describes how simulation clients communicate with the Client-Sim D
 
 ## Quick Start
 
-Set `server_url` in `simulation.conf` to point at the dashboard:
+### 1. Point clients at the webserver
+
+Set `server_url` in `simulation.conf` on each client:
 
 ```ini
 [server]
-server_url=http://sim-dashboard:8000
+server_url=http://10.255.255.1:8000
 ```
 
-If `server_url` is blank or unreachable, clients skip all API calls and run in standalone mode.
+Replace `10.255.255.1` with the dashboard server's IP address. For the standard Proxmox deployment this is the `eth1` address of the WebUI LXC on `vmbr255`. For a development/test server use the host IP and port `8000`.
+
+If `server_url` is blank or unreachable, all API calls are skipped and the client runs in standalone mode — it continues to use whatever scripts and config it last downloaded.
+
+### 2. Verify the server is reachable
+
+```bash
+curl http://10.255.255.1:8000/api/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "clients": 0,
+  "repo_synced": true,
+  "repo_error": null,
+  "installer_version": "0.03"
+}
+```
+
+`repo_synced: true` confirms the server has successfully cloned the git repo and can serve scripts and config. If `repo_synced` is `false`, check the **Setup** tab in the dashboard for the sync error — clients cannot pull scripts until the repo is ready.
+
+### 3. Confirm config is being served
+
+```bash
+curl "http://10.255.255.1:8000/api/config?hostname=$(hostname)"
+```
+
+This returns the INI-format `simulation.conf` with any per-client overrides already merged in. If the output looks correct, the client is ready to sync automatically.
 
 ---
 
@@ -74,6 +106,7 @@ Content-Type: application/json
   "gateway_reachable":  true,
   "vh_connected":       false,
   "active_simulations": ["dns_fail", "www_traffic"],
+  "errors":             ["SSID not found after 30s scan", "Gateway unreachable"],
   "config": {
     "sim_phy":     "on",
     "kill_switch": "off",
@@ -99,6 +132,7 @@ Content-Type: application/json
 | `gateway_reachable` | bool | Whether the default gateway responded to ping |
 | `vh_connected` | bool | Whether VH (VirtualHub) connection is active |
 | `active_simulations` | array of strings | Which simulations are currently running |
+| `errors` | array of strings | *(optional)* Error messages accumulated since the last beacon. The server stores the last 50 per client (circular buffer) and displays them in the dashboard error log. Cleared from the client buffer only after a successful POST. |
 | `config` | object | Key/value pairs from the client's active `simulation.conf` section |
 
 **Response:**
