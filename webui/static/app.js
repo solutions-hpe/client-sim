@@ -1790,37 +1790,43 @@ function simStatusBadge(pf) {
   return { label: '✗ Not Firing', cls: 'sim-fail' };
 }
 
-/** Build a map of checkKey → { checkId, label, sims[], aggLabel, aggCls } */
+// Canonical order and labels for simulation test types
+const SIM_TEST_ORDER = [
+  'dns_fail', 'assoc_fail', 'dhcp_fail', 'port_flap',
+  'iperf', 'www_traffic', 'download', 'ping_test',
+];
+const SIM_TEST_LABELS = {
+  dns_fail:   'DNS Fail',
+  assoc_fail: 'Association Fail',
+  dhcp_fail:  'DHCP Fail',
+  port_flap:  'Port Flap',
+  iperf:      'iPerf',
+  www_traffic:'Web Traffic',
+  download:   'Download',
+  ping_test:  'Ping Test',
+};
+
+/** Build a map of testKey → { label, sims[], aggLabel, aggCls }
+ *  One tile per simulation type (test flag) that is enabled in at least one bucket. */
 function getSimGroups() {
-  const monitoredChecks = currentSettings.monitored_checks || [];
-  const checkLabelMap = {};
-  for (const c of monitoredChecks) checkLabelMap[c.id] = c.name || c.id;
-  for (const type of ['alerts', 'insights']) {
-    for (const c of availableChecks[type] || []) {
-      if (!checkLabelMap[c.id]) checkLabelMap[c.id] = c.name || c.id;
-    }
-  }
-
   const groups = new Map();
-  for (const sim of simulationsData) {
-    // Strip site suffix from name (convention: "DNS Fail — MIA" → "DNS Fail")
-    const baseName = sim.name
-      ? sim.name.split(/\s+[—\-]+\s+/)[0].trim()
-      : sim.id;
-    const key = sim.central_check || baseName;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        checkId: sim.central_check || null,
-        label: sim.central_check
-          ? (checkLabelMap[sim.central_check] || sim.central_check)
-          : baseName,
-        sims: [],
-      });
+
+  for (const testKey of SIM_TEST_ORDER) {
+    for (const sim of simulationsData) {
+      const tests = sim.tests || {};
+      if (!tests[testKey]) continue;
+      if (!groups.has(testKey)) {
+        groups.set(testKey, {
+          key: testKey,
+          label: SIM_TEST_LABELS[testKey] || testKey,
+          sims: [],
+        });
+      }
+      groups.get(testKey).sims.push(sim);
     }
-    groups.get(key).sims.push(sim);
   }
 
-  // Compute aggregate firing status per group
+  // Compute aggregate Central firing status per group
   for (const group of groups.values()) {
     let anyFiring = false, anyFail = false, anyConfigured = false;
     for (const sim of group.sims) {
@@ -1828,7 +1834,7 @@ function getSimGroups() {
       if (pf) { anyConfigured = true; if (pf.firing) anyFiring = true; else anyFail = true; }
     }
     if (!anyConfigured) {
-      group.aggLabel = group.checkId ? 'Pending' : 'No Check'; group.aggCls = 'sim-unknown';
+      group.aggLabel = 'No Check'; group.aggCls = 'sim-unknown';
     } else if (anyFiring && !anyFail) {
       group.aggLabel = '✓ Firing'; group.aggCls = 'sim-pass';
     } else if (anyFail && !anyFiring) {
@@ -1923,11 +1929,28 @@ function renderSimulationCards() {
     meta.className = 'sim-card-meta';
     meta.textContent = sites.length ? sites.join('  ·  ') : '— no sites configured';
 
-    const totalActive = group.sims.reduce((a, s) => a + (s.active_client_count || 0), 0);
-    const totalConfigured = group.sims.reduce((a, s) => a + (s.configured_clients?.length || 0), 0);
+    // Central seen = sum of wireless clients Central reports per unique site
+    const centralSeen = sites.reduce((a, site) => {
+      const n = centralWirelessClients[site];
+      return a + (n != null ? n : 0);
+    }, 0);
+    const hasCentralData = sites.some(site => centralWirelessClients[site] != null);
+
+    // API reporting = clients actively sending heartbeats to the local API
+    const totalReporting = group.sims.reduce((a, s) => a + (s.active_client_count || 0), 0);
+
     const clientsRow = document.createElement('div');
     clientsRow.className = 'sim-card-clients';
-    clientsRow.innerHTML = `<span>${totalActive}/${totalConfigured} clients reporting</span>`;
+    if (hasCentralData) {
+      const warn = centralSeen < totalReporting;
+      clientsRow.innerHTML = warn
+        ? `<span class="sim-card-clients-warn">${centralSeen} Central / ${totalReporting} API</span>`
+        : `<span>${centralSeen} Central / ${totalReporting} API</span>`;
+      clientsRow.title = 'Clients seen by Aruba Central / Clients reporting to local API';
+    } else {
+      clientsRow.innerHTML = `<span>${totalReporting} reporting to API (Central not polled)</span>`;
+      clientsRow.title = 'Central not configured or not yet polled';
+    }
 
     card.appendChild(header);
     card.appendChild(meta);
@@ -1974,7 +1997,7 @@ function openSimGroup(key) {
 
     const siteName = document.createElement('span');
     siteName.className = 'sim-site-name';
-    siteName.textContent = sim.wsite || sim.id;
+    siteName.textContent = sim.wsite ? `${sim.wsite} (${sim.id})` : sim.id;
 
     const siteCount = document.createElement('span');
     siteCount.className = 'sim-site-count';

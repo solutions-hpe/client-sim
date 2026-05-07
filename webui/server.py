@@ -1828,15 +1828,22 @@ async def api_simulations() -> dict[str, Any]:
             parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
             site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
 
+            _SIM_TEST_KEYS = [
+                "dns_fail", "assoc_fail", "dhcp_fail", "port_flap",
+                "iperf", "www_traffic", "download", "ping_test",
+            ]
             sim_section_re = re.compile(r"^s\d$")
             for section in parser.sections():
                 if not sim_section_re.match(section):
                     continue
                 simulations[section] = {
                     "id": section,
-                    "name": parser.get(section, "name", fallback=section),
                     "wsite": parser.get(section, "wsite", fallback=""),
                     "central_check": parser.get(section, "central_check", fallback="").strip(),
+                    "tests": {
+                        k: parser.get(section, k, fallback="off").strip().lower() == "on"
+                        for k in _SIM_TEST_KEYS
+                    },
                     "configured_clients": [],
                     "active_client_count": 0,
                     "central_pass_fail": None,  # None = not configured
