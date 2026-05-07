@@ -86,9 +86,11 @@ done
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------
-#Checking global kill switch config
+#Checking global kill switch — source of truth is linux/kill_switch.txt in the repo,
+#synced to this device by update.sh. To kill all simulations globally, set the file
+#to "on" in the GitHub repo; update.sh will pull it down on the next cycle.
 #------------------------------------------------------------
-gkill_switch=$(cat /usr/local/scripts/kill_switch.txt)
+gkill_switch=$(cat /usr/local/scripts/kill_switch.txt 2>/dev/null || echo "off")
 #------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 #------------------------------------------------------------

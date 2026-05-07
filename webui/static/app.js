@@ -1284,17 +1284,6 @@ function connectWebSocket() {
   });
 }
 
-async function applyGlobalOverride(overrides) {
-  try {
-    await sendJson('/api/clients/all/control', {
-      method: 'POST',
-      body: JSON.stringify(overrides)
-    });
-  } catch (error) {
-    window.alert(`Global update failed: ${error.message}`);
-  }
-}
-
 // ── Simulations tab ───────────────────────────────────────────────
 const simCardsGrid    = document.getElementById('sim-cards-grid');
 const simEmpty        = document.getElementById('sim-empty');
@@ -1490,9 +1479,6 @@ if (simRefreshBtn) {
     }
   });
 }
-
-document.getElementById('kill-all').addEventListener('click', () => applyGlobalOverride({ kill_switch: 'on' }));
-document.getElementById('resume-all').addEventListener('click', () => applyGlobalOverride({ kill_switch: 'off' }));
 
 if (centralDetailBack) {
   centralDetailBack.addEventListener('click', closeSiteDetail);

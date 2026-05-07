@@ -148,7 +148,8 @@ while true; do
   clear
   # Re-detect the WiFi adapter each refresh — it can appear/disappear with VH
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-  # Read the global kill switch from the flat file (may differ from config-based one)
+  # Global kill switch comes from kill_switch.txt, synced from the GitHub repo by update.sh.
+  # To kill all simulations globally, set linux/kill_switch.txt = "on" in the repo.
   gkill=$(cat /usr/local/scripts/kill_switch.txt 2>/dev/null || echo "off")
 
   printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
@@ -162,7 +163,8 @@ while true; do
   printf "  %sWiFi:%s    %s\n" "$BOLD" "$RST" "$(get_wifi_status)"
   printf "  %sGateway:%s %s\n" "$BOLD" "$RST" "$(get_gateway_status)"
   printf "  %sAPI:%s     %s\n" "$BOLD" "$RST" "$(get_api_status)"
-  # Surface global kill-switch override prominently — operator needs to know immediately
+  # Surface global kill-switch prominently — operator needs to know immediately.
+  # Controlled via linux/kill_switch.txt in the GitHub repo (update.sh syncs it).
   if [[ "$gkill" == "on" ]]; then
     printf "  %sKill Sw:%s %s\n" "$BOLD" "$RST" "${RED}${BOLD}ENABLED — all simulations suspended${RST}"
   fi
