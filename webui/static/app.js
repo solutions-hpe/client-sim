@@ -39,6 +39,19 @@ const repoText = document.getElementById('repo-text');
 let socket = null;
 let reconnectTimer = null;
 let openControlHost = null;
+let centralSiteDetailOpen = null;
+let centralStatusData = {};
+let availableChecks = { alerts: [], insights: [] };
+let currentSettings = {
+  repo_url: '',
+  repo_branch: '',
+  central_config: { cluster_url: '', client_id: '', customer_id: '' },
+  site_mappings: {},
+  monitored_checks: []
+};
+let centralTokenValid = null;
+let centralLastSyncedTs = null;
+let centralStatusInitialized = false;
 
 // ── Tab navigation ────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -73,10 +86,98 @@ const branchInput = document.getElementById('branch-input');
 const saveBtn = document.getElementById('save-settings');
 const settingsMsg = document.getElementById('settings-message');
 const setupActiveBranch = document.getElementById('setup-active-branch');
+const repoUrlInput = document.getElementById('repo-url-input');
+const centralTabButton = document.querySelector('.tab[data-tab="central"]');
+const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
+const centralOverview = document.getElementById('central-overview');
+const centralSitesGrid = document.getElementById('central-sites-grid');
+const centralEmpty = document.getElementById('central-empty');
+const centralRefreshBtn = document.getElementById('central-refresh-btn');
+const centralLastSynced = document.getElementById('central-last-synced');
+const centralTokenDot = document.getElementById('central-token-dot');
+const centralTokenText = document.getElementById('central-token-text');
+const centralSiteDetail = document.getElementById('central-site-detail');
+const centralDetailBack = document.getElementById('central-detail-back');
+const centralDetailTitle = document.getElementById('central-detail-title');
+const centralDetailSub = document.getElementById('central-detail-sub');
+const centralSiteClients = document.getElementById('central-site-clients');
+const centralSiteChecks = document.getElementById('central-site-checks');
+const centralSiteHistory = document.getElementById('central-site-history');
+const centralClusterUrlInput = document.getElementById('central-cluster-url');
+const centralClientIdInput = document.getElementById('central-client-id');
+const centralClientSecretInput = document.getElementById('central-client-secret');
+const centralCustomerIdInput = document.getElementById('central-customer-id');
+const centralTestBtn = document.getElementById('central-test-btn');
+const centralTestMsg = document.getElementById('central-test-msg');
+const siteMappingsBody = document.getElementById('site-mappings-body');
+const addMappingBtn = document.getElementById('add-mapping-btn');
+const saveMappingsBtn = document.getElementById('save-mappings-btn');
+const centralMappingsMsg = document.getElementById('central-mappings-msg');
+const selectedChecksPreview = document.getElementById('selected-checks-preview');
+const loadChecksBtn = document.getElementById('central-load-checks-btn');
+const saveChecksBtn = document.getElementById('save-checks-btn');
+const availableChecksContainer = document.getElementById('available-checks-container');
+const centralChecksMsg = document.getElementById('central-checks-msg');
+
+function mergeSettings(next = {}) {
+  const merged = {
+    repo_url: next.repo_url ?? currentSettings.repo_url ?? repoUrlInput?.value ?? '',
+    repo_branch: next.repo_branch ?? currentSettings.repo_branch ?? '',
+    central_config: {
+      cluster_url: '',
+      client_id: '',
+      customer_id: '',
+      ...(currentSettings.central_config || {}),
+      ...(next.central_config || {})
+    },
+    site_mappings: next.site_mappings ?? currentSettings.site_mappings ?? {},
+    monitored_checks: Array.isArray(next.monitored_checks)
+      ? next.monitored_checks
+      : (currentSettings.monitored_checks || [])
+  };
+  currentSettings = merged;
+  return merged;
+}
+
+function setInputValueIfIdle(input, value) {
+  if (input && !input.matches(':focus')) input.value = value || '';
+}
+
+function showInlineMessage(element, text, isError, timeout = 5000) {
+  if (!element) return;
+  clearTimeout(element._timer);
+  if (!text) {
+    element.textContent = '';
+    element.className = 'settings-message hidden';
+    return;
+  }
+  element.textContent = text;
+  element.className = `settings-message ${isError ? 'error' : 'success'}`;
+  if (timeout > 0) {
+    element._timer = setTimeout(() => {
+      element.className = 'settings-message hidden';
+    }, timeout);
+  }
+}
 
 function applySettingsToUI(s) {
-  if (branchInput && !branchInput.matches(':focus')) branchInput.value = s.repo_branch || '';
-  if (setupActiveBranch) setupActiveBranch.textContent = s.repo_branch || '—';
+  const settings = mergeSettings(s);
+  if (repoUrlInput) repoUrlInput.value = settings.repo_url || repoUrlInput.value;
+  if (branchInput && !branchInput.matches(':focus')) branchInput.value = settings.repo_branch || '';
+  if (setupActiveBranch) setupActiveBranch.textContent = settings.repo_branch || '—';
+  setInputValueIfIdle(centralClusterUrlInput, settings.central_config.cluster_url);
+  setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
+  setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
+  renderSiteMappingsTable();
+  renderSelectedChecksPreview();
+  if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
+    renderAvailableChecks();
+  }
+  renderCentralOverview();
+  if (centralSiteDetailOpen) {
+    renderSiteClients(centralSiteDetailOpen);
+    renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
+  }
 }
 
 function showSettingsMessage(text, isError) {
@@ -271,6 +372,9 @@ function upsertClient(client) {
   }
 
   updateClientCount();
+  if (centralSiteDetailOpen) {
+    renderSiteClients(centralSiteDetailOpen);
+  }
 }
 
 function collectPanelState(panel) {
@@ -298,6 +402,444 @@ async function sendJson(url, options = {}) {
     return response.json();
   }
   return null;
+}
+
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get('content-type') || '';
+  let payload = null;
+  if (contentType.includes('application/json')) {
+    payload = await response.json();
+  } else {
+    const text = await response.text();
+    payload = text ? { detail: text } : null;
+  }
+  if (!response.ok) {
+    throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function formatCentralDate(value) {
+  if (value == null || value === '') return '—';
+  const date = new Date(value > 1e12 ? value : value * 1000);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
+
+function updateCentralToolbar() {
+  if (centralLastSynced) {
+    centralLastSynced.textContent = centralLastSyncedTs
+      ? `Last synced: ${formatCentralDate(centralLastSyncedTs / 1000)}`
+      : 'Last synced: —';
+  }
+  if (centralTokenDot) {
+    centralTokenDot.className = `status-dot ${centralTokenValid ? 'online' : 'offline'}`;
+  }
+  if (centralTokenText) {
+    if (centralTokenValid === null) {
+      centralTokenText.textContent = 'Token status unknown';
+    } else {
+      centralTokenText.textContent = centralTokenValid ? 'Token valid' : 'Token unavailable';
+    }
+  }
+}
+
+function monitoredCheckKey(check) {
+  return `${check.type}:${check.id}`;
+}
+
+function currentCheckSelectionSet() {
+  return new Set((currentSettings.monitored_checks || []).map(monitoredCheckKey));
+}
+
+function buildCheckBadge(label, kind) {
+  const badge = document.createElement('span');
+  badge.className = `check-badge ${kind}`;
+  badge.textContent = label;
+  return badge;
+}
+
+function buildCentralConfigPayload() {
+  const payload = {
+    cluster_url: centralClusterUrlInput?.value.trim() || '',
+    client_id: centralClientIdInput?.value.trim() || '',
+    customer_id: centralCustomerIdInput?.value.trim() || ''
+  };
+  const secret = centralClientSecretInput?.value.trim();
+  if (secret) payload.client_secret = secret;
+  return payload;
+}
+
+function updateLocalCentralConfig(payload) {
+  currentSettings = {
+    ...currentSettings,
+    central_config: {
+      ...(currentSettings.central_config || {}),
+      cluster_url: payload.cluster_url || '',
+      client_id: payload.client_id || '',
+      customer_id: payload.customer_id || ''
+    }
+  };
+}
+
+function addMappingRow(wsite = '', centralSite = '') {
+  if (!siteMappingsBody) return;
+  const row = document.createElement('tr');
+
+  const wsiteCell = document.createElement('td');
+  const wsiteInput = document.createElement('input');
+  wsiteInput.type = 'text';
+  wsiteInput.value = wsite;
+  wsiteInput.placeholder = 'e.g. branch-a';
+  wsiteCell.appendChild(wsiteInput);
+
+  const centralCell = document.createElement('td');
+  const centralInput = document.createElement('input');
+  centralInput.type = 'text';
+  centralInput.value = centralSite;
+  centralInput.placeholder = 'Central site name';
+  centralCell.appendChild(centralInput);
+
+  const removeCell = document.createElement('td');
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn btn-danger btn-small';
+  removeBtn.textContent = 'Remove';
+  removeBtn.addEventListener('click', () => row.remove());
+  removeCell.appendChild(removeBtn);
+
+  row.appendChild(wsiteCell);
+  row.appendChild(centralCell);
+  row.appendChild(removeCell);
+  siteMappingsBody.appendChild(row);
+}
+
+function renderSiteMappingsTable() {
+  if (!siteMappingsBody) return;
+  siteMappingsBody.textContent = '';
+  const entries = Object.entries(currentSettings.site_mappings || {});
+  entries.forEach(([wsite, centralSite]) => addMappingRow(wsite, centralSite));
+}
+
+function renderSelectedChecksPreview() {
+  if (!selectedChecksPreview) return;
+  const checks = currentSettings.monitored_checks || [];
+  if (!checks.length) {
+    selectedChecksPreview.textContent = 'No checks selected yet.';
+    return;
+  }
+  selectedChecksPreview.textContent = `Currently selected: ${checks.map((check) => `${check.name || check.id} (${check.type})`).join(', ')}`;
+}
+
+function renderAvailableChecks() {
+  if (!availableChecksContainer) return;
+  availableChecksContainer.textContent = '';
+  const selection = currentCheckSelectionSet();
+  const groups = [
+    { key: 'alerts', title: 'Alerts' },
+    { key: 'insights', title: 'AI Insights' }
+  ];
+  if (!availableChecks.alerts.length && !availableChecks.insights.length) {
+    const empty = document.createElement('div');
+    empty.className = 'form-hint';
+    empty.textContent = 'No checks returned by Aruba Central.';
+    availableChecksContainer.appendChild(empty);
+    return;
+  }
+  groups.forEach(({ key, title }) => {
+    const items = availableChecks[key] || [];
+    if (!items.length) return;
+    const group = document.createElement('div');
+    group.className = 'checks-group';
+
+    const heading = document.createElement('h3');
+    heading.className = 'checks-group-title';
+    heading.textContent = title;
+    group.appendChild(heading);
+
+    const list = document.createElement('div');
+    list.className = 'check-checkbox-list';
+    items.forEach((item) => {
+      const label = document.createElement('label');
+      label.className = 'check-checkbox-item';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.type = key === 'alerts' ? 'alert' : 'insight';
+      input.dataset.id = item.id;
+      input.dataset.name = item.name || item.id;
+      input.checked = selection.has(`${input.dataset.type}:${item.id}`);
+
+      const text = document.createElement('span');
+      text.textContent = item.name || item.id;
+
+      label.appendChild(input);
+      label.appendChild(text);
+      list.appendChild(label);
+    });
+    group.appendChild(list);
+    availableChecksContainer.appendChild(group);
+  });
+}
+
+function renderCentralOverview() {
+  if (!centralOverview || !centralSitesGrid || !centralEmpty) return;
+  updateCentralToolbar();
+  centralSitesGrid.textContent = '';
+
+  const mappings = currentSettings.site_mappings || {};
+  const entries = Object.entries(mappings);
+  if (!entries.length) {
+    centralEmpty.textContent = 'No Aruba Central site mappings configured yet.';
+    centralEmpty.classList.remove('hidden');
+    return;
+  }
+
+  centralEmpty.classList.add('hidden');
+  const monitoredChecks = currentSettings.monitored_checks || [];
+
+  entries.forEach(([wsite, centralSite]) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'central-site-card';
+    card.addEventListener('click', () => openSiteDetail(wsite));
+
+    const title = document.createElement('p');
+    title.className = 'central-site-card-title';
+    title.textContent = wsite;
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'central-site-card-sub';
+    subtitle.textContent = `→ ${centralSite || 'Unmapped Central site'}`;
+
+    const checks = document.createElement('div');
+    checks.className = 'central-site-card-checks';
+
+    const siteChecks = centralStatusData[wsite] || {};
+    const okCount = monitoredChecks.filter((check) => siteChecks[check.id]?.status === 'OK').length;
+    const errorCount = monitoredChecks.filter((check) => siteChecks[check.id]?.status === 'ERROR').length;
+    const unknownCount = Math.max(monitoredChecks.length - okCount - errorCount, 0);
+
+    if (!monitoredChecks.length) {
+      checks.appendChild(buildCheckBadge('No checks selected', 'check-badge-unknown'));
+    } else {
+      checks.appendChild(buildCheckBadge(`OK ${okCount}`, 'check-badge-ok'));
+      checks.appendChild(buildCheckBadge(`ERROR ${errorCount}`, 'check-badge-error'));
+      checks.appendChild(buildCheckBadge(
+        !Object.keys(siteChecks).length ? 'Not yet polled' : `Pending ${unknownCount}`,
+        'check-badge-unknown'
+      ));
+    }
+
+    card.appendChild(title);
+    card.appendChild(subtitle);
+    card.appendChild(checks);
+    centralSitesGrid.appendChild(card);
+  });
+}
+
+async function loadSiteHistory(wsite) {
+  if (!centralSiteHistory) return;
+  centralSiteHistory.textContent = 'Loading history…';
+  try {
+    const data = await requestJson(`/api/central/history?site=${encodeURIComponent(wsite)}&hours=24`);
+    renderSiteHistory(data.records || []);
+  } catch (error) {
+    centralSiteHistory.textContent = `Could not load history: ${error.message}`;
+  }
+}
+
+function renderSiteClients(wsite) {
+  if (!centralSiteClients) return;
+  centralSiteClients.textContent = '';
+  const siteClients = [...clients.values()]
+    .filter((client) => (client.config?.wsite || client.effective_config?.wsite || '') === wsite)
+    .sort((a, b) => (a.hostname || '').localeCompare(b.hostname || ''));
+
+  if (!siteClients.length) {
+    const empty = document.createElement('div');
+    empty.className = 'form-hint';
+    empty.textContent = 'No connected or known clients for this site.';
+    centralSiteClients.appendChild(empty);
+    return;
+  }
+
+  siteClients.forEach((client) => {
+    const row = document.createElement('div');
+    row.className = 'client-mini-row';
+
+    const dot = document.createElement('span');
+    dot.className = `status-dot ${client.online ? 'online' : 'offline'}`;
+
+    const host = document.createElement('span');
+    host.className = 'client-mini-host';
+    host.textContent = client.hostname || '—';
+
+    const meta = document.createElement('span');
+    meta.className = 'client-mini-sim';
+    const active = (client.active_simulations || []).join(', ') || 'No active simulations';
+    meta.textContent = `${client.simulation_id || '—'} · ${active}`;
+
+    row.appendChild(dot);
+    row.appendChild(host);
+    row.appendChild(meta);
+    centralSiteClients.appendChild(row);
+  });
+}
+
+function renderSiteChecks(wsite, checkStatusMap) {
+  if (!centralSiteChecks) return;
+  centralSiteChecks.textContent = '';
+  const monitoredChecks = currentSettings.monitored_checks || [];
+  if (!monitoredChecks.length) {
+    const empty = document.createElement('div');
+    empty.className = 'form-hint';
+    empty.textContent = 'No monitored checks configured.';
+    centralSiteChecks.appendChild(empty);
+    return;
+  }
+
+  monitoredChecks.forEach((check) => {
+    const status = checkStatusMap[check.id] || null;
+    const row = document.createElement('div');
+    row.className = 'check-status-row';
+
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'check-status-name';
+    name.textContent = check.name || check.id;
+    const meta = document.createElement('div');
+    meta.className = 'check-status-count';
+    meta.textContent = `${check.type} · ${status ? `Updated ${formatCentralDate(status.ts)}` : 'Not yet polled'}`;
+    left.appendChild(name);
+    left.appendChild(meta);
+
+    const right = document.createElement('div');
+    right.style.display = 'flex';
+    right.style.alignItems = 'center';
+    right.style.gap = '8px';
+    right.appendChild(buildCheckBadge(
+      status ? status.status : 'UNKNOWN',
+      status?.status === 'OK' ? 'check-badge-ok' : status?.status === 'ERROR' ? 'check-badge-error' : 'check-badge-unknown'
+    ));
+
+    const count = document.createElement('span');
+    count.className = 'check-status-count';
+    count.textContent = status ? `Count ${status.count ?? 0}` : 'Count —';
+    right.appendChild(count);
+
+    row.appendChild(left);
+    row.appendChild(right);
+    centralSiteChecks.appendChild(row);
+  });
+}
+
+function renderSiteHistory(records) {
+  if (!centralSiteHistory) return;
+  centralSiteHistory.textContent = '';
+  const sorted = [...records]
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    .slice(0, 100);
+
+  if (!sorted.length) {
+    centralSiteHistory.textContent = 'No history records in the last 24 hours.';
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'history-table';
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  ['Time', 'Check', 'Status', 'Count'].forEach((label) => {
+    const th = document.createElement('th');
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbodyEl = document.createElement('tbody');
+  sorted.forEach((record) => {
+    const row = document.createElement('tr');
+    const values = [
+      formatCentralDate(record.ts),
+      record.check_name || record.check_id || '—',
+      record.status || '—',
+      String(record.count ?? '—')
+    ];
+    values.forEach((value) => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      row.appendChild(td);
+    });
+    tbodyEl.appendChild(row);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbodyEl);
+  centralSiteHistory.appendChild(table);
+}
+
+function openSiteDetail(wsite) {
+  centralSiteDetailOpen = wsite;
+  if (centralOverview) centralOverview.classList.add('hidden');
+  if (centralSiteDetail) centralSiteDetail.classList.remove('hidden');
+  if (centralDetailTitle) centralDetailTitle.textContent = wsite;
+  if (centralDetailSub) {
+    centralDetailSub.textContent = `Central site: ${currentSettings.site_mappings?.[wsite] || 'Unmapped'}`;
+  }
+  renderSiteClients(wsite);
+  renderSiteChecks(wsite, centralStatusData[wsite] || {});
+  loadSiteHistory(wsite);
+}
+
+function closeSiteDetail() {
+  centralSiteDetailOpen = null;
+  if (centralSiteDetail) centralSiteDetail.classList.add('hidden');
+  if (centralOverview) centralOverview.classList.remove('hidden');
+}
+
+function handleCentralUpdate(status, ts) {
+  centralStatusData = status || {};
+  centralLastSyncedTs = ts ? ts * 1000 : Date.now();
+  renderCentralOverview();
+  if (centralSiteDetailOpen) {
+    renderSiteClients(centralSiteDetailOpen);
+    renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
+    loadSiteHistory(centralSiteDetailOpen);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const settings = await requestJson('/api/settings');
+    applySettingsToUI(settings || {});
+  } catch (error) {
+    showSettingsMessage(`Error loading settings: ${error.message}`, true);
+  }
+}
+
+async function loadCentralStatus() {
+  centralStatusInitialized = true;
+  try {
+    const data = await requestJson('/api/central/status');
+    mergeSettings({
+      site_mappings: data.site_mappings || {},
+      monitored_checks: data.monitored_checks || []
+    });
+    centralTokenValid = Boolean(data.token_valid);
+    handleCentralUpdate(data.status || {}, Date.now() / 1000);
+    renderSelectedChecksPreview();
+    renderSiteMappingsTable();
+  } catch (error) {
+    centralTokenValid = false;
+    updateCentralToolbar();
+    if (centralEmpty) {
+      centralEmpty.textContent = `Could not load Central status: ${error.message}`;
+      centralEmpty.classList.remove('hidden');
+    }
+  }
 }
 
 function buildToggle(flag, checked) {
@@ -460,6 +1002,11 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'central_update') {
+    handleCentralUpdate(message.status, message.ts);
+    return;
+  }
+
   if (['status_update', 'overrides_update', 'overrides_cleared'].includes(message.type) && message.client) {
     upsertClient(message.client);
   }
@@ -515,4 +1062,173 @@ async function applyGlobalOverride(overrides) {
 document.getElementById('kill-all').addEventListener('click', () => applyGlobalOverride({ kill_switch: 'on' }));
 document.getElementById('resume-all').addEventListener('click', () => applyGlobalOverride({ kill_switch: 'off' }));
 
+if (centralDetailBack) {
+  centralDetailBack.addEventListener('click', closeSiteDetail);
+}
+
+if (centralTabButton) {
+  centralTabButton.addEventListener('click', () => {
+    if (!centralStatusInitialized || !Object.keys(centralStatusData).length) {
+      loadCentralStatus();
+    } else {
+      renderCentralOverview();
+    }
+  });
+}
+
+if (setupTabButton) {
+  setupTabButton.addEventListener('click', () => {
+    if (!currentSettings.repo_url && !currentSettings.repo_branch) {
+      loadSettings();
+    }
+  });
+}
+
+if (centralRefreshBtn) {
+  centralRefreshBtn.addEventListener('click', async () => {
+    const originalLabel = centralRefreshBtn.textContent;
+    centralRefreshBtn.disabled = true;
+    centralRefreshBtn.textContent = 'Refreshing…';
+    try {
+      await requestJson('/api/central/poll', { method: 'POST' });
+      await loadCentralStatus();
+    } catch (error) {
+      if (centralLastSynced) centralLastSynced.textContent = `Refresh failed: ${error.message}`;
+    } finally {
+      centralRefreshBtn.disabled = false;
+      centralRefreshBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (centralTestBtn) {
+  centralTestBtn.addEventListener('click', async () => {
+    const originalLabel = centralTestBtn.textContent;
+    const configPayload = buildCentralConfigPayload();
+    updateLocalCentralConfig(configPayload);
+    centralTestBtn.disabled = true;
+    centralTestBtn.textContent = 'Testing…';
+    showInlineMessage(centralTestMsg, '', false, 0);
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ central_config: configPayload })
+      });
+      const result = await requestJson('/api/central/test-connection', { method: 'POST' });
+      centralTokenValid = true;
+      updateCentralToolbar();
+      showInlineMessage(centralTestMsg, result.message || 'Connected to Aruba Central successfully.', false);
+      if (centralClientSecretInput) centralClientSecretInput.value = '';
+    } catch (error) {
+      centralTokenValid = false;
+      updateCentralToolbar();
+      showInlineMessage(centralTestMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      centralTestBtn.disabled = false;
+      centralTestBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (addMappingBtn) {
+  addMappingBtn.addEventListener('click', () => addMappingRow());
+}
+
+if (saveMappingsBtn) {
+  saveMappingsBtn.addEventListener('click', async () => {
+    const rows = siteMappingsBody ? [...siteMappingsBody.querySelectorAll('tr')] : [];
+    const siteMappings = {};
+    rows.forEach((row) => {
+      const inputs = row.querySelectorAll('input');
+      const wsite = inputs[0]?.value.trim() || '';
+      const centralSite = inputs[1]?.value.trim() || '';
+      if (wsite && centralSite) siteMappings[wsite] = centralSite;
+    });
+    const originalLabel = saveMappingsBtn.textContent;
+    saveMappingsBtn.disabled = true;
+    saveMappingsBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_mappings: siteMappings })
+      });
+      applySettingsToUI({ site_mappings: siteMappings });
+      showInlineMessage(centralMappingsMsg, 'Site mappings saved.', false);
+      renderCentralOverview();
+    } catch (error) {
+      showInlineMessage(centralMappingsMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      saveMappingsBtn.disabled = false;
+      saveMappingsBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (loadChecksBtn) {
+  loadChecksBtn.addEventListener('click', async () => {
+    const originalLabel = loadChecksBtn.textContent;
+    loadChecksBtn.disabled = true;
+    loadChecksBtn.textContent = 'Loading…';
+    if (availableChecksContainer) availableChecksContainer.textContent = 'Loading available checks…';
+    try {
+      const data = await requestJson('/api/central/available');
+      availableChecks = {
+        alerts: data.alerts || [],
+        insights: data.insights || []
+      };
+      renderAvailableChecks();
+      showInlineMessage(centralChecksMsg, 'Available checks loaded.', false);
+    } catch (error) {
+      availableChecks = { alerts: [], insights: [] };
+      if (availableChecksContainer) {
+        availableChecksContainer.textContent = `Unable to load checks: ${error.message}`;
+      }
+      showInlineMessage(centralChecksMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      loadChecksBtn.disabled = false;
+      loadChecksBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (saveChecksBtn) {
+  saveChecksBtn.addEventListener('click', async () => {
+    const allInputs = availableChecksContainer
+      ? [...availableChecksContainer.querySelectorAll('input[type="checkbox"]')]
+      : [];
+    const checkedInputs = allInputs.filter((input) => input.checked);
+    const monitoredChecks = allInputs.length
+      ? checkedInputs.map((input) => ({
+          type: input.dataset.type,
+          id: input.dataset.id,
+          name: input.dataset.name || input.dataset.id
+        }))
+      : (currentSettings.monitored_checks || []);
+    const originalLabel = saveChecksBtn.textContent;
+    saveChecksBtn.disabled = true;
+    saveChecksBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitored_checks: monitoredChecks })
+      });
+      applySettingsToUI({ monitored_checks: monitoredChecks });
+      if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
+        renderAvailableChecks();
+      }
+      showInlineMessage(centralChecksMsg, 'Monitored checks saved.', false);
+    } catch (error) {
+      showInlineMessage(centralChecksMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      saveChecksBtn.disabled = false;
+      saveChecksBtn.textContent = originalLabel;
+    }
+  });
+}
+
+loadSettings();
+updateCentralToolbar();
 connectWebSocket();

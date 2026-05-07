@@ -6,11 +6,13 @@ import json
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,23 +25,45 @@ logger = logging.getLogger("client_sim_dashboard")
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
 REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
+CENTRAL_POLL_INTERVAL = 900   # 15 minutes
+HISTORY_HOURS = 24
 
-# ── Runtime settings (persisted to settings.json, survives restarts) ─────────
-def _load_persisted_settings() -> dict[str, str]:
+
+# ── Runtime settings (persisted to settings.json) ────────────────────────────
+def _load_persisted_settings() -> dict[str, Any]:
     try:
         return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
+
+def _save_settings() -> None:
+    try:
+        SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
+
+
 _persisted = _load_persisted_settings()
-settings: dict[str, str] = {
+settings: dict[str, Any] = {
     "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
+    "central_config": _persisted.get("central_config", {
+        "cluster_url": "",
+        "client_id": "",
+        "client_secret": "",
+        "customer_id": "",
+    }),
+    # {wsite_value: central_site_name}
+    "site_mappings": _persisted.get("site_mappings", {}),
+    # [{type: "alert"|"insight", id: "...", name: "..."}]
+    "monitored_checks": _persisted.get("monitored_checks", []),
 }
 
 ALLOWED_PLATFORMS = {"linux", "windows"}
@@ -93,10 +117,299 @@ ADDRESS_SECTION_KEYS = {
     "vh_server_addr",
 }
 
+
+# ── Aruba Central state ───────────────────────────────────────────────────────
+central_token: dict[str, Any] = {
+    "access_token": None,
+    "refresh_token": None,
+    "expires_at": 0.0,
+}
+# {wsite: {check_id: {status, count, ts, check_name, check_type}}}
+central_status: dict[str, dict[str, Any]] = {}
+central_history: list[dict[str, Any]] = []   # in-memory 24-h window
+history_lock = asyncio.Lock()
+
+
+# ── History file helpers ──────────────────────────────────────────────────────
+def _history_cutoff() -> float:
+    return time.time() - HISTORY_HOURS * 3600
+
+
+def _load_history() -> list[dict[str, Any]]:
+    """Load last 24 h from the JSONL file into memory."""
+    if not HISTORY_FILE.exists():
+        return []
+    cutoff = _history_cutoff()
+    result: list[dict[str, Any]] = []
+    try:
+        for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+                if record.get("ts", 0) >= cutoff:
+                    result.append(record)
+            except json.JSONDecodeError:
+                pass
+    except Exception as exc:
+        logger.warning("Could not read history file: %s", exc)
+    return result
+
+
+def _append_and_trim_history(new_records: list[dict[str, Any]]) -> None:
+    """Append new records to the JSONL file and remove lines older than 24 h."""
+    cutoff = _history_cutoff()
+    existing: list[str] = []
+    if HISTORY_FILE.exists():
+        try:
+            for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    if rec.get("ts", 0) >= cutoff:
+                        existing.append(line)
+                except json.JSONDecodeError:
+                    pass
+        except Exception as exc:
+            logger.warning("Could not read history file for trimming: %s", exc)
+
+    for record in new_records:
+        existing.append(json.dumps(record))
+
+    try:
+        HISTORY_FILE.write_text("\n".join(existing) + "\n", encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not write history file: %s", exc)
+
+
+# ── Aruba Central OAuth helpers ───────────────────────────────────────────────
+def _central_cfg() -> dict[str, str]:
+    return settings.get("central_config", {})
+
+
+def _central_ready() -> bool:
+    cfg = _central_cfg()
+    return bool(cfg.get("cluster_url") and cfg.get("client_id") and cfg.get("client_secret"))
+
+
+async def _fetch_central_token(client: httpx.AsyncClient) -> bool:
+    """Fetch a new access token using client_credentials grant."""
+    cfg = _central_cfg()
+    token_url = cfg["cluster_url"].rstrip("/") + "/oauth2/token"
+    data: dict[str, str] = {
+        "grant_type": "client_credentials",
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+    }
+    if cfg.get("customer_id"):
+        data["customer_id"] = cfg["customer_id"]
+    try:
+        resp = await client.post(token_url, data=data, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+        central_token["access_token"] = payload["access_token"]
+        central_token["refresh_token"] = payload.get("refresh_token")
+        central_token["expires_at"] = time.time() + payload.get("expires_in", 7200) - 60
+        logger.info("Aruba Central token acquired, expires in %ss", payload.get("expires_in", 7200))
+        return True
+    except Exception as exc:
+        logger.warning("Central token fetch failed: %s", exc)
+        central_token["access_token"] = None
+        return False
+
+
+async def _refresh_central_token(client: httpx.AsyncClient) -> bool:
+    """Refresh access token using the refresh_token grant."""
+    cfg = _central_cfg()
+    if not central_token.get("refresh_token"):
+        return await _fetch_central_token(client)
+    token_url = cfg["cluster_url"].rstrip("/") + "/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "refresh_token": central_token["refresh_token"],
+    }
+    try:
+        resp = await client.post(token_url, data=data, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+        central_token["access_token"] = payload["access_token"]
+        central_token["refresh_token"] = payload.get("refresh_token", central_token["refresh_token"])
+        central_token["expires_at"] = time.time() + payload.get("expires_in", 7200) - 60
+        logger.info("Aruba Central token refreshed")
+        return True
+    except Exception as exc:
+        logger.warning("Central token refresh failed (%s) — re-fetching", exc)
+        return await _fetch_central_token(client)
+
+
+def _central_headers() -> dict[str, str]:
+    token = central_token.get("access_token")
+    if not token:
+        raise HTTPException(status_code=503, detail="Aruba Central token not available — check connection settings")
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def central_token_manager() -> None:
+    """Background task: ensure token stays valid. Checks every 5 minutes."""
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                if _central_ready():
+                    if not central_token.get("access_token") or time.time() >= central_token["expires_at"]:
+                        await _refresh_central_token(client)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("Central token manager error: %s", exc)
+            await asyncio.sleep(300)
+
+
+# ── Aruba Central poll loop ───────────────────────────────────────────────────
+async def _poll_central_once(client: httpx.AsyncClient) -> None:
+    """Single poll cycle: fetch alerts + insights per mapped site, evaluate checks."""
+    if not _central_ready() or not central_token.get("access_token"):
+        return
+
+    site_mappings: dict[str, str] = settings.get("site_mappings", {})
+    monitored: list[dict[str, Any]] = settings.get("monitored_checks", [])
+    if not site_mappings or not monitored:
+        return
+
+    cfg = _central_cfg()
+    base_url = cfg["cluster_url"].rstrip("/")
+    headers = _central_headers()
+    now = time.time()
+    new_records: list[dict[str, Any]] = []
+
+    for wsite, central_site in site_mappings.items():
+        site_check_status: dict[str, Any] = {}
+
+        # ── Fetch alerts for this site ────────────────────────────
+        alert_type_counts: dict[str, int] = {}
+        try:
+            resp = await client.get(
+                f"{base_url}/monitoring/v2/alerts",
+                headers=headers,
+                params={"site": central_site, "limit": 1000},
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for alert in data.get("alerts", []):
+                    atype = alert.get("alert_type") or alert.get("type", "")
+                    if atype:
+                        alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
+        except Exception as exc:
+            logger.warning("Central alerts fetch failed for site %s: %s", central_site, exc)
+
+        # ── Fetch insights for this site ──────────────────────────
+        insight_cat_counts: dict[str, int] = {}
+        try:
+            resp = await client.get(
+                f"{base_url}/aiops/v1/insights",
+                headers=headers,
+                params={"site_name": central_site, "limit": 1000},
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for insight in data.get("insights", []):
+                    cat = insight.get("category") or insight.get("type", "")
+                    if cat:
+                        insight_cat_counts[cat] = insight_cat_counts.get(cat, 0) + 1
+        except Exception as exc:
+            logger.warning("Central insights fetch failed for site %s: %s", central_site, exc)
+
+        # ── Evaluate each monitored check ─────────────────────────
+        for check in monitored:
+            check_type = check.get("type", "")
+            check_id = check.get("id", "")
+            check_name = check.get("name", check_id)
+            if not check_id:
+                continue
+
+            if check_type == "alert":
+                count = alert_type_counts.get(check_id, 0)
+            elif check_type == "insight":
+                count = insight_cat_counts.get(check_id, 0)
+            else:
+                continue
+
+            status = "OK" if count > 0 else "ERROR"
+            site_check_status[check_id] = {
+                "status": status,
+                "count": count,
+                "check_name": check_name,
+                "check_type": check_type,
+                "ts": now,
+            }
+            new_records.append({
+                "ts": now,
+                "wsite": wsite,
+                "central_site": central_site,
+                "check_type": check_type,
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": status,
+                "count": count,
+            })
+
+        central_status[wsite] = site_check_status
+
+    # ── Persist history ───────────────────────────────────────────
+    if new_records:
+        cutoff = _history_cutoff()
+        async with history_lock:
+            central_history[:] = [r for r in central_history if r["ts"] >= cutoff]
+            central_history.extend(new_records)
+        await asyncio.to_thread(_append_and_trim_history, new_records)
+
+    await broadcast({"type": "central_update", "status": _central_status_payload(), "ts": now})
+
+
+def _central_status_payload() -> dict[str, Any]:
+    """Serialize current central_status for WS / API responses."""
+    return {
+        wsite: {
+            check_id: {
+                "status": info["status"],
+                "count": info["count"],
+                "check_name": info["check_name"],
+                "check_type": info["check_type"],
+                "ts": info["ts"],
+            }
+            for check_id, info in checks.items()
+        }
+        for wsite, checks in central_status.items()
+    }
+
+
+async def central_poller() -> None:
+    """Background task: poll Central every CENTRAL_POLL_INTERVAL seconds."""
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                await _poll_central_once(client)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("Central poll error: %s", exc)
+            await asyncio.sleep(CENTRAL_POLL_INTERVAL)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
+    global central_history
+    central_history = await asyncio.to_thread(_load_history)
     background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
+    background_tasks["central_token"] = asyncio.create_task(central_token_manager())
+    background_tasks["central_poller"] = asyncio.create_task(central_poller())
     yield
     for task in background_tasks.values():
         task.cancel()
@@ -132,7 +445,10 @@ class ClientControlResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    repo_branch: str
+    repo_branch: str | None = None
+    central_config: dict[str, str] | None = None
+    site_mappings: dict[str, str] | None = None
+    monitored_checks: list[dict[str, str]] | None = None
 
 
 def utcnow() -> datetime:
@@ -339,34 +655,153 @@ async def heartbeat_check() -> None:
 
 
 @app.get("/api/settings")
-async def api_settings_get() -> dict[str, str]:
-    return {"repo_url": REPO_URL, "repo_branch": settings["repo_branch"]}
+async def api_settings_get() -> dict[str, Any]:
+    cfg = dict(settings["central_config"])
+    cfg.pop("client_secret", None)   # never return secret to browser
+    return {
+        "repo_url": REPO_URL,
+        "repo_branch": settings["repo_branch"],
+        "central_config": cfg,
+        "site_mappings": settings["site_mappings"],
+        "monitored_checks": settings["monitored_checks"],
+    }
 
 
 @app.post("/api/settings")
 async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
-    branch = update.repo_branch.strip()
-    if not branch or not re.match(r'^[a-zA-Z0-9._/\-]+$', branch):
-        raise HTTPException(status_code=422, detail="Invalid branch name — use letters, numbers, hyphens, underscores, dots, or slashes only")
+    changed_branch = False
 
-    settings["repo_branch"] = branch
+    if update.repo_branch is not None:
+        branch = update.repo_branch.strip()
+        if not branch or not re.match(r'^[a-zA-Z0-9._/\-]+$', branch):
+            raise HTTPException(status_code=422, detail="Invalid branch name")
+        settings["repo_branch"] = branch
+        changed_branch = True
 
-    # Persist so the branch survives a service restart
-    try:
-        SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
+    if update.central_config is not None:
+        merged = dict(settings["central_config"])
+        for key in ("cluster_url", "client_id", "client_secret", "customer_id"):
+            if key in update.central_config:
+                merged[key] = update.central_config[key].strip()
+        settings["central_config"] = merged
+        # Reset token so the manager re-fetches with new credentials
+        central_token["access_token"] = None
+        central_token["expires_at"] = 0.0
 
-    # Restart sync task immediately on the new branch
-    if "repo_sync" in background_tasks:
-        background_tasks["repo_sync"].cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await background_tasks["repo_sync"]
-    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+    if update.site_mappings is not None:
+        settings["site_mappings"] = {k.strip(): v.strip() for k, v in update.site_mappings.items() if k.strip()}
 
-    payload = {"repo_url": REPO_URL, "repo_branch": branch}
+    if update.monitored_checks is not None:
+        settings["monitored_checks"] = [
+            {"type": c.get("type", ""), "id": c.get("id", ""), "name": c.get("name", c.get("id", ""))}
+            for c in update.monitored_checks
+            if c.get("type") and c.get("id")
+        ]
+
+    _save_settings()
+
+    if changed_branch:
+        if "repo_sync" in background_tasks:
+            background_tasks["repo_sync"].cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await background_tasks["repo_sync"]
+        background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+
+    payload = {
+        "repo_url": REPO_URL,
+        "repo_branch": settings["repo_branch"],
+    }
     await broadcast({"type": "settings_update", "settings": payload})
     return {"status": "ok", "settings": payload}
+
+
+# ── Aruba Central API endpoints ───────────────────────────────────────────────
+@app.post("/api/central/test-connection")
+async def api_central_test() -> dict[str, Any]:
+    if not _central_ready():
+        raise HTTPException(status_code=422, detail="Central connection not configured — set cluster_url, client_id, and client_secret in Setup.")
+    async with httpx.AsyncClient() as client:
+        ok = await _fetch_central_token(client)
+    if ok:
+        return {"status": "ok", "message": "Connected to Aruba Central successfully."}
+    raise HTTPException(status_code=502, detail="Could not obtain token from Aruba Central. Check your credentials and cluster URL.")
+
+
+@app.get("/api/central/available")
+async def api_central_available() -> dict[str, Any]:
+    """Return available alert types and insight categories from Central."""
+    if not _central_ready():
+        raise HTTPException(status_code=422, detail="Central not configured.")
+    if not central_token.get("access_token"):
+        raise HTTPException(status_code=503, detail="Central token not yet available — try Test Connection first.")
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    alert_types: dict[str, str] = {}
+    insight_categories: dict[str, str] = {}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}/monitoring/v2/alerts", headers=headers, params={"limit": 1000}, timeout=20)
+            if resp.status_code == 200:
+                for alert in resp.json().get("alerts", []):
+                    atype = alert.get("alert_type") or alert.get("type", "")
+                    aname = alert.get("alert_type_name") or atype.replace("_", " ").title()
+                    if atype:
+                        alert_types[atype] = aname
+        except Exception as exc:
+            logger.warning("Could not fetch alert types: %s", exc)
+
+        try:
+            resp = await client.get(f"{base_url}/aiops/v1/insights", headers=headers, params={"limit": 1000}, timeout=20)
+            if resp.status_code == 200:
+                for insight in resp.json().get("insights", []):
+                    cat = insight.get("category") or insight.get("type", "")
+                    cat_name = insight.get("category_name") or cat.replace("_", " ").title()
+                    if cat:
+                        insight_categories[cat] = cat_name
+        except Exception as exc:
+            logger.warning("Could not fetch insight categories: %s", exc)
+
+    return {
+        "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
+        "insights": [{"id": k, "name": v} for k, v in sorted(insight_categories.items())],
+    }
+
+
+@app.get("/api/central/status")
+async def api_central_status() -> dict[str, Any]:
+    """Current check status for all mapped sites."""
+    return {
+        "status": _central_status_payload(),
+        "site_mappings": settings.get("site_mappings", {}),
+        "monitored_checks": settings.get("monitored_checks", []),
+        "token_valid": bool(central_token.get("access_token") and time.time() < central_token["expires_at"]),
+    }
+
+
+@app.get("/api/central/history")
+async def api_central_history(
+    site: str | None = Query(default=None),
+    hours: int = Query(default=24, ge=1, le=24),
+) -> dict[str, Any]:
+    """Return history records, optionally filtered by wsite."""
+    cutoff = time.time() - hours * 3600
+    async with history_lock:
+        records = [
+            r for r in central_history
+            if r["ts"] >= cutoff and (site is None or r["wsite"] == site)
+        ]
+    return {"records": records, "count": len(records)}
+
+
+@app.post("/api/central/poll")
+async def api_central_poll() -> dict[str, Any]:
+    """Trigger an immediate Central poll cycle."""
+    if not _central_ready():
+        raise HTTPException(status_code=422, detail="Central not configured.")
+    asyncio.create_task(_poll_central_once(httpx.AsyncClient()))
+    return {"status": "ok", "message": "Poll started."}
 
 
 @app.get("/api/health")
@@ -492,6 +927,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}))
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"]}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": {"repo_url": REPO_URL, "repo_branch": settings["repo_branch"]}}))
+    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "ts": time.time()}))
 
     try:
         while True:

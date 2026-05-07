@@ -30,6 +30,7 @@
 
   <nav class="tab-nav" role="tablist">
     <button class="tab active" role="tab" aria-selected="true"  data-tab="dashboard">Dashboard</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
     <button class="tab"        role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
   </nav>
 
@@ -66,6 +67,56 @@
         </tbody>
       </table>
     </section>
+  </main>
+
+  <!-- ── Central tab ── -->
+  <main id="tab-central" class="page tab-content hidden">
+    <div id="central-overview">
+      <section class="central-toolbar">
+        <div>
+          <h2>Aruba Central</h2>
+          <div id="central-last-synced" class="central-last-synced">Last synced: —</div>
+        </div>
+        <div class="toolbar-actions">
+          <button id="central-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
+          <div id="central-token-status" class="central-token-status">
+            <span id="central-token-dot" class="status-dot offline"></span>
+            <span id="central-token-text">Token status unknown</span>
+          </div>
+        </div>
+      </section>
+
+      <div id="central-sites-grid" class="central-sites-grid"></div>
+      <div id="central-empty" class="central-empty hidden">No Aruba Central site mappings configured yet.</div>
+    </div>
+
+    <div id="central-site-detail" class="central-detail-panel hidden">
+      <div class="central-detail-header">
+        <button id="central-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+        <div>
+          <h2 id="central-detail-title">Site Detail</h2>
+          <p id="central-detail-sub" class="central-detail-sub">—</p>
+        </div>
+      </div>
+
+      <div class="central-detail-grid">
+        <section class="central-panel-card">
+          <h3>Clients at Site</h3>
+          <div id="central-site-clients" class="client-mini-list"></div>
+        </section>
+
+        <section class="central-panel-card">
+          <h3>Check Status</h3>
+          <div id="central-site-checks" class="check-status-list"></div>
+        </section>
+      </div>
+
+      <section class="history-section">
+        <h3>Last 24 Hours</h3>
+        <div id="central-site-history"></div>
+      </section>
+    </div>
+
   </main>
 
   <!-- ── Setup tab ── -->
@@ -114,6 +165,87 @@
           <span class="setup-status-label">Last error</span>
           <span id="setup-sync-error" class="setup-status-value muted">—</span>
         </div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Central Connection</h2>
+        <p>Configure Aruba Central API access for status polling and historical visibility.</p>
+      </div>
+
+      <div class="setup-form">
+        <div class="form-group">
+          <label class="form-label" for="central-cluster-url">Cluster URL</label>
+          <input id="central-cluster-url" class="form-input" type="text" placeholder="https://apigw-*.central.arubanetworks.com" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="central-client-id">Client ID</label>
+          <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="central-client-secret">Client Secret</label>
+          <input id="central-client-secret" class="form-input" type="password" placeholder="Enter to update, blank to keep current" autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="central-customer-id">Customer ID</label>
+          <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+          <span class="form-hint">Required for MSP accounts; leave blank if not applicable</span>
+        </div>
+
+        <div class="form-actions">
+          <button id="central-test-btn" class="btn btn-primary" type="button">Test Connection</button>
+        </div>
+
+        <div id="central-test-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Site Mappings</h2>
+        <p>Map the wsite value from simulation.conf to the site name used in Aruba Central.</p>
+      </div>
+
+      <div class="setup-form">
+        <table class="mapping-table">
+          <thead>
+            <tr>
+              <th>wsite</th>
+              <th>Central Site Name</th>
+              <th>Remove</th>
+            </tr>
+          </thead>
+          <tbody id="site-mappings-body"></tbody>
+        </table>
+
+        <div class="form-actions">
+          <button id="add-mapping-btn" class="btn btn-secondary" type="button">Add Mapping</button>
+          <button id="save-mappings-btn" class="btn btn-primary" type="button">Save Mappings</button>
+        </div>
+
+        <div id="central-mappings-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Monitored Checks</h2>
+        <p>Select which Aruba Central alerts and AI Insights to monitor. OK = present during polling. ERROR = missing.</p>
+      </div>
+
+      <div class="setup-form">
+        <div id="selected-checks-preview" class="form-hint">No checks selected yet.</div>
+        <div class="form-actions">
+          <button id="central-load-checks-btn" class="btn btn-secondary" type="button">Load Available Checks</button>
+          <button id="save-checks-btn" class="btn btn-primary" type="button">Save Monitored Checks</button>
+        </div>
+
+        <div id="available-checks-container"></div>
+        <div id="central-checks-msg" class="settings-message hidden" role="alert"></div>
       </div>
     </div>
   </main>
