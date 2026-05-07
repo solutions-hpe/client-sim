@@ -269,9 +269,14 @@
 
       <div class="setup-form">
         <div class="form-group">
-          <label class="form-label" for="relay-enabled-check">
-            <input type="checkbox" id="relay-enabled-check"> Enable relay to central server
-          </label>
+          <label class="form-label">Relay to Cloud Platform</label>
+          <div class="toggle-row">
+            <label class="switch">
+              <input type="checkbox" id="relay-enabled-check">
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-row-label" id="relay-enabled-label">Disabled</span>
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label" for="relay-url-input">Central Server URL</label>
@@ -358,15 +363,9 @@
         <!-- API Version toggle -->
         <div class="form-group">
           <label class="form-label">API Version</label>
-          <div class="radio-group">
-            <label class="radio-option">
-              <input type="radio" name="central-api-version" id="central-api-classic" value="classic" checked>
-              <span>Classic Central</span>
-            </label>
-            <label class="radio-option">
-              <input type="radio" name="central-api-version" id="central-api-new" value="new_central">
-              <span>New Central (CNX)</span>
-            </label>
+          <div class="segmented-control" id="central-api-version-control">
+            <button type="button" class="active" data-value="classic" id="central-api-classic">Classic Central</button>
+            <button type="button" data-value="new_central" id="central-api-new">New Central (CNX)</button>
           </div>
         </div>
 

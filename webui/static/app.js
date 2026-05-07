@@ -235,6 +235,12 @@ const centralNewFields = document.getElementById('central-new-fields');
 const centralClientIdBadge = document.getElementById('central-client-id-badge');
 const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
 const relayEnabledCheck = document.getElementById('relay-enabled-check');
+const relayEnabledLabel = document.getElementById('relay-enabled-label');
+if (relayEnabledCheck && relayEnabledLabel) {
+  relayEnabledCheck.addEventListener('change', () => {
+    relayEnabledLabel.textContent = relayEnabledCheck.checked ? 'Enabled' : 'Disabled';
+  });
+}
 const relayUrlInput = document.getElementById('relay-url-input');
 const relaySiteIdInput = document.getElementById('relay-site-id-input');
 const relayIntervalInput = document.getElementById('relay-interval-input');
@@ -245,11 +251,15 @@ const relayNowBtn = document.getElementById('relay-now-btn');
 const relayMsg = document.getElementById('relay-message');
 
 function getCentralApiVersion() {
-  const checked = document.querySelector('input[name="central-api-version"]:checked');
-  return checked ? checked.value : 'classic';
+  const active = document.querySelector('#central-api-version-control button.active');
+  return active ? active.dataset.value : 'classic';
 }
 
 function applyCentralVersionUI(version) {
+  // Update segmented control active state
+  document.querySelectorAll('#central-api-version-control button').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.value === version);
+  });
   const isNew = version === 'new_central';
   if (centralClassicFields) centralClassicFields.classList.toggle('hidden', isNew);
   if (centralNewFields) centralNewFields.classList.toggle('hidden', !isNew);
@@ -268,8 +278,8 @@ function applyCentralVersionUI(version) {
   }
 }
 
-document.querySelectorAll('input[name="central-api-version"]').forEach((radio) => {
-  radio.addEventListener('change', () => applyCentralVersionUI(getCentralApiVersion()));
+document.querySelectorAll('#central-api-version-control button').forEach((btn) => {
+  btn.addEventListener('click', () => applyCentralVersionUI(btn.dataset.value));
 });
 const siteMappingsBody = document.getElementById('site-mappings-body');
 const addMappingBtn = document.getElementById('add-mapping-btn');
@@ -349,10 +359,8 @@ function applySettingsToUI(s) {
   setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
   setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
 
-  // Set API version radio + toggle UI
+  // Set API version segmented control + toggle UI
   const version = settings.central_config.api_version || 'classic';
-  const radio = document.querySelector(`input[name="central-api-version"][value="${version}"]`);
-  if (radio) radio.checked = true;
   applyCentralVersionUI(version);
 
   // Show "configured" hint for secrets without revealing values
@@ -363,7 +371,11 @@ function applySettingsToUI(s) {
   if (rtStatus) rtStatus.textContent = settings.central_config.refresh_token_configured ? '✓ Refresh token configured — paste new value to replace.' : 'Optional — enables automatic renewal when the access token expires.';
   if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
   const relay = settings.relay || {};
-  if (relayEnabledCheck) relayEnabledCheck.checked = !!relay.enabled;
+  if (relayEnabledCheck) {
+    relayEnabledCheck.checked = !!relay.enabled;
+    const lbl = document.getElementById('relay-enabled-label');
+    if (lbl) lbl.textContent = relay.enabled ? 'Enabled' : 'Disabled';
+  }
   setInputValueIfIdle(relayUrlInput, relay.url || '');
   setInputValueIfIdle(relaySiteIdInput, relay.site_id || '');
   if (relayIntervalInput && !relayIntervalInput.matches(':focus')) relayIntervalInput.value = relay.interval || 900;

@@ -382,7 +382,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   color: var(--text);
 }
 
-/* HPE-styled toggle switch */
+/* HPE-styled toggle switch — matches New Central pill toggle */
 .switch {
   position: relative;
   display: inline-flex;
@@ -402,7 +402,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   position: absolute;
   inset: 0;
   cursor: pointer;
-  background: #B4C0CF;
+  background: #C8D0DA;
   border-radius: 24px;
   transition: background-color 0.2s;
 }
@@ -416,12 +416,50 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   top: 3px;
   background: #fff;
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.22);
   transition: transform 0.2s;
 }
 
 .switch input:checked + .slider { background: var(--hpe-green); }
 .switch input:checked + .slider::before { transform: translateX(20px); }
+.switch input:focus-visible + .slider { outline: 2px solid var(--hpe-green); outline-offset: 2px; }
+
+/* Toggle row: switch + label inline */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.toggle-row-label { cursor: pointer; line-height: 1.3; }
+
+/* Segmented control — matches Central's "By Client | By Attempt" style */
+.segmented-control {
+  display: inline-flex;
+  background: #EEF0F3;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.segmented-control button {
+  padding: 5px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.segmented-control button.active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+.segmented-control button:hover:not(.active) { background: rgba(255,255,255,0.6); color: var(--text); }
 
 /* ── Panel actions ──────────────────────────────────────────────── */
 .panel-actions {
@@ -822,25 +860,6 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   padding: 1px 6px;
   margin-left: 6px;
   vertical-align: middle;
-}
-
-/* API version radio toggle */
-.radio-group {
-  display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-}
-.radio-option {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.radio-option input[type="radio"] {
-  accent-color: var(--hpe-green, #01a982);
-  width: 1rem;
-  height: 1rem;
 }
 
 /* ── Simulation cards ───────────────────────────────────────────── */
