@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.04
+# Client-Sim Dashboard — LXC Installer v0.05
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
@@ -454,8 +454,20 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
 echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
 # Allow service user to self-update by re-running this installer as root
 SUDOERS_FILE="/etc/sudoers.d/client-sim-dashboard"
-echo "${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh" > "$SUDOERS_FILE"
-chmod 440 "$SUDOERS_FILE"
+SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh"
+mkdir -p /etc/sudoers.d
+# Remove old file first (may have 440 perms from a prior install)
+rm -f "$SUDOERS_FILE"
+# Write to a temp file, validate syntax, then install atomically
+_sudoers_tmp=$(mktemp)
+echo "$SUDOERS_LINE" > "$_sudoers_tmp"
+if visudo -c -f "$_sudoers_tmp" >>"$LOG" 2>&1; then
+  install -m 440 -o root -g root "$_sudoers_tmp" "$SUDOERS_FILE"
+  ok "Sudoers entry written for self-update"
+else
+  warn "visudo validation failed — skipping sudoers entry (self-update button will require manual sudo setup)"
+fi
+rm -f "$_sudoers_tmp"
 ok "Permissions set"
 
 ###############################################################################
