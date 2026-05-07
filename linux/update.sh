@@ -39,6 +39,10 @@ copy_local_files() {
     (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
 
+    if [[ -f "$src_dir/user-overrides.conf" ]]; then
+        sudo cp "$src_dir/user-overrides.conf" /usr/local/scripts/user-overrides.conf
+    fi
+
     if [[ -f "$src_dir/10-rsyslog.conf" ]]; then
         sudo cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf
     fi
@@ -120,6 +124,18 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             if [[ "$http_code" != "200" || ! -s "$tmp_web/simulation.conf" ]]; then
                 echo "Config download failed (code: $http_code)" | tee -a "$debug" "$log"
                 sync_ok=false
+            fi
+
+            # Pull user-overrides.conf (404 is acceptable — file may not exist in repo)
+            if [[ "$sync_ok" == true ]]; then
+                ov_code=$(curl -sS --max-time 10 \
+                    -o "$tmp_web/user-overrides.conf" \
+                    -w "%{http_code}" \
+                    "$server_url/api/config/overrides" 2>/dev/null)
+                if [[ "$ov_code" != "200" ]]; then
+                    echo "user-overrides.conf not available (code: $ov_code) — skipping" | tee -a "$debug"
+                    rm -f "$tmp_web/user-overrides.conf"
+                fi
             fi
 
             # Pull script list and download each file
@@ -250,7 +266,8 @@ if [[ "$source_found" == false && "$public_repo" == "on" ]]; then
             fi
 
             if cd configs 2>/dev/null; then
-                [[ -f "simulation.conf" ]] && sudo cp simulation.conf /usr/local/scripts/simulation.conf
+                [[ -f "simulation.conf" ]]    && sudo cp simulation.conf    /usr/local/scripts/simulation.conf
+                [[ -f "user-overrides.conf" ]] && sudo cp user-overrides.conf /usr/local/scripts/user-overrides.conf
                 cd ..
             else
                 echo "WARNING: configs directory not found" | tee -a "$debug"

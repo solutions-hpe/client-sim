@@ -1570,12 +1570,6 @@ async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")
     config_text = config_path.read_text(encoding="utf-8")
 
-    # Append user-overrides.conf if present (overrides win at parse time)
-    overrides_path = REPO_DIR / "configs" / "user-overrides.conf"
-    if overrides_path.exists():
-        overrides_text = overrides_path.read_text(encoding="utf-8")
-        config_text = config_text.rstrip("\n") + "\n\n" + overrides_text
-
     if not hostname:
         return config_text
 
@@ -1584,6 +1578,12 @@ async def api_config(hostname: str | None = Query(default=None)) -> str:
         if not client or not client.get("overrides"):
             return config_text
         return apply_overrides(config_text, client)
+
+
+@app.get("/api/config/overrides", response_class=PlainTextResponse)
+async def api_config_overrides() -> str:
+    overrides_path = repo_path("configs", "user-overrides.conf")
+    return overrides_path.read_text(encoding="utf-8")
 
 
 @app.get("/api/scripts/list")

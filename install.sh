@@ -550,6 +550,14 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
       fi
     fi
 
+    # ── user-overrides.conf ──────────────────────────────────────────────────
+    if [[ -f "$CONFIGS_DIR/user-overrides.conf" ]]; then
+      cp "$CONFIGS_DIR/user-overrides.conf" /usr/local/scripts/user-overrides.conf >>"$LOG" 2>&1
+      ok "user-overrides.conf copied"
+    else
+      warn "user-overrides.conf not found in configs/ — skipping"
+    fi
+
     # ── rsyslog config from repo ─────────────────────────────────────────────
     info "Checking for rsyslog config in repo"
     if [[ -f "$LINUX_DIR/10-rsyslog.conf" ]]; then
