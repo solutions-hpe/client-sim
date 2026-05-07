@@ -1430,6 +1430,20 @@ async def api_health() -> dict[str, Any]:
     }
 
 
+@app.post("/api/sync-now")
+async def api_sync_now() -> dict[str, Any]:
+    """Trigger an immediate GitHub sync outside the normal interval."""
+    if "repo_sync" in background_tasks:
+        background_tasks["repo_sync"].cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await background_tasks["repo_sync"]
+    repo_state["synced"] = False
+    repo_state["error"] = None
+    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+    await broadcast({"type": "repo_status", "synced": False, "error": None})
+    return {"status": "ok", "message": "GitHub sync started"}
+
+
 @app.get("/api/config", response_class=PlainTextResponse)
 async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")

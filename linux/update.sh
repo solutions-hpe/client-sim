@@ -31,7 +31,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
     echo "Web server enabled — checking reachability: $server_url" | tee -a "$debug"
 
     if curl -fsSL --connect-timeout 5 --max-time 10 \
-            "${server_url}/api/health" >/dev/null 2>>"$debug"; then
+            "${server_url}/api/health" 2>>"$debug" | grep -q '"status".*"ok"'; then
 
         echo "Web server reachable — using as primary source, skipping GitHub clone" | tee -a "$debug" "$log"
         web_server_used=true

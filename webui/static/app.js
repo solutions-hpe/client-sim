@@ -84,6 +84,8 @@ function setRepoStatus(synced, error) {
 // ── Setup tab — settings form ─────────────────────────────────────
 const branchInput = document.getElementById('branch-input');
 const saveBtn = document.getElementById('save-settings');
+const syncNowBtn = document.getElementById('sync-now-btn');
+const syncNowMsg = document.getElementById('sync-now-message');
 const settingsMsg = document.getElementById('settings-message');
 const setupActiveBranch = document.getElementById('setup-active-branch');
 const repoUrlInput = document.getElementById('repo-url-input');
@@ -266,6 +268,29 @@ saveBtn.addEventListener('click', async () => {
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Save & Sync';
+  }
+});
+
+syncNowBtn.addEventListener('click', async () => {
+  syncNowBtn.disabled = true;
+  syncNowBtn.textContent = '⬇ Syncing…';
+  syncNowMsg.textContent = 'GitHub sync started…';
+  syncNowMsg.className = 'settings-message success';
+  try {
+    const res = await fetch('/api/sync-now', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    syncNowMsg.textContent = 'Sync triggered — status will update below when complete.';
+  } catch (err) {
+    syncNowMsg.textContent = `Error: ${err.message}`;
+    syncNowMsg.className = 'settings-message error';
+  } finally {
+    syncNowBtn.disabled = false;
+    syncNowBtn.textContent = '⬇ Sync from GitHub Now';
+    clearTimeout(syncNowMsg._timer);
+    syncNowMsg._timer = setTimeout(() => {
+      syncNowMsg.className = 'settings-message hidden';
+    }, 6000);
   }
 });
 
