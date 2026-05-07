@@ -27,6 +27,7 @@ RST=$(tput sgr0 2>/dev/null || true)
 username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
 site_based_num=$(get_value 'simulation' 'site_based_num')
+server_url=$(get_value 'server' 'server_url')
 simulation_id=s
 simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
 kill_switch=$(get_value 'simulation' 'kill_switch')
@@ -70,8 +71,25 @@ for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
 #------------------------------------------------------------
-# Helper: WiFi status with color
+# Helper: webUI API reachability
+# WHY: Clients heartbeat to the webUI server; if the API is unreachable the
+# operator needs to know immediately — heartbeats and config updates will fail.
 #------------------------------------------------------------
+get_api_status() {
+  if [[ -z "$server_url" ]]; then
+    echo "${YLW}NOT CONFIGURED${RST}"
+    return
+  fi
+  local http_code
+  http_code=$(curl -o /dev/null -s -w "%{http_code}" \
+    --connect-timeout 2 --max-time 3 \
+    "${server_url%/}/api/health" 2>/dev/null)
+  if [[ "$http_code" == "200" ]]; then
+    echo "${GRN}CONNECTED${RST} (${server_url})"
+  else
+    echo "${RED}UNREACHABLE${RST} (${server_url})"
+  fi
+}
 get_wifi_status() {
   local connected_ssid
   connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
@@ -143,6 +161,7 @@ while true; do
   echo ""
   printf "  %sWiFi:%s    %s\n" "$BOLD" "$RST" "$(get_wifi_status)"
   printf "  %sGateway:%s %s\n" "$BOLD" "$RST" "$(get_gateway_status)"
+  printf "  %sAPI:%s     %s\n" "$BOLD" "$RST" "$(get_api_status)"
   # Surface global kill-switch override prominently — operator needs to know immediately
   if [[ "$gkill" == "on" ]]; then
     printf "  %sKill Sw:%s %s\n" "$BOLD" "$RST" "${RED}${BOLD}ENABLED — all simulations suspended${RST}"
