@@ -76,6 +76,7 @@ let reconnectTimer = null;
 let openControlHost = null;
 let centralSiteDetailOpen = null;
 let centralStatusData = {};
+let centralWirelessClients = {};   // wsite → client count from Central API
 let availableChecks = { alerts: [], insights: [] };
 let currentSettings = {
   repo_url: '',
@@ -1227,8 +1228,9 @@ function closeSiteDetail() {
   if (centralOverview) centralOverview.classList.remove('hidden');
 }
 
-function handleCentralUpdate(status, ts) {
+function handleCentralUpdate(status, ts, wirelessClients) {
   centralStatusData = status || {};
+  if (wirelessClients) centralWirelessClients = wirelessClients;
   centralLastSyncedTs = ts ? ts * 1000 : Date.now();
   renderCentralOverview();
   if (centralSiteDetailOpen) {
@@ -1257,7 +1259,7 @@ async function loadCentralStatus() {
     });
     centralTokenValid = Boolean(data.token_valid);
     setCentralApiStatus(centralTokenValid);
-    handleCentralUpdate(data.status || {}, Date.now() / 1000);
+    handleCentralUpdate(data.status || {}, Date.now() / 1000, data.wireless_clients || {});
     renderSelectedChecksPreview();
     renderSiteMappingsTable();
   } catch (error) {
@@ -1694,7 +1696,7 @@ function handleMessage(message) {
   }
 
   if (message.type === 'central_update') {
-    handleCentralUpdate(message.status, message.ts);
+    handleCentralUpdate(message.status, message.ts, message.wireless_clients);
     return;
   }
 
@@ -1800,15 +1802,21 @@ function renderSimulationCards() {
     meta.className = 'sim-card-meta';
     meta.textContent = `Bucket: ${sim.id}  ·  Site: ${sim.wsite || '—'}`;
 
-    const total = sim.configured_clients.length;
-    const active = sim.active_client_count;
-    const warn = total > 0 && active < total;
+    const apiReporting = sim.active_client_count;
+    const centralSeen = sim.central_client_count;   // null if Central not polled yet
+    const hasCentral = centralSeen !== null && centralSeen !== undefined;
+    const warn = hasCentral && apiReporting > centralSeen;
 
     const clientsRow = document.createElement('div');
     clientsRow.className = 'sim-card-clients';
-    clientsRow.innerHTML = warn
-      ? `<span class="sim-card-clients-warn">⚠ ${active}/${total} clients reporting</span>`
-      : `<span>${active}/${total} clients reporting</span>`;
+    if (hasCentral) {
+      clientsRow.innerHTML = warn
+        ? `<span class="sim-card-clients-warn">⚠ ${centralSeen} Central / ${apiReporting} reporting</span>`
+        : `<span>${centralSeen} Central / ${apiReporting} reporting</span>`;
+      clientsRow.title = 'Central-seen clients / Clients reporting to local API';
+    } else {
+      clientsRow.innerHTML = `<span>${apiReporting} reporting (Central not configured)</span>`;
+    }
 
     card.appendChild(header);
     card.appendChild(meta);
@@ -1834,8 +1842,14 @@ function openSimDetail(simId) {
   }
 
   const total = sim.configured_clients.length;
+  const simDetailCentralClients = document.getElementById('sim-detail-central-clients');
   if (simDetailTotal) simDetailTotal.textContent = total;
   if (simDetailActive) simDetailActive.textContent = sim.active_client_count;
+  if (simDetailCentralClients) {
+    simDetailCentralClients.textContent = sim.central_client_count !== null && sim.central_client_count !== undefined
+      ? sim.central_client_count
+      : '—';
+  }
   if (simDetailWsite) simDetailWsite.textContent = sim.wsite || '—';
   if (simDetailCount) simDetailCount.textContent = total;
 

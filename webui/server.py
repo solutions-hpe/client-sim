@@ -192,6 +192,7 @@ ALLOWED_CONFIG_SECTIONS = {"simulation", "address", "server", *(f"s{i}" for i in
 # central_token is declared above, initialised from persisted settings.
 # {wsite: {check_id: {status, count, ts, check_name, check_type}}}
 central_status: dict[str, dict[str, Any]] = {}
+central_wireless_clients: dict[str, int] = {}   # wsite → client count from Central API
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 history_lock = asyncio.Lock()
 
@@ -616,6 +617,44 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
 
         central_status[wsite] = site_check_status
 
+        # ── Fetch wireless client count for this site from Central ─
+        wl_count = 0
+        try:
+            if _is_new_central_api():
+                # New API: client count lives in site_health payload
+                wl_count = int(
+                    site_health.get("clientCount")
+                    or site_health.get("client_count")
+                    or 0
+                )
+            else:
+                # Classic API: query wireless clients with site filter
+                for clients_path in ["/monitoring/v2/clients/wireless", "/monitoring/v1/clients/wireless"]:
+                    resp = await client.get(
+                        f"{base_url}{clients_path}",
+                        headers=headers,
+                        params={"site": central_site, "limit": 1},
+                        timeout=20,
+                    )
+                    if resp.status_code == 401 and _can_refresh():
+                        ok, _ = await _refresh_central_token(client)
+                        if ok:
+                            headers = _central_headers()
+                        resp = await client.get(
+                            f"{base_url}{clients_path}",
+                            headers=headers,
+                            params={"site": central_site, "limit": 1},
+                            timeout=20,
+                        )
+                    if resp.status_code == 200:
+                        wl_count = int(resp.json().get("total", 0))
+                        break
+                    if resp.status_code == 404:
+                        continue
+        except Exception as exc:
+            logger.warning("Central wireless client count fetch failed for site %s: %s", central_site, exc)
+        central_wireless_clients[wsite] = wl_count
+
     # ── Persist history ───────────────────────────────────────────
     if new_records:
         cutoff = _history_cutoff()
@@ -624,7 +663,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             central_history.extend(new_records)
         await asyncio.to_thread(_append_and_trim_history, new_records)
 
-    await broadcast({"type": "central_update", "status": _central_status_payload(), "ts": now})
+    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": now})
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -1571,6 +1610,7 @@ async def api_central_status() -> dict[str, Any]:
     """Current check status for all mapped sites."""
     return {
         "status": _central_status_payload(),
+        "wireless_clients": dict(central_wireless_clients),
         "site_mappings": settings.get("site_mappings", {}),
         "monitored_checks": settings.get("monitored_checks", []),
         "token_valid": bool(central_token.get("access_token") and time.time() < central_token["expires_at"]),
@@ -1850,6 +1890,7 @@ async def api_simulations() -> dict[str, Any]:
                 if online:
                     active_count += 1
         sim["active_client_count"] = active_count
+        sim["central_client_count"] = central_wireless_clients.get(sim["wsite"], None)
 
         # Central PASS/FAIL — look up wsite + central_check in polled status
         wsite = sim["wsite"]
@@ -2144,7 +2185,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"]}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "ts": time.time()}))
+    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time()}))
 
     try:
         while True:
