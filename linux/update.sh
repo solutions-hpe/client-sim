@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.30
+version=.31
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -30,14 +30,35 @@ source_found=false
 if [[ "$web_server" == "on" && -n "$server_url" ]]; then
     echo "Web server enabled — checking reachability: $server_url" | tee -a "$debug"
 
-    health_body=$(curl -fsSL --connect-timeout 5 --max-time 10 \
-        "${server_url}/api/health" 2>>"$debug")
-    health_exit=$?
+    # ── Step 1: TCP port check — fastest definitive test ────────────────────
+    # Strips http(s):// and path, extracts host and port
+    _stripped="${server_url#http://}"; _stripped="${_stripped#https://}"
+    _server_host="${_stripped%%[:/?]*}"
+    _server_port="${_stripped#*:}"; _server_port="${_server_port%%/*}"
+    [[ "$_server_port" == "$_stripped" ]] && _server_port="80"  # no port in URL
 
-    if [[ $health_exit -eq 0 ]] && echo "$health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+    echo "TCP check: ${_server_host}:${_server_port}" | tee -a "$debug"
+    if ! timeout 3 bash -c ">/dev/tcp/${_server_host}/${_server_port}" 2>/dev/null; then
+        echo "WARNING: TCP port ${_server_host}:${_server_port} not open — web server unreachable, falling back to SMB/GitHub" | tee -a "$debug" "$log"
+    else
+        # ── Step 2: HTTP health check — verify it is the client-sim API ─────
+        # Uses -w to capture HTTP code separately; no -L (no redirect following);
+        # no -f (we check http_code ourselves) so we always get the response body.
+        _health_tmp=$(mktemp)
+        _http_code=$(curl -sS --connect-timeout 5 --max-time 10 \
+            -o "$_health_tmp" \
+            -w "%{http_code}" \
+            "${server_url}/api/health" 2>>"$debug" || echo "000")
+        _health_body=$(cat "$_health_tmp" 2>/dev/null || echo "")
+        rm -f "$_health_tmp"
 
-        echo "Web server reachable — attempting sync" | tee -a "$debug" "$log"
-        ws_sync_ok=true
+        echo "health HTTP ${_http_code}: ${_health_body}" >>"$debug"
+
+        if [[ "$_http_code" == "200" ]] && \
+           echo "$_health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+
+            echo "Web server confirmed — attempting sync" | tee -a "$debug" "$log"
+            ws_sync_ok=true
 
         # ── simulation.conf ──────────────────────────────────────────────────
         if curl -fsSL --connect-timeout 5 --max-time 15 \
@@ -81,10 +102,11 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             echo "WARNING: Web server sync incomplete — will attempt SMB/GitHub fallback" | tee -a "$debug" "$log"
         fi
 
-    else
-        echo "WARNING: Web server not reachable (curl_exit=${health_exit}) — falling back to SMB/GitHub" | tee -a "$debug" "$log"
-    fi
-fi
+        else
+            echo "WARNING: Health check failed (HTTP ${_http_code}) — not the client-sim API, falling back to SMB/GitHub" | tee -a "$debug" "$log"
+        fi  # end HTTP check
+    fi  # end TCP check
+fi  # end web_server block
 
 #------------------------------------------------------------
 # SMB fallback — local network share; faster than internet, used before GitHub
