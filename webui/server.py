@@ -1236,13 +1236,15 @@ async def _run_self_update() -> None:
     await broadcast({"type": "version_status", **update_state})
     try:
         logger.info("Self-update: running %s", _INSTALLER_PATH)
-        # Run as root directly if already root, otherwise use sudo
-        import os as _os
-        cmd = ["bash", str(_INSTALLER_PATH)] if _os.geteuid() == 0 else ["sudo", "bash", str(_INSTALLER_PATH)]
+        # Resolve bash absolute path — systemd units run with a minimal PATH
+        import shutil as _shutil, os as _os
+        bash = _shutil.which("bash") or "/bin/bash"
+        cmd = [bash, str(_INSTALLER_PATH)] if _os.geteuid() == 0 else ["sudo", bash, str(_INSTALLER_PATH)]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
         )
         assert proc.stdout is not None
         async for raw in proc.stdout:
