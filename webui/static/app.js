@@ -343,9 +343,6 @@ function normalizeFlagValue(value) {
   return String(value ?? 'off').toLowerCase() === 'on' ? 'on' : 'off';
 }
 
-  return String(value ?? 'off').toLowerCase() === 'on' ? 'on' : 'off';
-}
-
 function formatLastSeen(value) {
   if (!value) return '—';
   const date = new Date(value);
