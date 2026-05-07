@@ -18,6 +18,24 @@ if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a "$debu
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a "$debug"; fi
 #------------------------------------------------------------
+# Helper: returns true if the ethernet adapter carries a 169.253.x.x address.
+# WHY: 169.253.1.0/24 is the management subnet used to reach the API server.
+# If ethernet has this address, it must NEVER be brought down — doing so would
+# cut the heartbeat and config-sync link back to the WebUI dashboard.
+#------------------------------------------------------------
+ea_is_mgmt() {
+  [[ -n "$eadapter" ]] && ip -4 addr show dev "$eadapter" 2>/dev/null | grep -q "169\.253\."
+}
+# Safe wrapper — always use this instead of raw 'ip link set dev $eadapter down'.
+# Silently refuses to shut down the interface if a management IP is present.
+ea_down() {
+  if ea_is_mgmt; then
+    echo "Blocked ethernet shutdown — management IP (169.253.x.x) active on $eadapter" | tee -a "$debug"
+  elif [[ -n "$eadapter" ]]; then
+    sudo ip link set dev "$eadapter" down
+  fi
+}
+#------------------------------------------------------------
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
@@ -377,7 +395,9 @@ fi
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a "$debug"
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then sudo ip link set dev $eadapter down; fi
+if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then
+  ea_down
+fi
 echo Generating MAC address | tee -a "$debug"
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
@@ -596,7 +616,7 @@ echo "Closing Firefox" | tee -a "$debug"
 pkill -f firefox 2>/dev/null &
 echo "Running Updates" | tee -a "$debug"
 bash /usr/local/scripts/apt_update.sh &
-if [ "$allow_offline" == "yes" ]; then
+if [ "$allow_offline" == "on" ]; then
   #------------------------------------------------------------
   # allow_offline: take all interfaces down for a random period.
   # WHY: Devices that are always-connected get flagged as IoT by some
@@ -606,7 +626,7 @@ if [ "$allow_offline" == "yes" ]; then
   #------------------------------------------------------------
   echo "Bringing all interfaces down (allow_offline mode)" | tee -a "$debug"
   if [[ -n "${wladapter}" ]]; then sudo ip link set dev "$wladapter" down; fi
-  if [[ -n "${eadapter}" ]]; then sudo ip link set dev "$eadapter" down; fi
+  ea_down
   echo "Sleeping for $rn_offline_time seconds" | tee -a "$debug"
   sleep "$rn_offline_time"
   echo "Bringing all interfaces back online" | tee -a "$debug"
