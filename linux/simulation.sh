@@ -103,7 +103,16 @@ set +a
 hostname=$HOSTNAME
 platform=linux
 #------------------------------------------------------------
-#Status reporting
+# Error accumulator
+# WHY: Errors used to only go to log files. The operator has no easy way
+# to see log files on 20+ remote clients. Accumulating here and flushing
+# in report_status() surfaces them in the webUI dashboard automatically.
+# error_log[] holds raw messages (json-escaped) since the last status POST.
+#------------------------------------------------------------
+declare -a error_log=()
+
+#------------------------------------------------------------
+# json_escape: make a string safe to embed in a JSON string literal
 #------------------------------------------------------------
 json_escape() {
   local value="${1-}"
@@ -115,6 +124,39 @@ json_escape() {
   printf '%s' "$value"
 }
 
+#------------------------------------------------------------
+# report_error: write an error to local logs AND queue it for the API
+# Usage: report_error "message" [severity]
+# WHY: The biggest operational pain point is not knowing why a client
+# can't connect. This ensures those failures appear in the dashboard
+# immediately rather than requiring SSH access to read log files.
+# The function also triggers an immediate report_status() call so
+# the webUI sees the error without waiting for the next loop iteration.
+#------------------------------------------------------------
+report_error() {
+  local msg="$1"
+  local severity="${2:-error}"
+
+  # Always write to local files — unchanged from original behavior
+  echo "$(date '+%Y-%m-%dT%H:%M:%S') [$severity] $msg" | tee -a "$debug" "$log"
+
+  # Queue for next (or immediate) API report
+  error_log+=("$(json_escape "$msg")")
+
+  # Fire an immediate status POST so the webUI sees the error right away.
+  # WHY: Without this, errors would only appear on the next periodic report
+  # (could be 10–60 seconds away), which is too slow for a live dashboard.
+  # We suppress report_error() inside report_status() to avoid infinite recursion.
+  _in_report_error=true report_status "${z:-0}" || true
+  unset _in_report_error
+}
+
+#------------------------------------------------------------
+# report_status: POST current state + any queued errors to the webUI API
+# WHY: Originally only sent connectivity and sim flags. Now also flushes
+# error_log[] so the server can display them per-client in the dashboard.
+# error_log[] is cleared after each successful send to avoid duplicates.
+#------------------------------------------------------------
 report_status() {
   local iteration="${1:-${z:-0}}"
   [[ $web_server != "on" ]] && return 0
@@ -138,8 +180,19 @@ report_status() {
     fi
   done
 
+  # Build the errors JSON array from the accumulated error_log[].
+  # WHY: We use a global array rather than a file so there's no I/O overhead
+  # on every error, and so the list is naturally cleared on exec-restart.
+  local errors_json="[]"
+  if [[ ${#error_log[@]} -gt 0 ]]; then
+    local joined
+    printf -v joined '"%s",' "${error_log[@]}"
+    errors_json="[${joined%,}]"
+  fi
+
   local payload
-  printf -v payload '{"hostname":"%s","simulation_id":"%s","platform":"%s","iteration":%s,"connected_ssid":"%s","gateway_reachable":%s,"vh_connected":false,"active_simulations":[%s],"config":{"sim_phy":"%s","kill_switch":"%s","dns_fail":"%s","iperf":"%s","www_traffic":"%s","download":"%s","ping_test":"%s","ssidpw_fail":"%s","auth_fail":"%s","dhcp_fail":"%s"}}' \
+  printf -v payload \
+    '{"hostname":"%s","simulation_id":"%s","platform":"%s","iteration":%s,"connected_ssid":"%s","gateway_reachable":%s,"vh_connected":false,"active_simulations":[%s],"errors":%s,"config":{"sim_phy":"%s","kill_switch":"%s","dns_fail":"%s","iperf":"%s","www_traffic":"%s","download":"%s","ping_test":"%s","ssidpw_fail":"%s","auth_fail":"%s","dhcp_fail":"%s"}}' \
     "$(json_escape "$hostname")" \
     "$(json_escape "$simulation_id")" \
     "$(json_escape "$platform")" \
@@ -147,6 +200,7 @@ report_status() {
     "$(json_escape "$connected_ssid")" \
     "$gateway_json" \
     "$active_simulations" \
+    "$errors_json" \
     "$(json_escape "$sim_phy")" \
     "$(json_escape "$kill_switch")" \
     "$(json_escape "$dns_fail")" \
@@ -158,7 +212,16 @@ report_status() {
     "$(json_escape "$auth_fail")" \
     "$(json_escape "$dhcp_fail")"
 
-  curl -m 5 -s -o /dev/null -H "Content-Type: application/json" -X POST --data "$payload" "${server_url%/}/api/status" >/dev/null 2>&1 || true
+  if curl -m 5 -s -o /dev/null \
+        -H "Content-Type: application/json" \
+        -X POST --data "$payload" \
+        "${server_url%/}/api/status" 2>/dev/null; then
+    # Only clear the error log on a successful send to avoid losing errors
+    # if the server was temporarily unreachable.
+    # WHY: If the server is down when an error fires, we keep it in the buffer
+    # so it will be included in the next successful report.
+    [[ -z "${_in_report_error:-}" ]] && error_log=()
+  fi
   return 0
 }
 #------------------------------------------------------------
@@ -168,7 +231,16 @@ report_status() {
 #------------------------------------------------------------
 sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
-#Functions
+# Functions
+#------------------------------------------------------------
+
+#------------------------------------------------------------
+# wait_for_ssid: scan for a target SSID with progressive fallback
+# WHY: We scan first, then force a rescan, then toggle the radio.
+# Each stage gets longer; we don't toggle the radio immediately
+# because that causes a visible gap and is disruptive if other
+# connections are active. Errors at each stage go to the API via
+# report_error() so the operator can see what's happening in real time.
 #------------------------------------------------------------
 wait_for_ssid() {
   local target_ssid="$1"
@@ -176,7 +248,7 @@ wait_for_ssid() {
   local interval=3
   local elapsed=0
   echo "Scanning for SSID: $target_ssid" | tee -a "$debug"
-  # First scan phase
+  # Stage 1: passive scan
   while [ "$elapsed" -lt "$timeout" ]; do
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
       echo "SSID found: $target_ssid" | tee -a "$debug"
@@ -185,36 +257,41 @@ wait_for_ssid() {
     sleep "$interval"
     elapsed=$((elapsed + interval))
   done
-  echo "SSID not found after $timeout seconds, attempting rescan" | tee -a "$debug" "$log"
-  # Force rescan
+  # Stage 2: force a rescan — SSID may just not have been advertised yet
+  report_error "SSID '$target_ssid' not visible after ${timeout}s — forcing rescan" "warning"
   nmcli device wifi rescan >/dev/null 2>&1
   sleep 2
   if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
     echo "SSID found after rescan: $target_ssid" | tee -a "$debug"
     return 0
   fi
-  echo "SSID still not found, resetting WiFi adapter" | tee -a "$debug" "$log"
-  # Toggle WiFi ONLY now
+  # Stage 3: toggle the radio — adapter may be in a stuck state
+  report_error "SSID '$target_ssid' still missing after rescan — toggling WiFi radio" "warning"
   nmcli radio wifi off
   sleep 3
   nmcli radio wifi on
   sleep 2
-  # Final attempt after reset
   elapsed=0
   while [ "$elapsed" -lt "$timeout" ]; do
     nmcli device wifi rescan >/dev/null 2>&1
     if nmcli -t -f SSID device wifi list | grep -Fxq "$target_ssid"; then
-      echo "SSID found after WiFi reset: $target_ssid" | tee -a "$debug" "$log"
+      echo "SSID found after radio toggle: $target_ssid" | tee -a "$debug" "$log"
       return 0
     fi
     sleep "$interval"
     elapsed=$((elapsed + interval))
   done
-  echo "ERROR: SSID '$target_ssid' not found after rescan and WiFi reset" | tee -a "$debug" "$log"
+  # All three stages exhausted — hard failure, surface to API
+  report_error "Cannot find SSID '$target_ssid' after scan + rescan + radio toggle" "error"
   return 1
 }
 #------------------------------------------------------------
 #WiFi connections
+#------------------------------------------------------------
+# connect_wifi: bring up WiFi and connect to the configured SSID
+# WHY: We check if we're already connected before doing anything.
+# nmcli connect on an already-connected adapter causes a reconnect
+# which looks like a brief outage in Central — avoid it.
 #------------------------------------------------------------
 connect_wifi() {
   nmcli radio wifi on
@@ -225,18 +302,25 @@ connect_wifi() {
   else
     target_ssid="$ssid"
   fi
-  # --- NEW: check current connection ---
   current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
   if [ "$current_ssid" == "$target_ssid" ]; then
     echo "Already connected to $target_ssid — skipping" | tee -a "$debug"
     return 0
   fi
-  wait_for_ssid "$target_ssid" || return 1
+  if ! wait_for_ssid "$target_ssid"; then
+    # wait_for_ssid already called report_error(); just propagate the failure
+    return 1
+  fi
   echo "Attempting to connect to $target_ssid" | tee -a "$debug"
-  nmcli device wifi connect "$target_ssid" password "$ssidpw"
+  if ! nmcli device wifi connect "$target_ssid" password "$ssidpw"; then
+    report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
+    return 1
+  fi
 }
 #------------------------------------------------------------
-#Connection management
+# manage_connection: bring a connection up or down by name
+# WHY: Used for auth_fail simulation (rapid up/down) where we need
+# fine-grained control over the connection state rather than the adapter.
 #------------------------------------------------------------
 manage_connection() {
   local action=$1
@@ -254,27 +338,37 @@ manage_connection() {
     echo "Already connected to $target_ssid — skipping bring-up" | tee -a "$debug"
     return 0
   fi
-  wait_for_ssid "$target_ssid" || return 1
+  if [[ "$action" == "up" ]]; then
+    wait_for_ssid "$target_ssid" || return 1
+  fi
   echo "Attempting to $action connection: $target_ssid" | tee -a "$debug"
   nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
 #------------------------------------------------------------
-#Run simulation scripts
+# run_simulation: launch a sub-simulation script in the background
+# WHY: nohup + & detaches it so the main loop isn't blocked.
+# We check the file exists first to avoid a confusing bash error.
 #------------------------------------------------------------
 run_simulation() {
  local script=$1
  if [ -f "/usr/local/scripts/$script" ]; then
   nohup bash "/usr/local/scripts/$script" > /dev/null 2>&1 &
+ else
+  report_error "run_simulation: script not found: $script" "warning"
  fi
 }
 #------------------------------------------------------------
-#Attempting WiFi connection
+# Initial WiFi connection attempt before entering the main loop
 #------------------------------------------------------------
-connect_wifi
+if ! connect_wifi; then
+  report_error "Pre-simulation WiFi connect failed for SSID '$ssid'" "error"
+fi
 gateway_reachable=false
 dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
-if [[ -n ${dfgw} ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
+if [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
   gateway_reachable=true
+else
+  [[ -n "$dfgw" ]] && report_error "Gateway $dfgw unreachable after initial connect" "warning"
 fi
 report_status 0
 #------------------------------------------------------------
@@ -287,34 +381,39 @@ echo Generating MAC address | tee -a "$debug"
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
-#Checking to see if the default gateway is reachable
+# Pre-simulation: verify gateway is reachable via the selected interface
+# WHY: After connect_wifi succeeds we still need to confirm we got an IP
+# and the gateway responds. If this block fails, we attempt VH recovery
+# (for wireless sims using VirtualHere USB adapters) then retry.
+# dfgw must have head -n1 because 'ip route' can return multiple defaults
+# when both eth and wlan are up; taking the first avoids a multi-word ping.
 #------------------------------------------------------------
-echo Finding WLAN Adapter | tee -a "$debug"
+echo "Finding WLAN Adapter" | tee -a "$debug"
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-echo Unblocking WiFi / RFKill | tee -a "$debug"
+echo "Unblocking WiFi / RFKill" | tee -a "$debug"
 sudo rfkill unblock wifi & disown
-echo Getting Default Gateway | tee -a "$debug"
-dfgw=$(ip route | grep -oP 'default via \K\S+')
-echo Ping the Default Gateway | tee -a "$debug"
-ping -c2 $dfgw
-if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
- echo Successful network connection - Pre-Simulation | tee -a "$debug"
- echo In Pre-Simulation | tee -a "$debug"
+echo "Getting Default Gateway" | tee -a "$debug"
+dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+echo "Pinging Default Gateway: ${dfgw:-(none)}" | tee -a "$debug"
+if [[ -n "$dfgw" ]] && ping -c2 -W2 "$dfgw" >/dev/null 2>&1 \
+   && [ "$sim_phy" == "wireless" ] && [[ -n "${wladapter}" ]]; then
+  echo "Successful network connection - Pre-Simulation" | tee -a "$debug"
 else
-  echo Network connection failed | tee -a "$debug"
-  echo In Pre-Simulation | tee -a "$debug"
-  #------------------------------------------------------------
-  #If VH is enabled then attempt to connect to VHServer
-  #------------------------------------------------------------
-  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
-  #------------------------------------------------------------
-  #End Connecting to VHServer
-  #------------------------------------------------------------
+  # Report which part failed so we can tell from the dashboard
+  if [[ -z "$dfgw" ]]; then
+    report_error "No default gateway found — no IP assigned after WiFi connect" "error"
+  elif ! ping -c1 -W2 "$dfgw" >/dev/null 2>&1; then
+    report_error "Gateway $dfgw unreachable (no L3 path after WiFi connect)" "error"
+  fi
+  echo "Network connection failed - Pre-Simulation" | tee -a "$debug"
+  # If VirtualHere is in use, the WiFi adapter came from a USB server.
+  # Attempt to reconnect to a VH device before retrying WiFi.
+  if [ "$vh_server" == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
   sleep 15
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   connect_wifi
   sleep 15
-  dfgw=$(ip route | grep -oP 'default via \K\S+')
+  dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
 fi
 #------------------------------------------------------------
 #Begin Setting up simulation load
@@ -330,201 +429,195 @@ fi
 #------------------------------------------------------------
 #End Setting up simulation load
 #------------------------------------------------------------
-echo Kill Switch is $kill_switch | tee -a "$debug"
-if [ $kill_switch == "off" ]; then
+#------------------------------------------------------------
+# Main simulation loop — 100 iterations then exec-restarts for fresh config.
+# WHY: 100 iterations is a natural checkpoint to reload config, run apt
+# updates, and restart cleanly. We exec-restart (not source) so the bash
+# call stack stays flat — see comment at the bottom.
+#------------------------------------------------------------
+echo "Kill Switch is $kill_switch" | tee -a "$debug"
+if [ "$kill_switch" == "off" ]; then
  for z in {1..100}; do
+  #----------------------------------------------------------
+  # Per-iteration gateway check — used by report_status() and to decide
+  # whether to skip simulations this cycle.
+  #----------------------------------------------------------
   gateway_reachable=false
   dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
-  if [[ -n ${dfgw} ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
+  if [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1; then
    gateway_reachable=true
   fi
   report_status "$z"
   #------------------------------------------------------------
-  #SSID Incorrect Password Simulation or Auth Failure Simulation
-  #since these are very similar they are in the same section one
-  #has a bad PSK and others have a blocked mac or invalud username/password combo
-  #both need to be constantly connecting so we trigger insights
+  # SSID auth-failure simulations (ssidpw_fail / auth_fail)
+  # WHY: Grouped together because both deliberately fail the connection.
+  # ssidpw_fail appends "_fail" to the password so the AP rejects it.
+  # auth_fail does rapid connect/disconnect to simulate MAC block or
+  # 802.1X rejection. Both generate the "Auth Fail" Insight in Central.
+  # NOTE: Operator-intended operator precedence:
+  #   ssidpw_fail=on → enter regardless of wladapter (ethernet sims OK)
+  #   auth_fail=on   → only enter when wladapter is present (needs WiFi)
   #------------------------------------------------------------
-  if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
-    if [ $ssidpw_fail == "on" ]; then
+  if [ "$ssidpw_fail" == "on" ] || [ "$auth_fail" == "on" ] && [[ -n "${wladapter}" ]]; then
+    if [ "$ssidpw_fail" == "on" ]; then
      for i in {1..100}; do
-      echo Running SSID Incorrect Password | tee -a "$debug"
-      ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
-      echo Iteration $i of 100 | tee -a "$debug"
-      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+      echo "Running SSID Incorrect Password iteration $i/100" | tee -a "$debug"
+      ssidpw="$(get_value "$simulation_id" 'ssidpw')_fail"
+      # Remove cached PSK profiles so nmcli can't auto-reconnect with the correct password.
+      # WHY: Without this, nmcli uses the saved profile and connects successfully,
+      # defeating the simulation purpose.
+      _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+      [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
       connect_wifi
      done
     fi
-    if [ $auth_fail == "on" ]; then
-     echo Running Auth Failure | tee -a "$debug"
+    if [ "$auth_fail" == "on" ]; then
+     echo "Running Auth Failure simulation" | tee -a "$debug"
      for i in {1..100}; do
-      echo Enable/Disable WLAN interface | tee -a "$debug"
-      echo Iteration $i of 100 | tee -a "$debug"
-      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+      echo "Auth fail iteration $i/100" | tee -a "$debug"
+      _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+      [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
       manage_connection up 5
       sleep 5
       manage_connection down 5
      done
     fi
-   #------------------------------------------------------------
-   #Resetting the WIFI Password so it can connect correctly for updates/maintenance
-   #------------------------------------------------------------
-   ssidpw=$(get_value $simulation_id 'ssidpw')
+   # Restore correct password so the device can reconnect for updates/maintenance
+   ssidpw=$(get_value "$simulation_id" 'ssidpw')
    connect_wifi
-   #------------------------------------------------------------
-   #End SSID Incorrect Password Simualtion or Auth Failure Simulation
-   #------------------------------------------------------------
   else
    #------------------------------------------------------------
-   #If SSID Incorrect Password Sim is not triggered then check
-   #for the other simualtions
+   # Normal simulation path — verify gateway, launch sub-simulations
+   # WHY: Re-checking gateway here (not just at loop top) because the
+   # adapter state can change during a prior iteration (VH reconnect, etc.).
+   # Two pings (-c2) tolerate a single dropped packet.
    #------------------------------------------------------------
-   dfgw=$(ip route | grep -oP 'default via \K\S+')
-   ping -c2 $dfgw
-   if [ $? -eq 0 ]; then
-    echo Successful network connection | tee -a "$debug"
-    echo In Simulation Loop | tee -a "$debug"
+   dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+   if [[ -n "$dfgw" ]] && ping -c2 -W2 "$dfgw" >/dev/null 2>&1; then
+    echo "Successful network connection — In Simulation Loop" | tee -a "$debug"
+   else
+    report_error "Gateway unreachable in loop (dfgw=${dfgw:-(none)}) — recovery attempt 1" "error"
+    echo "Network connection failed — attempting adapter reset" | tee -a "$debug"
+    if [ "$vh_server" == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
+    sleep 15
+    wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
+    # Remove stale PSK profiles before reconnecting.
+    # WHY: A cached bad profile causes nmcli to use wrong credentials silently.
+    _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+    [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
+    connect_wifi
+    echo "WLAN Adapter: $wladapter" | tee -a "$debug"
+    sleep 15
+    if [[ -n "$dfgw" ]] && ping -c2 -W2 "$dfgw" >/dev/null 2>&1; then
+     echo "Successful network connection after adapter reset" | tee -a "$debug"
     else
-     echo Network connection failed | tee -a "$debug"
-     echo In Simulation Loop | tee -a "$debug"
-     echo Attempting to reset adapter | tee -a "$debug"
-     if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
-     sleep 15
-     wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-     connect_wifi
-     echo WLAN Adapter name $wladapter | tee -a "$debug"
-     sleep 15
-     ping -c2 $dfgw
-     if [ $? -eq 0 ]; then
-      echo Successful network connection | tee -a "$debug"
-      echo After Adapter Reset | tee -a "$debug"
-     else
-     echo Connection failed muiltiple times | tee -a "$debug"
-     echo Resetting configuration | tee -a "$debug"
-     echo Purging VHConfig | tee -a "$debug"
-     #------------------------------------------------------------
-     #Running API to VHClient to disconnect all clients this device is connecting to
-     #When a device ID changes on VH the client can think it should connect to multiple devices
-     #------------------------------------------------------------
-     /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-     /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-     #------------------------------------------------------------
-     #VHCached.txt will hold the server and device ID from VH so we use the same device every time
-     #In the case when a device ID Changes, puring this setting will make sure a new device is captured
-     #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-     #changes occur in the environment. This is a workaround just for when the IDs change.
-     #------------------------------------------------------------
+     # Second consecutive failure — clear VH device cache and restart cleanly.
+     report_error "Network still down after adapter reset — clearing VH config and restarting" "error"
+     # VH device IDs change when adapters are re-plugged or the VH server restarts.
+     # The cache (vhcached.txt) then points to a stale ID causing repeated failures.
+     # Clearing it forces a fresh device assignment on the next exec-restart.
+     /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL" 2>/dev/null || true
+     /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"   2>/dev/null || true
      rm -f /usr/local/scripts/vhcached.txt
-     #------------------------------------------------------------
-     #Cleaning up old network connection profiles
-     #------------------------------------------------------------
-     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
-     #------------------------------------------------------------
-     #Looping Script - Network Connectivity Failed
-     #------------------------------------------------------------
-     source /usr/local/scripts/simulation.sh
+     _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+     [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
+     # Break exits the for-loop cleanly; exec at the bottom restarts the script.
+     # WHY: Using 'source simulation.sh' here would add another call frame inside
+     # an already-running for-loop, making it impossible to unwind — use break+exec.
+     break
     fi
    fi
    #------------------------------------------------------------
-   #End Connecting to Network
+   # Sub-simulation launchers
+   # Each is guarded by pgrep so we never launch duplicates.
+   # www_traffic is toggled off after launch then re-enabled every 10
+   # iterations to recycle Firefox (prevents memory leak in long sessions).
    #------------------------------------------------------------
    if [ "$www_traffic" == "on" ]; then
     if ! pgrep -f "www_traffic.sh" >/dev/null; then
      run_simulation "www_traffic.sh"
-     echo Running WWW Traffic Simulation | tee -a "$debug" "$log"
+     echo "Running WWW Traffic Simulation" | tee -a "$debug" "$log"
      www_traffic="off"
     fi
    fi
    if [ "$ping_test" == "on" ]; then
     if ! pgrep -f "ping_test.sh" >/dev/null; then
      run_simulation "ping_test.sh"
-     echo Running Ping Test Simulation | tee -a "$debug" "$log"
+     echo "Running Ping Test Simulation" | tee -a "$debug" "$log"
     fi
    fi
    if [ "$iperf" == "on" ]; then
     if ! pgrep -f "iperf.sh" >/dev/null; then
      run_simulation "iperf.sh"
-     echo Running iPerf Simulation | tee -a "$debug" "$log"
+     echo "Running iPerf Simulation" | tee -a "$debug" "$log"
     fi
    fi
    if [ "$download" == "on" ]; then
     if ! pgrep -f "download.sh" >/dev/null; then
      run_simulation "download.sh"
-     echo Running Download Simulation | tee -a "$debug" "$log"
+     echo "Running Download Simulation" | tee -a "$debug" "$log"
     fi
    fi
    if [ "$dns_fail" == "on" ]; then
     if ! pgrep -f "dns_fail.sh" >/dev/null; then
      run_simulation "dns_fail.sh"
-     echo Running DNS Simulation| tee -a "$debug" "$log"
+     echo "Running DNS Simulation" | tee -a "$debug" "$log"
     fi
    fi
    sleep 10
    if (( z % 10 == 0 )); then
-    echo Closing Firefox | tee -a "$debug"
-    pkill -f firefox
+    echo "Closing Firefox (iteration $z — scheduled recycle)" | tee -a "$debug"
+    pkill -f firefox 2>/dev/null || true
     www_traffic="on"
    fi
-   echo End of simulation | tee -a "$debug"
-   #------------------------------------------------------------
-   #Running update to either the cloud repo or local SMB repo
-   #------------------------------------------------------------
-   if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
-   #------------------------------------------------------------
-   #End Script Updates
-   #------------------------------------------------------------
-   echo Sleeping for 5 seconds | tee -a "$debug"
-   echo Loop iteration $z of 100 | tee -a "$debug"
+   echo "End of simulation loop iteration $z/100" | tee -a "$debug"
+   if [ "$rapid_update" == "on" ]; then source '/usr/local/scripts/update.sh'; fi
+   echo "Sleeping 5 seconds" | tee -a "$debug"
    sleep 5
-   #------------------------------------------------------------
-   #End of 100 Loop Count
-   #------------------------------------------------------------
   fi
  done
 else
  #------------------------------------------------------------
- #If kill switch is enabled - sleeping for 5 minutes then restarting the loop
+ # Kill switch active — park, report, then fall through to exec-restart.
+ # WHY: We don't loop here; instead we restart so a config change
+ # (kill_switch=off) is picked up on the next exec-restart cycle.
  #------------------------------------------------------------
- echo Kill switch enabled - sleeping for 5 minutes | tee -a "$debug"
+ echo "Kill switch enabled — parking for 5 minutes" | tee -a "$debug"
+ report_error "Kill switch is ON — all simulations suspended" "warning"
  sleep 300
 fi
 #------------------------------------------------------------
-#Killing Firefox simulation
+# Post-loop: cleanup, background updates, optional offline period
 #------------------------------------------------------------
-echo Closing Firefox | tee -a "$debug"
-pkill -f firefox &
-#------------------------------------------------------------
-#End Kill switch Check 
-#------------------------------------------------------------
-#------------------------------------------------------------
-#Running apt update & apt upgrade
-#------------------------------------------------------------
-echo Running Updates | tee -a "$debug"
+echo "Closing Firefox" | tee -a "$debug"
+pkill -f firefox 2>/dev/null &
+echo "Running Updates" | tee -a "$debug"
 bash /usr/local/scripts/apt_update.sh &
-if [ $allow_offline == "yes" ]; then
+if [ "$allow_offline" == "yes" ]; then
   #------------------------------------------------------------
-  #Bringing all interfaces down to make it look like the device is offline.
-  #Otherwise they get triggered as IOT since they are always connected.
+  # allow_offline: take all interfaces down for a random period.
+  # WHY: Devices that are always-connected get flagged as IoT by some
+  # network visibility tools. Going offline makes them look like real
+  # user devices that leave the office or sleep. Duration is
+  # rn_offline_time (random 1-14400 seconds = up to 4 hours).
   #------------------------------------------------------------
-  echo Bringing all interfaces down | tee -a "$debug"
-  if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter down; fi
-  if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter down; fi
-  echo Sleeping for $rn_offline_time seconds | tee -a "$debug"
-  echo ------------------------------ | tee -a "$debug"
-  #------------------------------------------------------------
-  #Sleep for up to 4 hours to show the device left
-  #------------------------------------------------------------
-  sleep $rn_offline_time
-  #------------------------------------------------------------
-  #Bringing all interfaces back up to call home/update scripts
-  #------------------------------------------------------------
-  echo Bringing all interfaces online | tee -a "$debug"
-  if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
-  if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
-  echo ------------------------------ | tee -a "$debug"
+  echo "Bringing all interfaces down (allow_offline mode)" | tee -a "$debug"
+  if [[ -n "${wladapter}" ]]; then sudo ip link set dev "$wladapter" down; fi
+  if [[ -n "${eadapter}" ]]; then sudo ip link set dev "$eadapter" down; fi
+  echo "Sleeping for $rn_offline_time seconds" | tee -a "$debug"
+  sleep "$rn_offline_time"
+  echo "Bringing all interfaces back online" | tee -a "$debug"
+  if [[ -n "${eadapter}" ]]; then sudo ip link set dev "$eadapter" up; fi
+  if [[ -n "${wladapter}" ]]; then sudo ip link set dev "$wladapter" up; fi
 fi
 #------------------------------------------------------------
-#Looping Script
+# Restart via exec — replaces this process without growing the call stack.
+# WHY: The original code used 'source simulation.sh' which adds a new bash
+# call frame every 100 iterations. Over long runtimes (hours/days) this
+# exhausts bash's recursion limit and crashes the simulation silently.
+# 'exec bash simulation.sh' replaces the current process entirely:
+#   - same PID stays visible in the terminal / dashboard
+#   - zero stack growth
+#   - fresh variable state including re-reading simulation.conf
 #------------------------------------------------------------
-source /usr/local/scripts/simulation.sh
+exec bash /usr/local/scripts/simulation.sh

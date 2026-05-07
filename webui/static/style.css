@@ -700,6 +700,54 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .history-section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px 18px; }
 .history-section h3 { margin: 0 0 12px; font-size: 0.88rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .badge-count { font-size: 0.78rem; font-weight: 600; background: var(--hpe-navy); color: #fff; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+
+/* Error badge in the Errors column — red pill showing count of reported errors.
+   WHY: High-visibility red makes it easy to spot a problem on a busy table. */
+.error-badge {
+  display: inline-block;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  min-width: 24px;
+  text-align: center;
+}
+.error-badge.hidden { display: none; }
+
+/* Error log inside the control panel — shown below the toggle grid */
+.error-log-section {
+  margin-top: 1.2rem;
+  padding: 0.8rem 1rem;
+  background: #1a1a2e;
+  border: 1px solid #c0392b55;
+  border-radius: 6px;
+}
+.error-log-section h3 {
+  font-size: 0.9rem;
+  color: #e74c3c;
+  margin: 0 0 0.6rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.error-log-empty { color: #6b8e7f; font-size: 0.85rem; margin: 0; }
+.error-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.error-log-list li {
+  display: flex;
+  gap: 0.8rem;
+  padding: 3px 0;
+  border-bottom: 1px solid #ffffff0d;
+  font-size: 0.82rem;
+}
+.error-ts { color: #7f8c8d; white-space: nowrap; flex-shrink: 0; }
+.error-msg { color: #f39c12; word-break: break-word; }
 .history-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
 .history-table th { background: var(--hpe-navy); color: #fff; padding: 7px 10px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--hpe-green); }
 .history-table td { padding: 6px 10px; border-bottom: 1px solid #EBEBEB; }

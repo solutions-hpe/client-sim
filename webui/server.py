@@ -34,6 +34,9 @@ _version_file = BASE_DIR / "INSTALLER_VERSION"
 INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exists() else "dev"
 REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
+# Max error entries kept per client in memory.
+# WHY: errors accumulate over a long run; capping prevents unbounded memory growth.
+MAX_CLIENT_ERRORS = 50
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
@@ -647,6 +650,11 @@ class ClientStatus(BaseModel):
     vh_connected: bool = False
     active_simulations: list[str] = Field(default_factory=list)
     config: dict[str, str] = Field(default_factory=dict)
+    # errors: list of human-readable error strings that occurred since the last
+    # status report. The client accumulates them between reports and sends the
+    # whole batch here. WHY: we want errors visible in the dashboard, not buried
+    # in client-side log files that no operator can easily read remotely.
+    errors: list[str] = Field(default_factory=list)
 
 
 class ClientControlResponse(BaseModel):
@@ -691,6 +699,10 @@ def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
         "overrides": overrides,
         "last_seen": last_seen.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "online": online,
+        # recent_errors: circular buffer of the last MAX_CLIENT_ERRORS entries.
+        # Each entry has a timestamp and message so operators know when errors occurred.
+        "recent_errors": list(client.get("recent_errors", [])),
+        "error_count": int(client.get("error_count", 0)),
     }
 
 
@@ -1345,6 +1357,28 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
     now = utcnow()
     async with state_lock:
         existing = clients.get(status.hostname, {})
+
+        # Build timestamped error entries from whatever the client reported this cycle.
+        # WHY: clients accumulate errors between reports (e.g. "SSID not found") and
+        # flush them here. We stamp them server-side so timestamps are in server time,
+        # which is consistent with other log timestamps in the dashboard.
+        incoming_errors = [
+            {"ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "msg": e}
+            for e in status.errors
+        ]
+        existing_errors: list[dict[str, str]] = existing.get("recent_errors", [])
+        # Keep a rolling window; oldest entries fall off the front.
+        recent_errors = (existing_errors + incoming_errors)[-MAX_CLIENT_ERRORS:]
+        total_errors = int(existing.get("error_count", 0)) + len(incoming_errors)
+
+        if incoming_errors:
+            logger.warning(
+                "Client %s reported %d error(s): %s",
+                status.hostname,
+                len(incoming_errors),
+                "; ".join(e["msg"] for e in incoming_errors),
+            )
+
         clients[status.hostname] = {
             **existing,
             "hostname": status.hostname,
@@ -1359,6 +1393,8 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
             "overrides": existing.get("overrides", {}),
             "last_seen": now,
             "online": True,
+            "recent_errors": recent_errors,
+            "error_count": total_errors,
         }
         payload = serialize_client(status.hostname, clients[status.hostname])
 

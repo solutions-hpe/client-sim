@@ -318,7 +318,7 @@ function ensureRow(hostname) {
   const detailRow = document.createElement('tr');
   detailRow.className = 'control-row hidden';
   const detailCell = document.createElement('td');
-  detailCell.colSpan = 10;
+  detailCell.colSpan = 11;
   detailRow.appendChild(detailCell);
 
   const statusCell = createCell('status-cell');
@@ -335,6 +335,15 @@ function ensureRow(hostname) {
   const iterationCell = createCell();
   const lastSeenCell = createCell();
   const actionsCell = createCell();
+
+  // Error count badge cell — shows a red badge when the client has reported errors.
+  // WHY: Operators need to see at a glance which clients are having problems
+  // without clicking into each one individually.
+  const errorCell = createCell('error-cell');
+  const errorBadge = document.createElement('span');
+  errorBadge.className = 'error-badge hidden';
+  errorBadge.title = 'Click Actions → Control to see error log';
+  errorCell.appendChild(errorBadge);
 
   const controlButton = document.createElement('button');
   controlButton.type = 'button';
@@ -353,6 +362,7 @@ function ensureRow(hostname) {
     impactCell,
     iterationCell,
     lastSeenCell,
+    errorCell,
     actionsCell
   ].forEach((cell) => mainRow.appendChild(cell));
 
@@ -372,6 +382,8 @@ function ensureRow(hostname) {
     impactCell,
     iterationCell,
     lastSeenCell,
+    errorCell,
+    errorBadge,
     controlButton
   };
 
@@ -402,7 +414,11 @@ function upsertClient(client) {
     config: client.config || existing.config || {},
     effective_config: client.effective_config || existing.effective_config || client.config || {},
     overrides: client.overrides || existing.overrides || {},
-    active_simulations: client.active_simulations || existing.active_simulations || []
+    active_simulations: client.active_simulations || existing.active_simulations || [],
+    // Merge recent_errors: always use the server-provided list which is the authoritative
+    // circular buffer. If not present in the update, keep the existing list.
+    recent_errors: client.recent_errors || existing.recent_errors || [],
+    error_count: client.error_count ?? existing.error_count ?? 0
   };
 
   clients.set(client.hostname, merged);
@@ -419,6 +435,18 @@ function upsertClient(client) {
   refs.iterationCell.textContent = String(merged.iteration ?? '—');
   refs.lastSeenCell.textContent = formatLastSeen(merged.last_seen);
   refs.controlButton.textContent = openControlHost === merged.hostname ? 'Close' : 'Control';
+
+  // Update error badge — show count if there are any errors, hide if clean.
+  // WHY: Red number in the Errors column is the fastest way to spot a problem
+  // on a table with many clients without reading every row in detail.
+  const errCount = merged.error_count || 0;
+  if (errCount > 0) {
+    refs.errorBadge.textContent = errCount > 99 ? '99+' : String(errCount);
+    refs.errorBadge.className = 'error-badge';
+    refs.errorBadge.title = `${errCount} error(s) reported — open Control to see log`;
+  } else {
+    refs.errorBadge.className = 'error-badge hidden';
+  }
 
   if (openControlHost === merged.hostname) {
     renderControlPanel(merged.hostname);
@@ -1128,6 +1156,44 @@ function renderControlPanel(hostname) {
   panel.appendChild(header);
   panel.appendChild(toggles);
   panel.appendChild(actions);
+
+  // Error log section — shows the rolling buffer of errors reported by this client.
+  // WHY: Operators need to diagnose why a client isn't connecting. Rather than
+  // SSH-ing into the client to read log files, the error messages are surfaced here
+  // directly in the dashboard so the problem can be identified remotely.
+  const recentErrors = client.recent_errors || [];
+  const errorSection = document.createElement('div');
+  errorSection.className = 'error-log-section';
+  const errorTitle = document.createElement('h3');
+  const errCount = client.error_count || 0;
+  errorTitle.textContent = `Error Log (${recentErrors.length} shown, ${errCount} total)`;
+  errorSection.appendChild(errorTitle);
+
+  if (recentErrors.length === 0) {
+    const none = document.createElement('p');
+    none.className = 'error-log-empty';
+    none.textContent = 'No errors reported.';
+    errorSection.appendChild(none);
+  } else {
+    const ul = document.createElement('ul');
+    ul.className = 'error-log-list';
+    // Show newest errors first so the operator sees the latest problem immediately
+    [...recentErrors].reverse().forEach(({ ts, msg }) => {
+      const li = document.createElement('li');
+      const time = document.createElement('span');
+      time.className = 'error-ts';
+      time.textContent = ts || '';
+      const message = document.createElement('span');
+      message.className = 'error-msg';
+      message.textContent = msg || '';
+      li.appendChild(time);
+      li.appendChild(message);
+      ul.appendChild(li);
+    });
+    errorSection.appendChild(ul);
+  }
+
+  panel.appendChild(errorSection);
   refs.detailCell.appendChild(panel);
 }
 
