@@ -1550,7 +1550,17 @@ async def api_self_update() -> dict[str, Any]:
     """Manually trigger a self-update check and apply if a new version is available."""
     if update_state["update_in_progress"]:
         raise HTTPException(status_code=409, detail="Update already in progress")
-    # Refresh the available version first
+    # Sync from GitHub first so version check reflects the latest repo state
+    try:
+        await asyncio.to_thread(sync_repo_once)
+        repo_state["synced"] = True
+        repo_state["error"] = None
+        await broadcast({"type": "repo_status", "synced": True, "error": None})
+    except Exception as exc:
+        repo_state["error"] = str(exc)
+        await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc)})
+        raise HTTPException(status_code=502, detail=f"GitHub sync failed: {exc}") from exc
+    # Now check version against freshly synced repo
     available = await asyncio.to_thread(_get_repo_version)
     import datetime
     update_state["available_version"] = available
