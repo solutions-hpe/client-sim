@@ -162,7 +162,7 @@ All DHCP settings are configurable via environment variables before running the 
 | `DHCP_PREFIX` | `24` | Subnet prefix length |
 | `DHCP_RANGE_START` | `169.253.1.11` | First DHCP address (first 10 IPs reserved) |
 | `DHCP_RANGE_END` | `169.253.1.254` | Last DHCP address |
-| `DHCP_LEASE_TIME` | `12h` | DHCP lease duration |
+| `DHCP_LEASE_TIME` | `1h` | DHCP lease duration |
 
 Example — custom subnet:
 

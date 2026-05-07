@@ -1,4 +1,4 @@
-$version = '.18'
+$version = '.02'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-vhconnect.log'
 $tempDir = 'C:\Temp'

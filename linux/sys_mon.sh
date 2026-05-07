@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.01
+version=.02
 log_file="/var/log/messages"  # Replace with the actual log file path
 error_search="Call Trace:"  # Replace with the message to trigger the reboot
 tail -f $log_file | while read logline; do

@@ -1,6 +1,6 @@
 . 'C:\Scripts\ini-parser.ps1'
 
-$version = '.94'
+$version = '.02'
 $scriptRoot = 'C:\Scripts'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-simulation.log'

@@ -1,4 +1,4 @@
-$version = '.04'
+$version = '.02'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-www-traffic.log'
 

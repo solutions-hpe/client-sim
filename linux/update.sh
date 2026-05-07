@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.01
+version=.02
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -69,7 +69,7 @@ check_api_up() {
     local tmp
     tmp=$(mktemp)
     local http_code
-    http_code=$(curl -sS --max-time 5 -o "$tmp" -w "%{http_code}" "$url/health" 2>/dev/null)
+    http_code=$(curl -sS --max-time 5 -o "$tmp" -w "%{http_code}" "$url/api/health" 2>/dev/null)
     local body
     body=$(cat "$tmp")
     rm -f "$tmp"
@@ -97,16 +97,47 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
 
     if check_api_up "$server_url"; then
         tmp_web=$(mktemp -d)
-        # Download linux scripts tarball from WebUI
-        http_code=$(curl -sS --max-time 30 -o "$tmp_web/scripts.tar.gz" \
-            -w "%{http_code}" "$server_url/api/scripts/download" 2>/dev/null)
+        sync_ok=true
 
-        if [[ "$http_code" == "200" ]] && tar -xzf "$tmp_web/scripts.tar.gz" -C "$tmp_web" 2>/dev/null; then
+        # Pull simulation.conf with hostname-specific overrides
+        http_code=$(curl -sS --max-time 10 \
+            -o "$tmp_web/simulation.conf" \
+            -w "%{http_code}" \
+            "$server_url/api/config?hostname=$(hostname)" 2>/dev/null)
+        if [[ "$http_code" != "200" || ! -s "$tmp_web/simulation.conf" ]]; then
+            echo "Config download failed (code: $http_code)" | tee -a "$debug" "$log"
+            sync_ok=false
+        fi
+
+        # Pull script list and download each file
+        if [[ "$sync_ok" == true ]]; then
+            script_list=$(curl -sS --max-time 10 \
+                "$server_url/api/scripts/list?platform=linux" 2>/dev/null)
+            if [[ -z "$script_list" ]]; then
+                echo "Script list empty or unreachable — falling through" | tee -a "$debug" "$log"
+                sync_ok=false
+            else
+                for fname in $(echo "$script_list" | tr -d '[]"' | tr ',' '\n' | tr -d ' '); do
+                    [[ -z "$fname" ]] && continue
+                    fcode=$(curl -sS --max-time 15 \
+                        -o "$tmp_web/$fname" \
+                        -w "%{http_code}" \
+                        "$server_url/api/scripts/linux/$fname" 2>/dev/null)
+                    if [[ "$fcode" != "200" ]]; then
+                        echo "Failed to download $fname (code: $fcode)" | tee -a "$debug" "$log"
+                        sync_ok=false
+                        break
+                    fi
+                done
+            fi
+        fi
+
+        if [[ "$sync_ok" == true ]]; then
             echo "Web server sync succeeded" | tee -a "$debug" "$log"
             copy_local_files "$tmp_web"
             source_found=true
         else
-            echo "Web server reachable but file download failed (code: $http_code) — falling through" | tee -a "$debug" "$log"
+            echo "Web server reachable but sync incomplete — falling through" | tee -a "$debug" "$log"
         fi
         rm -rf "$tmp_web"
     else

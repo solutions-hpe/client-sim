@@ -1,4 +1,4 @@
-$version = '.33'
+$version = '.02'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-startup.log'
 
