@@ -310,18 +310,14 @@ build_usb_state_json() {
         USB_STATE_JSON="[]"
     fi
     # Build present_usb: all certified dongles physically detected right now
-    if (( ${#PRESENT_BUSES[@]} )); then
-        PRESENT_USB_JSON=$(python3 - <<PY
-import json
-items = []
-$(for bp in "${!PRESENT_BUSES[@]}"; do
-    vp="${PRESENT_BUSES[$bp]}"
-    nm="${USB_NAME_BY_BUS[$bp]:-}"
-    printf 'items.append({"bus_path":"%s","vidpid":"%s","name":"%s"})\n' "$bp" "$vp" "$nm"
-done)
-print(json.dumps(items))
-PY
-)
+    local present_lines=()
+    for bus_path in "${!PRESENT_BUSES[@]}"; do
+        vidpid="${PRESENT_BUSES[$bus_path]}"
+        name="${USB_NAME_BY_BUS[$bus_path]:-}"
+        present_lines+=("${bus_path}"$'\t'"${vidpid}"$'\t'"${name}")
+    done
+    if (( ${#present_lines[@]} )); then
+        PRESENT_USB_JSON=$(json_from_records unknown "${present_lines[@]}")
     else
         PRESENT_USB_JSON="[]"
     fi
