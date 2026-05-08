@@ -285,7 +285,7 @@ else
 fi
 
 ###############################################################################
-# STEP 7 — Install prerequisites inside the container
+# STEP 7 — Install prerequisites and run Client-Sim dashboard installer
 ###############################################################################
 info "Running initial apt update inside container..."
 pct exec "$CTID" -- bash -c "
@@ -294,6 +294,13 @@ pct exec "$CTID" -- bash -c "
   apt-get install -y -qq curl git
 "
 ok "Base packages installed in container"
+
+info "Running Client-Sim dashboard installer inside container..."
+pct exec "$CTID" -- bash -c "
+  curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui/install-lxc.sh \
+    | bash -s -- --branch lrb --port 8000
+"
+ok "Client-Sim dashboard installed"
 
 ###############################################################################
 # Summary
@@ -311,12 +318,7 @@ echo -e "  ${COL_GREEN}✓${COL_RESET}  IP (eth0)   : ${CONTAINER_IP}"
 echo -e "  ${COL_GREEN}✓${COL_RESET}  eth1        : attached to ${CLIENT_BRIDGE} (no IP yet)"
 echo -e "  ${COL_GREEN}✓${COL_RESET}  Auto-start  : enabled"
 echo
-echo "  Next step — run the Client-Sim installer inside the container:"
-echo
-echo -e "  ${COL_BOLD}pct exec ${CTID} -- bash -c \\"
-echo     "    'curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui/install-lxc.sh | bash'"
-echo -e "  ${COL_RESET}"
-echo "  Or to enter the container shell:"
+echo "  Dashboard installer ran automatically — enter the container to check:"
 echo -e "  ${COL_BOLD}pct enter ${CTID}${COL_RESET}"
 echo "============================================================"
 echo
