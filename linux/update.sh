@@ -57,6 +57,11 @@ copy_local_files() {
     if [[ -f "$src_dir/10-rsyslog.conf" ]]; then
         sudo cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf
     fi
+    # Deploy polkit rule to suppress NM graphical auth dialogs
+    if [[ -f "$src_dir/50-client-sim-nm.rules" ]]; then
+        sudo mkdir -p /etc/polkit-1/rules.d
+        sudo cp "$src_dir/50-client-sim-nm.rules" /etc/polkit-1/rules.d/50-client-sim-nm.rules
+    fi
     if [[ -f "$src_dir/VERSION" ]]; then
         sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
     fi
