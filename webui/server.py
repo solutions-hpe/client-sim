@@ -50,6 +50,7 @@ REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.gi
 _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
+_SENSITIVE_NOTIF_KEYS = {"smtp_password"}
 
 try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
@@ -92,6 +93,9 @@ def _encrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _encrypt_secret(out["central_config"][key])
+    for key in _SENSITIVE_NOTIF_KEYS:
+        if out.get("notifications", {}).get(key):
+            out["notifications"][key] = _encrypt_secret(out["notifications"][key])
     return out
 
 
@@ -105,6 +109,9 @@ def _decrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _decrypt_secret(out["central_config"][key])
+    for key in _SENSITIVE_NOTIF_KEYS:
+        if out.get("notifications", {}).get(key):
+            out["notifications"][key] = _decrypt_secret(out["notifications"][key])
     return out
 
 
