@@ -1286,7 +1286,8 @@ async def sync_repo() -> None:
             repo_state["synced"] = True
             repo_state["error"] = None
             repo_state["last_sync"] = time.time()
-            await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"]})
+            repo_version = await asyncio.to_thread(_get_repo_version)
+            await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"], "repo_version": repo_version})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -2057,6 +2058,176 @@ async def api_simulations() -> dict[str, Any]:
     }
 
 
+# Cache: (wsite, central_site) → (timestamp, [client_name, ...])
+_central_client_cache: dict[str, tuple[float, list[str]]] = {}
+_CENTRAL_CLIENT_CACHE_TTL = 60  # seconds
+
+
+async def _fetch_central_client_names(wsite: str, central_site: str) -> list[str]:
+    """Fetch wireless client hostnames from Central for a given site (cached 60 s)."""
+    cache_key = f"{wsite}:{central_site}"
+    now = time.time()
+    if cache_key in _central_client_cache:
+        ts, names = _central_client_cache[cache_key]
+        if now - ts < _CENTRAL_CLIENT_CACHE_TTL:
+            return names
+
+    cfg = _central_cfg()
+    if not cfg.get("access_token") and not cfg.get("client_id"):
+        return []
+
+    base_url = cfg["cluster_url"].rstrip("/")
+    headers = _central_headers()
+    names: list[str] = []
+
+    async with httpx.AsyncClient(verify=False) as client:
+        for path in ["/monitoring/v2/clients/wireless", "/monitoring/v1/clients/wireless"]:
+            for site_param in ["site", "site_name"]:
+                try:
+                    resp = await asyncio.wait_for(
+                        client.get(
+                            f"{base_url}{path}",
+                            headers=headers,
+                            params={site_param: central_site, "limit": 1000},
+                            timeout=10,
+                        ),
+                        timeout=12,
+                    )
+                    if resp.status_code == 401 and _can_refresh():
+                        ok, _ = await _refresh_central_token(client)
+                        if ok:
+                            headers = _central_headers()
+                        resp = await client.get(
+                            f"{base_url}{path}",
+                            headers=headers,
+                            params={site_param: central_site, "limit": 1000},
+                            timeout=10,
+                        )
+                    if resp.status_code == 200:
+                        body = resp.json()
+                        for c in body.get("clients", []):
+                            n = (c.get("name") or c.get("client_name") or
+                                 c.get("username") or "").strip().lower()
+                            if n:
+                                names.append(n)
+                        _central_client_cache[cache_key] = (now, names)
+                        return names
+                    if resp.status_code == 404:
+                        continue
+                except Exception:
+                    pass
+
+    return names
+
+
+@app.get("/api/simulations/{sim_id}/clients")
+async def api_sim_clients(sim_id: str) -> dict[str, Any]:
+    """Return per-client status for one simulation bucket.
+
+    Each client entry includes:
+      - api_online / api_last_seen — from live heartbeats
+      - central_connected — matched by hostname from Central wireless client list
+    """
+    import configparser as _cp
+
+    sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
+    client_conf_path = REPO_DIR / "proxmox" / "client-setup.conf"
+
+    # --- Load simulation profile ---
+    wsite = ""
+    central_site = ""
+    site_based_num = 2
+    if sim_conf_path.exists():
+        try:
+            p = _cp.ConfigParser()
+            p.read_string(sim_conf_path.read_text(encoding="utf-8"))
+            site_based_num = int(p.get("simulation", "site_based_num", fallback="2"))
+            if p.has_section(sim_id):
+                wsite = p.get(sim_id, "wsite", fallback="")
+        except Exception:
+            pass
+
+    settings = await _load_settings()
+    central_site = settings.get("site_mappings", {}).get(wsite, "")
+
+    # --- Build configured client list from client-setup.conf ---
+    configured: dict[str, dict[str, Any]] = {}  # hostname → info
+    if client_conf_path.exists():
+        try:
+            cp = _cp.ConfigParser()
+            cp.read_string(client_conf_path.read_text(encoding="utf-8"))
+            vmid_re = re.compile(r"^c(\d+)$")
+            for section in cp.sections():
+                m = vmid_re.match(section)
+                if not m:
+                    continue
+                vmid_str = m.group(1)
+                vm_name = cp.get(section, "vm_name", fallback="").strip()
+                if not vm_name:
+                    continue
+                digit = vmid_str[-(site_based_num)] if len(vmid_str) >= site_based_num else vmid_str[-1]
+                if f"s{digit}" != sim_id:
+                    continue
+                hostname = f"{vm_name}-{vmid_str}"
+                configured[hostname] = {
+                    "hostname": hostname,
+                    "vmid": int(vmid_str),
+                    "api_online": False,
+                    "api_last_seen": None,
+                    "central_connected": None,
+                    "source": "configured",
+                }
+        except Exception:
+            pass
+
+    # --- Overlay live heartbeat data ---
+    async with state_lock:
+        active_snap = {h: dict(c) for h, c in clients.items()}
+
+    for h, c in active_snap.items():
+        if c.get("simulation_id", "") != sim_id:
+            continue
+        online = compute_online(c.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
+        last_seen_dt = c.get("last_seen")
+        if h in configured:
+            configured[h]["api_online"] = online
+            configured[h]["api_last_seen"] = last_seen_dt.isoformat() if last_seen_dt else None
+        else:
+            # Ad-hoc client (not in client-setup.conf)
+            configured[h] = {
+                "hostname": h,
+                "vmid": None,
+                "api_online": online,
+                "api_last_seen": last_seen_dt.isoformat() if last_seen_dt else None,
+                "central_connected": None,
+                "source": "heartbeat",
+            }
+
+    # --- Match against Central client list ---
+    central_names: list[str] = []
+    if central_site:
+        try:
+            central_names = await asyncio.wait_for(
+                _fetch_central_client_names(wsite, central_site), timeout=15
+            )
+        except Exception:
+            pass
+
+    central_set = {n.lower() for n in central_names}
+    for info in configured.values():
+        if central_set:
+            info["central_connected"] = info["hostname"].lower() in central_set
+        # else leave None (not configured / fetch failed)
+
+    return {
+        "sim_id": sim_id,
+        "wsite": wsite,
+        "central_site": central_site,
+        "central_total": central_wireless_clients.get(wsite, None),
+        "clients": sorted(configured.values(), key=lambda x: x["hostname"]),
+    }
+
+
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     async with state_lock:
@@ -2388,7 +2559,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     ws_connections.append(websocket)
     await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}))
-    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"]}))
+    _repo_ver = await asyncio.to_thread(_get_repo_version)
+    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()}))

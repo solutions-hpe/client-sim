@@ -112,26 +112,20 @@ a:hover { color: var(--hpe-green-dark); text-decoration: underline; }
   gap: 10px;
 }
 
-/* HPE double-chevron logo mark rendered via CSS */
-.topbar h1::before {
-  content: ">";
-  font-size: 2rem;
-  font-weight: 300;
-  color: var(--hpe-green);
-  letter-spacing: -4px;
-  text-shadow: 10px 0 0 var(--hpe-green);
-  padding-right: 16px;
-  line-height: 1;
+/* Official HPE logo mark (wordmark SVG inline) */
+.hpe-logo-mark {
+  height: 22px;
+  width: auto;
+  flex-shrink: 0;
+  color: #ffffff;          /* currentColor for the H/P/E body paths */
+  display: block;
 }
 
-.topbar h1 .brand-name {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: rgba(255,255,255,0.85);
-  border-right: 1px solid var(--hpe-navy-mid);
-  padding-right: 14px;
+.topbar h1 .brand-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--hpe-navy-mid);
+  flex-shrink: 0;
 }
 
 /* WebSocket status in header */
@@ -480,7 +474,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 
 @media (max-width: 640px) {
   .topbar { padding: 0 14px; }
-  .topbar h1 .brand-name { display: none; }
+  .topbar h1 .brand-divider { display: none; }
   .page { padding: 14px; }
   .toolbar { flex-wrap: wrap; }
 }
@@ -1063,3 +1057,79 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   word-break: break-all;
   margin-top: 8px;
 }
+
+/* ── Sim site tiles (clickable rows in level-2 panel) ───────────── */
+.sim-site-row {
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.sim-site-row:hover {
+  background: rgba(255,255,255,0.07);
+  box-shadow: 0 0 0 2px var(--hpe-green);
+}
+.sim-site-row .sim-site-arrow {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+/* ── Client list panel (level 3) ────────────────────────────────── */
+.sim-clients-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+}
+.sim-clients-loading {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 24px 0;
+  text-align: center;
+}
+.sim-client-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card-bg, rgba(255,255,255,0.05));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+}
+.sim-client-card-hostname {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sim-client-indicators {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.sim-client-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sim-client-indicator .ind-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sim-client-indicator .ind-dot.green  { background: #2ecc71; box-shadow: 0 0 4px #2ecc71aa; }
+.sim-client-indicator .ind-dot.yellow { background: #f1c40f; box-shadow: 0 0 4px #f1c40faa; }
+.sim-client-indicator .ind-dot.grey   { background: #666; }
+.sim-client-indicator .ind-dot.unknown { background: transparent; border: 1.5px solid #555; }
+.sim-client-indicator .ind-label { color: var(--muted); }
