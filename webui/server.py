@@ -50,7 +50,7 @@ REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.gi
 _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
-_SENSITIVE_NOTIF_KEYS = {"smtp_password"}
+_SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
 
 try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
@@ -2134,7 +2134,7 @@ async def api_settings_get() -> dict[str, Any]:
         "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
         "notifications": {
             k: v for k, v in settings.get("notifications", {}).items()
-            if k != "smtp_password"  # never expose password
+            if k not in ("smtp_password", "teams_webhook_url")  # never expose secrets
         },
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
