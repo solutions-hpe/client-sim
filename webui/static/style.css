@@ -264,6 +264,13 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   white-space: nowrap;
   letter-spacing: 0.02em;
 }
+.badge-yellow { background: #fef3c7; color: #92400e; }
+.badge-blue   { background: #dbeafe; color: #1e40af; }
+.badge-green  { background: #d1fae5; color: #065f46; }
+.badge-red    { background: #fee2e2; color: #991b1b; }
+.badge-grey   { background: #f3f4f6; color: #6b7280; }
+.btn-icon { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 0.85rem; padding: 2px 6px; }
+.btn-icon:hover { color: var(--hpe-navy); }
 
 .badge-failure {
   background: var(--hpe-red-bg);
@@ -566,6 +573,63 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .tab-content.hidden { display: none; }
 
 /* ── Setup card ─────────────────────────────────────────────────── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+  max-width: 680px;
+}
+
+.card-header {
+  padding: 28px 32px 0;
+}
+
+.card-title {
+  display: inline-block;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--hpe-navy);
+}
+
+.card-body {
+  padding: 0 32px 28px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-msg {
+  min-height: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.form-msg.msg-ok {
+  color: var(--hpe-green-dark);
+}
+
+.form-msg.msg-error {
+  color: #C0392B;
+}
+
 .setup-card {
   background: var(--panel);
   border: 1px solid var(--border);

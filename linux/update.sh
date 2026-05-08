@@ -364,4 +364,13 @@ fi
 if [[ "$source_found" == false ]]; then
     echo "ERROR: All update sources failed — no files updated" | tee -a "$debug" "$log"
 fi
+#============================================================
+# Run inbox agent — check for pending commands from server
+#============================================================
+if [[ "$web_server" == "on" && -n "$server_url" ]]; then
+    if [[ -f /usr/local/scripts/agent.sh ]]; then
+        bash /usr/local/scripts/agent.sh
+    fi
+fi
+
 echo "Update complete" | tee -a "$debug"

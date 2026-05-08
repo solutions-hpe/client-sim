@@ -10,6 +10,7 @@ import re
 import socket
 import subprocess
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1175,6 +1176,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["update_checker"] = asyncio.create_task(check_for_update())
     background_tasks["relay"] = asyncio.create_task(relay_worker())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
+    background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -1187,6 +1189,12 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
 clients: dict[str, dict[str, Any]] = _load_client_history()
+
+# ── Command inbox ──────────────────────────────────────────────────────────────
+commands: list[dict[str, Any]] = []
+COMMAND_MAX = 100          # keep last N commands in history
+COMMAND_EXPIRE_SECS = 900  # 15 minutes
+
 ws_connections: list[WebSocket] = []
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
@@ -1299,6 +1307,45 @@ def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
 async def current_clients() -> list[dict[str, Any]]:
     async with state_lock:
         return [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
+
+
+def _make_command(target: str, action: str, args: dict | None = None) -> dict[str, Any]:
+    now = time.time()
+    return {
+        "id": str(uuid.uuid4()),
+        "target": target,
+        "action": action,
+        "args": args or {},
+        "status": "pending",
+        "created_at": now,
+        "updated_at": now,
+        "result": None,
+        "message": None,
+    }
+
+
+def _serialize_commands() -> list[dict[str, Any]]:
+    return [
+        {**cmd, "age_secs": int(time.time() - cmd["created_at"])}
+        for cmd in commands
+    ]
+
+
+async def expire_commands() -> None:
+    """Mark pending/delivered commands as expired after 15 minutes and broadcast."""
+    while True:
+        await asyncio.sleep(30)
+        now = time.time()
+        changed = False
+        for cmd in commands:
+            if cmd["status"] in ("pending", "delivered") and (now - cmd["created_at"]) > COMMAND_EXPIRE_SECS:
+                cmd["status"] = "expired"
+                cmd["updated_at"] = now
+                changed = True
+                logger.info("Command %s (%s → %s) expired", cmd["id"], cmd["target"], cmd["action"])
+        if changed:
+            await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+            await broadcast({"type": "notification", "level": "warning", "message": "One or more commands expired without being delivered."})
 
 
 async def broadcast(message: dict[str, Any]) -> None:
@@ -2982,6 +3029,97 @@ async def api_health() -> dict[str, Any]:
         "repo_synced": repo_state["synced"],
         "version": INSTALLER_VERSION,
     }
+
+
+@app.post("/api/commands")
+async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Queue a command for one device, all clients, or the proxmox agent."""
+    target = str(body.get("target", "")).strip()
+    action = str(body.get("action", "")).strip()
+    args = body.get("args", {})
+
+    if not target or not action:
+        raise HTTPException(status_code=422, detail="target and action are required")
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        raise HTTPException(status_code=422, detail="args must be an object")
+
+    new_cmds: list[dict[str, Any]] = []
+
+    async with state_lock:
+        if target == "all":
+            known = list(clients.keys())
+            if not known:
+                raise HTTPException(status_code=400, detail="No clients registered yet")
+            for hostname in known:
+                new_cmds.append(_make_command(hostname, action, args))
+        elif target == "proxmox":
+            new_cmds.append(_make_command(target, action, args))
+        else:
+            if target not in clients:
+                raise HTTPException(status_code=404, detail="Client not found")
+            new_cmds.append(_make_command(target, action, args))
+
+    commands.extend(new_cmds)
+    if len(commands) > COMMAND_MAX:
+        del commands[:len(commands) - COMMAND_MAX]
+
+    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return {"queued": len(new_cmds), "ids": [c["id"] for c in new_cmds]}
+
+
+@app.get("/api/commands")
+async def list_commands() -> list[dict[str, Any]]:
+    """Return full command history for the UI."""
+    return _serialize_commands()
+
+
+@app.get("/api/inbox")
+async def poll_inbox(hostname: str) -> list[dict[str, Any]]:
+    """Device polls for pending commands addressed to it. Marks them delivered."""
+    if not hostname:
+        raise HTTPException(status_code=422, detail="hostname is required")
+    pending = [c for c in commands if c["status"] == "pending" and c["target"] == hostname]
+    now = time.time()
+    for cmd in pending:
+        cmd["status"] = "delivered"
+        cmd["updated_at"] = now
+    if pending:
+        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return [{"id": c["id"], "action": c["action"], "args": c["args"]} for c in pending]
+
+
+@app.post("/api/inbox/ack")
+async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
+    """Device reports command result."""
+    cmd_id = str(body.get("id", "")).strip()
+    status = str(body.get("status", "completed")).strip()
+    message = body.get("message", "")
+
+    if status not in ("completed", "failed"):
+        raise HTTPException(status_code=422, detail="status must be 'completed' or 'failed'")
+
+    cmd = next((c for c in commands if c["id"] == cmd_id), None)
+    if not cmd:
+        raise HTTPException(status_code=404, detail="Command not found")
+
+    cmd["status"] = status
+    cmd["message"] = str(message) if message is not None else ""
+    cmd["updated_at"] = time.time()
+    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return {"ok": True}
+
+
+@app.delete("/api/commands/{cmd_id}")
+async def delete_command(cmd_id: str) -> dict[str, bool]:
+    """Remove a command from history."""
+    before = len(commands)
+    commands[:] = [c for c in commands if c["id"] != cmd_id]
+    if len(commands) == before:
+        raise HTTPException(status_code=404, detail="Command not found")
+    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return {"ok": True}
 
 
 @app.post("/api/notifications/test")

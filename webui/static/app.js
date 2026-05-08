@@ -1808,9 +1808,139 @@ async function loadConfigEditor(force = false) {
   }
 }
 
+// ── Command Inbox ─────────────────────────────────────────────────────────────
+
+const cmdTarget    = document.getElementById('cmd-target');
+const cmdAction    = document.getElementById('cmd-action');
+const cmdSendBtn   = document.getElementById('cmd-send-btn');
+const cmdClearBtn  = document.getElementById('cmd-clear-btn');
+const cmdMsg       = document.getElementById('cmd-msg');
+const cmdTbody     = document.getElementById('cmd-tbody');
+const cmdEmpty     = document.getElementById('cmd-empty');
+
+const CMD_STATUS_LABELS = {
+  pending:   { text: 'Pending',   cls: 'badge-yellow' },
+  delivered: { text: 'Delivered', cls: 'badge-blue' },
+  completed: { text: 'Completed', cls: 'badge-green' },
+  failed:    { text: 'Failed',    cls: 'badge-red' },
+  expired:   { text: 'Expired',   cls: 'badge-grey' },
+};
+
+function updateCmdTargetDropdown(clientList = [...clients.values()]) {
+  if (!cmdTarget) return;
+  [...cmdTarget.options].forEach((option) => {
+    if (option.value !== 'all' && option.value !== 'proxmox') option.remove();
+  });
+  clientList.forEach((client) => {
+    if (!client?.hostname) return;
+    const option = document.createElement('option');
+    option.value = client.hostname;
+    option.textContent = client.hostname;
+    cmdTarget.appendChild(option);
+  });
+}
+
+function renderCommandTable(cmds) {
+  if (!cmdTbody || !cmdEmpty) return;
+  cmdTbody.innerHTML = '';
+  if (!cmds || cmds.length === 0) {
+    cmdEmpty.style.display = '';
+    return;
+  }
+  cmdEmpty.style.display = 'none';
+  [...cmds].reverse().forEach((cmd) => {
+    const info = CMD_STATUS_LABELS[cmd.status] || { text: cmd.status, cls: 'badge-grey' };
+    const age = cmd.age_secs != null ? `${Math.floor(cmd.age_secs / 60)}m ${cmd.age_secs % 60}s` : '—';
+    const tr = document.createElement('tr');
+
+    const targetTd = document.createElement('td');
+    targetTd.textContent = cmd.target;
+    tr.appendChild(targetTd);
+
+    const actionTd = document.createElement('td');
+    const code = document.createElement('code');
+    code.textContent = cmd.action;
+    actionTd.appendChild(code);
+    tr.appendChild(actionTd);
+
+    const statusTd = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = `badge ${info.cls}`;
+    badge.textContent = info.text;
+    statusTd.appendChild(badge);
+    tr.appendChild(statusTd);
+
+    const ageTd = document.createElement('td');
+    ageTd.textContent = age;
+    tr.appendChild(ageTd);
+
+    const messageTd = document.createElement('td');
+    messageTd.style.maxWidth = '220px';
+    messageTd.style.overflow = 'hidden';
+    messageTd.style.textOverflow = 'ellipsis';
+    messageTd.style.whiteSpace = 'nowrap';
+    messageTd.textContent = cmd.message || '—';
+    tr.appendChild(messageTd);
+
+    const deleteTd = document.createElement('td');
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-icon';
+    deleteBtn.dataset.id = cmd.id;
+    deleteBtn.title = 'Remove';
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '✕';
+    deleteBtn.addEventListener('click', async (event) => {
+      try {
+        await fetch(`/api/commands/${event.currentTarget.dataset.id}`, { method: 'DELETE' });
+      } catch (_) { /* silent */ }
+    });
+    deleteTd.appendChild(deleteBtn);
+    tr.appendChild(deleteTd);
+
+    cmdTbody.appendChild(tr);
+  });
+}
+
+if (cmdSendBtn) {
+  cmdSendBtn.addEventListener('click', async () => {
+    const target = cmdTarget?.value || '';
+    const action = cmdAction?.value || '';
+    if (cmdMsg) {
+      cmdMsg.textContent = '';
+      cmdMsg.className = 'form-msg';
+    }
+    try {
+      const data = await requestJson('/api/commands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, action })
+      });
+      if (cmdMsg) {
+        cmdMsg.textContent = `✓ Queued ${data.queued} command(s)`;
+        cmdMsg.classList.add('msg-ok');
+      }
+    } catch (err) {
+      if (cmdMsg) {
+        cmdMsg.textContent = `✗ ${err.message}`;
+        cmdMsg.classList.add('msg-error');
+      }
+    }
+  });
+}
+
+if (cmdClearBtn) {
+  cmdClearBtn.addEventListener('click', async () => {
+    const ids = [...cmdTbody.querySelectorAll('[data-id]')].map((button) => button.dataset.id);
+    await Promise.all(ids.map((id) => fetch(`/api/commands/${id}`, { method: 'DELETE' })));
+  });
+}
+
+requestJson('/api/commands').then(renderCommandTable).catch(() => {});
+
 function handleMessage(message) {
   if (message.type === 'full_state') {
     (message.clients || []).forEach((client) => upsertClient(client));
+    updateCmdTargetDropdown(message.clients || []);
     return;
   }
 
@@ -1843,8 +1973,24 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'commands_update') {
+    renderCommandTable(message.commands);
+    return;
+  }
+
+  if (message.type === 'notification') {
+    if (cmdMsg && message.message) {
+      cmdMsg.textContent = message.message;
+      cmdMsg.className = 'form-msg';
+      cmdMsg.classList.add(message.level === 'warning' ? 'msg-error' : 'msg-ok');
+    }
+    return;
+  }
+
   if (['status_update', 'overrides_update', 'overrides_cleared'].includes(message.type) && message.client) {
     upsertClient(message.client);
+    updateCmdTargetDropdown();
+    return;
   }
 
   if (message.type === 'clients_purged') {
@@ -1853,6 +1999,7 @@ function handleMessage(message) {
     const emptyRow = document.getElementById('empty-row');
     if (emptyRow) emptyRow.classList.remove('hidden');
     updateClientCount();
+    updateCmdTargetDropdown([]);
   }
 }
 
