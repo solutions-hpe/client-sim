@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import socket
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,6 @@ except ImportError:
 from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from git import InvalidGitRepositoryError, Repo
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
@@ -1530,37 +1530,35 @@ def _push_to_github(files_changed: list[str], commit_message: str) -> bool:
     if not token:
         raise ValueError("GitHub token not configured")
 
+    if not (REPO_DIR / ".git").exists():
+        raise RuntimeError(f"{REPO_DIR} exists but is not a git repository")
+
+    # Ensure git identity is set (required for commit)
     try:
-        repo = Repo(REPO_DIR)
-    except InvalidGitRepositoryError as exc:
-        raise RuntimeError(f"{REPO_DIR} exists but is not a git repository") from exc
+        _git("config", "user.name")
+    except RuntimeError:
+        _git("config", "user.name", "Client-Sim Dashboard")
+    try:
+        _git("config", "user.email")
+    except RuntimeError:
+        _git("config", "user.email", "client-sim@localhost")
 
     authed_url = REPO_URL.replace("https://", f"https://{token}@", 1)
-    origin = repo.remote("origin")
-
-    reader = repo.config_reader()
-    has_name = reader.has_option("user", "name")
-    has_email = reader.has_option("user", "email")
-    reader.release()
-    if not has_name or not has_email:
-        writer = repo.config_writer()
-        if not has_name:
-            writer.set_value("user", "name", "Client-Sim Dashboard")
-        if not has_email:
-            writer.set_value("user", "email", "client-sim@localhost")
-        writer.release()
-
-    origin.set_url(authed_url)
+    _git("remote", "set-url", "origin", authed_url)
     try:
-        repo.index.add(files_changed)
-        staged_changes = list(repo.index.diff("HEAD")) if repo.head.is_valid() else list(repo.index.entries)
-        if not staged_changes:
-            return False
-        repo.index.commit(commit_message)
-        origin.push()
+        _git("add", *files_changed)
+        # Check if there is anything staged
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=REPO_DIR
+        )
+        if status.returncode == 0:
+            return False  # nothing staged
+        _git("commit", "-m", commit_message)
+        _git("push")
         return True
     finally:
-        origin.set_url(REPO_URL)
+        _git("remote", "set-url", "origin", REPO_URL)
 
 
 def _update_ini_section(filepath: Path, section: str, updates: dict[str, str]) -> None:
@@ -1616,26 +1614,36 @@ def _update_ini_section(filepath: Path, section: str, updates: dict[str, str]) -
     filepath.write_text(output, encoding="utf-8")
 
 
+def _git(*args: str, cwd: Path | None = None) -> str:
+    """Run a git command, raise RuntimeError on failure."""
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd or REPO_DIR,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
 def sync_repo_once() -> None:
     branch = settings["repo_branch"]
     REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
 
     if not REPO_DIR.exists() or not any(REPO_DIR.iterdir()):
         logger.info("Cloning %s (%s) into %s", REPO_URL, branch, REPO_DIR)
-        Repo.clone_from(REPO_URL, REPO_DIR, branch=branch, single_branch=True)
+        _git("clone", "--branch", branch, "--single-branch", REPO_URL, str(REPO_DIR),
+             cwd=REPO_DIR.parent)
         return
 
-    try:
-        repo = Repo(REPO_DIR)
-    except InvalidGitRepositoryError as exc:
-        raise RuntimeError(f"{REPO_DIR} exists but is not a git repository") from exc
+    if not (REPO_DIR / ".git").exists():
+        raise RuntimeError(f"{REPO_DIR} exists but is not a git repository")
 
-    origin = repo.remotes.origin
     logger.info("Pulling latest repo state from %s branch %s", REPO_URL, branch)
-    origin.fetch(prune=True)
-    repo.git.checkout(branch)
-    origin.pull(branch)
-    repo.git.reset("--hard", f"origin/{branch}")
+    _git("fetch", "--prune", "origin")
+    _git("checkout", branch)
+    _git("reset", "--hard", f"origin/{branch}")
 
 
 async def sync_repo() -> None:
