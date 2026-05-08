@@ -1,5 +1,5 @@
 #!/bin/bash
-# launch-terminals.sh v0.03
+# launch-terminals.sh v0.04
 # Launches and positions gnome-terminal windows for client-sim.
 # Called from openbox autostart — replaces individual .desktop autostart entries.
 #
