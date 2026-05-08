@@ -115,12 +115,13 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   export _CLIENT_SIM_BOOTSTRAPPED=1
   _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui/install-lxc.sh"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
-  bash <(curl -fsSL "$_bs_url") --branch "$REPO_BRANCH" --port "$PORT" \
-    ${REINSTALL:+--reinstall}
+  _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
+  [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
+  bash <(curl -fsSL "$_bs_url") "${_bs_args[@]}"
   exit $?
 fi
 
-VERSION="0.25"
+VERSION="0.26"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -352,7 +353,7 @@ if [[ "$REINSTALL" -eq 1 ]]; then
   info "Reinstall mode — removing existing application files..."
   # Remove app files only; keep venv dir removal for Step 6
   find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
-    ! -name 'venv' ! -name '.env' ! -name 'settings.json' \
+    ! -name 'venv' ! -name '.env' ! -name 'settings.json' ! -name '.secret_key' \
     -exec rm -rf {} + 2>/dev/null || true
 fi
 
