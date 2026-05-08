@@ -139,6 +139,20 @@ find_label_for_vidpid() {
     fi
 }
 
+CLIENT_SETUP_CONF="/etc/pve/scripts/client-setup.conf"
+
+get_vm_name() {
+    local vmid="$1" name=""
+    if [[ -f "$CLIENT_SETUP_CONF" ]]; then
+        name=$(awk -v sec="[c${vmid}]" '
+            $0 == sec        { found=1; next }
+            found && /^\[/   { exit }
+            found && /^vm_name=/ { sub(/^vm_name=[ \t]*/, ""); print; exit }
+        ' "$CLIENT_SETUP_CONF")
+    fi
+    printf '%s' "${name:-sim-client}"
+}
+
 device_name_from_sysfs() {
     local dev="$1" manufacturer="" product="" name
     [[ -f "$dev/manufacturer" ]] && manufacturer=$(tr -d '\n' < "$dev/manufacturer")
@@ -302,7 +316,11 @@ clone_vm_for_usb() {
     local template_id="$IMAGE1_TEMPLATE_ID"
     [[ "$image_num" == "2" ]] && template_id="$IMAGE2_TEMPLATE_ID"
 
-    qm clone "$template_id" "$vmid" --name "sim-client-$vmid"
+    local vm_name
+    vm_name=$(get_vm_name "$vmid")
+    local full_name="${vm_name}-${vmid}"
+
+    qm clone "$template_id" "$vmid" --name "$full_name"
     qm set "$vmid" --onboot 1 --startup "order=2,up=60"
     qm set "$vmid" -usb0 "host=$bus_path"
     qm start "$vmid"
@@ -316,7 +334,7 @@ clone_vm_for_usb() {
     done
 
     if [[ "$guest_ready" -eq 1 ]]; then
-        qm guest exec "$vmid" -- hostnamectl set-hostname "sim-client-$vmid" >/dev/null 2>&1 || true
+        qm guest exec "$vmid" -- hostnamectl set-hostname "$full_name" >/dev/null 2>&1 || true
         # Write the USB device physical-layer type so startup.sh uses the right sim_phy
         qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
             && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
@@ -326,7 +344,7 @@ clone_vm_for_usb() {
         log "WARNING: Guest agent not ready for VM $vmid"
     fi
 
-    log "Provisioned VM $vmid for USB $bus_path (${product_name}) type=${device_type}"
+    log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
 provision_vm() {
