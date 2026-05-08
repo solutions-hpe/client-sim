@@ -104,7 +104,23 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.24"
+###############################################################################
+# Self-bootstrap: always run the latest version from GitHub.
+# When the WebUI triggers an update, it calls the local repo copy which may be
+# outdated or broken.  Re-fetching from GitHub here ensures we always execute
+# the current installer — eliminating the chicken-and-egg problem.
+# _CLIENT_SIM_BOOTSTRAPPED is exported to the child so it doesn't loop.
+###############################################################################
+if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
+  export _CLIENT_SIM_BOOTSTRAPPED=1
+  _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui/install-lxc.sh"
+  echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
+  bash <(curl -fsSL "$_bs_url") --branch "$REPO_BRANCH" --port "$PORT" \
+    ${REINSTALL:+--reinstall}
+  exit $?
+fi
+
+VERSION="0.25"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
