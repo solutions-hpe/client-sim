@@ -1996,6 +1996,15 @@ async def api_simulations() -> dict[str, Any]:
 
     for sim in simulations.values():
         active_count = 0
+
+        # Primary: count any live client whose simulation_id matches this bucket
+        for h, c in active_snap.items():
+            if c.get("simulation_id", "") == sim["id"]:
+                online = compute_online(c.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
+                if online:
+                    active_count += 1
+
+        # Secondary: update configured_clients reporting flags (for detail panel)
         for client_info in sim["configured_clients"]:
             h = client_info["hostname"]
             if h in active_snap:
@@ -2005,8 +2014,7 @@ async def api_simulations() -> dict[str, Any]:
                 client_info["reporting"] = True
                 client_info["online"] = online
                 client_info["last_seen"] = last_seen_dt.isoformat() if last_seen_dt else None
-                if online:
-                    active_count += 1
+
         sim["active_client_count"] = active_count
         sim["central_client_count"] = central_wireless_clients.get(sim["wsite"], None)
 
