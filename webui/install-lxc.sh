@@ -495,7 +495,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
 echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
 # Allow service user to self-update by re-running this installer as root
 SUDOERS_FILE="/etc/sudoers.d/client-sim-dashboard"
-SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh"
+SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh *"
 mkdir -p /etc/sudoers.d
 # Remove old file first (may have 440 perms from a prior install)
 rm -f "$SUDOERS_FILE"
