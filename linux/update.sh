@@ -34,7 +34,12 @@ copy_local_files() {
     local desktop_files=( "$src_dir"/*.desktop )
     local conf_files=( "$src_dir"/simulation.conf )
 
-    (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
+    # Copy all .sh files except update.sh first — update.sh is copied last so
+    # that if bash re-reads this file after the copy it doesn't hit a parse error.
+    for _f in "${sh_files[@]}"; do
+        [[ "$(basename "$_f")" == "update.sh" ]] && continue
+        sudo cp "$_f" /usr/local/scripts/
+    done
     (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
     (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
@@ -49,6 +54,8 @@ copy_local_files() {
     if [[ -f "$src_dir/VERSION" ]]; then
         sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
     fi
+    # update.sh copied last — avoids bash re-read errors if this script is running
+    [[ -f "$src_dir/update.sh" ]] && sudo cp "$src_dir/update.sh" /usr/local/scripts/update.sh
     sudo chmod -R 777 /usr/local/scripts
 }
 
@@ -304,7 +311,11 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 txt_files=( *.txt )
                 [[ -f "10-rsyslog.conf" ]] && sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
                 (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
-                (( ${#sh_files[@]} ))      && sudo cp "${sh_files[@]}"      /usr/local/scripts/
+                # Copy all .sh except update.sh first; update.sh copied last
+                for _f in "${sh_files[@]}"; do
+                    [[ "$_f" == "update.sh" ]] && continue
+                    sudo cp "$_f" /usr/local/scripts/
+                done
                 (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
                 [[ -f "VERSION" ]]         && sudo cp VERSION               /usr/local/scripts/VERSION
                 cd ..
@@ -320,6 +331,8 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 echo "WARNING: configs directory not found" | tee -a "$debug"
             fi
 
+            # update.sh copied last
+            [[ -f "linux/update.sh" ]] && sudo cp linux/update.sh /usr/local/scripts/update.sh
             sudo chmod -R 777 /usr/local/scripts
             echo "GitHub sync succeeded" | tee -a "$debug" "$log"
             source_found=true
