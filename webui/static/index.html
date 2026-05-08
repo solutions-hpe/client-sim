@@ -103,6 +103,35 @@
       <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
     </div>
 
+    <div id="reclone-status-panel" class="card">
+      <div class="reclone-header">
+        <h3>Fleet Reclone</h3>
+        <span id="reclone-status-badge" class="badge badge-grey">Idle</span>
+        <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
+      </div>
+      <div id="reclone-progress-wrap" style="display:none">
+        <div class="progress-bar-wrap"><div id="reclone-progress-bar" class="progress-bar"></div></div>
+        <div id="reclone-progress-label"></div>
+        <div id="reclone-vm-log" class="reclone-log"></div>
+      </div>
+      <div id="reclone-last-run"></div>
+    </div>
+
+    <div id="usb-summary-panel" class="card" style="display:none">
+      <h3>USB Devices</h3>
+      <table id="usb-summary-table">
+        <thead><tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Free Slots</th></tr></thead>
+        <tbody id="usb-summary-tbody"></tbody>
+      </table>
+      <div id="unknown-usb-section" style="display:none">
+        <h4>⚠️ Uncertified Devices Detected</h4>
+        <table id="unknown-usb-table">
+          <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
+          <tbody id="unknown-usb-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <table class="data-table" id="server-vm-table">
       <thead>
         <tr>
@@ -342,6 +371,51 @@
         <div class="setup-status-item">
           <span class="setup-status-label">Last error</span>
           <span id="setup-sync-error" class="setup-status-value muted">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>USB Auto-Provisioning</h2>
+        <p>Configure certified USB dongles, provisioning behavior, and ignored devices.</p>
+      </div>
+      <div class="card" id="usb-provision-card">
+        <h3>USB Auto-Provisioning</h3>
+        <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
+        <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
+        <label>Clone Template VMID: <input type="number" id="usb-template-id" value="100"></label>
+        <h4>Certified Devices</h4>
+        <table id="usb-vidpid-table">
+          <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
+          <tbody id="usb-vidpid-tbody"></tbody>
+        </table>
+        <div class="row">
+          <input type="text" id="new-vidpid" placeholder="e.g. 2357:012d">
+          <select id="new-vidpid-type"><option value="wireless">Wireless</option><option value="wired">Wired</option></select>
+          <input type="text" id="new-vidpid-label" placeholder="Friendly name">
+          <button type="button" class="btn btn-secondary" onclick="addVidPid()">+ Add</button>
+        </div>
+        <h4>Ignored Devices</h4>
+        <div id="usb-ignored-list"></div>
+      </div>
+    </div>
+
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>VM Maintenance</h2>
+        <p>Configure auto-recovery and scheduled fleet reclones.</p>
+      </div>
+      <div class="card" id="vm-maintenance-card">
+        <h3>VM Maintenance</h3>
+        <label>Auto-recovery (reclone if silent): <input type="number" id="vm-silent-timeout" value="24" min="1"> hours</label>
+        <label>Scheduled reclone: <input type="checkbox" id="reclone-schedule-enabled"></label>
+        <div id="reclone-schedule-fields">
+          <select id="reclone-schedule-day">
+            <option>sunday</option><option>monday</option><option>tuesday</option>
+            <option>wednesday</option><option>thursday</option><option>friday</option><option>saturday</option>
+          </select>
+          <input type="time" id="reclone-schedule-time" value="02:00">
         </div>
       </div>
     </div>

@@ -87,17 +87,29 @@ let currentSettings = {
   central_config: { cluster_url: '', client_id: '', customer_id: '' },
   site_mappings: {},
   monitored_checks: [],
+  hardware_checks: [],
   relay_enabled: 'off',
   relay_server_url: '',
   relay_island_id: '',
   relay_poll_interval: 60,
-  relay_api_key_configured: false
+  relay_api_key_configured: false,
+  usb_vidpids: '[]',
+  usb_missing_timeout: '60',
+  usb_template_id: '100',
+  usb_auto_provision: 'off',
+  usb_ignored_vidpids: '[]',
+  vm_silent_timeout: '24',
+  reclone_schedule_enabled: 'off',
+  reclone_schedule_cron: 'sunday 02:00'
 };
 let configData = {};
 let configLoaded = false;
 let centralTokenValid = null;
 let centralLastSyncedTs = null;
 let centralStatusInitialized = false;
+let latestProxmoxData = { vms: [], usb_state: [], unknown_usb: [], reclone_state: null };
+let latestRecloneState = null;
+let usbCountdownTimer = null;
 
 // ── Tab navigation ────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -243,6 +255,29 @@ const teamsWebhookUrl    = document.getElementById('teams-webhook-url');
 const saveTeamsBtn       = document.getElementById('save-teams-btn');
 const testTeamsBtn       = document.getElementById('test-teams-btn');
 const teamsNotifMsg      = document.getElementById('teams-notif-msg');
+const usbAutoProvisionInput = document.getElementById('usb-auto-provision');
+const usbMissingTimeoutInput = document.getElementById('usb-missing-timeout');
+const usbTemplateIdInput = document.getElementById('usb-template-id');
+const usbVidPidTbody = document.getElementById('usb-vidpid-tbody');
+const newVidPidInput = document.getElementById('new-vidpid');
+const newVidPidTypeInput = document.getElementById('new-vidpid-type');
+const newVidPidLabelInput = document.getElementById('new-vidpid-label');
+const usbIgnoredList = document.getElementById('usb-ignored-list');
+const vmSilentTimeoutInput = document.getElementById('vm-silent-timeout');
+const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-enabled');
+const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
+const recloneScheduleTimeInput = document.getElementById('reclone-schedule-time');
+const usbSummaryPanel = document.getElementById('usb-summary-panel');
+const usbSummaryTbody = document.getElementById('usb-summary-tbody');
+const unknownUsbSection = document.getElementById('unknown-usb-section');
+const unknownUsbTbody = document.getElementById('unknown-usb-tbody');
+const recloneStatusBadge = document.getElementById('reclone-status-badge');
+const recloneProgressWrap = document.getElementById('reclone-progress-wrap');
+const recloneProgressBar = document.getElementById('reclone-progress-bar');
+const recloneProgressLabel = document.getElementById('reclone-progress-label');
+const recloneVmLog = document.getElementById('reclone-vm-log');
+const recloneLastRun = document.getElementById('reclone-last-run');
+const recloneNowBtn = document.getElementById('reclone-now-btn');
 
 function getCentralApiVersion() {
   const active = document.querySelector('#central-api-version-control button.active');
@@ -313,11 +348,22 @@ function mergeSettings(next = {}) {
     monitored_checks: Array.isArray(next.monitored_checks)
       ? next.monitored_checks
       : (currentSettings.monitored_checks || []),
+    hardware_checks: Array.isArray(next.hardware_checks)
+      ? next.hardware_checks
+      : (currentSettings.hardware_checks || []),
     relay_enabled: next.relay_enabled ?? currentSettings.relay_enabled ?? 'off',
     relay_server_url: next.relay_server_url ?? currentSettings.relay_server_url ?? '',
     relay_island_id: next.relay_island_id ?? currentSettings.relay_island_id ?? '',
     relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
-    relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false
+    relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
+    usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
+    usb_missing_timeout: next.usb_missing_timeout ?? currentSettings.usb_missing_timeout ?? '60',
+    usb_template_id: next.usb_template_id ?? currentSettings.usb_template_id ?? '100',
+    usb_auto_provision: next.usb_auto_provision ?? currentSettings.usb_auto_provision ?? 'off',
+    usb_ignored_vidpids: next.usb_ignored_vidpids ?? currentSettings.usb_ignored_vidpids ?? '[]',
+    vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
+    reclone_schedule_enabled: next.reclone_schedule_enabled ?? currentSettings.reclone_schedule_enabled ?? 'off',
+    reclone_schedule_cron: next.reclone_schedule_cron ?? currentSettings.reclone_schedule_cron ?? 'sunday 02:00'
   };
   currentSettings = merged;
   return merged;
@@ -381,12 +427,15 @@ function sendProxmoxCommand(action, vmid) {
 }
 
 function renderServerTab(data) {
+  latestProxmoxData = data || latestProxmoxData;
+  if (data?.reclone_state) latestRecloneState = data.reclone_state;
+
   const tabBtn = document.getElementById('tab-server-btn');
   const tabPanel = document.getElementById('tab-server');
   if (tabBtn) tabBtn.style.display = '';
   if (tabPanel) tabPanel.style.display = '';
 
-  const node = data.node || {};
+  const node = latestProxmoxData.node || {};
   const setEl = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
@@ -397,7 +446,7 @@ function renderServerTab(data) {
   const ramUsedGB = node.mem_used_kb ? (Number(node.mem_used_kb) / 1024 / 1024).toFixed(1) : '—';
   const ramTotalGB = node.mem_total_kb ? (Number(node.mem_total_kb) / 1024 / 1024).toFixed(1) : '—';
   setEl('server-ram', `${ramUsedGB}/${ramTotalGB} GB`);
-  setEl('server-last-seen', formatRelativeTime(data.last_seen));
+  setEl('server-last-seen', formatRelativeTime(latestProxmoxData.last_seen));
 
   const storagePills = document.getElementById('server-storage-pills');
   if (storagePills && Array.isArray(node.storage)) {
@@ -408,11 +457,14 @@ function renderServerTab(data) {
     }).join('');
   }
 
+  renderUsbSummary(latestProxmoxData);
+  renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
+
   const tbody = document.getElementById('server-vm-tbody');
   const empty = document.getElementById('server-empty');
   const selectAll = document.getElementById('server-select-all');
   const thCheck = document.getElementById('server-th-check');
-  const vms = Array.isArray(data.vms) ? data.vms : [];
+  const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
   if (!tbody) return;
 
   tbody.innerHTML = '';
@@ -438,7 +490,7 @@ function renderServerTab(data) {
   ];
 
   vms.forEach((vm) => {
-    const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
+    const statusDot = vm.status === 'running' ? '��' : vm.status === 'paused' ? '🟡' : '⚫';
     const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
     const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
     const actionBtns = VM_ACTIONS.map((a) =>
@@ -496,6 +548,16 @@ function applySettingsToUI(s) {
     const relayOn = settings.relay_enabled === 'on' && settings.relay_server_url;
     relayIndicator.style.display = relayOn ? '' : 'none';
   }
+  if (usbAutoProvisionInput) usbAutoProvisionInput.checked = settings.usb_auto_provision === 'on';
+  if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = settings.usb_missing_timeout ?? '60';
+  if (usbTemplateIdInput && !usbTemplateIdInput.matches(':focus')) usbTemplateIdInput.value = settings.usb_template_id ?? '100';
+  if (vmSilentTimeoutInput && !vmSilentTimeoutInput.matches(':focus')) vmSilentTimeoutInput.value = settings.vm_silent_timeout ?? '24';
+  const schedule = parseScheduleCron(settings.reclone_schedule_cron);
+  if (recloneScheduleEnabledInput) recloneScheduleEnabledInput.checked = settings.reclone_schedule_enabled === 'on';
+  if (recloneScheduleDayInput && !recloneScheduleDayInput.matches(':focus')) recloneScheduleDayInput.value = schedule.day;
+  if (recloneScheduleTimeInput && !recloneScheduleTimeInput.matches(':focus')) recloneScheduleTimeInput.value = schedule.time;
+  renderUsbVidPidTable();
+  renderIgnoredUsbList();
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
   renderHwChecksPreview();
@@ -504,6 +566,8 @@ function applySettingsToUI(s) {
   }
   renderCentralOverview();
   renderChecksList(); // Refresh sim tab whenever settings change (monitored checks may have changed)
+  renderUsbSummary(latestProxmoxData);
+  renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
   if (centralSiteDetailOpen) {
     renderSiteClients(centralSiteDetailOpen);
     renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
@@ -542,7 +606,7 @@ saveBtn.addEventListener('click', async () => {
     showSettingsMessage('Branch name cannot be empty.', true);
     return;
   }
-  const payload = { repo_branch: branch };
+  const payload = { repo_branch: branch, ...collectUsbSettingsPayload() };
   const githubToken = githubTokenInput?.value.trim() || '';
   if (githubToken) payload.github_token = githubToken;
   saveBtn.disabled = true;
@@ -553,7 +617,7 @@ saveBtn.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    showSettingsMessage(`Branch set to "${data.settings.repo_branch}" — sync started.`, false);
+    showSettingsMessage(`Settings saved for branch "${data.settings.repo_branch}" — sync started.`, false);
     applySettingsToUI(data.settings);
     if (githubTokenInput) githubTokenInput.value = '';
   } catch (err) {
@@ -938,6 +1002,274 @@ async function requestJson(url, options = {}) {
     throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+function parseJsonList(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeJsonList(value) {
+  return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function parseScheduleCron(cronValue = 'sunday 02:00') {
+  const [day = 'sunday', time = '02:00'] = String(cronValue || '').trim().toLowerCase().split(/\s+/, 2);
+  return { day, time: /^\d{2}:\d{2}$/.test(time || '') ? time : '02:00' };
+}
+
+function formatUiDate(value) {
+  if (!value) return '—';
+  const date = new Date(typeof value === 'number' ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function renderUsbVidPidTable() {
+  if (!usbVidPidTbody) return;
+  usbVidPidTbody.innerHTML = '';
+  const devices = parseJsonList(currentSettings.usb_vidpids);
+  devices.forEach((device) => {
+    const tr = document.createElement('tr');
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-icon';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', () => removeVidPid(device.vidpid));
+    tr.innerHTML = `<td>${device.vidpid || '—'}</td><td>${device.type || 'wireless'}</td><td>${device.label || '—'}</td>`;
+    const actionTd = document.createElement('td');
+    actionTd.appendChild(removeBtn);
+    tr.appendChild(actionTd);
+    usbVidPidTbody.appendChild(tr);
+  });
+}
+
+function renderIgnoredUsbList() {
+  if (!usbIgnoredList) return;
+  usbIgnoredList.innerHTML = '';
+  const ignored = parseJsonList(currentSettings.usb_ignored_vidpids);
+  if (!ignored.length) {
+    usbIgnoredList.textContent = 'No ignored devices.';
+    return;
+  }
+  ignored.forEach((vidpid) => {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-grey';
+    badge.textContent = vidpid;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = ' ✕';
+    button.addEventListener('click', () => {
+      currentSettings.usb_ignored_vidpids = serializeJsonList(ignored.filter((item) => item !== vidpid));
+      renderIgnoredUsbList();
+    });
+    badge.appendChild(button);
+    usbIgnoredList.appendChild(badge);
+  });
+}
+
+async function loadUsbConfig() {
+  const data = await requestJson('/api/proxmox/usb-config');
+  currentSettings.usb_vidpids = serializeJsonList(data.vidpids || []);
+  currentSettings.usb_ignored_vidpids = serializeJsonList(data.ignored_vidpids || []);
+  currentSettings.usb_missing_timeout = String(data.missing_timeout ?? currentSettings.usb_missing_timeout ?? '60');
+  currentSettings.usb_template_id = String(data.template_id ?? currentSettings.usb_template_id ?? '100');
+  currentSettings.usb_auto_provision = data.auto_provision || 'off';
+  if (usbAutoProvisionInput) usbAutoProvisionInput.checked = currentSettings.usb_auto_provision === 'on';
+  if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = currentSettings.usb_missing_timeout;
+  if (usbTemplateIdInput && !usbTemplateIdInput.matches(':focus')) usbTemplateIdInput.value = currentSettings.usb_template_id;
+  renderUsbVidPidTable();
+  renderIgnoredUsbList();
+}
+
+function addVidPid() {
+  const vidpid = newVidPidInput?.value.trim().toLowerCase() || '';
+  const type = newVidPidTypeInput?.value || 'wireless';
+  const label = newVidPidLabelInput?.value.trim() || '';
+  if (!/^[0-9a-f]{4}:[0-9a-f]{4}$/i.test(vidpid)) {
+    showNotification('Enter VID:PID as ####:####', 'error');
+    return;
+  }
+  const devices = parseJsonList(currentSettings.usb_vidpids).filter((item) => item?.vidpid !== vidpid);
+  devices.push({ vidpid, type, label });
+  devices.sort((a, b) => String(a.vidpid).localeCompare(String(b.vidpid)));
+  currentSettings.usb_vidpids = serializeJsonList(devices);
+  renderUsbVidPidTable();
+  if (newVidPidInput) newVidPidInput.value = '';
+  if (newVidPidLabelInput) newVidPidLabelInput.value = '';
+}
+
+function removeVidPid(vidpid) {
+  currentSettings.usb_vidpids = serializeJsonList(parseJsonList(currentSettings.usb_vidpids).filter((item) => item?.vidpid !== vidpid));
+  renderUsbVidPidTable();
+}
+
+function collectUsbSettingsPayload() {
+  return {
+    usb_vidpids: currentSettings.usb_vidpids,
+    usb_missing_timeout: String(usbMissingTimeoutInput?.value || currentSettings.usb_missing_timeout || '60'),
+    usb_template_id: String(usbTemplateIdInput?.value || currentSettings.usb_template_id || '100'),
+    usb_auto_provision: usbAutoProvisionInput?.checked ? 'on' : 'off',
+    usb_ignored_vidpids: currentSettings.usb_ignored_vidpids,
+    vm_silent_timeout: String(vmSilentTimeoutInput?.value || currentSettings.vm_silent_timeout || '24'),
+    reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
+    reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
+  };
+}
+
+async function ignoreUsbDevice(vidpid) {
+  const ignored = new Set(parseJsonList(currentSettings.usb_ignored_vidpids));
+  ignored.add(String(vidpid || '').toLowerCase());
+  currentSettings.usb_ignored_vidpids = serializeJsonList([...ignored].sort());
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usb_ignored_vidpids: currentSettings.usb_ignored_vidpids })
+    });
+    renderIgnoredUsbList();
+    renderUsbSummary(latestProxmoxData);
+  } catch (error) {
+    showNotification(`Error: ${error.message}`, 'error');
+  }
+}
+
+function addUnknownToCertified(vidpid, name) {
+  if (newVidPidInput) newVidPidInput.value = vidpid || '';
+  if (newVidPidLabelInput) newVidPidLabelInput.value = name || '';
+  if (newVidPidInput) newVidPidInput.focus();
+}
+
+function updateUsbCountdowns() {
+  document.querySelectorAll('[data-missing-until]').forEach((node) => {
+    const until = Number(node.dataset.missingUntil || 0) * 1000;
+    const remaining = Math.max(0, Math.floor((until - Date.now()) / 1000));
+    node.textContent = remaining > 0 ? `${Math.ceil(remaining / 60)}m remaining` : 'Ready to destroy';
+  });
+}
+
+function renderUsbSummary(proxmoxData = latestProxmoxData) {
+  latestProxmoxData = proxmoxData || latestProxmoxData;
+  if (!usbSummaryPanel || !usbSummaryTbody || !unknownUsbSection || !unknownUsbTbody) return;
+
+  const certified = parseJsonList(currentSettings.usb_vidpids);
+  const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
+  const unknownUsb = Array.isArray(latestProxmoxData.unknown_usb) ? latestProxmoxData.unknown_usb : [];
+  const missingTimeoutSeconds = (parseInt(currentSettings.usb_missing_timeout, 10) || 60) * 60;
+
+  usbSummaryTbody.innerHTML = '';
+  certified.forEach((device) => {
+    const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
+    const active = entries.filter((item) => !item.missing_since).length;
+    const missing = entries.filter((item) => item.missing_since).length;
+    const freeSlots = Math.max(0, 24 - entries.length);
+    const tr = document.createElement('tr');
+    const missingHtml = missing
+      ? `<div class="usb-missing-list">${entries.filter((item) => item.missing_since).map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
+      : '—';
+    tr.innerHTML = `
+      <td>${device.label || device.vidpid || '—'}</td>
+      <td>${device.vidpid || '—'}</td>
+      <td class="usb-type-${device.type || 'wireless'}">${device.type || 'wireless'}</td>
+      <td>${active}</td>
+      <td>${missingHtml}</td>
+      <td>${freeSlots}</td>
+    `;
+    usbSummaryTbody.appendChild(tr);
+  });
+
+  unknownUsbTbody.innerHTML = '';
+  unknownUsb.forEach((device) => {
+    const tr = document.createElement('tr');
+    const actions = document.createElement('td');
+    actions.className = 'usb-actions';
+    const certifyBtn = document.createElement('button');
+    certifyBtn.type = 'button';
+    certifyBtn.className = 'btn btn-secondary btn-small';
+    certifyBtn.textContent = 'Add to certified';
+    certifyBtn.addEventListener('click', () => addUnknownToCertified(device.vidpid, device.name));
+    const ignoreBtn = document.createElement('button');
+    ignoreBtn.type = 'button';
+    ignoreBtn.className = 'btn btn-secondary btn-small';
+    ignoreBtn.textContent = 'Ignore';
+    ignoreBtn.addEventListener('click', () => ignoreUsbDevice(device.vidpid));
+    actions.appendChild(certifyBtn);
+    actions.appendChild(ignoreBtn);
+    tr.innerHTML = `<td>${device.name || device.bus_path || 'Unknown device'}</td><td>${device.vidpid || '—'}</td>`;
+    tr.appendChild(actions);
+    unknownUsbTbody.appendChild(tr);
+  });
+
+  unknownUsbSection.style.display = unknownUsb.length ? '' : 'none';
+  usbSummaryPanel.style.display = certified.length || unknownUsb.length ? '' : 'none';
+
+  if (usbCountdownTimer) window.clearInterval(usbCountdownTimer);
+  updateUsbCountdowns();
+  if (usbState.some((item) => item.missing_since)) {
+    usbCountdownTimer = window.setInterval(updateUsbCountdowns, 1000);
+  }
+}
+
+async function triggerRecloneAll() {
+  if (recloneNowBtn) {
+    recloneNowBtn.disabled = true;
+    recloneNowBtn.textContent = '⟳ Starting…';
+  }
+  try {
+    await requestJson('/api/proxmox/reclone-all', { method: 'POST' });
+    showNotification('Fleet reclone started.', 'info');
+  } catch (error) {
+    showNotification(`Error: ${error.message}`, 'error');
+  } finally {
+    if (recloneNowBtn) {
+      recloneNowBtn.disabled = false;
+      recloneNowBtn.textContent = '⟳ Reclone All Now';
+    }
+  }
+}
+
+function renderRecloneStatus(recloneState = latestRecloneState || {}) {
+  latestRecloneState = recloneState || latestRecloneState || {};
+  if (!recloneStatusBadge || !recloneProgressWrap || !recloneProgressBar || !recloneProgressLabel || !recloneVmLog || !recloneLastRun) return;
+
+  const state = latestRecloneState || {};
+  const status = state.status || 'idle';
+  const badgeClass = status === 'running'
+    ? 'badge-blue'
+    : status === 'completed'
+      ? 'badge-green'
+      : status === 'failed'
+        ? 'badge-red'
+        : 'badge-grey';
+  recloneStatusBadge.className = `badge ${badgeClass}`;
+  recloneStatusBadge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+  const total = Number(state.total || 0);
+  const done = Number(state.completed || 0) + Number(state.failed || 0);
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  recloneProgressWrap.style.display = status === 'running' || done > 0 ? '' : 'none';
+  recloneProgressBar.style.width = `${pct}%`;
+  recloneProgressLabel.textContent = total ? `${done}/${total} VMs` : 'No VMs queued';
+
+  const iconMap = { completed: '✅', failed: '❌', in_progress: '⏳', queued: '🕐' };
+  recloneVmLog.innerHTML = (state.log || []).map((entry) => `
+    <div class="log-entry">
+      <span>${iconMap[entry.status] || '•'}</span>
+      <span>${entry.name || `VM ${entry.vmid}`}</span>
+      <span>${entry.status}</span>
+      <span>${formatUiDate(entry.timestamp)}</span>
+    </div>
+  `).join('');
+
+  if (state.last_run) {
+    recloneLastRun.textContent = `Last run: ${formatUiDate(state.last_run.timestamp)} · ${state.last_run.completed || 0} completed · ${state.last_run.failed || 0} failed · ${state.last_run.type || 'manual'}`;
+  } else {
+    recloneLastRun.textContent = 'Last run: —';
+  }
 }
 
 function formatCentralDate(value) {
@@ -1464,6 +1796,7 @@ async function loadSettings() {
   try {
     const settings = await requestJson('/api/settings');
     applySettingsToUI(settings || {});
+    await loadUsbConfig().catch(() => {});
   } catch (error) {
     showSettingsMessage(`Error loading settings: ${error.message}`, true);
   }
@@ -2043,6 +2376,11 @@ function handleMessage(message) {
 
   if (message.type === 'proxmox_update') {
     renderServerTab(message);
+    return;
+  }
+
+  if (message.type === 'reclone_update') {
+    renderRecloneStatus(message);
     return;
   }
 
@@ -3346,9 +3684,10 @@ updateCentralToolbar();
 connectWebSocket();
 loadSimulations();
 requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
-fetch('/api/proxmox/status').then((r) => r.json()).then((data) => {
-  if (data.connected) renderServerTab(data);
+requestJson('/api/proxmox/status').then((data) => {
+  if (data.connected || (data.vms || []).length || (data.usb_state || []).length || (data.unknown_usb || []).length) renderServerTab(data);
 }).catch(() => {});
+requestJson('/api/proxmox/reclone-status').then(renderRecloneStatus).catch(() => {});
 
 // Fetch installer version once on load and display in header
 (async () => {

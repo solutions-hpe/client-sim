@@ -7,7 +7,7 @@
 #
 # Commands:
 #   automated      Auto-detect USB adapters and create one VM per adapter.
-#                  start_vmid/end_vmid are computed from the last 2 digits of the hostname.
+#                  start_vmid/end_vmid are computed from the last 3 digits of the hostname.
 #   re-create      Stop, destroy, and re-clone VMs in the given VMID range.
 #   delete         Stop and destroy VMs in the given VMID range.
 #   config         Push hostname and reboot to VMs in the given VMID range.
@@ -40,12 +40,12 @@ vidpids=(
 pcistr="Renesas Electronics Corp. uPD720202"
 
 # ---------------------------------------------------------------------------
-# Host ID — last 2 digits of hostname, used in automated mode to compute
+# Host ID — last 3 digits of hostname, used in automated mode to compute
 # a deterministic VM ID range so multiple hosts don't collide.
 # ---------------------------------------------------------------------------
 h=$(hostname)
-last2="${h: -2}"
-[[ "$last2" =~ ^[0-9]{2}$ ]] && host_id="$last2" || host_id=""
+last3="${h: -3}"
+[[ "$last3" =~ ^[0-9]{3}$ ]] && host_id="$last3" || host_id=""
 
 # ---------------------------------------------------------------------------
 # Arguments
@@ -98,7 +98,7 @@ mapfile -t pci_devices < <(lspci | grep -i "$pcistr" | awk '{print $1}')
 
 # ---------------------------------------------------------------------------
 # AUTOMATED MODE
-# Computes a 24-slot VMID range from the last 2 hostname digits so multiple
+# Computes a 24-slot VMID range from the last 3 hostname digits so multiple
 # Proxmox hosts can run this script without VMID collisions.
 # One VM is created per detected USB adapter (up to 24).
 # ---------------------------------------------------------------------------

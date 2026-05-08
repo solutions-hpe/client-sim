@@ -204,6 +204,14 @@ settings: dict[str, Any] = {
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
+    "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
+    "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
+    "usb_template_id": str(_persisted.get("usb_template_id", "100")),
+    "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
+    "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
+    "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
+    "reclone_schedule_enabled": _normalize_relay_enabled(_persisted.get("reclone_schedule_enabled", "off")),
+    "reclone_schedule_cron": _persisted.get("reclone_schedule_cron", "sunday 02:00"),
 }
 
 # Initialise in-memory token from persisted values so a restart
@@ -1182,6 +1190,8 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["relay"] = asyncio.create_task(relay_loop())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
+    background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
+    background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -1214,9 +1224,24 @@ proxmox_state: dict[str, Any] = {
     "last_seen": None,
     "node": {},
     "vms": [],
+    "unknown_usb": [],
+    "usb_state": [],
+}
+reclone_state: dict[str, Any] = {
+    "status": "idle",
+    "type": None,
+    "total": 0,
+    "completed": 0,
+    "failed": 0,
+    "current_vm": None,
+    "log": [],
+    "last_run": None,
+    "started_at": None,
 }
 relay_sites: dict[str, dict[str, Any]] = {}
 background_tasks: dict[str, asyncio.Task[Any]] = {}
+reclone_run_lock = asyncio.Lock()
+last_schedule_trigger: str | None = None
 
 
 class ClientStatus(BaseModel):
@@ -1257,6 +1282,14 @@ class SettingsUpdate(BaseModel):
     relay_api_key: str | None = None
     relay_island_id: str | None = None
     relay_poll_interval: int | None = None
+    usb_vidpids: str | None = None
+    usb_missing_timeout: str | None = None
+    usb_template_id: str | None = None
+    usb_auto_provision: str | None = None
+    usb_ignored_vidpids: str | None = None
+    vm_silent_timeout: str | None = None
+    reclone_schedule_enabled: str | None = None
+    reclone_schedule_cron: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -1271,6 +1304,10 @@ class OverridesSaveRequest(BaseModel):
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def iso_utcnow() -> str:
+    return utcnow().isoformat().replace("+00:00", "Z")
 
 
 def compute_online(last_seen: datetime) -> bool:
@@ -1311,13 +1348,14 @@ async def current_clients() -> list[dict[str, Any]]:
         return [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
 
 
-def _make_command(target: str, action: str, args: dict | None = None) -> dict[str, Any]:
+def _make_command(target: str, action: str, args: dict | None = None, command_type: str | None = None) -> dict[str, Any]:
     now = time.time()
     return {
         "id": str(uuid.uuid4()),
         "target": target,
         "action": action,
         "args": args or {},
+        "type": command_type,
         "status": "pending",
         "created_at": now,
         "updated_at": now,
@@ -1331,6 +1369,257 @@ def _serialize_commands() -> list[dict[str, Any]]:
         {**cmd, "age_secs": int(time.time() - cmd["created_at"])}
         for cmd in commands
     ]
+
+
+def _normalize_toggle(value: Any) -> str:
+    if isinstance(value, str):
+        return "on" if value.lower() == "on" else "off"
+    return "on" if value else "off"
+
+
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _ensure_json_list(value: str, field_name: str) -> str:
+    try:
+        parsed = json.loads(value or "[]")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be valid JSON") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a JSON array")
+    return json.dumps(parsed)
+
+
+def _setting_int(key: str, default: int, minimum: int = 0) -> int:
+    try:
+        value = int(str(settings.get(key, default)).strip())
+    except (TypeError, ValueError, AttributeError):
+        value = default
+    return max(minimum, value)
+
+
+def _parse_ts(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _proxmox_usb_config_payload() -> dict[str, Any]:
+    return {
+        "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
+        "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
+        "template_id": _setting_int("usb_template_id", 100, 1),
+        "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
+        "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
+    }
+
+
+def _proxmox_status_payload() -> dict[str, Any]:
+    return {**proxmox_state, "reclone_state": dict(reclone_state)}
+
+
+async def _broadcast_proxmox_state() -> None:
+    await broadcast({"type": "proxmox_update", **_proxmox_status_payload()})
+
+
+async def _broadcast_reclone_state() -> None:
+    await broadcast({"type": "reclone_update", **dict(reclone_state)})
+
+
+def _update_reclone_log(vmid: int, name: str, status: str) -> None:
+    timestamp = iso_utcnow()
+    for entry in reversed(reclone_state["log"]):
+        if entry.get("vmid") == vmid and entry.get("status") in {"queued", "in_progress"}:
+            entry.update({"name": name, "status": status, "timestamp": timestamp})
+            break
+    else:
+        reclone_state["log"].append({"vmid": vmid, "name": name, "status": status, "timestamp": timestamp})
+    reclone_state["log"] = reclone_state["log"][-200:]
+
+
+def _parse_reclone_schedule(value: Any) -> tuple[str, int, int] | None:
+    raw = str(value or "").strip().lower()
+    parts = raw.split()
+    if len(parts) != 2:
+        return None
+    day, clock = parts
+    if day not in {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}:
+        return None
+    try:
+        hour, minute = (int(piece) for piece in clock.split(":", 1))
+    except ValueError:
+        return None
+    if hour not in range(24) or minute not in range(60):
+        return None
+    return day, hour, minute
+
+
+def _has_pending_reclone(vmid: int) -> bool:
+    for cmd in commands:
+        if cmd.get("action") != "reclone_vm":
+            continue
+        if int(cmd.get("args", {}).get("vmid", -1)) != vmid:
+            continue
+        if cmd.get("status") in {"pending", "delivered"}:
+            return True
+    return False
+
+
+async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> dict[str, Any]:
+    cmd = _make_command("proxmox", action, args, command_type=command_type)
+    commands.append(cmd)
+    if len(commands) > COMMAND_MAX:
+        del commands[:len(commands) - COMMAND_MAX]
+    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return cmd
+
+
+async def _run_rolling_reclone(trigger_type: str) -> None:
+    async with reclone_run_lock:
+        if reclone_state["status"] == "running":
+            return
+
+        vms = sorted(
+            [dict(vm) for vm in proxmox_state.get("vms", []) if vm.get("vmid") is not None],
+            key=lambda vm: int(vm.get("vmid", 0)),
+        )
+        reclone_state.update({
+            "status": "running",
+            "type": trigger_type,
+            "total": len(vms),
+            "completed": 0,
+            "failed": 0,
+            "current_vm": None,
+            "log": [],
+            "started_at": iso_utcnow(),
+        })
+        await _broadcast_reclone_state()
+        await _broadcast_proxmox_state()
+
+        try:
+            for vm in vms:
+                vmid = int(vm.get("vmid"))
+                name = vm.get("name") or f"VM {vmid}"
+                reclone_state["current_vm"] = vmid
+                _update_reclone_log(vmid, name, "queued")
+                await _broadcast_reclone_state()
+                await _broadcast_proxmox_state()
+
+                cmd = await _queue_proxmox_command("reclone_vm", {"vmid": vmid}, command_type=trigger_type)
+                deadline = time.time() + 1800
+                last_status = "pending"
+                while time.time() < deadline:
+                    current = next((item for item in commands if item["id"] == cmd["id"]), None)
+                    if current is None:
+                        break
+                    status = current.get("status", "pending")
+                    if status != last_status and status == "delivered":
+                        _update_reclone_log(vmid, name, "in_progress")
+                        await _broadcast_reclone_state()
+                        await _broadcast_proxmox_state()
+                    last_status = status
+                    if status in {"completed", "failed", "expired"}:
+                        final_status = "completed" if status == "completed" else "failed"
+                        _update_reclone_log(vmid, name, final_status)
+                        if final_status == "completed":
+                            reclone_state["completed"] += 1
+                        else:
+                            reclone_state["failed"] += 1
+                        await _broadcast_reclone_state()
+                        await _broadcast_proxmox_state()
+                        break
+                    await asyncio.sleep(2)
+                else:
+                    _update_reclone_log(vmid, name, "failed")
+                    reclone_state["failed"] += 1
+                    await _broadcast_reclone_state()
+                    await _broadcast_proxmox_state()
+
+            reclone_state["status"] = "failed" if reclone_state["failed"] else "completed"
+        except Exception as exc:
+            logger.exception("Rolling reclone failed: %s", exc)
+            reclone_state["status"] = "failed"
+            reclone_state["failed"] += 1
+        finally:
+            reclone_state["current_vm"] = None
+            reclone_state["last_run"] = {
+                "timestamp": iso_utcnow(),
+                "completed": reclone_state["completed"],
+                "failed": reclone_state["failed"],
+                "type": trigger_type,
+            }
+            if reclone_state["status"] != "running":
+                reclone_state["started_at"] = None
+            await _broadcast_reclone_state()
+            await _broadcast_proxmox_state()
+
+
+async def auto_recovery_check() -> None:
+    while True:
+        await asyncio.sleep(1800)
+        timeout_hours = _setting_int("vm_silent_timeout", 24, 1)
+        now = time.time()
+        triggered = False
+        for vm in list(proxmox_state.get("vms", [])):
+            vmid = vm.get("vmid")
+            if vmid is None:
+                continue
+            last_seen = _parse_ts(vm.get("last_seen"))
+            if last_seen is None or (now - last_seen) <= timeout_hours * 3600:
+                continue
+            vmid_int = int(vmid)
+            if _has_pending_reclone(vmid_int):
+                continue
+            await _queue_proxmox_command("reclone_vm", {"vmid": vmid_int}, command_type="auto-recovery")
+            triggered = True
+        if triggered:
+            await _broadcast_proxmox_state()
+
+
+async def schedule_check() -> None:
+    global last_schedule_trigger
+    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    while True:
+        await asyncio.sleep(60)
+        if _normalize_toggle(settings.get("reclone_schedule_enabled", "off")) != "on":
+            continue
+        if reclone_state.get("status") == "running":
+            continue
+        parsed = _parse_reclone_schedule(settings.get("reclone_schedule_cron", "sunday 02:00"))
+        if not parsed:
+            continue
+        day, hour, minute = parsed
+        now = datetime.now()
+        if day_names[now.weekday()] != day or now.hour != hour or now.minute != minute:
+            continue
+        trigger_key = now.strftime("%Y-%m-%d %H:%M")
+        if last_schedule_trigger == trigger_key:
+            continue
+        last_schedule_trigger = trigger_key
+        asyncio.create_task(_run_rolling_reclone("scheduled"))
 
 
 async def expire_commands() -> None:
@@ -1415,11 +1704,12 @@ async def relay_sync_once() -> None:
                 args = rc.get("args", {})
                 if not target or not action:
                     continue
+                cmd_type = rc.get("type")
                 if target == "all":
                     for hostname in list(clients.keys()):
-                        commands.append(_make_command(hostname, action, args))
+                        commands.append(_make_command(hostname, action, args, command_type=cmd_type))
                 else:
-                    commands.append(_make_command(target, action, args))
+                    commands.append(_make_command(target, action, args, command_type=cmd_type))
                 if len(commands) > COMMAND_MAX:
                     del commands[:len(commands) - COMMAND_MAX]
 
@@ -1799,6 +2089,15 @@ async def api_settings_get() -> dict[str, Any]:
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
         "monitored_checks": settings["monitored_checks"],
+        "hardware_checks": settings.get("hardware_checks", []),
+        "usb_vidpids": settings.get("usb_vidpids", "[]"),
+        "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
+        "usb_template_id": settings.get("usb_template_id", "100"),
+        "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
+        "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
+        "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
+        "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
         "notifications": {
             k: v for k, v in settings.get("notifications", {}).items()
             if k != "smtp_password"  # never expose password
@@ -1914,6 +2213,33 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         interval = max(60, min(86400, update.repo_sync_interval))  # clamp 1min–24hr
         settings["repo_sync_interval"] = interval
 
+    if update.usb_vidpids is not None:
+        settings["usb_vidpids"] = _ensure_json_list(update.usb_vidpids.strip(), "usb_vidpids")
+
+    if update.usb_missing_timeout is not None:
+        settings["usb_missing_timeout"] = str(max(1, int(update.usb_missing_timeout.strip() or "60")))
+
+    if update.usb_template_id is not None:
+        settings["usb_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
+
+    if update.usb_auto_provision is not None:
+        settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
+
+    if update.usb_ignored_vidpids is not None:
+        settings["usb_ignored_vidpids"] = _ensure_json_list(update.usb_ignored_vidpids.strip(), "usb_ignored_vidpids")
+
+    if update.vm_silent_timeout is not None:
+        settings["vm_silent_timeout"] = str(max(1, int(update.vm_silent_timeout.strip() or "24")))
+
+    if update.reclone_schedule_enabled is not None:
+        settings["reclone_schedule_enabled"] = _normalize_toggle(update.reclone_schedule_enabled)
+
+    if update.reclone_schedule_cron is not None:
+        cron_value = update.reclone_schedule_cron.strip().lower() or "sunday 02:00"
+        if _parse_reclone_schedule(cron_value) is None:
+            raise HTTPException(status_code=422, detail="reclone_schedule_cron must be in '<day> HH:MM' format")
+        settings["reclone_schedule_cron"] = cron_value
+
     _save_settings()
 
     if changed_branch:
@@ -1978,20 +2304,51 @@ async def api_relay_status_endpoint() -> dict[str, Any]:
     return relay_state
 
 
+@app.get("/api/proxmox/usb-config")
+async def get_proxmox_usb_config() -> dict[str, Any]:
+    return _proxmox_usb_config_payload()
+
+
+@app.post("/api/proxmox/reclone-all")
+async def api_proxmox_reclone_all() -> dict[str, Any]:
+    if reclone_state.get("status") == "running":
+        raise HTTPException(status_code=409, detail="A reclone run is already in progress")
+    asyncio.create_task(_run_rolling_reclone("manual"))
+    return {"status": "started"}
+
+
+@app.get("/api/proxmox/reclone-status")
+async def api_proxmox_reclone_status() -> dict[str, Any]:
+    return dict(reclone_state)
+
+
 @app.post("/api/proxmox/telemetry")
 async def proxmox_telemetry(body: dict = Body(...)) -> dict[str, bool]:
     """Receive telemetry from the Proxmox host agent."""
+    async with state_lock:
+        client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
+
+    enriched_vms: list[dict[str, Any]] = []
+    for vm in body.get("vms", []):
+        enriched = dict(vm)
+        client_last_seen = client_seen.get(str(enriched.get("name", "")))
+        if isinstance(client_last_seen, datetime):
+            enriched["last_seen"] = client_last_seen.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        enriched_vms.append(enriched)
+
     proxmox_state["connected"] = True
     proxmox_state["last_seen"] = time.time()
     proxmox_state["node"] = body.get("node", {})
-    proxmox_state["vms"] = body.get("vms", [])
-    await broadcast({"type": "proxmox_update", **proxmox_state})
+    proxmox_state["vms"] = enriched_vms
+    proxmox_state["unknown_usb"] = body.get("unknown_usb", [])
+    proxmox_state["usb_state"] = body.get("usb_state", [])
+    await _broadcast_proxmox_state()
     return {"ok": True}
 
 
 @app.get("/api/proxmox/status")
 async def get_proxmox_status() -> dict[str, Any]:
-    return proxmox_state
+    return _proxmox_status_payload()
 
 
 # ── Aruba Central API endpoints ───────────────────────────────────────────────
@@ -2653,7 +3010,7 @@ async def api_hardware_alerts() -> dict[str, Any]:
 
 
 
-async def api_health() -> dict[str, Any]:
+async def _api_health_payload() -> dict[str, Any]:
     async with state_lock:
         client_count = len(clients)
     return {
@@ -2992,14 +3349,7 @@ async def api_logs_stream():
 
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
-    async with state_lock:
-        client_count = len(clients)
-    return {
-        "status": "ok",
-        "clients": client_count,
-        "repo_synced": repo_state["synced"],
-        "version": INSTALLER_VERSION,
-    }
+    return await _api_health_payload()
 
 
 @app.post("/api/commands")
@@ -3008,6 +3358,7 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     target = str(body.get("target", "")).strip()
     action = str(body.get("action", "")).strip()
     args = body.get("args", {})
+    command_type = body.get("type")
 
     if not target or not action:
         raise HTTPException(status_code=422, detail="target and action are required")
@@ -3024,13 +3375,13 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
             if not known:
                 raise HTTPException(status_code=400, detail="No clients registered yet")
             for hostname in known:
-                new_cmds.append(_make_command(hostname, action, args))
+                new_cmds.append(_make_command(hostname, action, args, command_type=command_type))
         elif target == "proxmox":
-            new_cmds.append(_make_command(target, action, args))
+            new_cmds.append(_make_command(target, action, args, command_type=command_type))
         else:
             if target not in clients:
                 raise HTTPException(status_code=404, detail="Client not found")
-            new_cmds.append(_make_command(target, action, args))
+            new_cmds.append(_make_command(target, action, args, command_type=command_type))
 
     commands.extend(new_cmds)
     if len(commands) > COMMAND_MAX:
@@ -3058,7 +3409,7 @@ async def poll_inbox(hostname: str) -> list[dict[str, Any]]:
         cmd["updated_at"] = now
     if pending:
         await broadcast({"type": "commands_update", "commands": _serialize_commands()})
-    return [{"id": c["id"], "action": c["action"], "args": c["args"]} for c in pending]
+    return [{"id": c["id"], "action": c["action"], "args": c["args"], "type": c.get("type")} for c in pending]
 
 
 @app.post("/api/inbox/ack")
@@ -3140,8 +3491,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    if proxmox_state["connected"] or proxmox_state["vms"]:
-        await websocket.send_text(json.dumps({"type": "proxmox_update", **proxmox_state}))
+    if proxmox_state["connected"] or proxmox_state["vms"] or proxmox_state.get("usb_state") or proxmox_state.get("unknown_usb"):
+        await websocket.send_text(json.dumps({"type": "proxmox_update", **_proxmox_status_payload()}))
+    await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
 
     try:

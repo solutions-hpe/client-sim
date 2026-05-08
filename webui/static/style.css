@@ -1278,3 +1278,20 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .server-bulk-bar .btn-danger { background:#ef4444; color:#fff; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:0.85rem; }
 .server-bulk-bar .btn-danger:hover { background:#dc2626; }
 .sim-client-indicator .ind-label { color: var(--muted); }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0; }
+#usb-provision-card label,
+#vm-maintenance-card label { display:flex; gap:8px; align-items:center; margin:10px 0; }
+#usb-vidpid-table, #usb-summary-table, #unknown-usb-table { margin-top:10px; }
+#usb-ignored-list { display:flex; flex-wrap:wrap; gap:8px; }
+#usb-ignored-list .badge button { border:none; background:none; color:inherit; cursor:pointer; }
+.reclone-header { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+.reclone-log { max-height: 200px; overflow-y: auto; font-size: 0.85rem; }
+.reclone-log .log-entry { padding: 2px 0; display: flex; gap: 8px; align-items: center; }
+.progress-bar-wrap { background: #e0e0e0; border-radius: 4px; height: 12px; margin: 8px 0; }
+.progress-bar { background: #01a982; height: 100%; border-radius: 4px; transition: width 0.3s; width:0%; }
+.usb-type-wireless { color: #01a982; }
+.usb-type-wired { color: #ff8300; }
+.usb-missing-list { display:flex; flex-direction:column; gap:4px; }
+.usb-missing-item { font-size:0.82rem; color:var(--muted); }
+.usb-actions { display:flex; gap:8px; flex-wrap:wrap; }
+#reclone-last-run, #reclone-progress-label { font-size:0.85rem; color:var(--muted); }
