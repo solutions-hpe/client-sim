@@ -940,6 +940,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .check-badge-sim { background: #e8f4fd; color: #2980b9; border: 1px solid rgba(41,128,185,0.25); }
 .check-badge-hw  { background: #fdf2e8; color: #d35400; border: 1px solid rgba(211,84,0,0.25); }
 .check-badge-cc  { background: #f0f8e8; color: #27ae60; border: 1px solid rgba(39,174,96,0.25); }
+.check-badge-mon { background: #f5eefa; color: #8e44ad; border: 1px solid rgba(142,68,173,0.25); }
 .check-detail {
   font-size: 0.82rem;
   color: var(--muted);

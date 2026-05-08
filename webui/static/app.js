@@ -410,6 +410,7 @@ function applySettingsToUI(s) {
     renderAvailableChecks();
   }
   renderCentralOverview();
+  renderChecksList(); // Refresh sim tab whenever settings change (monitored checks may have changed)
   if (centralSiteDetailOpen) {
     renderSiteClients(centralSiteDetailOpen);
     renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
@@ -2097,9 +2098,50 @@ function renderChecksList() {
   ccRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 
   const totalChecks = simRows.length + hwRows.length + ccRows.length;
-  if (countBadge) countBadge.textContent = `${totalChecks} check${totalChecks !== 1 ? 's' : ''}`;
 
-  if (!totalChecks) {
+  // ── Monitored Central checks (alerts / insights from Settings) ────────────
+  const monRows = [];
+  const monChecks = currentSettings.monitored_checks || [];
+  for (const mc of monChecks) {
+    const checkId = mc.id;
+    const checkName = mc.name || checkId;
+    const checkType = (mc.type || 'alert').toUpperCase().slice(0, 3); // ALT / INS
+    let anyOk = false, anyFail = false, latestTs = null;
+    const firingAt = [], missingAt = [];
+    for (const [wsite, checks] of Object.entries(centralStatusData)) {
+      if (!(checkId in checks)) continue;
+      const info = checks[checkId];
+      if (info.status === 'OK') { anyOk = true; firingAt.push(wsite); }
+      else { anyFail = true; missingAt.push(wsite); }
+      if (info.ts && (!latestTs || info.ts > latestTs)) latestTs = info.ts;
+    }
+    const hasData = anyOk || anyFail;
+    const dotCls = !hasData ? 'dot-unknown' : anyFail ? 'dot-err' : 'dot-ok';
+    const detail = !hasData
+      ? 'Not yet polled'
+      : anyFail && !anyOk
+        ? `Not detected at: ${missingAt.join(', ')}`
+        : anyOk && !anyFail
+          ? `Detected at: ${firingAt.join(', ')}`
+          : `Partial — OK: ${firingAt.join(', ')} · Missing: ${missingAt.join(', ')}`;
+    monRows.push({
+      key: `mon-${checkId}`,
+      label: checkName,
+      dotCls,
+      badge: checkType,
+      badgeCls: 'check-badge-mon',
+      detail,
+      ts: latestTs,
+      priority: dotCls === 'dot-err' ? 0 : dotCls === 'dot-warn' ? 1 : dotCls === 'dot-ok' ? 2 : 3,
+      onClick: () => {},  // no drill-down for now
+    });
+  }
+  monRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+
+  const totalChecksAll = simRows.length + hwRows.length + ccRows.length + monRows.length;
+  if (countBadge) countBadge.textContent = `${totalChecksAll} check${totalChecksAll !== 1 ? 's' : ''}`;
+
+  if (!totalChecksAll) {
     if (emptyEl) emptyEl.classList.remove('hidden');
     return;
   }
@@ -2160,6 +2202,7 @@ function renderChecksList() {
   appendSection('Simulation Checks', simRows);
   appendSection('Hardware Alerts', hwRows);
   appendSection('Client Count Monitoring', ccRows);
+  appendSection('Monitored Central Checks', monRows);
 
   const visibleCount = list.querySelectorAll('.check-row').length;
   if (!visibleCount && emptyEl) {
