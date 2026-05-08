@@ -1,0 +1,26 @@
+#!/bin/bash
+# Auto-increment both version numbers on every commit.
+# Reads linux/VERSION, adds 0.01, writes it back and updates
+# the VERSION= line in webui/install-lxc.sh, then stages both.
+
+LINUX_VER_FILE="linux/VERSION"
+INSTALLER="webui/install-lxc.sh"
+
+current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$current" ]]; then
+    echo "[pre-commit] WARNING: $LINUX_VER_FILE not found — skipping version bump"
+    exit 0
+fi
+
+# Increment by 0.01 using awk (handles floats cleanly)
+new=$(awk -v v="$current" 'BEGIN { printf "%.2f", v + 0.01 }')
+
+echo "[pre-commit] Bumping version $current → $new"
+
+# Update linux/VERSION
+echo "$new" > "$LINUX_VER_FILE"
+
+# Update VERSION="x.xx" in install-lxc.sh
+sed -i.bak "s/^VERSION=\"[^\"]*\"/VERSION=\"$new\"/" "$INSTALLER" && rm -f "${INSTALLER}.bak"
+
+git add "$LINUX_VER_FILE" "$INSTALLER"
