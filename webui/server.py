@@ -2443,6 +2443,26 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
                 await background_tasks["repo_sync"]
         background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
 
+    # Re-filter unknown_usb immediately so subsequent proxmox_update broadcasts don't
+    # restore devices the user just certified or ignored.
+    if update.usb_vidpids is not None or update.usb_ignored_vidpids is not None:
+        _new_certified: set[str] = {
+            str(item.get("vidpid", "")).strip().lower()
+            for item in _parse_json_list(settings.get("usb_vidpids", "[]"))
+            if isinstance(item, dict) and item.get("vidpid")
+        }
+        _new_ignored: set[str] = {
+            str(v).strip().lower()
+            for v in _parse_json_list(settings.get("usb_ignored_vidpids", "[]"))
+            if str(v).strip()
+        }
+        _exclude = _new_certified | _new_ignored
+        proxmox_state["unknown_usb"] = [
+            d for d in proxmox_state.get("unknown_usb", [])
+            if str(d.get("vidpid", "")).strip()
+            and str(d.get("vidpid", "")).strip().lower() not in _exclude
+        ]
+
     payload = await api_settings_get()
     await broadcast({"type": "settings_update", "settings": payload})
     if relay_config_changed:
@@ -2573,7 +2593,8 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     raw_unknown = body.get("unknown_usb", [])
     proxmox_state["unknown_usb"] = [
         d for d in raw_unknown
-        if str(d.get("vidpid", "")).strip().lower() not in exclude_vidpids
+        if str(d.get("vidpid", "")).strip()  # skip devices with no VID:PID
+        and str(d.get("vidpid", "")).strip().lower() not in exclude_vidpids
     ]
 
     proxmox_state["connected"] = True

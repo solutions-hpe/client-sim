@@ -1362,8 +1362,17 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
 
   const certified = parseJsonList(currentSettings.usb_vidpids);
   const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
-  const unknownUsb = Array.isArray(latestProxmoxData.unknown_usb) ? latestProxmoxData.unknown_usb : [];
   const missingTimeoutSeconds = (parseInt(currentSettings.usb_missing_timeout, 10) || 60) * 60;
+
+  // Client-side filter: remove devices that are now certified or ignored, and skip empty vidpids.
+  // This prevents stale server broadcasts from restoring a device the user just acted on.
+  const certifiedSet = new Set(certified.map((d) => String(d?.vidpid || '').toLowerCase()).filter(Boolean));
+  const ignoredSet = new Set(parseJsonList(currentSettings.usb_ignored_vidpids).map((v) => String(v || '').toLowerCase()).filter(Boolean));
+  const unknownUsb = (Array.isArray(latestProxmoxData.unknown_usb) ? latestProxmoxData.unknown_usb : [])
+    .filter((d) => {
+      const v = String(d.vidpid || '').toLowerCase().trim();
+      return v && !certifiedSet.has(v) && !ignoredSet.has(v);
+    });
 
   usbSummaryTbody.innerHTML = '';
   certified.forEach((device) => {
@@ -1402,7 +1411,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   unknownUsbTbody._delegated = true;
 
   unknownUsbSection.classList.toggle('hidden', unknownUsb.length === 0);
-  usbSummaryPanel.classList.toggle('hidden', certified.length === 0 && unknownUsb.length === 0);
+  usbSummaryPanel.classList.toggle('hidden', certified.length === 0 && unknownUsb.length === 0 && usbState.length === 0);
 
   if (usbCountdownTimer) window.clearInterval(usbCountdownTimer);
   updateUsbCountdowns();
