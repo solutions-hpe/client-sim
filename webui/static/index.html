@@ -309,18 +309,34 @@
 
   <!-- ── Config tab ── -->
   <main id="tab-config" class="page tab-content hidden">
-  <!-- Dynamic sections rendered by renderSimulationConfigSections() -->
-  <div id="config-simulation-form"></div>
+    <nav class="setup-subnav" role="tablist">
+      <button class="config-subtab active" data-subtab="config-general" role="tab">General</button>
+      <button class="config-subtab" data-subtab="config-addresses" role="tab">Addresses</button>
+      <button class="config-subtab" data-subtab="config-buckets-panel" role="tab">Buckets</button>
+    </nav>
 
-  <div class="setup-card setup-section-gap">
-    <div class="setup-card-header">
-      <h2>Bucket Profiles</h2>
-      <p>Review and save individual simulation bucket sections (<strong>s0–s9</strong>).</p>
+    <!-- General: [simulation] section -->
+    <div id="config-general" class="config-subpanel">
+      <div id="config-simulation-form"></div>
     </div>
-    <div id="config-buckets-container"></div>
-    <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
-  </div>
-</main>
+
+    <!-- Addresses: [server] + [address] sections -->
+    <div id="config-addresses" class="config-subpanel hidden">
+      <div id="config-addresses-form"></div>
+    </div>
+
+    <!-- Buckets: [s0]–[s9] -->
+    <div id="config-buckets-panel" class="config-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Bucket Profiles</h2>
+          <p>Review and save individual simulation bucket sections (<strong>s0–s9</strong>).</p>
+        </div>
+        <div id="config-buckets-container"></div>
+        <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+  </main>
 
   <!-- ── Setup tab ── -->
   <main id="tab-setup" class="page tab-content hidden">

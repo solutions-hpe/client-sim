@@ -134,6 +134,17 @@ function activateSetupSubtab(subtabId = 'setup-github') {
   });
 }
 
+function activateConfigSubtab(subtabId = 'config-general') {
+  document.querySelectorAll('.config-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.subtab === subtabId);
+  });
+  document.querySelectorAll('.config-subpanel').forEach((panel) => {
+    const isActive = panel.id === subtabId;
+    panel.classList.toggle('active', isActive);
+    panel.classList.toggle('hidden', !isActive);
+  });
+}
+
 // ── Repo sync status ──────────────────────────────────────────────
 let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
 
@@ -379,6 +390,7 @@ const hwChecksContainer = document.getElementById('hw-checks-container');
 const hwChecksMsg = document.getElementById('hw-checks-msg');
 const hwChecksPreview = document.getElementById('hw-checks-preview');
 const configSimulationForm = document.getElementById('config-simulation-form');
+const configAddressesForm  = document.getElementById('config-addresses-form');
 const configSimulationSaveBtn = document.getElementById('config-simulation-save');
 const configSimulationMsg = document.getElementById('config-simulation-message');
 const configBucketsContainer = document.getElementById('config-buckets-container');
@@ -2281,11 +2293,88 @@ function buildBucketSummary(section, values = {}) {
   return `${section} — ${values.name || values.wsite || 'Unnamed bucket'}`;
 }
 
+const ADDRESS_SECTION_RE = /^(server|address)$/i;
+
+function _buildSectionCard(section, values, container) {
+  const card = document.createElement('div');
+  card.className = 'setup-card setup-section-gap';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'setup-card-header';
+  const h2 = document.createElement('h2');
+  h2.textContent = `[${_fmtSection(section)}]`;
+  hdr.appendChild(h2);
+  card.appendChild(hdr);
+
+  const form = document.createElement('div');
+  form.className = 'setup-form';
+
+  const textPairs = [], boolPairs = [];
+  Object.entries(values).forEach(([key, val]) => {
+    (_isBoolVal(val) ? boolPairs : textPairs).push([key, val]);
+  });
+
+  textPairs.forEach(([key, val]) => {
+    const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
+    const lbl = group.querySelector('label');
+    if (lbl) lbl.textContent = _fmtConfigKey(key);
+    form.appendChild(group);
+  });
+
+  if (boolPairs.length) {
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Flags';
+    form.appendChild(h3);
+    const grid = document.createElement('div');
+    grid.className = 'toggle-grid';
+    boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
+    form.appendChild(grid);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'form-actions';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn btn-primary';
+  saveBtn.textContent = `Save [${section}] to GitHub`;
+  actions.appendChild(saveBtn);
+  form.appendChild(actions);
+
+  const msg = document.createElement('div');
+  msg.className = 'settings-message hidden';
+  form.appendChild(msg);
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const updates = collectSectionedConfigState(form)[section] || {};
+      const result = await requestJson('/api/config/simulation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section, updates }),
+      });
+      showInlineMessage(msg, result?.pushed ? `[${section}] saved and pushed to GitHub.` : `[${section}] saved. GitHub push skipped.`, false, 7000);
+      await loadConfigEditor(true);
+    } catch (error) {
+      showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = `Save [${section}] to GitHub`;
+    }
+  });
+
+  card.appendChild(form);
+  container.appendChild(card);
+}
+
 function renderSimulationConfigForm() {
   if (!configSimulationForm) return;
   configSimulationForm.textContent = '';
 
-  const sections = Object.keys(configData).filter(s => !BUCKET_SECTION_RE.test(s));
+  const sections = Object.keys(configData).filter(
+    s => !BUCKET_SECTION_RE.test(s) && !ADDRESS_SECTION_RE.test(s)
+  );
   if (sections.length === 0) {
     const p = document.createElement('p');
     p.className = 'muted';
@@ -2294,79 +2383,23 @@ function renderSimulationConfigForm() {
     return;
   }
 
-  sections.forEach(section => {
-    const values = configData[section] || {};
-    const card = document.createElement('div');
-    card.className = 'setup-card setup-section-gap';
+  sections.forEach(section => _buildSectionCard(section, configData[section] || {}, configSimulationForm));
+}
 
-    const hdr = document.createElement('div');
-    hdr.className = 'setup-card-header';
-    const h2 = document.createElement('h2');
-    h2.textContent = `[${_fmtSection(section)}]`;
-    hdr.appendChild(h2);
-    card.appendChild(hdr);
+function renderAddressesForm() {
+  if (!configAddressesForm) return;
+  configAddressesForm.textContent = '';
 
-    const form = document.createElement('div');
-    form.className = 'setup-form';
+  const sections = Object.keys(configData).filter(s => ADDRESS_SECTION_RE.test(s));
+  if (sections.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'No [server] or [address] sections found — sync from GitHub first.';
+    configAddressesForm.appendChild(p);
+    return;
+  }
 
-    const textPairs = [], boolPairs = [];
-    Object.entries(values).forEach(([key, val]) => {
-      (_isBoolVal(val) ? boolPairs : textPairs).push([key, val]);
-    });
-
-    textPairs.forEach(([key, val]) => {
-      const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
-      const lbl = group.querySelector('label');
-      if (lbl) lbl.textContent = _fmtConfigKey(key);
-      form.appendChild(group);
-    });
-
-    if (boolPairs.length) {
-      const h3 = document.createElement('h3');
-      h3.textContent = 'Flags';
-      form.appendChild(h3);
-      const grid = document.createElement('div');
-      grid.className = 'toggle-grid';
-      boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
-      form.appendChild(grid);
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'form-actions';
-    const saveBtn = document.createElement('button');
-    saveBtn.type = 'button';
-    saveBtn.className = 'btn btn-primary';
-    saveBtn.textContent = `Save [${section}] to GitHub`;
-    actions.appendChild(saveBtn);
-    form.appendChild(actions);
-
-    const msg = document.createElement('div');
-    msg.className = 'settings-message hidden';
-    form.appendChild(msg);
-
-    saveBtn.addEventListener('click', async () => {
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving…';
-      try {
-        const updates = collectSectionedConfigState(form)[section] || {};
-        const result = await requestJson('/api/config/simulation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ section, updates }),
-        });
-        showInlineMessage(msg, result?.pushed ? `[${section}] saved and pushed to GitHub.` : `[${section}] saved. GitHub push skipped.`, false, 7000);
-        await loadConfigEditor(true);
-      } catch (error) {
-        showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
-      } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = `Save [${section}] to GitHub`;
-      }
-    });
-
-    card.appendChild(form);
-    configSimulationForm.appendChild(card);
-  });
+  sections.forEach(section => _buildSectionCard(section, configData[section] || {}, configAddressesForm));
 }
 
 function renderBucketEditors() {
@@ -2481,6 +2514,7 @@ async function loadConfigEditor(force = false) {
     configData = data || {};
     configLoaded = true;
     renderSimulationConfigForm();
+    renderAddressesForm();
     renderBucketEditors();
     return configData;
   } catch (error) {
@@ -3482,6 +3516,10 @@ if (configTabButton) {
 }
 
 // configSimulationSaveBtn removed — each section now has its own per-section Save button
+
+document.querySelectorAll('.config-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => activateConfigSubtab(btn.dataset.subtab));
+});
 
 if (setupSubtabButtons.length) {
   setupSubtabButtons.forEach((btn) => {
