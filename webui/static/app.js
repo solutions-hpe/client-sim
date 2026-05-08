@@ -1440,7 +1440,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
     const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
     const active = entries.filter((item) => !item.missing_since).length;
     const missing = entries.filter((item) => item.missing_since).length;
-    const freeSlots = Math.max(0, 24 - entries.length);
+    const total = entries.length;
     const tr = document.createElement('tr');
     const missingHtml = missing
       ? `<div class="usb-missing-list">${entries.filter((item) => item.missing_since).map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
@@ -1451,7 +1451,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
       <td class="usb-type-${device.type || 'wireless'}">${device.type || 'wireless'}</td>
       <td>${active}</td>
       <td>${missingHtml}</td>
-      <td>${freeSlots}</td>
+      <td>${total}</td>
     `;
     usbSummaryTbody.appendChild(tr);
   });
