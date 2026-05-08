@@ -1448,24 +1448,73 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   const total = Number(state.total || 0);
   const done = Number(state.completed || 0) + Number(state.failed || 0);
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  recloneProgressWrap.classList.toggle('hidden', status !== 'running' && done === 0);
+  const isActive = status === 'running' || done > 0;
+  recloneProgressWrap.classList.toggle('hidden', !isActive);
+
+  // Type label
+  const typeEl = document.getElementById('reclone-type-label');
+  if (typeEl) {
+    const typeMap = { scheduled: 'Scheduled', manual: 'Manual', 'auto-recovery': 'Auto-Recovery' };
+    typeEl.textContent = typeMap[state.type] || (state.type || '');
+    typeEl.className = `badge ${state.type === 'auto-recovery' ? 'badge-yellow' : state.type === 'scheduled' ? 'badge-blue' : 'badge-grey'}`;
+    typeEl.classList.toggle('hidden', !state.type || status === 'idle');
+  }
+
+  // Current VM
+  const currentVmEl = document.getElementById('reclone-current-vm');
+  if (currentVmEl) {
+    currentVmEl.textContent = status === 'running' && state.current_vm
+      ? `Recloning VM ${state.current_vm}…`
+      : '';
+  }
+
+  // ETA
+  const etaEl = document.getElementById('reclone-eta');
+  if (etaEl) {
+    let etaText = '';
+    if (status === 'running' && done > 0 && total > done && state.started_at) {
+      const elapsed = (Date.now() - new Date(state.started_at).getTime()) / 1000;
+      const avgSec = elapsed / done;
+      const remaining = (total - done) * avgSec;
+      etaText = `~${Math.ceil(remaining / 60)} min remaining`;
+    }
+    etaEl.textContent = etaText;
+  }
+
   recloneProgressBar.style.width = `${pct}%`;
-  recloneProgressLabel.textContent = total ? `${done}/${total} VMs` : 'No VMs queued';
+  recloneProgressLabel.textContent = total ? `${done} / ${total} VMs (${pct}%)` : '';
 
   const iconMap = { completed: '✅', failed: '❌', in_progress: '⏳', queued: '🕐' };
-  recloneVmLog.innerHTML = (state.log || []).map((entry) => `
+  recloneVmLog.innerHTML = (state.log || []).slice().reverse().map((entry) => `
     <div class="log-entry">
       <span>${iconMap[entry.status] || '•'}</span>
       <span>${entry.name || `VM ${entry.vmid}`}</span>
-      <span>${entry.status}</span>
-      <span>${formatUiDate(entry.timestamp)}</span>
+      <span class="muted">${entry.status}</span>
+      <span class="muted">${formatUiDate(entry.timestamp)}</span>
     </div>
   `).join('');
 
   if (state.last_run) {
-    recloneLastRun.textContent = `Last run: ${formatUiDate(state.last_run.timestamp)} · ${state.last_run.completed || 0} completed · ${state.last_run.failed || 0} failed · ${state.last_run.type || 'manual'}`;
+    const typeLabel = state.last_run.type ? ` · ${state.last_run.type}` : '';
+    recloneLastRun.textContent = `Last run: ${formatUiDate(state.last_run.timestamp)} · ${state.last_run.completed || 0} completed · ${state.last_run.failed || 0} failed${typeLabel}`;
   } else {
     recloneLastRun.textContent = 'Last run: —';
+  }
+
+  // Auto-recovery log
+  const arSection = document.getElementById('reclone-auto-recovery-section');
+  const arLog = document.getElementById('reclone-auto-recovery-log');
+  const autoLog = Array.isArray(state.auto_recovery_log) ? state.auto_recovery_log : [];
+  if (arSection) arSection.classList.toggle('hidden', autoLog.length === 0);
+  if (arLog) {
+    arLog.innerHTML = autoLog.slice().reverse().map((entry) => `
+      <div class="log-entry">
+        <span>${iconMap[entry.status] || '↺'}</span>
+        <span>${entry.name || `VM ${entry.vmid}`}</span>
+        <span class="muted">auto-recovery</span>
+        <span class="muted">${formatUiDate(entry.timestamp)}</span>
+      </div>
+    `).join('');
   }
 }
 

@@ -129,11 +129,20 @@
         <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
       </div>
       <div id="reclone-progress-wrap" class="hidden">
+        <div class="reclone-meta">
+          <span id="reclone-type-label" class="badge badge-grey"></span>
+          <span id="reclone-current-vm" class="muted"></span>
+          <span id="reclone-eta" class="muted"></span>
+        </div>
         <div class="progress-bar-wrap"><div id="reclone-progress-bar" class="progress-bar"></div></div>
         <div id="reclone-progress-label"></div>
         <div id="reclone-vm-log" class="reclone-log"></div>
       </div>
-      <div id="reclone-last-run"></div>
+      <div id="reclone-last-run" class="reclone-last-run"></div>
+      <div id="reclone-auto-recovery-section" class="hidden" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+        <div class="reclone-section-title">↺ Auto-Recovery Log</div>
+        <div id="reclone-auto-recovery-log" class="reclone-log"></div>
+      </div>
     </div>
 
     <div id="usb-summary-panel" class="setup-card setup-section-gap hidden">

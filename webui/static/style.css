@@ -1358,6 +1358,9 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 #usb-ignored-list { display:flex; flex-wrap:wrap; gap:8px; }
 #usb-ignored-list .badge button { border:none; background:none; color:inherit; cursor:pointer; }
 .reclone-header { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+.reclone-meta { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:6px; font-size:0.875rem; }
+.reclone-last-run { font-size:0.8rem; color:var(--muted); margin-top:6px; }
+.reclone-section-title { font-size:0.8rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
 .reclone-log { max-height: 200px; overflow-y: auto; font-size: 0.85rem; }
 .reclone-log .log-entry { padding: 2px 0; display: flex; gap: 8px; align-items: center; }
 .progress-bar-wrap { background: #e0e0e0; border-radius: 4px; height: 12px; margin: 8px 0; }

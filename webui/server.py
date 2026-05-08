@@ -1317,6 +1317,7 @@ reclone_state: dict[str, Any] = {
     "failed": 0,
     "current_vm": None,
     "log": [],
+    "auto_recovery_log": [],
     "last_run": None,
     "started_at": None,
 }
@@ -1730,6 +1731,18 @@ async def auto_recovery_check() -> None:
             triggered.append(vmid_int)
         if triggered:
             vmid_list = ", ".join(str(v) for v in triggered)
+            for vmid_int in triggered:
+                name = next(
+                    (vm.get("name") or f"VM {vmid_int}" for vm in proxmox_state.get("vms", []) if int(vm.get("vmid", -1)) == vmid_int),
+                    f"VM {vmid_int}",
+                )
+                reclone_state["auto_recovery_log"].append({
+                    "vmid": vmid_int,
+                    "name": name,
+                    "status": "queued",
+                    "timestamp": iso_utcnow(),
+                })
+            reclone_state["auto_recovery_log"] = reclone_state["auto_recovery_log"][-50:]
             await broadcast({
                 "type": "notification",
                 "level": "warning",
