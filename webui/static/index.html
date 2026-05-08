@@ -41,9 +41,6 @@
           <span id="ws-text">Disconnected</span>
         </div>
         <span id="installer-version" class="installer-version-badge" title="Installer version"></span>
-        <button id="theme-toggle" class="theme-toggle-btn" title="Switch UI theme" aria-label="Switch UI theme">
-          <span id="theme-toggle-label">Central Theme</span>
-        </button>
       </div>
     </div>
   </header>
@@ -54,6 +51,7 @@
     <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="config">⚙ Config</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="logs">📋 Logs</button>
   </nav>
 
   <!-- ── Dashboard tab ── -->
@@ -491,6 +489,37 @@
         <div id="central-checks-msg" class="settings-message hidden" role="alert"></div>
       </div>
     </div>
+  </main>
+
+  <!-- ── Logs tab ── -->
+  <main id="tab-logs" class="page tab-content hidden">
+    <section class="toolbar">
+      <div class="toolbar-actions">
+        <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
+        <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
+        <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
+        <label class="logs-filter-label">
+          Filter:
+          <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
+        </label>
+        <label class="logs-lines-label">
+          Lines:
+          <select id="logs-lines-select">
+            <option value="100">100</option>
+            <option value="300" selected>300</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar-actions">
+        <label class="logs-autoscroll-label">
+          <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
+        </label>
+        <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
+      </div>
+    </section>
+    <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
   </main>
 
   <script src="/app.js" defer></script>

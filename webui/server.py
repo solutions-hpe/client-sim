@@ -22,7 +22,7 @@ except ImportError:
     _HTTPX_AVAILABLE = False
 
 from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from git import InvalidGitRepositoryError, Repo
 from pydantic import BaseModel, Field
@@ -2318,6 +2318,58 @@ async def api_all_clients_control(overrides: dict[str, str]) -> dict[str, Any]:
 
     await broadcast_full_state()
     return {"status": "ok", "updated": updated, "overrides": normalized}
+
+
+
+# ── Log viewer endpoints ──────────────────────────────────────────────────────
+
+JOURNAL_UNIT = "client-sim-dashboard"
+
+
+@app.get("/api/logs/history")
+async def api_logs_history(lines: int = Query(default=300, ge=10, le=2000)):
+    """Return the last N lines from journalctl as plain text."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", JOURNAL_UNIT, "--no-pager", "-n", str(lines),
+            "--output=short-iso",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        return PlainTextResponse(stdout.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/logs/stream")
+async def api_logs_stream():
+    """Server-Sent Events stream of live journalctl -f output."""
+    async def generate():
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", JOURNAL_UNIT, "-f", "--no-pager",
+            "--output=short-iso",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            while True:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").rstrip("\n")
+                yield f"data: {json.dumps(text)}\n\n"
+        except asyncio.TimeoutError:
+            yield "data: \n\n"  # keep-alive ping
+        except Exception:
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                proc.kill()
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
 
 
 @app.websocket("/ws")

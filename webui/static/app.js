@@ -2392,3 +2392,107 @@ loadSimulations();
     }
   } catch (_) { /* silent — version badge is non-critical */ }
 })();
+
+// ── Log viewer ────────────────────────────────────────────────────────────────
+(function initLogViewer() {
+  const output      = document.getElementById('logs-output');
+  const tailBtn     = document.getElementById('logs-tail-btn');
+  const stopBtn     = document.getElementById('logs-stop-btn');
+  const refreshBtn  = document.getElementById('logs-refresh-btn');
+  const clearBtn    = document.getElementById('logs-clear-btn');
+  const filterInput = document.getElementById('logs-filter');
+  const linesSelect = document.getElementById('logs-lines-select');
+  const autoScroll  = document.getElementById('logs-autoscroll');
+
+  if (!output) return;
+
+  let evtSource = null;
+  const MAX_LINES = 2000;
+
+  function classify(text) {
+    const t = text.toLowerCase();
+    if (/\b(error|err|exception|traceback|critical)\b/.test(t)) return 'log-err';
+    if (/\b(warning|warn)\b/.test(t)) return 'log-warn';
+    if (/\b(info)\b/.test(t)) return 'log-info';
+    if (/\b(debug)\b/.test(t)) return 'log-debug';
+    return '';
+  }
+
+  function highlight(text, filter) {
+    if (!filter) return escHtml(text);
+    const re = new RegExp(`(${filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return escHtml(text).replace(re, '<mark class="log-hi">$1</mark>');
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function appendLine(text) {
+    const filter = filterInput.value.trim();
+    if (filter && !text.toLowerCase().includes(filter.toLowerCase())) return;
+
+    const span = document.createElement('span');
+    span.className = 'log-line ' + classify(text);
+    span.innerHTML = highlight(text, filter) + '\n';
+    output.appendChild(span);
+
+    // Prune old lines
+    while (output.children.length > MAX_LINES) output.removeChild(output.firstChild);
+
+    if (autoScroll.checked) output.scrollTop = output.scrollHeight;
+  }
+
+  function clearOutput() { output.innerHTML = ''; }
+
+  async function loadHistory() {
+    const lines = linesSelect.value;
+    clearOutput();
+    try {
+      const resp = await fetch(`/api/logs/history?lines=${lines}`);
+      const text = await resp.text();
+      text.split('\n').forEach(l => { if (l) appendLine(l); });
+    } catch (e) {
+      appendLine(`[ERROR] Could not load logs: ${e}`);
+    }
+  }
+
+  function startTail() {
+    if (evtSource) return;
+    evtSource = new EventSource('/api/logs/stream');
+    evtSource.onmessage = (e) => {
+      const line = JSON.parse(e.data);
+      if (line) appendLine(line);
+    };
+    evtSource.onerror = () => appendLine('[stream disconnected — click Start Tail to reconnect]');
+    tailBtn.classList.add('hidden');
+    stopBtn.classList.remove('hidden');
+  }
+
+  function stopTail() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    tailBtn.classList.remove('hidden');
+    stopBtn.classList.add('hidden');
+  }
+
+  tailBtn.addEventListener('click', startTail);
+  stopBtn.addEventListener('click', stopTail);
+  refreshBtn.addEventListener('click', loadHistory);
+  clearBtn.addEventListener('click', clearOutput);
+
+  // Re-apply filter live
+  filterInput.addEventListener('input', () => {
+    const lines = Array.from(output.querySelectorAll('.log-line')).map(s => s.textContent);
+    clearOutput();
+    lines.forEach(appendLine);
+  });
+
+  // Load history when tab is first opened
+  const logsTabBtn = document.querySelector('.tab[data-tab="logs"]');
+  let historyLoaded = false;
+  if (logsTabBtn) {
+    logsTabBtn.addEventListener('click', () => {
+      if (!historyLoaded) { historyLoaded = true; loadHistory(); }
+    });
+  }
+})();
