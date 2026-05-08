@@ -55,9 +55,9 @@ try:
     else:
         _fernet = None
         logger.warning("No .secret_key found — credentials stored as plaintext")
-except ImportError:
+except Exception:
     _fernet = None
-    logger.warning("cryptography package not installed — credentials stored as plaintext")
+    logger.warning("cryptography unavailable or key error — credentials stored as plaintext")
 
 
 def _encrypt_secret(value: str) -> str:
@@ -435,7 +435,6 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         central_token["refresh_token"] = cfg["refresh_token"]
     central_token["expires_at"] = time.time() + 7200
 
-    global central_auth_error
     ok, msg = await _probe_central_token(client)
     central_auth_error = None if ok else msg
     return ok, msg
