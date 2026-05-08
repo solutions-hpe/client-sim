@@ -686,12 +686,12 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
-  padding: 6px 8px;
+  padding: 6px 32px;
   border-bottom: 1px solid var(--border);
 }
 
 .data-table td {
-  padding: 10px 8px;
+  padding: 10px 32px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -727,6 +727,13 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 /* Setup tab forms stay narrow; all other tabs get full width */
 #tab-setup .setup-card {
   max-width: 680px;
+}
+
+/* Tables break out of card padding so the dark header is edge-to-edge,
+   clipped symmetrically by the card's overflow:hidden + border-radius */
+.setup-card .data-table {
+  margin: 0 -32px;
+  width: calc(100% + 64px);
 }
 
 .setup-card-header h2 {
