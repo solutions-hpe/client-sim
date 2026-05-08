@@ -127,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="0.28"
+VERSION="0.29"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -539,12 +539,18 @@ ok "Permissions set"
 ###############################################################################
 if systemctl is-active --quiet client-sim-dashboard; then
   info "Restarting client-sim-dashboard service..."
-  systemctl restart client-sim-dashboard
+  # Schedule restart AFTER this script exits — if the installer was launched
+  # by the running server, a synchronous restart here would send SIGTERM to
+  # the server mid-install, which cascades back and kills this script (-15).
+  # The subshell is disowned so it outlives this process and any parent.
+  (sleep 2 && systemctl restart client-sim-dashboard) &
+  disown
 else
   info "Starting client-sim-dashboard service..."
   systemctl start client-sim-dashboard
 fi
-sleep 3
+# Give the (possibly deferred) restart time to complete before health check.
+sleep 5
 
 if systemctl is-active --quiet client-sim-dashboard; then
   ok "Service running"
