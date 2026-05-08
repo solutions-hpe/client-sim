@@ -181,6 +181,15 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             if [[ "$sync_ok" == true ]]; then
                 echo "Web server sync succeeded" | tee -a "$debug" "$log"
                 copy_local_files "$tmp_web"
+                # Persist a copy of API-downloaded files as a local fallback cache.
+                # Prevents an older GitHub version from clobbering API-customised
+                # scripts and configs (e.g. per-device simulation.conf) when the
+                # API is temporarily unavailable on the next boot.
+                API_CACHE="/usr/local/scripts/.api-cache"
+                sudo mkdir -p "$API_CACHE"
+                sudo cp -r "$tmp_web"/. "$API_CACHE/"
+                sudo chmod -R 777 "$API_CACHE"
+                echo "API cache updated at $API_CACHE" | tee -a "$debug"
                 source_found=true
             else
                 echo "Web server reachable but sync incomplete — falling through" | tee -a "$debug" "$log"
@@ -206,6 +215,28 @@ if [[ "$source_found" == false && "$smb_repo" == "on" && -n "$smb_address" ]]; t
         echo "SMB sync failed — falling through" | tee -a "$debug" "$log"
     fi
     rm -rf "$tmp_smb"
+fi
+
+#============================================================
+# TIER 2.5 — Local API Cache (last successful API download)
+# Used when API and SMB are both unavailable. Prevents falling
+# back to a potentially older GitHub version when the API was
+# the source of truth for scripts and per-device configs.
+#============================================================
+API_CACHE="/usr/local/scripts/.api-cache"
+if [[ "$source_found" == false && -f "$API_CACHE/VERSION" ]]; then
+    echo "Tier 2.5: Trying local API cache ($API_CACHE)..." | tee -a "$debug"
+    cache_ver=$(cat "$API_CACHE/VERSION" 2>/dev/null | tr -d '[:space:]')
+    local_ver=$(cat /usr/local/scripts/VERSION 2>/dev/null | tr -d '[:space:]')
+    echo "Cache version: $cache_ver  Installed: $local_ver" | tee -a "$debug"
+    if [[ -n "$cache_ver" && "$cache_ver" == "$local_ver" ]]; then
+        echo "Already running cached version (v$cache_ver) — no update needed" | tee -a "$debug" "$log"
+        source_found=true
+    elif [[ -n "$cache_ver" ]]; then
+        echo "Applying cached API files (v$local_ver → v$cache_ver)..." | tee -a "$debug" "$log"
+        copy_local_files "$API_CACHE"
+        source_found=true
+    fi
 fi
 
 #============================================================
