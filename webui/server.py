@@ -10,7 +10,7 @@ import re
 import socket
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -2931,13 +2931,14 @@ async def api_logs_stream():
         )
         try:
             while True:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
-                if not line:
-                    break
-                text = line.decode("utf-8", errors="replace").rstrip("\n")
-                yield f"data: {json.dumps(text)}\n\n"
-        except asyncio.TimeoutError:
-            yield "data: \n\n"  # keep-alive ping
+                try:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=25)
+                    if not line:
+                        break
+                    text = line.decode("utf-8", errors="replace").rstrip("\n")
+                    yield f"data: {json.dumps(text)}\n\n"
+                except asyncio.TimeoutError:
+                    yield "data: \"\"\n\n"  # keep-alive ping — stay in loop
         except Exception:
             pass
         finally:
@@ -2947,6 +2948,18 @@ async def api_logs_stream():
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/health")
+async def api_health() -> dict[str, Any]:
+    async with state_lock:
+        client_count = len(clients)
+    return {
+        "status": "ok",
+        "clients": client_count,
+        "repo_synced": repo_state["synced"],
+        "version": INSTALLER_VERSION,
+    }
 
 
 @app.websocket("/ws")
