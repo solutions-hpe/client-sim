@@ -269,7 +269,7 @@ scan_usb_devices() {
         if [[ -n "${CERTIFIED_TYPES[$vidpid]:-}" || -n "${CERTIFIED_LABELS[$vidpid]:-}" ]]; then
             PRESENT_BUSES["$bus_path"]="$vidpid"
         else
-            UNKNOWN_USB_LINES+=("${bus_path}\t${vidpid}\t${name}")
+            UNKNOWN_USB_LINES+=("${bus_path}"$'\t'"${vidpid}"$'\t'"${name}")
         fi
     done
 }
@@ -282,7 +282,7 @@ build_usb_state_json() {
         missing_since="${STATE_MISSING_BY_BUS[$bus_path]:-}"
         vidpid="${USB_VIDPID_BY_BUS[$bus_path]:-}"
         name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
-        USB_STATE_LINES+=("${vmid}\t${bus_path}\t${missing_since}\t${name}\t${vidpid}")
+        USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}")
     done
     if (( ${#UNKNOWN_USB_LINES[@]} )); then
         UNKNOWN_USB_JSON=$(json_from_records unknown "${UNKNOWN_USB_LINES[@]}")
