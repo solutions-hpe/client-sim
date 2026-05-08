@@ -290,19 +290,26 @@ EOF
 
   # Systemd drop-in: wait for the DHCP interface to appear before dnsmasq starts.
   # Without this, dnsmasq fails with "unknown interface" on reboot because the
-  # LXC bridge attachment (net1) isn't ready when dnsmasq is first started.
+  # LXC bridge attachment isn't ready when dnsmasq is first started.
+  # The ExecStartPre reads the interface name from the dnsmasq config at runtime
+  # so it works regardless of the interface name (net1, eth1, ens3, etc.).
   mkdir -p /etc/systemd/system/dnsmasq.service.d
-  cat > /etc/systemd/system/dnsmasq.service.d/wait-for-interface.conf <<DROPIN
+  cat > /etc/systemd/system/dnsmasq.service.d/wait-for-interface.conf <<'DROPIN'
 [Unit]
 After=network.target network-online.target
 
 [Service]
-ExecStartPre=/bin/bash -c 'n=0; until ip link show ${DHCP_IFACE} >/dev/null 2>&1; do n=\$((n+1)); [ \$n -ge 30 ] && exit 1; sleep 1; done'
+ExecStartPre=/bin/bash -c '\
+  iface=$(grep "^interface=" /etc/dnsmasq.d/client-sim.conf 2>/dev/null | cut -d= -f2 | tr -d " \t"); \
+  [ -z "$iface" ] && exit 0; \
+  n=0; until ip link show "$iface" >/dev/null 2>&1; do \
+    n=$((n+1)); [ $n -ge 30 ] && exit 1; sleep 1; \
+  done'
 Restart=on-failure
 RestartSec=5
 DROPIN
   systemctl daemon-reload >>"$LOG" 2>&1
-  ok "dnsmasq systemd drop-in written (waits for ${DHCP_IFACE})"
+  ok "dnsmasq systemd drop-in written (waits for DHCP interface from config)"
 
   systemctl enable dnsmasq >>"$LOG" 2>&1
   systemctl restart dnsmasq >>"$LOG" 2>&1
