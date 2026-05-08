@@ -564,24 +564,41 @@ function renderServerTab(data) {
     { action: 'reclone_vm', label: '⎘', title: 'Reclone' },
     { action: 'delete_vm', label: '✕', title: 'Delete' },
   ];
+  const TEMPLATE_ACTIONS = [
+    { action: 'start_vm', label: '▶', title: 'Start' },
+    { action: 'stop_vm', label: '■', title: 'Stop' },
+  ];
 
   vms.forEach((vm) => {
     const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
     const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
     const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
-    const actionBtns = VM_ACTIONS.map((a) =>
+    const isTemplate = vm.type === 'template-1' || vm.type === 'template-2';
+    const actions = isTemplate ? TEMPLATE_ACTIONS : VM_ACTIONS;
+    const actionBtns = actions.map((a) =>
       `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}" title="${a.title}">${a.label}</button>`
     ).join(' ');
     const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
       ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
       : '';
 
+    let typeBadge;
+    if (vm.type === 'template-1') {
+      typeBadge = '<span class="badge badge-blue" title="VM Image 1 template — cloned for new USB devices">Template Img 1</span>';
+    } else if (vm.type === 'template-2') {
+      typeBadge = '<span class="badge badge-blue" title="VM Image 2 template — cloned for new USB devices">Template Img 2</span>';
+    } else {
+      typeBadge = '<span class="badge badge-grey">VM</span>';
+    }
+
     const tr = document.createElement('tr');
+    if (isTemplate) tr.classList.add('vm-row-template');
     tr.innerHTML = `
-      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
+      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"${isTemplate ? ' disabled' : ''}></td>
       <td>${statusDot} ${vm.status || 'unknown'}</td>
       <td>${vm.vmid}</td>
       <td>${vm.name || '—'}${recoveryBadge}</td>
+      <td>${typeBadge}</td>
       <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
       <td>${memUsedGB}/${memTotalGB} GB</td>
       <td>${actionBtns}</td>
@@ -1411,7 +1428,8 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   unknownUsbTbody._delegated = true;
 
   unknownUsbSection.classList.toggle('hidden', unknownUsb.length === 0);
-  usbSummaryPanel.classList.toggle('hidden', certified.length === 0 && unknownUsb.length === 0 && usbState.length === 0);
+  // Show the panel whenever Proxmox is connected; hide only before any data has arrived
+  usbSummaryPanel.classList.toggle('hidden', !latestProxmoxData.connected && certified.length === 0 && unknownUsb.length === 0 && usbState.length === 0);
 
   if (usbCountdownTimer) window.clearInterval(usbCountdownTimer);
   updateUsbCountdowns();

@@ -464,9 +464,10 @@ collect_telemetry() {
 
     vms_json="[]"
     if command -v qm &>/dev/null; then
-        vms_json=$(qm list 2>/dev/null | awk 'NR>1 {
-            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"mem\":%s,\"maxmem\":%s},",
-            $1,$2,$3,$4,$5
+        vms_json=$(qm list 2>/dev/null | awk -v t1="$IMAGE1_TEMPLATE_ID" -v t2="$IMAGE2_TEMPLATE_ID" 'NR>1 {
+            type_val = ($1+0==t1+0) ? "template-1" : ($1+0==t2+0) ? "template-2" : "vm"
+            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"mem\":%s,\"maxmem\":%s,\"type\":\"%s\"},",
+            $1,$2,$3,$4,$5,type_val
         }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
     fi
 

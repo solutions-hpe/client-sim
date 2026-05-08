@@ -695,6 +695,13 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   border-bottom: 1px solid var(--border);
 }
 
+.vm-row-template td {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  font-style: italic;
+  color: var(--muted);
+}
+.vm-row-template .badge { font-style: normal; }
+
 .form-msg {
   min-height: 1.2rem;
   font-size: 0.85rem;
