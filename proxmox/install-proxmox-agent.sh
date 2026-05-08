@@ -29,8 +29,8 @@ if [[ -z "$SERVER_URL" ]]; then
     exit 1
 fi
 
-if [[ ! -x /usr/bin/qm ]]; then
-    echo "ERROR: /usr/bin/qm not found — this script must run on a Proxmox host."
+if ! command -v qm &>/dev/null; then
+    echo "ERROR: 'qm' not found — this script must run on a Proxmox host."
     exit 1
 fi
 
