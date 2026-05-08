@@ -184,8 +184,8 @@ get_gateway_status() {
 #------------------------------------------------------------
 get_sim_status() {
   local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
-  printf "  %s%-12s %-22s %-8s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "PID" "RUNTIME" "$RST"
-  printf "  %-12s %-22s %-8s %-10s\n" "──────────" "──────────────────────" "───" "───────"
+  printf "  %s%-12s %-22s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
+  printf "  %-12s %-22s %-10s\n" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
     local script_name pid runtime
     script_name=$(basename "$s")
@@ -195,9 +195,9 @@ get_sim_status() {
     pid=$(pgrep -f "$script_name" | head -n 1)
     if [[ -n "$pid" ]]; then
       runtime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
-      printf "  %s%-12s%s %-22s %-8s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$pid" "$runtime"
+      printf "  %s%-12s%s %-22s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$runtime"
     else
-      printf "  %s%-12s%s %-22s %-8s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "-" "-"
+      printf "  %s%-12s%s %-22s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "-"
     fi
   done
 }

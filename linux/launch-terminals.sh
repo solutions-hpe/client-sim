@@ -131,8 +131,8 @@ echo "$(date) launch-terminals: screen=${SCREEN_W}x${SCREEN_H} output=${OUTPUT}"
 # ── Calculate pixel offsets proportional to actual resolution ────────────────
 # Baseline values match the 1920x1080 layout above (TARGET_W/H = 1920×1080).
 # On smaller screens the offsets scale down proportionally.
-JOUR_X=$(( SCREEN_W * 960  / TARGET_W ))
-START_X=$(( SCREEN_W * 1460 / TARGET_W ))
+JOUR_X=$(( SCREEN_W * 840  / TARGET_W ))
+START_X=$(( SCREEN_W * 1440 / TARGET_W ))
 START_Y=$(( SCREEN_H * 525  / TARGET_H ))
 
 # ── Ensure dbus session is available (gnome-terminal requires it) ────────────
@@ -180,7 +180,7 @@ _launch "Dashboard" \
 # Journal viewer — center, top
 _launch "Journal" \
   --title="Journal" \
-  --geometry="88x20+${JOUR_X}+0" \
+  --geometry="80x20+${JOUR_X}+0" \
   -- journalctl -f &
 
 # Startup / Simulation — right side, lower half; reboots on exit

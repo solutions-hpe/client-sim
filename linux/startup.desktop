@@ -2,4 +2,4 @@
 Type=Application
 Name=StartUp
 Comment=Simulation Script Startup
-Exec=gnome-terminal --geometry=88x15+1460+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
+Exec=gnome-terminal --geometry=80x15+1440+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
