@@ -174,7 +174,7 @@ _launch() {
 # Dashboard — left column, full height (58 cols matches dashboard.sh content width)
 _launch "Dashboard" \
   --title="Dashboard" \
-  --geometry="58x43+0+0" \
+  --geometry="60x43+0+0" \
   -- bash -c "$SCRIPTS/dashboard.sh" &
 
 # Journal viewer — center, top
