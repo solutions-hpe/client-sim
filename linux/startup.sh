@@ -76,6 +76,11 @@ tempvar=$(get_value $username 'vh_server')
 if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
 tempvar=$(get_value $username 'sim_phy')
 if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
+# USB device physical-layer override — written by Proxmox agent at provisioning
+# time based on the certified USB device type (wireless/wired). Highest priority.
+if [[ -f '/usr/local/scripts/usb-phy-override.conf' ]]; then
+  source '/usr/local/scripts/usb-phy-override.conf'
+fi
 #------------------------------------------------------------
 #Configuring Syslog Server
 #------------------------------------------------------------

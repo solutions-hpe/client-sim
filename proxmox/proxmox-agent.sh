@@ -297,7 +297,7 @@ build_usb_state_json() {
 }
 
 clone_vm_for_usb() {
-    local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}"
+    local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}"
     local guest_ready=0
     local template_id="$IMAGE1_TEMPLATE_ID"
     [[ "$image_num" == "2" ]] && template_id="$IMAGE2_TEMPLATE_ID"
@@ -317,12 +317,16 @@ clone_vm_for_usb() {
 
     if [[ "$guest_ready" -eq 1 ]]; then
         qm guest exec "$vmid" -- hostnamectl set-hostname "sim-client-$vmid" >/dev/null 2>&1 || true
+        # Write the USB device physical-layer type so startup.sh uses the right sim_phy
+        qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
+            && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
+            || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
         qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
     else
         log "WARNING: Guest agent not ready for VM $vmid"
     fi
 
-    log "Provisioned VM $vmid for USB $bus_path (${product_name})"
+    log "Provisioned VM $vmid for USB $bus_path (${product_name}) type=${device_type}"
 }
 
 provision_vm() {
@@ -351,12 +355,13 @@ provision_vm() {
     local target_img1=$(( (IMAGE1_PCT * total_vms + 99) / 100 ))  # ceiling
     [[ "$img1_count" -ge "$target_img1" ]] && image_num=2
 
-    clone_vm_for_usb "$free_vmid" "$bus_path" "$product_name" "$image_num"
+    local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
+    clone_vm_for_usb "$free_vmid" "$bus_path" "$product_name" "$image_num" "$device_type"
     STATE_BUS_TO_VMID["$bus_path"]="$free_vmid"
     STATE_VMID_TO_BUS["$free_vmid"]="$bus_path"
     STATE_MISSING_BY_BUS["$bus_path"]=""
     STATE_VMID_TO_IMAGE["$free_vmid"]="$image_num"
-    log "Provisioned VM $free_vmid for USB $bus_path ($vidpid) image=$image_num (${IMAGE1_PCT}% img1 target, ${img1_count}/${total_vms} currently img1)"
+    log "Provisioned VM $free_vmid for USB $bus_path ($vidpid) type=$device_type image=$image_num (${IMAGE1_PCT}% img1 target, ${img1_count}/${total_vms} currently img1)"
 }
 
 destroy_vm() {
@@ -394,9 +399,10 @@ reclone_vm_instance() {
 
     vidpid="${USB_VIDPID_BY_BUS[$bus_path]:-}"
     product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
+    local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
 
     destroy_vm "$vmid"
-    clone_vm_for_usb "$vmid" "$bus_path" "$product_name"
+    clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "${STATE_VMID_TO_IMAGE[$vmid]:-1}" "$device_type"
     STATE_BUS_TO_VMID["$bus_path"]="$vmid"
     STATE_VMID_TO_BUS["$vmid"]="$bus_path"
     STATE_MISSING_BY_BUS["$bus_path"]=""
