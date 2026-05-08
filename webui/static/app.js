@@ -538,6 +538,9 @@ function renderServerTab(data) {
   const selectAll = document.getElementById('server-select-all');
   const thCheck = document.getElementById('server-th-check');
   const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
+  const autoRecoveryPending = new Set(
+    Array.isArray(latestProxmoxData.auto_recovery_pending) ? latestProxmoxData.auto_recovery_pending : []
+  );
   if (!tbody) return;
 
   tbody.innerHTML = '';
@@ -563,19 +566,22 @@ function renderServerTab(data) {
   ];
 
   vms.forEach((vm) => {
-    const statusDot = vm.status === 'running' ? '��' : vm.status === 'paused' ? '🟡' : '⚫';
+    const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
     const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
     const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
     const actionBtns = VM_ACTIONS.map((a) =>
       `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}" title="${a.title}">${a.label}</button>`
     ).join(' ');
+    const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
+      ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
+      : '';
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
       <td>${statusDot} ${vm.status || 'unknown'}</td>
       <td>${vm.vmid}</td>
-      <td>${vm.name || '—'}</td>
+      <td>${vm.name || '—'}${recoveryBadge}</td>
       <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
       <td>${memUsedGB}/${memTotalGB} GB</td>
       <td>${actionBtns}</td>

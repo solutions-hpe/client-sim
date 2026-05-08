@@ -1558,6 +1558,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "approved_proxmox": _approved_proxmox_payload(),
         "reclone_state": dict(reclone_state),
         "client_os_counts": _client_os_counts(),
+        "auto_recovery_pending": _auto_recovery_pending_vmids(),
     }
 
 
@@ -1606,6 +1607,18 @@ def _has_pending_reclone(vmid: int) -> bool:
         if cmd.get("status") in {"pending", "delivered"}:
             return True
     return False
+
+
+def _auto_recovery_pending_vmids() -> list[int]:
+    """Return VMIDs that have a pending/delivered auto-recovery reclone command."""
+    return [
+        int(cmd.get("args", {}).get("vmid", -1))
+        for cmd in commands
+        if cmd.get("action") == "reclone_vm"
+        and cmd.get("type") == "auto-recovery"
+        and cmd.get("status") in {"pending", "delivered"}
+        and cmd.get("args", {}).get("vmid") is not None
+    ]
 
 
 async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> dict[str, Any]:
@@ -1702,7 +1715,7 @@ async def auto_recovery_check() -> None:
         await asyncio.sleep(1800)
         timeout_hours = _setting_int("vm_silent_timeout", 24, 1)
         now = time.time()
-        triggered = False
+        triggered: list[int] = []
         for vm in list(proxmox_state.get("vms", [])):
             vmid = vm.get("vmid")
             if vmid is None:
@@ -1714,8 +1727,14 @@ async def auto_recovery_check() -> None:
             if _has_pending_reclone(vmid_int):
                 continue
             await _queue_proxmox_command("reclone_vm", {"vmid": vmid_int}, command_type="auto-recovery")
-            triggered = True
+            triggered.append(vmid_int)
         if triggered:
+            vmid_list = ", ".join(str(v) for v in triggered)
+            await broadcast({
+                "type": "notification",
+                "level": "warning",
+                "message": f"Auto-recovery: queued reclone for {len(triggered)} silent VM(s) — {vmid_list}",
+            })
             await _broadcast_proxmox_state()
 
 
