@@ -1438,9 +1438,10 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   usbSummaryTbody.innerHTML = '';
   certified.forEach((device) => {
     const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
+    const presentUsb = Array.isArray(latestProxmoxData.present_usb) ? latestProxmoxData.present_usb : [];
     const active = entries.filter((item) => !item.missing_since).length;
     const missing = entries.filter((item) => item.missing_since).length;
-    const total = entries.length;
+    const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
     const tr = document.createElement('tr');
     const missingHtml = missing
       ? `<div class="usb-missing-list">${entries.filter((item) => item.missing_since).map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`

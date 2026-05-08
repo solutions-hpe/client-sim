@@ -1305,6 +1305,7 @@ proxmox_state: dict[str, Any] = {
     "vms": [],
     "unknown_usb": [],
     "usb_state": [],
+    "present_usb": [],
 }
 # Pending/approved Proxmox agent registry
 pending_proxmox_agents: dict[str, dict[str, Any]] = {}
@@ -2602,6 +2603,7 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["node"] = node
     proxmox_state["vms"] = enriched_vms
     proxmox_state["usb_state"] = body.get("usb_state", [])
+    proxmox_state["present_usb"] = body.get("present_usb", [])
     await _broadcast_proxmox_state()
     return {"ok": True}
 

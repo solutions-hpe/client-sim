@@ -19,6 +19,7 @@ IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
 UNKNOWN_USB_JSON="[]"
 USB_STATE_JSON="[]"
+PRESENT_USB_JSON="[]"
 
 h=$(hostname)
 last3="${h: -3}"
@@ -308,6 +309,22 @@ build_usb_state_json() {
     else
         USB_STATE_JSON="[]"
     fi
+    # Build present_usb: all certified dongles physically detected right now
+    if (( ${#PRESENT_BUSES[@]} )); then
+        PRESENT_USB_JSON=$(python3 - <<PY
+import json
+items = []
+$(for bp in "${!PRESENT_BUSES[@]}"; do
+    vp="${PRESENT_BUSES[$bp]}"
+    nm="${USB_NAME_BY_BUS[$bp]:-}"
+    printf 'items.append({"bus_path":"%s","vidpid":"%s","name":"%s"})\n' "$bp" "$vp" "$nm"
+done)
+print(json.dumps(items))
+PY
+)
+    else
+        PRESENT_USB_JSON="[]"
+    fi
 }
 
 clone_vm_for_usb() {
@@ -516,7 +533,8 @@ collect_telemetry() {
   },
   "vms": ${vms_json:-[]},
   "unknown_usb": ${UNKNOWN_USB_JSON:-[]},
-  "usb_state": ${USB_STATE_JSON:-[]}
+  "usb_state": ${USB_STATE_JSON:-[]},
+  "present_usb": ${PRESENT_USB_JSON:-[]}
 }
 JSON
 }
