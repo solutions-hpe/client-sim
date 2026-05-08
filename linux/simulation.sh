@@ -13,6 +13,10 @@ echo Simulation Script Version $version | tee "$debug"
 #set int he simulation.conf
 #------------------------------------------------------------
 #------------------------------------------------------------
+# Kill nm-applet so the desktop graphical agent cannot intercept nmcli
+# WiFi connections and pop up password dialogs mid-simulation.
+pkill -f nm-applet 2>/dev/null || true
+
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a "$debug"; fi
 eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6" | cut -d ' ' -f '1')
