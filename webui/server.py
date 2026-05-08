@@ -557,10 +557,13 @@ async def central_token_manager() -> None:
                         ok, msg = await _fetch_central_token(client)
                         if not ok:
                             logger.warning("Central token load failed: %s", msg)
+                        # Broadcast updated token state regardless of success
+                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()})
                     elif expiring and _can_refresh():
                         ok, msg = await _refresh_central_token(client)
                         if not ok:
                             logger.warning("Central token refresh failed: %s", msg)
+                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()})
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -2300,7 +2303,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"]}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time()}))
+    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()}))
 
     try:
         while True:
