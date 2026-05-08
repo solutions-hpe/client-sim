@@ -2125,13 +2125,20 @@ async def _run_self_update() -> None:
             logger.info("self-update: %s", line)
             await broadcast({"type": "version_status", **update_state})
         await proc.wait()
-        if proc.returncode != 0:
+        # -15 (SIGTERM) is expected when the installer schedules a deferred
+        # `systemctl restart` and asyncio cleans up the subprocess transport
+        # when the server is stopped.  If the restart step already ran, treat
+        # it as success rather than surfacing a misleading error.
+        restart_triggered = any(
+            "Restarting client-sim-dashboard" in l for l in update_state["update_log"]
+        )
+        if proc.returncode != 0 and not (proc.returncode == -15 and restart_triggered):
             logger.error("Self-update installer exited with code %s", proc.returncode)
             update_state["update_in_progress"] = False
             update_state["update_error"] = f"Installer exited with code {proc.returncode} — check logs"
             await broadcast({"type": "version_status", **update_state})
         else:
-            logger.info("Self-update installer completed successfully")
+            logger.info("Self-update installer completed successfully (rc=%s)", proc.returncode)
             update_state["update_in_progress"] = False
             update_state["update_error"] = None
             await broadcast({"type": "version_status", **update_state})

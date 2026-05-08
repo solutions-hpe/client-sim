@@ -73,6 +73,7 @@ const repoDot = document.getElementById('repo-dot');
 const repoText = document.getElementById('repo-text');
 let socket = null;
 let reconnectTimer = null;
+let updateWasInProgress = false;  // track if update was running when WS dropped
 let openControlHost = null;
 let centralSiteDetailOpen = null;
 let centralStatusData = {};
@@ -724,6 +725,7 @@ function applyVersionStatus(data) {
   if (versionLastChecked) versionLastChecked.textContent = data.last_checked ?? '—';
 
   const inProgress = !!data.update_in_progress;
+  updateWasInProgress = inProgress;
   if (checkUpdateBtn) {
     checkUpdateBtn.disabled = inProgress;
     checkUpdateBtn.textContent = inProgress ? '🔄 Updating…' : '🔄 Check & Update Now';
@@ -2516,6 +2518,14 @@ function connectWebSocket() {
       reconnectTimer = null;
     }
     setWsStatus(true, 'Connected');
+    // If we showed "restarting" during an update, confirm success on reconnect
+    if (updateMsg && updateMsg.textContent.includes('restarting')) {
+      updateMsg.textContent = '✅ Update complete — service restarted successfully.';
+      updateMsg.className = 'settings-message success';
+      updateMsg.classList.remove('hidden');
+      clearTimeout(updateMsg._timer);
+      updateMsg._timer = setTimeout(() => { updateMsg.classList.add('hidden'); }, 10000);
+    }
   });
 
   socket.addEventListener('message', (event) => {
@@ -2528,6 +2538,17 @@ function connectWebSocket() {
 
   socket.addEventListener('close', () => {
     setWsStatus(false, 'Disconnected');
+    // If an update was running, the service is restarting — don't show an error
+    if (updateWasInProgress && updateMsg) {
+      updateWasInProgress = false;
+      updateMsg.textContent = '🔄 Service restarting — reconnecting…';
+      updateMsg.className = 'settings-message success';
+      updateMsg.classList.remove('hidden');
+      if (checkUpdateBtn) {
+        checkUpdateBtn.disabled = false;
+        checkUpdateBtn.textContent = '🔄 Check & Update Now';
+      }
+    }
     if (!reconnectTimer) {
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
