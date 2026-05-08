@@ -1247,9 +1247,22 @@ function renderIgnoredUsbList() {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = ' ✕';
-    button.addEventListener('click', () => {
-      currentSettings.usb_ignored_vidpids = serializeJsonList(ignored.filter((item) => item !== vidpid));
+    button.addEventListener('click', async () => {
+      // Re-read from currentSettings each click to avoid stale closure
+      const current = parseJsonList(currentSettings.usb_ignored_vidpids);
+      currentSettings.usb_ignored_vidpids = serializeJsonList(current.filter((item) => item !== vidpid));
       renderIgnoredUsbList();
+      renderUsbSummary(latestProxmoxData);
+      try {
+        await requestJson('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(collectUsbSettingsPayload()),
+        });
+        showNotification(`${vidpid} removed from ignored devices`, 'success');
+      } catch (err) {
+        showNotification(`Error saving: ${err.message}`, 'error');
+      }
     });
     badge.appendChild(button);
     usbIgnoredList.appendChild(badge);
