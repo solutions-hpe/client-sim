@@ -2324,18 +2324,29 @@ async def api_all_clients_control(overrides: dict[str, str]) -> dict[str, Any]:
 # ── Log viewer endpoints ──────────────────────────────────────────────────────
 
 JOURNAL_UNIT = "client-sim-dashboard"
+INSTALL_LOG_PATH = "/var/log/client-sim-dashboard-install.log"
 
 
 @app.get("/api/logs/history")
-async def api_logs_history(lines: int = Query(default=300, ge=10, le=2000)):
-    """Return the last N lines from journalctl as plain text."""
+async def api_logs_history(
+    lines: int = Query(default=300, ge=10, le=2000),
+    source: str = Query(default="journal"),
+):
+    """Return the last N lines from journalctl or the install log."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "journalctl", "-u", JOURNAL_UNIT, "--no-pager", "-n", str(lines),
-            "--output=short-iso",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        if source == "install":
+            proc = await asyncio.create_subprocess_exec(
+                "tail", "-n", str(lines), INSTALL_LOG_PATH,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                "journalctl", "-u", JOURNAL_UNIT, "--no-pager", "-n", str(lines),
+                "--output=short-iso",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         return PlainTextResponse(stdout.decode("utf-8", errors="replace"))
     except Exception as exc:

@@ -351,6 +351,10 @@
           <button id="check-update-btn" class="btn btn-primary" type="button">🔄 Check &amp; Update Now</button>
         </div>
         <div id="update-message" class="settings-message hidden" role="alert"></div>
+        <details id="update-log-details" class="hidden" style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.6);">Show install output</summary>
+          <pre id="update-log-output" class="update-log-pre"></pre>
+        </details>
       </div>
     </div>
 
@@ -509,6 +513,13 @@
             <option value="300" selected>300</option>
             <option value="500">500</option>
             <option value="1000">1000</option>
+          </select>
+        </label>
+        <label class="logs-filter-label">
+          Source:
+          <select id="logs-source-select">
+            <option value="journal">Service journal</option>
+            <option value="install">Install log</option>
           </select>
         </label>
       </div>

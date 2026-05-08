@@ -1048,3 +1048,18 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   font-size: 0.82rem;
   padding: 3px 6px;
 }
+
+.update-log-pre {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 10px 14px;
+  border-radius: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 8px;
+}
