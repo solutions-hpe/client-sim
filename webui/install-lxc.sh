@@ -17,6 +17,7 @@
 ###############################################################################
 
 set -euo pipefail
+set -x                        # trace every command — output captured in install log
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -104,7 +105,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.21"
+VERSION="0.22"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
