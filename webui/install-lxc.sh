@@ -17,7 +17,6 @@
 ###############################################################################
 
 set -euo pipefail
-set -x                        # trace every command — output captured in install log
 export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -105,7 +104,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.22"
+VERSION="0.23"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -168,7 +167,7 @@ ok "Package lists updated"
 info "Installing dependencies..."
 apt-get install -y --quiet=2 \
   python3 python3-pip python3-venv \
-  git curl rsync \
+  git curl rsync sudo \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold" \
   >>"$LOG" 2>&1
