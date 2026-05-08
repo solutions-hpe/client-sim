@@ -241,7 +241,11 @@ tbody tr.client-row.expanded {
 tbody tr.updated { animation: row-update 1.4s ease-out; }
 
 /* ── Status cell ────────────────────────────────────────────────── */
-.status-cell { width: 70px; }
+.status-cell { width: 44px; text-align: center; }
+.hostname-cell { min-width: 160px; font-weight: 500; }
+
+/* ── Impact cell ────────────────────────────────────────────────── */
+.impact-cell { display: flex; align-items: center; white-space: nowrap; }
 
 /* ── Aruba Impact + Simulation badges ──────────────────────────── */
 .badge-cell {

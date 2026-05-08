@@ -581,6 +581,22 @@ function impactSummary(activeSimulations = []) {
   return labels.length ? labels.join(' · ') : '— Normal';
 }
 
+function renderImpactCell(cell, activeSimulations = []) {
+  cell.textContent = '';
+  const labels = [...new Set(activeSimulations.map((sim) => IMPACT_LABELS[sim]).filter(Boolean))];
+  if (!labels.length) {
+    cell.textContent = '— Normal';
+    return;
+  }
+  const dot = document.createElement('span');
+  dot.className = 'ind-dot red';
+  dot.style.cssText = 'display:inline-block;vertical-align:middle;margin-right:5px;flex-shrink:0;';
+  const text = document.createElement('span');
+  text.textContent = labels.join(' · ');
+  cell.appendChild(dot);
+  cell.appendChild(text);
+}
+
 function badgeClass(simulation) {
   if (FAILURE_SIMS.has(simulation)) return 'badge badge-failure';
   if (TRAFFIC_SIMS.has(simulation)) return 'badge badge-traffic';
@@ -651,7 +667,7 @@ function ensureRow(hostname) {
   const detailRow = document.createElement('tr');
   detailRow.className = 'control-row hidden';
   const detailCell = document.createElement('td');
-  detailCell.colSpan = 11;
+  detailCell.colSpan = 10;
   detailRow.appendChild(detailCell);
 
   const statusCell = createCell('status-cell');
@@ -659,13 +675,12 @@ function ensureRow(hostname) {
   statusDot.className = 'status-dot offline';
   statusCell.appendChild(statusDot);
 
-  const hostnameCell = createCell();
+  const hostnameCell = createCell('hostname-cell');
   const platformCell = createCell();
   const simIdCell = createCell();
   const ssidCell = createCell();
   const activeCell = createCell('badge-cell');
-  const impactCell = createCell();
-  const iterationCell = createCell();
+  const impactCell = createCell('impact-cell');
   const lastSeenCell = createCell();
   const actionsCell = createCell();
 
@@ -693,7 +708,6 @@ function ensureRow(hostname) {
     ssidCell,
     activeCell,
     impactCell,
-    iterationCell,
     lastSeenCell,
     errorCell,
     actionsCell
@@ -713,7 +727,6 @@ function ensureRow(hostname) {
     ssidCell,
     activeCell,
     impactCell,
-    iterationCell,
     lastSeenCell,
     errorCell,
     errorBadge,
@@ -764,8 +777,7 @@ function upsertClient(client) {
   refs.simIdCell.textContent = merged.simulation_id || '—';
   refs.ssidCell.textContent = merged.connected_ssid || '—';
   renderBadges(refs.activeCell, merged.active_simulations || []);
-  refs.impactCell.textContent = impactSummary(merged.active_simulations || []);
-  refs.iterationCell.textContent = String(merged.iteration ?? '—');
+  renderImpactCell(refs.impactCell, merged.active_simulations || []);
   refs.lastSeenCell.textContent = formatLastSeen(merged.last_seen);
   refs.controlButton.textContent = openControlHost === merged.hostname ? 'Close' : 'Control';
 
