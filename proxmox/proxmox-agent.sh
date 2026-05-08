@@ -14,7 +14,9 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
-TEMPLATE_ID=100
+IMAGE1_TEMPLATE_ID=100
+IMAGE2_TEMPLATE_ID=200
+IMAGE1_PCT=50
 UNKNOWN_USB_JSON="[]"
 USB_STATE_JSON="[]"
 
@@ -27,6 +29,7 @@ end_vmid=$((start_vmid + 23))
 
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
+declare -A STATE_VMID_TO_IMAGE
 declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
@@ -161,10 +164,12 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
-    int(data.get("template_id", 100) or 100),
+    int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
+    int(data.get("image2_template_id", 200) or 200),
+    max(0, min(100, int(data.get("image1_pct", 50) or 50))),
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -187,15 +192,19 @@ PY
     IGNORED_VIDPIDS=()
     AUTO_PROVISION="off"
     MISSING_TIMEOUT=60
-    TEMPLATE_ID=100
+    IMAGE1_TEMPLATE_ID=100
+    IMAGE2_TEMPLATE_ID=200
+    IMAGE1_PCT=50
 
-    while IFS=$'\t' read -r kind a b c; do
+    while IFS=$'\t' read -r kind a b c d e; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
                 AUTO_PROVISION="$a"
                 MISSING_TIMEOUT="$b"
-                TEMPLATE_ID="$c"
+                IMAGE1_TEMPLATE_ID="$c"
+                IMAGE2_TEMPLATE_ID="$d"
+                IMAGE1_PCT="${e:-50}"
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"
@@ -213,11 +222,13 @@ load_state_file() {
     STATE_BUS_TO_VMID=()
     STATE_VMID_TO_BUS=()
     STATE_MISSING_BY_BUS=()
-    while IFS=$'\t' read -r vmid bus_path missing_since; do
+    STATE_VMID_TO_IMAGE=()
+    while IFS=$'\t' read -r vmid bus_path missing_since image_num; do
         [[ -z "$vmid" || -z "$bus_path" ]] && continue
         STATE_BUS_TO_VMID["$bus_path"]="$vmid"
         STATE_VMID_TO_BUS["$vmid"]="$bus_path"
         STATE_MISSING_BY_BUS["$bus_path"]="$missing_since"
+        STATE_VMID_TO_IMAGE["$vmid"]="${image_num:-1}"
     done < "$STATE_FILE"
 }
 
@@ -226,7 +237,7 @@ save_state_file() {
     {
         for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
             local_bus="${STATE_VMID_TO_BUS[$vmid]}"
-            printf '%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}"
+            printf '%s\t%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}" "${STATE_VMID_TO_IMAGE[$vmid]:-1}"
         done | sort -n
     } > "$STATE_FILE"
 }
@@ -286,10 +297,12 @@ build_usb_state_json() {
 }
 
 clone_vm_for_usb() {
-    local vmid="$1" bus_path="$2" product_name="$3"
+    local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}"
     local guest_ready=0
+    local template_id="$IMAGE1_TEMPLATE_ID"
+    [[ "$image_num" == "2" ]] && template_id="$IMAGE2_TEMPLATE_ID"
 
-    qm clone "$TEMPLATE_ID" "$vmid" --name "sim-client-$vmid"
+    qm clone "$template_id" "$vmid" --name "sim-client-$vmid"
     qm set "$vmid" --onboot 1 --startup "order=2,up=60"
     qm set "$vmid" -usb0 "host=$bus_path"
     qm start "$vmid"
@@ -329,11 +342,21 @@ provision_vm() {
         return 1
     fi
 
-    clone_vm_for_usb "$free_vmid" "$bus_path" "$product_name"
+    # Choose image based on current distribution vs target %
+    local img1_count=0 img2_count=0 total_vms image_num=1
+    for vmid in "${!STATE_VMID_TO_IMAGE[@]}"; do
+        [[ "${STATE_VMID_TO_IMAGE[$vmid]}" == "2" ]] && ((img2_count++)) || ((img1_count++))
+    done
+    total_vms=$(( img1_count + img2_count + 1 ))
+    local target_img1=$(( (IMAGE1_PCT * total_vms + 99) / 100 ))  # ceiling
+    [[ "$img1_count" -ge "$target_img1" ]] && image_num=2
+
+    clone_vm_for_usb "$free_vmid" "$bus_path" "$product_name" "$image_num"
     STATE_BUS_TO_VMID["$bus_path"]="$free_vmid"
     STATE_VMID_TO_BUS["$free_vmid"]="$bus_path"
     STATE_MISSING_BY_BUS["$bus_path"]=""
-    log "Provisioned VM $free_vmid for USB $bus_path ($vidpid)"
+    STATE_VMID_TO_IMAGE["$free_vmid"]="$image_num"
+    log "Provisioned VM $free_vmid for USB $bus_path ($vidpid) image=$image_num (${IMAGE1_PCT}% img1 target, ${img1_count}/${total_vms} currently img1)"
 }
 
 destroy_vm() {
@@ -346,6 +369,7 @@ destroy_vm() {
         unset 'STATE_BUS_TO_VMID[$bus_path]'
     fi
     unset 'STATE_VMID_TO_BUS[$vmid]'
+    unset 'STATE_VMID_TO_IMAGE[$vmid]'
     save_state_file
     log "Destroyed VM $vmid"
 }

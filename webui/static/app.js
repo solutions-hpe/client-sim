@@ -69,7 +69,9 @@ let currentSettings = {
   relay_api_key_configured: false,
   usb_vidpids: '[]',
   usb_missing_timeout: '60',
-  usb_template_id: '100',
+  vm_image_1_template_id: '100',
+  vm_image_2_template_id: '200',
+  vm_image_1_pct: '50',
   usb_auto_provision: 'off',
   usb_ignored_vidpids: '[]',
   vm_silent_timeout: '24',
@@ -291,7 +293,9 @@ const testTeamsBtn       = document.getElementById('test-teams-btn');
 const teamsNotifMsg      = document.getElementById('teams-notif-msg');
 const usbAutoProvisionInput = document.getElementById('usb-auto-provision');
 const usbMissingTimeoutInput = document.getElementById('usb-missing-timeout');
-const usbTemplateIdInput = document.getElementById('usb-template-id');
+const vmImage1TemplateIdInput = document.getElementById('vm-image-1-template-id');
+const vmImage2TemplateIdInput = document.getElementById('vm-image-2-template-id');
+const vmImage1PctInput = document.getElementById('vm-image-1-pct');
 const usbVidPidTbody = document.getElementById('usb-vidpid-tbody');
 const newVidPidInput = document.getElementById('new-vidpid');
 const newVidPidTypeInput = document.getElementById('new-vidpid-type');
@@ -406,7 +410,9 @@ function mergeSettings(next = {}) {
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
     usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
     usb_missing_timeout: next.usb_missing_timeout ?? currentSettings.usb_missing_timeout ?? '60',
-    usb_template_id: next.usb_template_id ?? currentSettings.usb_template_id ?? '100',
+    vm_image_1_template_id: next.vm_image_1_template_id ?? currentSettings.vm_image_1_template_id ?? '100',
+    vm_image_2_template_id: next.vm_image_2_template_id ?? currentSettings.vm_image_2_template_id ?? '200',
+    vm_image_1_pct: next.vm_image_1_pct ?? currentSettings.vm_image_1_pct ?? '50',
     usb_auto_provision: next.usb_auto_provision ?? currentSettings.usb_auto_provision ?? 'off',
     usb_ignored_vidpids: next.usb_ignored_vidpids ?? currentSettings.usb_ignored_vidpids ?? '[]',
     vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
@@ -681,7 +687,9 @@ function applySettingsToUI(s) {
   }
   if (usbAutoProvisionInput) usbAutoProvisionInput.checked = settings.usb_auto_provision === 'on';
   if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = settings.usb_missing_timeout ?? '60';
-  if (usbTemplateIdInput && !usbTemplateIdInput.matches(':focus')) usbTemplateIdInput.value = settings.usb_template_id ?? '100';
+  if (vmImage1TemplateIdInput && !vmImage1TemplateIdInput.matches(':focus')) vmImage1TemplateIdInput.value = settings.vm_image_1_template_id ?? '100';
+  if (vmImage2TemplateIdInput && !vmImage2TemplateIdInput.matches(':focus')) vmImage2TemplateIdInput.value = settings.vm_image_2_template_id ?? '200';
+  if (vmImage1PctInput && !vmImage1PctInput.matches(':focus')) vmImage1PctInput.value = settings.vm_image_1_pct ?? '50';
   if (vmSilentTimeoutInput && !vmSilentTimeoutInput.matches(':focus')) vmSilentTimeoutInput.value = settings.vm_silent_timeout ?? '24';
   const schedule = parseScheduleCron(settings.reclone_schedule_cron);
   if (recloneScheduleEnabledInput) recloneScheduleEnabledInput.checked = settings.reclone_schedule_enabled === 'on';
@@ -1213,11 +1221,15 @@ async function loadUsbConfig() {
   currentSettings.usb_vidpids = serializeJsonList(data.vidpids || []);
   currentSettings.usb_ignored_vidpids = serializeJsonList(data.ignored_vidpids || []);
   currentSettings.usb_missing_timeout = String(data.missing_timeout ?? currentSettings.usb_missing_timeout ?? '60');
-  currentSettings.usb_template_id = String(data.template_id ?? currentSettings.usb_template_id ?? '100');
+  currentSettings.vm_image_1_template_id = String(data.image1_template_id ?? currentSettings.vm_image_1_template_id ?? '100');
+  currentSettings.vm_image_2_template_id = String(data.image2_template_id ?? currentSettings.vm_image_2_template_id ?? '200');
+  currentSettings.vm_image_1_pct = String(data.image1_pct ?? currentSettings.vm_image_1_pct ?? '50');
   currentSettings.usb_auto_provision = data.auto_provision || 'off';
   if (usbAutoProvisionInput) usbAutoProvisionInput.checked = currentSettings.usb_auto_provision === 'on';
   if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = currentSettings.usb_missing_timeout;
-  if (usbTemplateIdInput && !usbTemplateIdInput.matches(':focus')) usbTemplateIdInput.value = currentSettings.usb_template_id;
+  if (vmImage1TemplateIdInput && !vmImage1TemplateIdInput.matches(':focus')) vmImage1TemplateIdInput.value = currentSettings.vm_image_1_template_id;
+  if (vmImage2TemplateIdInput && !vmImage2TemplateIdInput.matches(':focus')) vmImage2TemplateIdInput.value = currentSettings.vm_image_2_template_id;
+  if (vmImage1PctInput && !vmImage1PctInput.matches(':focus')) vmImage1PctInput.value = currentSettings.vm_image_1_pct;
   renderUsbVidPidTable();
   renderIgnoredUsbList();
 }
@@ -1248,7 +1260,9 @@ function collectUsbSettingsPayload() {
   return {
     usb_vidpids: currentSettings.usb_vidpids,
     usb_missing_timeout: String(usbMissingTimeoutInput?.value || currentSettings.usb_missing_timeout || '60'),
-    usb_template_id: String(usbTemplateIdInput?.value || currentSettings.usb_template_id || '100'),
+    vm_image_1_template_id: String(vmImage1TemplateIdInput?.value || currentSettings.vm_image_1_template_id || '100'),
+    vm_image_2_template_id: String(vmImage2TemplateIdInput?.value || currentSettings.vm_image_2_template_id || '200'),
+    vm_image_1_pct: String(vmImage1PctInput?.value ?? currentSettings.vm_image_1_pct ?? '50'),
     usb_auto_provision: usbAutoProvisionInput?.checked ? 'on' : 'off',
     usb_ignored_vidpids: currentSettings.usb_ignored_vidpids,
     vm_silent_timeout: String(vmSilentTimeoutInput?.value || currentSettings.vm_silent_timeout || '24'),

@@ -230,8 +230,9 @@ settings: dict[str, Any] = {
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
-    "usb_linux_template_id": str(_persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100"))),
-    "usb_windows_template_id": str(_persisted.get("usb_windows_template_id", "200")),
+    "vm_image_1_template_id": str(_persisted.get("vm_image_1_template_id", _persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100")))),
+    "vm_image_2_template_id": str(_persisted.get("vm_image_2_template_id", _persisted.get("usb_windows_template_id", "200"))),
+    "vm_image_1_pct": str(_persisted.get("vm_image_1_pct", "50")),
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
@@ -1366,8 +1367,9 @@ class SettingsUpdate(BaseModel):
     usb_vidpids: str | None = None
     usb_missing_timeout: str | None = None
     usb_template_id: str | None = None
-    usb_linux_template_id: str | None = None
-    usb_windows_template_id: str | None = None
+    vm_image_1_template_id: str | None = None
+    vm_image_2_template_id: str | None = None
+    vm_image_1_pct: str | None = None
     usb_auto_provision: str | None = None
     usb_ignored_vidpids: str | None = None
     vm_silent_timeout: str | None = None
@@ -1514,9 +1516,9 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
-        "template_id": _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1),
-        "linux_template_id": _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1),
-        "windows_template_id": _setting_int("usb_windows_template_id", 200, 1),
+        "image1_template_id": _setting_int("vm_image_1_template_id", _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1), 1),
+        "image2_template_id": _setting_int("vm_image_2_template_id", _setting_int("usb_windows_template_id", 200, 1), 1),
+        "image1_pct": max(0, min(100, int(str(settings.get("vm_image_1_pct", "50")).strip() or "50"))),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
     }
@@ -2241,8 +2243,9 @@ async def api_settings_get() -> dict[str, Any]:
         "hardware_checks": settings.get("hardware_checks", []),
         "usb_vidpids": settings.get("usb_vidpids", "[]"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
-        "usb_linux_template_id": settings.get("usb_linux_template_id", settings.get("usb_template_id", "100")),
-        "usb_windows_template_id": settings.get("usb_windows_template_id", "200"),
+        "vm_image_1_template_id": settings.get("vm_image_1_template_id", settings.get("usb_linux_template_id", settings.get("usb_template_id", "100"))),
+        "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
+        "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
@@ -2370,13 +2373,16 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["usb_missing_timeout"] = str(max(1, int(update.usb_missing_timeout.strip() or "60")))
 
     if update.usb_template_id is not None:
-        settings["usb_linux_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
+        settings["vm_image_1_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
 
-    if update.usb_linux_template_id is not None:
-        settings["usb_linux_template_id"] = str(max(1, int(update.usb_linux_template_id.strip() or "100")))
+    if update.vm_image_1_template_id is not None:
+        settings["vm_image_1_template_id"] = str(max(1, int(update.vm_image_1_template_id.strip() or "100")))
 
-    if update.usb_windows_template_id is not None:
-        settings["usb_windows_template_id"] = str(max(1, int(update.usb_windows_template_id.strip() or "200")))
+    if update.vm_image_2_template_id is not None:
+        settings["vm_image_2_template_id"] = str(max(1, int(update.vm_image_2_template_id.strip() or "200")))
+
+    if update.vm_image_1_pct is not None:
+        settings["vm_image_1_pct"] = str(max(0, min(100, int(update.vm_image_1_pct.strip() or "50"))))
 
     if update.usb_auto_provision is not None:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)

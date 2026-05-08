@@ -520,8 +520,9 @@
               <h3>USB Auto-Provisioning</h3>
               <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
               <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
-              <label>Linux Clone Template VMID: <input type="number" id="usb-linux-template-id" value="100"></label>
-              <label>Windows Clone Template VMID: <input type="number" id="usb-windows-template-id" value="200"></label>
+              <label>VM Image 1 Template VMID: <input type="number" id="vm-image-1-template-id" value="100" min="1"></label>
+              <label>VM Image 2 Template VMID: <input type="number" id="vm-image-2-template-id" value="200" min="1"></label>
+              <label>VM Image 1 %: <input type="number" id="vm-image-1-pct" value="50" min="0" max="100"> <small>(Image 2 = remainder)</small></label>
               <h4>Certified Devices</h4>
               <table id="usb-vidpid-table">
                 <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
