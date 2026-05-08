@@ -1724,6 +1724,7 @@ async def _run_self_update() -> None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env={**os.environ, "PATH": full_path},
+            start_new_session=True,  # detach from server's process group so SIGTERM on restart doesn't kill installer
         )
         assert proc.stdout is not None
         async for raw in proc.stdout:
