@@ -727,29 +727,42 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
                     or 0
                 )
             else:
-                # Classic API: query wireless clients with site filter
+                # Classic API: query wireless clients with site filter.
+                # Try both "site" and "site_name" — Central uses each in
+                # different API versions.
+                fetched = False
                 for clients_path in ["/monitoring/v2/clients/wireless", "/monitoring/v1/clients/wireless"]:
-                    resp = await client.get(
-                        f"{base_url}{clients_path}",
-                        headers=headers,
-                        params={"site": central_site, "limit": 1},
-                        timeout=20,
-                    )
-                    if resp.status_code == 401 and _can_refresh():
-                        ok, _ = await _refresh_central_token(client)
-                        if ok:
-                            headers = _central_headers()
+                    for site_param in ["site", "site_name"]:
                         resp = await client.get(
                             f"{base_url}{clients_path}",
                             headers=headers,
-                            params={"site": central_site, "limit": 1},
+                            params={site_param: central_site, "limit": 1},
                             timeout=20,
                         )
-                    if resp.status_code == 200:
-                        wl_count = int(resp.json().get("total", 0))
+                        if resp.status_code == 401 and _can_refresh():
+                            ok, _ = await _refresh_central_token(client)
+                            if ok:
+                                headers = _central_headers()
+                            resp = await client.get(
+                                f"{base_url}{clients_path}",
+                                headers=headers,
+                                params={site_param: central_site, "limit": 1},
+                                timeout=20,
+                            )
+                        logger.info(
+                            "Central wireless clients %s ?%s=%s → %s body=%s",
+                            clients_path, site_param, central_site,
+                            resp.status_code, resp.text[:200],
+                        )
+                        if resp.status_code == 200:
+                            body = resp.json()
+                            wl_count = int(body.get("total") or body.get("count") or 0)
+                            fetched = True
+                            break
+                        if resp.status_code == 404:
+                            continue
+                    if fetched:
                         break
-                    if resp.status_code == 404:
-                        continue
         except Exception as exc:
             logger.warning("Central wireless client count fetch failed for site %s: %s", central_site, exc)
         central_wireless_clients[wsite] = wl_count
