@@ -2,4 +2,4 @@
 Type=Application
 Name=JournalView
 Comment=Launch journalctl viewer
-Exec=gnome-terminal --geometry=80x20+840+0 -- journalctl -f
+Exec=gnome-terminal --geometry=80x20+580+0 -- journalctl -f

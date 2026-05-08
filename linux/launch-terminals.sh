@@ -9,7 +9,7 @@
 #   3. If not supported (smaller display), scale offsets proportionally
 #
 # Layout designed for 1920x1080 @ Monospace 13 (≈10px wide × 24px tall per cell):
-#   Dashboard  (84x43)  +0+0       — left column  (84×10 = 840px right edge)
+#   Dashboard  (58x43)  +0+0       — left column  (58×10 = 580px right edge)
 #   Journal    (88x20)  +960+0     — center, top   (960+88×10 = 1840px right edge)
 #   Startup    (88x15)  +1460+525  — right, lower  (20×24+chrome ≈ 525px Y start)
 #
@@ -131,8 +131,8 @@ echo "$(date) launch-terminals: screen=${SCREEN_W}x${SCREEN_H} output=${OUTPUT}"
 # ── Calculate pixel offsets proportional to actual resolution ────────────────
 # Baseline values match the 1920x1080 layout above (TARGET_W/H = 1920×1080).
 # On smaller screens the offsets scale down proportionally.
-JOUR_X=$(( SCREEN_W * 840  / TARGET_W ))
-START_X=$(( SCREEN_W * 1440 / TARGET_W ))
+JOUR_X=$(( SCREEN_W * 580  / TARGET_W ))
+START_X=$(( SCREEN_W * 1180 / TARGET_W ))
 START_Y=$(( SCREEN_H * 525  / TARGET_H ))
 
 # ── Ensure dbus session is available (gnome-terminal requires it) ────────────
@@ -174,7 +174,7 @@ _launch() {
 # Dashboard — left column, full height (58 cols matches dashboard.sh content width)
 _launch "Dashboard" \
   --title="Dashboard" \
-  --geometry="84x43+0+0" \
+  --geometry="58x43+0+0" \
   -- bash -c "$SCRIPTS/dashboard.sh" &
 
 # Journal viewer — center, top
