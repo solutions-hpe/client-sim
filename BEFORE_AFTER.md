@@ -34,7 +34,7 @@ apply_override() {
   [[ -n ${val} ]] && declare -g "$1=$val"
 }
 
-override_keys=(kill_switch sim_load public_repo ...)
+override_keys=(kill_switch sim_load github_repo ...)
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done

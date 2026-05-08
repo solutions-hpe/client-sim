@@ -238,7 +238,7 @@ GLOBAL_SECTION_KEYS = {
     "kill_switch",
     "rapid_update",
     "sim_load",
-    "public_repo",
+    "github_repo",
     "repo_location",
     "repo_branch",
     "vh_server",

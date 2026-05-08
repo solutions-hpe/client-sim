@@ -45,7 +45,7 @@ const CONFIG_SIMULATION_TOGGLES = [
   { section: 'simulation', key: 'syslog' },
   { section: 'simulation', key: 'allow_offline' },
   { section: 'simulation', key: 'rapid_update' },
-  { section: 'simulation', key: 'public_repo' },
+  { section: 'simulation', key: 'github_repo' },
   { section: 'simulation', key: 'smb_repo' }
 ];
 const CONFIG_BUCKET_TEXT_FIELDS = ['name', 'wsite', 'ssid', 'ssidpw'];

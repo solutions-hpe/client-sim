@@ -278,7 +278,7 @@ rapid_update=on                 # Keep scripts updated
 sim_load=50                     # Reasonable load
 
 # Use known-good repositories
-public_repo=on
+github_repo=on
 repo_location=https://github.com/solutions-hpe/client-sim.git
 repo_branch=main
 

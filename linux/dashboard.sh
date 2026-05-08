@@ -33,7 +33,7 @@ simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
-public_repo=$(get_value 'simulation' 'public_repo')
+github_repo=$(get_value 'simulation' 'github_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
@@ -64,7 +64,7 @@ apply_override() {
   val=$(get_value "$username" "$var")
   [[ -n "${val}" ]] && declare -g "$var=$val"
 }
-override_keys=(kill_switch sim_load public_repo repo_location vh_server site_based_ssid iperf_bw \
+override_keys=(kill_switch sim_load github_repo repo_location vh_server site_based_ssid iperf_bw \
   wsite sim_phy ssid dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail)
 for key in "${override_keys[@]}"; do

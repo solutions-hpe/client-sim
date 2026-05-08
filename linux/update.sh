@@ -15,7 +15,7 @@ web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
 smb_repo=$(get_value 'simulation' 'smb_repo')
 smb_address=$(get_value 'address' 'smb_address')
-public_repo=$(get_value 'simulation' 'public_repo')
+github_repo=$(get_value 'simulation' 'github_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 repo_branch=$(get_value 'simulation' 'repo_branch')
 
@@ -241,7 +241,7 @@ fi
 #============================================================
 # TIER 3 — GitHub
 #============================================================
-if [[ "$source_found" == false && "$public_repo" == "on" ]]; then
+if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
     echo "Tier 3: Trying GitHub ($repo_location)..." | tee -a "$debug"
     cd ~ || { echo "WARNING: Failed to cd to home directory" | tee -a "$debug"; exit 1; }
     repo_dir="client-sim"

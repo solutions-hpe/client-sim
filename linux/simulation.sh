@@ -85,7 +85,7 @@ set -a
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
-public_repo=$(get_value 'simulation' 'public_repo')
+github_repo=$(get_value 'simulation' 'github_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
 vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
@@ -134,7 +134,7 @@ apply_override() {
   local val=$(get_value $username "$var")
   [[ -n ${val} ]] && declare -g "$var=$val"
 }
-override_keys=(kill_switch sim_load public_repo repo_location vh_server site_based_ssid iperf_bw \
+override_keys=(kill_switch sim_load github_repo repo_location vh_server site_based_ssid iperf_bw \
   wsite sim_phy ssid ssidpw dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail smb_address ping_address dns_latency_1 dns_latency_2 \
   dns_latency_3 dns_bad_ip_1 dns_bad_ip_2 dns_bad_ip_3 dns_bad_record_1 dns_bad_record_2 \

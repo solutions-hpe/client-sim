@@ -529,7 +529,7 @@ The `simulation.conf` file uses INI format with three main sections:
 kill_switch=off              # Master control: on/off
 rapid_update=off             # Skip updates at startup
 sim_load=50                  # Simulation intensity (1-99)
-public_repo=on               # Use public GitHub repo
+github_repo=on               # Use public GitHub repo
 repo_location=https://github.com/solutions-hpe/client-sim.git
 repo_branch=main             # Git branch
 site_based_ssid=off          # Use site prefix in SSID
@@ -1021,7 +1021,7 @@ Store scripts on SMB server and configure auto-update:
 
 ```ini
 [simulation]
-public_repo=off
+github_repo=off
 repo_location=\\server\scripts
 rapid_update=on
 ```
