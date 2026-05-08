@@ -545,6 +545,97 @@
         <div id="central-checks-msg" class="settings-message hidden" role="alert"></div>
       </div>
     </div>
+
+    <!-- ── GitHub Sync Interval ── -->
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>GitHub Sync</h2>
+        <p>How often the server pulls the latest scripts from the repository. Default: 5 minutes.</p>
+      </div>
+      <div class="setup-form">
+        <div class="form-row">
+          <label class="form-label" for="sync-interval-input">Sync interval (seconds)</label>
+          <input id="sync-interval-input" class="form-input" type="number" min="60" max="86400" placeholder="300" style="width:120px;" />
+          <span class="form-hint" style="margin-left:.5rem;">Min 60 · Max 86400 (24 hr)</span>
+        </div>
+        <div class="form-actions">
+          <button id="save-sync-interval-btn" class="btn btn-primary" type="button">Save</button>
+        </div>
+        <div id="sync-interval-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
+    <!-- ── Email Notifications ── -->
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Email Notifications</h2>
+        <p>Send an email when a simulation check transitions from OK to failing.</p>
+      </div>
+      <div class="setup-form">
+        <div class="form-row">
+          <label class="form-label">Enable</label>
+          <label class="toggle-switch">
+            <input id="email-enabled-toggle" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-host">SMTP Host</label>
+          <input id="smtp-host" class="form-input" type="text" placeholder="smtp.example.com" />
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-port">SMTP Port</label>
+          <input id="smtp-port" class="form-input" type="number" placeholder="587" style="width:100px;" />
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-user">Username</label>
+          <input id="smtp-user" class="form-input" type="text" placeholder="user@example.com" />
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-password">Password</label>
+          <input id="smtp-password" class="form-input" type="password" placeholder="••••••••" autocomplete="new-password" />
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-from">From address</label>
+          <input id="smtp-from" class="form-input" type="email" placeholder="client-sim@example.com" />
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="smtp-to">To (comma-separated)</label>
+          <input id="smtp-to" class="form-input" type="text" placeholder="ops@example.com, noc@example.com" />
+        </div>
+        <div class="form-actions">
+          <button id="save-email-btn" class="btn btn-primary" type="button">Save</button>
+          <button id="test-email-btn" class="btn btn-secondary" type="button">Send Test</button>
+        </div>
+        <div id="email-notif-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
+    <!-- ── Teams Webhook ── -->
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Teams Webhook</h2>
+        <p>Post an Adaptive Card to a Microsoft Teams channel when a check fails.</p>
+      </div>
+      <div class="setup-form">
+        <div class="form-row">
+          <label class="form-label">Enable</label>
+          <label class="toggle-switch">
+            <input id="teams-enabled-toggle" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="teams-webhook-url">Webhook URL</label>
+          <input id="teams-webhook-url" class="form-input" type="url" placeholder="https://outlook.office.com/webhook/..." />
+        </div>
+        <div class="form-actions">
+          <button id="save-teams-btn" class="btn btn-primary" type="button">Save</button>
+          <button id="test-teams-btn" class="btn btn-secondary" type="button">Send Test</button>
+        </div>
+        <div id="teams-notif-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
   </main>
 
   <!-- ── Logs tab ── -->

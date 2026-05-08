@@ -191,6 +191,7 @@ settings: dict[str, Any] = {
         "teams_enabled": False,
         "teams_webhook_url": "",
     }),
+    "repo_sync_interval": _persisted.get("repo_sync_interval", SYNC_INTERVAL),
 }
 settings.setdefault("relay_url", None)
 settings.setdefault("relay_token", None)
@@ -1240,6 +1241,7 @@ class SettingsUpdate(BaseModel):
     monitored_checks: list[dict[str, str]] | None = None
     hardware_checks: list[dict[str, str]] | None = None
     notifications: dict[str, Any] | None = None
+    repo_sync_interval: int | None = None
     relay_url: str | None = None
     relay_token: str | None = None
     relay_site_id: str | None = None
@@ -1651,7 +1653,7 @@ async def sync_repo() -> None:
             repo_state["error"] = str(exc)
             logger.exception("Repository sync failed")
             await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc), "last_sync": repo_state["last_sync"]})
-        await asyncio.sleep(SYNC_INTERVAL)
+        await asyncio.sleep(settings.get("repo_sync_interval", SYNC_INTERVAL))
 
 
 def _get_repo_version() -> str | None:
@@ -1774,10 +1776,15 @@ async def api_settings_get() -> dict[str, Any]:
     return {
         "repo_url": REPO_URL,
         "repo_branch": settings["repo_branch"],
+        "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
         "github_token_configured": bool(settings.get("github_token")),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
         "monitored_checks": settings["monitored_checks"],
+        "notifications": {
+            k: v for k, v in settings.get("notifications", {}).items()
+            if k != "smtp_password"  # never expose password
+        },
         "relay": {
             "enabled": relay_state["enabled"],
             "url": relay_state["url"],
@@ -1891,6 +1898,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         if isinstance(merged_notif.get("smtp_to"), str):
             merged_notif["smtp_to"] = [a.strip() for a in merged_notif["smtp_to"].split(",") if a.strip()]
         settings["notifications"] = merged_notif
+
+    if update.repo_sync_interval is not None:
+        interval = max(60, min(86400, update.repo_sync_interval))  # clamp 1min–24hr
+        settings["repo_sync_interval"] = interval
 
     _save_settings()
 
@@ -2567,16 +2578,18 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
             continue
         online = compute_online(c.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
         last_seen_dt = c.get("last_seen")
+        active_sims = list(c.get("active_simulations", []))
         if h in configured:
             configured[h]["api_online"] = online
             configured[h]["api_last_seen"] = last_seen_dt.isoformat() if last_seen_dt else None
+            configured[h]["active_simulations"] = active_sims
         else:
-            # Ad-hoc client (not in client-setup.conf)
             configured[h] = {
                 "hostname": h,
                 "vmid": None,
                 "api_online": online,
                 "api_last_seen": last_seen_dt.isoformat() if last_seen_dt else None,
+                "active_simulations": active_sims,
                 "central_connected": None,
                 "source": "heartbeat",
             }
@@ -2960,6 +2973,44 @@ async def api_health() -> dict[str, Any]:
         "repo_synced": repo_state["synced"],
         "version": INSTALLER_VERSION,
     }
+
+
+@app.post("/api/notifications/test")
+async def api_notifications_test(body: dict[str, Any]) -> dict[str, Any]:
+    """Send a test notification via email or Teams."""
+    channel = body.get("channel", "")  # "email" | "teams"
+    notif = dict(settings.get("notifications", {}))
+    # Allow overriding with posted values (for unsaved fields)
+    notif.update({k: v for k, v in body.items() if k != "channel"})
+
+    test_transition = [{
+        "check_type": "sim",
+        "check_id": "test",
+        "check_name": "Test Notification",
+        "site": "test-site",
+        "old": "ok",
+        "new": "error",
+        "ts": time.time(),
+    }]
+
+    try:
+        if channel == "email":
+            if not notif.get("smtp_host") or not notif.get("smtp_to"):
+                raise HTTPException(status_code=422, detail="smtp_host and smtp_to are required")
+            await asyncio.to_thread(_send_email_notifications, notif, test_transition)
+        elif channel == "teams":
+            url = notif.get("teams_webhook_url", "")
+            if not url:
+                raise HTTPException(status_code=422, detail="teams_webhook_url is required")
+            await _send_teams_notifications(url, test_transition)
+        else:
+            raise HTTPException(status_code=422, detail="channel must be 'email' or 'teams'")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"status": "ok", "channel": channel}
 
 
 @app.websocket("/ws")

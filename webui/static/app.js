@@ -254,6 +254,26 @@ const saveRelayBtn = document.getElementById('save-relay-btn');
 const relayNowBtn = document.getElementById('relay-now-btn');
 const relayMsg = document.getElementById('relay-message');
 
+// Notifications + sync interval
+const syncIntervalInput  = document.getElementById('sync-interval-input');
+const saveSyncIntervalBtn = document.getElementById('save-sync-interval-btn');
+const syncIntervalMsg    = document.getElementById('sync-interval-msg');
+const emailEnabledToggle = document.getElementById('email-enabled-toggle');
+const smtpHost           = document.getElementById('smtp-host');
+const smtpPort           = document.getElementById('smtp-port');
+const smtpUser           = document.getElementById('smtp-user');
+const smtpPassword       = document.getElementById('smtp-password');
+const smtpFrom           = document.getElementById('smtp-from');
+const smtpTo             = document.getElementById('smtp-to');
+const saveEmailBtn       = document.getElementById('save-email-btn');
+const testEmailBtn       = document.getElementById('test-email-btn');
+const emailNotifMsg      = document.getElementById('email-notif-msg');
+const teamsEnabledToggle = document.getElementById('teams-enabled-toggle');
+const teamsWebhookUrl    = document.getElementById('teams-webhook-url');
+const saveTeamsBtn       = document.getElementById('save-teams-btn');
+const testTeamsBtn       = document.getElementById('test-teams-btn');
+const teamsNotifMsg      = document.getElementById('teams-notif-msg');
+
 function getCentralApiVersion() {
   const active = document.querySelector('#central-api-version-control button.active');
   return active ? active.dataset.value : 'classic';
@@ -394,6 +414,23 @@ function applySettingsToUI(s) {
     renderSiteClients(centralSiteDetailOpen);
     renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
   }
+
+  // Sync interval
+  if (syncIntervalInput && !syncIntervalInput.matches(':focus'))
+    syncIntervalInput.value = settings.repo_sync_interval ?? 300;
+
+  // Email notifications
+  const notif = settings.notifications || {};
+  if (emailEnabledToggle) emailEnabledToggle.checked = !!notif.email_enabled;
+  setInputValueIfIdle(smtpHost, notif.smtp_host || '');
+  if (smtpPort && !smtpPort.matches(':focus')) smtpPort.value = notif.smtp_port ?? 587;
+  setInputValueIfIdle(smtpUser, notif.smtp_user || '');
+  setInputValueIfIdle(smtpFrom, notif.smtp_from || '');
+  setInputValueIfIdle(smtpTo, Array.isArray(notif.smtp_to) ? notif.smtp_to.join(', ') : (notif.smtp_to || ''));
+
+  // Teams
+  if (teamsEnabledToggle) teamsEnabledToggle.checked = !!notif.teams_enabled;
+  setInputValueIfIdle(teamsWebhookUrl, notif.teams_webhook_url || '');
 }
 
 function showSettingsMessage(text, isError) {
@@ -2196,12 +2233,12 @@ function openSimGroup(key) {
     siteRow.appendChild(siteCount);
     siteRow.appendChild(siteBadge);
     siteRow.appendChild(arrow);
-    siteRow.addEventListener('click', () => openSimClients(simId, site, group.label));
+    siteRow.addEventListener('click', () => openSimClients(simId, site, group.key, centralPf, group.label));
     siteList.appendChild(siteRow);
   }
 }
 
-async function openSimClients(simId, wsite, checkLabel) {
+async function openSimClients(simId, wsite, testKey, alertPf, checkLabel) {
   if (!simClientsPanel || !simDetail) return;
   simDetail.classList.add('hidden');
   simClientsPanel.classList.remove('hidden');
@@ -2209,6 +2246,10 @@ async function openSimClients(simId, wsite, checkLabel) {
   if (simClientsTitle) simClientsTitle.textContent = checkLabel || 'Clients';
   if (simClientsSub)  simClientsSub.textContent  = `Site: ${wsite}`;
   if (simClientsList) simClientsList.innerHTML = '<div class="sim-clients-loading">Loading…</div>';
+
+  // Alert polarity: alert PRESENT in Central = GREEN (sim is working)
+  const alertMonitored = alertPf !== null && alertPf !== undefined;
+  const alertFiring    = alertMonitored && alertPf.firing === true;
 
   try {
     const data = await requestJson(`/api/simulations/${encodeURIComponent(simId)}/clients`);
@@ -2244,35 +2285,46 @@ async function openSimClients(simId, wsite, checkLabel) {
       const indicators = document.createElement('div');
       indicators.className = 'sim-client-indicators';
 
-      // API indicator
-      const apiInd = document.createElement('div');
-      apiInd.className = 'sim-client-indicator';
-      const apiDot = document.createElement('span');
-      apiDot.className = `ind-dot ${c.api_online ? 'green' : c.api_last_seen ? 'yellow' : 'grey'}`;
-      const apiLabel = document.createElement('span');
-      apiLabel.className = 'ind-label';
-      apiLabel.textContent = 'API';
-      apiInd.title = c.api_online ? 'Reporting to API' : c.api_last_seen ? 'API — offline' : 'API — never seen';
-      apiInd.appendChild(apiDot);
-      apiInd.appendChild(apiLabel);
+      // --- Icon 1: SIM RUNNING ---
+      const activeSims = Array.isArray(c.active_simulations) ? c.active_simulations : [];
+      const simRunning = activeSims.includes(testKey);
+      const simInd = document.createElement('div');
+      simInd.className = 'sim-client-indicator';
+      const simDot = document.createElement('span');
+      simDot.className = `ind-dot ${simRunning ? 'green' : c.api_online ? 'yellow' : 'grey'}`;
+      const simLabel = document.createElement('span');
+      simLabel.className = 'ind-label';
+      simLabel.textContent = 'SIM';
+      simInd.title = simRunning ? 'Simulation running'
+                   : c.api_online ? 'Online — sim not active'
+                   : 'Client offline';
+      simInd.appendChild(simDot);
+      simInd.appendChild(simLabel);
 
-      // Central indicator
-      const centralInd = document.createElement('div');
-      centralInd.className = 'sim-client-indicator';
-      const centralDot = document.createElement('span');
-      const centralConnected = c.central_connected;
-      centralDot.className = `ind-dot ${centralConnected === true ? 'green' : centralConnected === false ? 'grey' : 'unknown'}`;
-      const centralLabel = document.createElement('span');
-      centralLabel.className = 'ind-label';
-      centralLabel.textContent = 'Central';
-      centralInd.title = centralConnected === true ? 'Seen in Aruba Central'
-                       : centralConnected === false ? 'Not in Aruba Central'
-                       : 'Central not polled';
-      centralInd.appendChild(centralDot);
-      centralInd.appendChild(centralLabel);
+      // --- Icon 2: ALERT / INSIGHT ---
+      const alertInd = document.createElement('div');
+      alertInd.className = 'sim-client-indicator';
+      const alertDot = document.createElement('span');
+      const alertLabelEl = document.createElement('span');
+      alertLabelEl.className = 'ind-label';
+      alertLabelEl.textContent = 'ALERT';
+      if (!alertMonitored) {
+        alertDot.className = 'ind-dot unknown';
+        alertLabelEl.style.color = 'var(--muted)';
+        alertLabelEl.textContent = 'N/A';
+        alertInd.title = 'No Central check configured for this simulation';
+      } else if (alertFiring) {
+        alertDot.className = 'ind-dot green';
+        alertInd.title = `Alert detected in Central: ${alertPf.check_name || testKey}`;
+      } else {
+        alertDot.className = 'ind-dot red';
+        alertInd.title = `Alert NOT seen in Central: ${alertPf.check_name || testKey}`;
+      }
+      alertInd.appendChild(alertDot);
+      alertInd.appendChild(alertLabelEl);
 
-      indicators.appendChild(apiInd);
-      indicators.appendChild(centralInd);
+      indicators.appendChild(simInd);
+      indicators.appendChild(alertInd);
 
       card.appendChild(hostname);
       card.appendChild(lastSeen);
@@ -2747,7 +2799,138 @@ if (saveChecksBtn) {
   });
 }
 
-loadSettings();
+// ── Sync interval ──────────────────────────────────────────────────────────
+if (saveSyncIntervalBtn) {
+  saveSyncIntervalBtn.addEventListener('click', async () => {
+    const val = parseInt(syncIntervalInput?.value, 10);
+    if (!val || val < 60 || val > 86400) {
+      showInlineMessage(syncIntervalMsg, 'Enter a value between 60 and 86400 seconds.', true);
+      return;
+    }
+    saveSyncIntervalBtn.disabled = true;
+    saveSyncIntervalBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_sync_interval: val })
+      });
+      showInlineMessage(syncIntervalMsg, `Sync interval set to ${val}s. Takes effect on next cycle.`, false);
+    } catch (err) {
+      showInlineMessage(syncIntervalMsg, `Error: ${err.message}`, true);
+    } finally {
+      saveSyncIntervalBtn.disabled = false;
+      saveSyncIntervalBtn.textContent = 'Save';
+    }
+  });
+}
+
+// ── Email notifications ────────────────────────────────────────────────────
+function collectEmailPayload() {
+  return {
+    email_enabled: emailEnabledToggle?.checked ?? false,
+    smtp_host:     smtpHost?.value.trim() || '',
+    smtp_port:     parseInt(smtpPort?.value, 10) || 587,
+    smtp_user:     smtpUser?.value.trim() || '',
+    smtp_password: smtpPassword?.value || '',   // only sent if non-blank
+    smtp_from:     smtpFrom?.value.trim() || '',
+    smtp_to:       (smtpTo?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+  };
+}
+
+if (saveEmailBtn) {
+  saveEmailBtn.addEventListener('click', async () => {
+    const payload = collectEmailPayload();
+    // Don't send blank password (keep existing)
+    if (!payload.smtp_password) delete payload.smtp_password;
+    saveEmailBtn.disabled = true;
+    saveEmailBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifications: payload })
+      });
+      showInlineMessage(emailNotifMsg, 'Email settings saved.', false);
+    } catch (err) {
+      showInlineMessage(emailNotifMsg, `Error: ${err.message}`, true);
+    } finally {
+      saveEmailBtn.disabled = false;
+      saveEmailBtn.textContent = 'Save';
+    }
+  });
+}
+
+if (testEmailBtn) {
+  testEmailBtn.addEventListener('click', async () => {
+    const payload = { channel: 'email', ...collectEmailPayload() };
+    testEmailBtn.disabled = true;
+    testEmailBtn.textContent = 'Sending…';
+    try {
+      await requestJson('/api/notifications/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      showInlineMessage(emailNotifMsg, 'Test email sent — check your inbox.', false);
+    } catch (err) {
+      showInlineMessage(emailNotifMsg, `Failed: ${err.message}`, true, 8000);
+    } finally {
+      testEmailBtn.disabled = false;
+      testEmailBtn.textContent = 'Send Test';
+    }
+  });
+}
+
+// ── Teams webhook ──────────────────────────────────────────────────────────
+if (saveTeamsBtn) {
+  saveTeamsBtn.addEventListener('click', async () => {
+    const payload = {
+      teams_enabled:     teamsEnabledToggle?.checked ?? false,
+      teams_webhook_url: teamsWebhookUrl?.value.trim() || '',
+    };
+    saveTeamsBtn.disabled = true;
+    saveTeamsBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifications: payload })
+      });
+      showInlineMessage(teamsNotifMsg, 'Teams settings saved.', false);
+    } catch (err) {
+      showInlineMessage(teamsNotifMsg, `Error: ${err.message}`, true);
+    } finally {
+      saveTeamsBtn.disabled = false;
+      saveTeamsBtn.textContent = 'Save';
+    }
+  });
+}
+
+if (testTeamsBtn) {
+  testTeamsBtn.addEventListener('click', async () => {
+    const url = teamsWebhookUrl?.value.trim() || '';
+    if (!url) {
+      showInlineMessage(teamsNotifMsg, 'Enter a webhook URL first.', true);
+      return;
+    }
+    testTeamsBtn.disabled = true;
+    testTeamsBtn.textContent = 'Sending…';
+    try {
+      await requestJson('/api/notifications/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'teams', teams_webhook_url: url })
+      });
+      showInlineMessage(teamsNotifMsg, 'Test card posted to Teams.', false);
+    } catch (err) {
+      showInlineMessage(teamsNotifMsg, `Failed: ${err.message}`, true, 8000);
+    } finally {
+      testTeamsBtn.disabled = false;
+      testTeamsBtn.textContent = 'Send Test';
+    }
+  });
+}
 updateCentralToolbar();
 connectWebSocket();
 loadSimulations();

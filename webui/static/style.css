@@ -1169,6 +1169,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 }
 .sim-client-indicator .ind-dot.green  { background: #2ecc71; box-shadow: 0 0 4px #2ecc71aa; }
 .sim-client-indicator .ind-dot.yellow { background: #f1c40f; box-shadow: 0 0 4px #f1c40faa; }
+.sim-client-indicator .ind-dot.red    { background: #e74c3c; box-shadow: 0 0 4px #e74c3caa; }
 .sim-client-indicator .ind-dot.grey   { background: #666; }
 .sim-client-indicator .ind-dot.unknown { background: transparent; border: 1.5px solid #555; }
 .sim-client-indicator .ind-label { color: var(--muted); }
