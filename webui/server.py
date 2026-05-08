@@ -39,6 +39,71 @@ HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
 
+# ── Credential encryption ─────────────────────────────────────────────────────
+# Fernet symmetric encryption for sensitive fields in settings.json.
+# Key is generated once at install time and stored in .secret_key (chmod 600).
+# Falls back to plaintext if key file or cryptography package is unavailable.
+_ENC_PREFIX = "enc:"
+_SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
+_SENSITIVE_TOP_KEYS = {"relay_token", "github_token"}
+
+try:
+    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
+    _key_file = BASE_DIR / ".secret_key"
+    if _key_file.exists():
+        _fernet = _Fernet(_key_file.read_bytes().strip())
+    else:
+        _fernet = None
+        logger.warning("No .secret_key found — credentials stored as plaintext")
+except ImportError:
+    _fernet = None
+    logger.warning("cryptography package not installed — credentials stored as plaintext")
+
+
+def _encrypt_secret(value: str) -> str:
+    if not _fernet or not value:
+        return value
+    return _ENC_PREFIX + _fernet.encrypt(value.encode()).decode()
+
+
+def _decrypt_secret(value: str) -> str:
+    if not value or not value.startswith(_ENC_PREFIX):
+        return value  # plaintext or empty — return as-is (legacy compat)
+    if not _fernet:
+        return value  # no key — return ciphertext unchanged
+    try:
+        return _fernet.decrypt(value[len(_ENC_PREFIX):].encode()).decode()
+    except Exception:
+        logger.warning("Failed to decrypt a secret field — may be corrupted or from a different key")
+        return ""
+
+
+def _encrypt_settings(raw: dict) -> dict:
+    """Return a deep copy of settings with sensitive fields encrypted for disk storage."""
+    import copy
+    out = copy.deepcopy(raw)
+    for key in _SENSITIVE_TOP_KEYS:
+        if out.get(key):
+            out[key] = _encrypt_secret(out[key])
+    for key in _SENSITIVE_CFG_KEYS:
+        if out.get("central_config", {}).get(key):
+            out["central_config"][key] = _encrypt_secret(out["central_config"][key])
+    return out
+
+
+def _decrypt_settings(raw: dict) -> dict:
+    """Return a deep copy of settings with sensitive fields decrypted into memory."""
+    import copy
+    out = copy.deepcopy(raw)
+    for key in _SENSITIVE_TOP_KEYS:
+        if out.get(key):
+            out[key] = _decrypt_secret(out[key])
+    for key in _SENSITIVE_CFG_KEYS:
+        if out.get("central_config", {}).get(key):
+            out["central_config"][key] = _decrypt_secret(out["central_config"][key])
+    return out
+
+
 # Installer version — written by install-lxc.sh at install time
 _version_file = BASE_DIR / "INSTALLER_VERSION"
 INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exists() else "dev"
@@ -71,14 +136,15 @@ update_state: dict[str, Any] = {
 # ── Runtime settings (persisted to settings.json) ────────────────────────────
 def _load_persisted_settings() -> dict[str, Any]:
     try:
-        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return _decrypt_settings(raw)
     except Exception:
         return {}
 
 
 def _save_settings() -> None:
     try:
-        SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        SETTINGS_FILE.write_text(json.dumps(_encrypt_settings(settings), indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
 

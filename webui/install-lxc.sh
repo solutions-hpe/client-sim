@@ -104,7 +104,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   exit 1
 fi
 
-VERSION="0.18"
+VERSION="0.19"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -342,11 +342,12 @@ fi
 
 # Sync webui files from repo cache.
 # rsync --delete removes files in INSTALL_DIR that no longer exist in the repo.
-# venv/, .env, and settings.json are excluded so user data is never wiped.
+# venv/, .env, settings.json, and .secret_key are excluded so user data is never wiped.
 rsync -a --delete \
   --exclude='venv/' \
   --exclude='.env' \
   --exclude='settings.json' \
+  --exclude='.secret_key' \
   "$REPO_CACHE/webui/" "$INSTALL_DIR/" >>"$LOG" 2>&1
 
 # Restore settings.json if it existed before sync
@@ -355,6 +356,23 @@ if [[ -n "$SETTINGS_BACKUP" && ! -f "$INSTALL_DIR/settings.json" ]]; then
 fi
 
 ok "Dashboard files synced"
+
+###############################################################################
+# STEP 5b — Encryption key (generated once, never overwritten on update)
+# Uses stdlib only (base64 + os) so system python3 is sufficient here.
+# Fernet key = URL-safe base64 of 32 random bytes — no cryptography pkg needed.
+###############################################################################
+SECRET_KEY_FILE="$INSTALL_DIR/.secret_key"
+if [[ ! -f "$SECRET_KEY_FILE" ]]; then
+  info "Generating encryption key for credential storage..."
+  python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())" \
+    > "$SECRET_KEY_FILE"
+  chmod 600 "$SECRET_KEY_FILE"
+  chown root:root "$SECRET_KEY_FILE" 2>/dev/null || true
+  ok "Encryption key created at $SECRET_KEY_FILE"
+else
+  ok "Encryption key exists — preserved"
+fi
 
 ###############################################################################
 # STEP 6 — Python virtual environment + dependencies
