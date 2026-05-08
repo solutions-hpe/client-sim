@@ -10,6 +10,7 @@ SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-60}"
 STATE_FILE="/etc/client-sim-usb-state.conf"
+ENV_FILE="/etc/client-sim-proxmox-agent.env"
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
@@ -43,6 +44,56 @@ curl_api() {
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     [[ -n "$data" ]] && args+=(-d "$data")
     curl "${args[@]}"
+}
+
+json_field() {
+    local payload="$1" field="$2"
+    python3 -c "import json,sys; data=json.loads(sys.argv[1] or '{}'); value=data.get(sys.argv[2], ''); print(str(value))" "$payload" "$field" 2>/dev/null || true
+}
+
+save_api_key() {
+    local key="$1"
+    if grep -q '^CLIENT_SIM_API_KEY=' "$ENV_FILE" 2>/dev/null; then
+        sed -i "s/^CLIENT_SIM_API_KEY=.*/CLIENT_SIM_API_KEY=${key}/" "$ENV_FILE"
+    else
+        echo "CLIENT_SIM_API_KEY=${key}" >> "$ENV_FILE"
+    fi
+    API_KEY="$key"
+}
+
+register_and_wait_for_key() {
+    local my_hostname response approved key poll_response poll_approved poll_key
+    my_hostname=$(hostname)
+    log "No API key found. Registering with server..."
+
+    while true; do
+        response=$(curl -sS --max-time 10 -X POST "${SERVER_URL}/api/proxmox/register" \
+            -H "Content-Type: application/json" \
+            -d "{\"hostname\":\"$my_hostname\"}" 2>/dev/null || echo '{}')
+
+        approved=$(json_field "$response" approved)
+        key=$(json_field "$response" key)
+
+        if [[ "$approved" == "True" || "$approved" == "true" ]] && [[ -n "$key" ]]; then
+            log "Approved! Saving API key."
+            save_api_key "$key"
+            return 0
+        fi
+
+        log "Pending approval... checking again in 30s"
+        sleep 30
+
+        poll_response=$(curl -sS --max-time 10 \
+            "${SERVER_URL}/api/proxmox/key?hostname=$my_hostname" 2>/dev/null || echo '{}')
+        poll_approved=$(json_field "$poll_response" approved)
+        poll_key=$(json_field "$poll_response" key)
+
+        if [[ "$poll_approved" == "True" || "$poll_approved" == "true" ]] && [[ -n "$poll_key" ]]; then
+            log "Approved! Saving API key."
+            save_api_key "$poll_key"
+            return 0
+        fi
+    done
 }
 
 ensure_state_file() {
@@ -437,6 +488,9 @@ execute_vm_command() {
 
 log "Proxmox agent starting. Server: $SERVER_URL"
 log "Host block $host_id → VM range $start_vmid-$end_vmid"
+if [[ -z "$API_KEY" ]]; then
+    register_and_wait_for_key
+fi
 ensure_state_file
 refresh_usb_telemetry_only || true
 

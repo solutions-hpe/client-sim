@@ -96,6 +96,30 @@
       <span class="server-last-seen">Last seen: <span id="server-last-seen">—</span></span>
     </div>
 
+    <div id="proxmox-pending-card" class="card mb-3 d-none">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="badge bg-warning text-dark" id="proxmox-pending-badge">0</span>
+        <strong>Pending Proxmox Agents</strong>
+        <small class="text-muted ms-auto">Approve agents to allow telemetry</small>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0" id="proxmox-pending-table">
+          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
+          <tbody id="proxmox-pending-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="proxmox-approved-card" class="card mb-3 d-none">
+      <div class="card-header"><strong>Approved Proxmox Agents</strong></div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Hostname</th><th></th></tr></thead>
+          <tbody id="proxmox-approved-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="server-bulk-bar">
       <label><input type="checkbox" id="server-select-all"> Select All</label>
       <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>

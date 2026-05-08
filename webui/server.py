@@ -23,8 +23,8 @@ except ImportError:
     httpx = None
     _HTTPX_AVAILABLE = False
 
-from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,7 @@ REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.gi
 _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
+_SENSITIVE_TOP_DICT_KEYS = {"proxmox_approved_agents"}
 _SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
 
 try:
@@ -91,6 +92,13 @@ def _encrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_TOP_KEYS:
         if out.get(key):
             out[key] = _encrypt_secret(out[key])
+    for key in _SENSITIVE_TOP_DICT_KEYS:
+        value = out.get(key)
+        if isinstance(value, dict):
+            out[key] = {
+                str(dict_key): _encrypt_secret(str(dict_value)) if dict_value not in (None, "") else ""
+                for dict_key, dict_value in value.items()
+            }
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _encrypt_secret(out["central_config"][key])
@@ -107,6 +115,13 @@ def _decrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_TOP_KEYS:
         if out.get(key):
             out[key] = _decrypt_secret(out[key])
+    for key in _SENSITIVE_TOP_DICT_KEYS:
+        value = out.get(key)
+        if isinstance(value, dict):
+            out[key] = {
+                str(dict_key): _decrypt_secret(str(dict_value)) if dict_value not in (None, "") else ""
+                for dict_key, dict_value in value.items()
+            }
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _decrypt_secret(out["central_config"][key])
@@ -212,6 +227,7 @@ settings: dict[str, Any] = {
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
+    "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
     "usb_template_id": str(_persisted.get("usb_template_id", "100")),
@@ -1288,6 +1304,9 @@ proxmox_state: dict[str, Any] = {
     "unknown_usb": [],
     "usb_state": [],
 }
+# Pending/approved Proxmox agent registry
+pending_proxmox_agents: dict[str, dict[str, Any]] = {}
+approved_proxmox_agents: dict[str, str] = dict(settings.get("proxmox_approved_agents", {}))
 reclone_state: dict[str, Any] = {
     "status": "idle",
     "type": None,
@@ -1498,8 +1517,30 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
     }
 
 
+def _pending_proxmox_payload() -> list[dict[str, Any]]:
+    now = time.time()
+    return [
+        {
+            "hostname": hostname,
+            "ip": info.get("ip", ""),
+            "first_seen": info.get("first_seen", now),
+            "last_seen": info.get("last_seen", now),
+        }
+        for hostname, info in pending_proxmox_agents.items()
+    ]
+
+
+def _approved_proxmox_payload() -> list[dict[str, Any]]:
+    return [{"hostname": hostname} for hostname in approved_proxmox_agents]
+
+
 def _proxmox_status_payload() -> dict[str, Any]:
-    return {**proxmox_state, "reclone_state": dict(reclone_state)}
+    return {
+        **proxmox_state,
+        "pending_proxmox": _pending_proxmox_payload(),
+        "approved_proxmox": _approved_proxmox_payload(),
+        "reclone_state": dict(reclone_state),
+    }
 
 
 async def _broadcast_proxmox_state() -> None:
@@ -2415,8 +2456,34 @@ async def api_proxmox_reclone_status() -> dict[str, Any]:
 
 
 @app.post("/api/proxmox/telemetry")
-async def proxmox_telemetry(body: dict = Body(...)) -> dict[str, bool]:
+async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[str, bool] | JSONResponse:
     """Receive telemetry from the Proxmox host agent."""
+    node = body.get("node", {}) or {}
+    hostname = str(node.get("hostname", "") or "").strip()
+    api_key = request.headers.get("X-API-Key", "")
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    if approved_proxmox_agents:
+        if not hostname:
+            return JSONResponse({"error": "hostname required"}, status_code=400)
+        if hostname not in approved_proxmox_agents:
+            entry = pending_proxmox_agents.get(hostname)
+            if entry is None:
+                pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
+            else:
+                entry["ip"] = client_ip
+                entry["last_seen"] = now
+            await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+            return JSONResponse({"pending": True}, status_code=202)
+        if api_key != approved_proxmox_agents[hostname]:
+            return JSONResponse({"error": "invalid key"}, status_code=401)
+
+    if hostname in pending_proxmox_agents:
+        pending_proxmox_agents[hostname]["ip"] = client_ip
+        pending_proxmox_agents[hostname]["last_seen"] = now
+        await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+
     async with state_lock:
         client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
 
@@ -2429,8 +2496,8 @@ async def proxmox_telemetry(body: dict = Body(...)) -> dict[str, bool]:
         enriched_vms.append(enriched)
 
     proxmox_state["connected"] = True
-    proxmox_state["last_seen"] = time.time()
-    proxmox_state["node"] = body.get("node", {})
+    proxmox_state["last_seen"] = now
+    proxmox_state["node"] = node
     proxmox_state["vms"] = enriched_vms
     proxmox_state["unknown_usb"] = body.get("unknown_usb", [])
     proxmox_state["usb_state"] = body.get("usb_state", [])
@@ -2441,6 +2508,78 @@ async def proxmox_telemetry(body: dict = Body(...)) -> dict[str, bool]:
 @app.get("/api/proxmox/status")
 async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
+
+
+@app.post("/api/proxmox/register")
+async def proxmox_register(request: Request, body: dict = Body(...)) -> JSONResponse:
+    """Called by agent with no key. Adds to pending if not approved."""
+    hostname = str(body.get("hostname", "") or request.headers.get("X-Hostname", "")).strip()
+    if not hostname:
+        return JSONResponse({"error": "hostname required"}, status_code=400)
+    client_ip = request.client.host if request.client else "unknown"
+
+    if hostname in approved_proxmox_agents:
+        return JSONResponse({"approved": True, "key": approved_proxmox_agents[hostname]})
+
+    now = time.time()
+    entry = pending_proxmox_agents.get(hostname)
+    if entry is None:
+        pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
+    else:
+        entry["ip"] = client_ip
+        entry["last_seen"] = now
+    await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+    return JSONResponse({"pending": True}, status_code=202)
+
+
+@app.get("/api/proxmox/key")
+async def proxmox_get_key(hostname: str = Query(...)) -> JSONResponse:
+    """Agent polls this until approved. Returns key when ready."""
+    if hostname in approved_proxmox_agents:
+        return JSONResponse({"approved": True, "key": approved_proxmox_agents[hostname]})
+    if hostname in pending_proxmox_agents:
+        return JSONResponse({"pending": True}, status_code=202)
+    return JSONResponse({"error": "unknown hostname"}, status_code=404)
+
+
+@app.get("/api/proxmox/pending")
+async def proxmox_pending_list() -> list[dict[str, Any]]:
+    return _pending_proxmox_payload()
+
+
+@app.post("/api/proxmox/approve/{hostname}")
+async def proxmox_approve(hostname: str) -> dict[str, Any]:
+    key = str(uuid.uuid4())
+    approved_proxmox_agents[hostname] = key
+    pending_proxmox_agents.pop(hostname, None)
+    settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+    _save_settings()
+    await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+    await _broadcast_proxmox_state()
+    return {"approved": True, "hostname": hostname, "key": key}
+
+
+@app.post("/api/proxmox/reject/{hostname}")
+async def proxmox_reject(hostname: str) -> dict[str, Any]:
+    pending_proxmox_agents.pop(hostname, None)
+    await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+    await _broadcast_proxmox_state()
+    return {"rejected": True, "hostname": hostname}
+
+
+@app.delete("/api/proxmox/approved/{hostname}")
+async def proxmox_revoke(hostname: str) -> dict[str, Any]:
+    """Revoke an approved agent's key."""
+    approved_proxmox_agents.pop(hostname, None)
+    settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+    _save_settings()
+    await _broadcast_proxmox_state()
+    return {"revoked": True, "hostname": hostname}
+
+
+@app.get("/api/proxmox/approved")
+async def proxmox_approved_list() -> list[dict[str, Any]]:
+    return _approved_proxmox_payload()
 
 
 # ── Aruba Central API endpoints ───────────────────────────────────────────────
@@ -3601,7 +3740,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    if proxmox_state["connected"] or proxmox_state["vms"] or proxmox_state.get("usb_state") or proxmox_state.get("unknown_usb"):
+    if (
+        proxmox_state["connected"]
+        or proxmox_state["vms"]
+        or proxmox_state.get("usb_state")
+        or proxmox_state.get("unknown_usb")
+        or pending_proxmox_agents
+        or approved_proxmox_agents
+    ):
         await websocket.send_text(json.dumps({"type": "proxmox_update", **_proxmox_status_payload()}))
     await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))

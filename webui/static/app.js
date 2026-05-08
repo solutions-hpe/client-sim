@@ -98,6 +98,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
+    if (tab.dataset.tab === 'server') loadProxmoxApproved().catch(() => {});
     resetTabDrilldowns(tab.dataset.tab);
   });
 });
@@ -462,6 +463,8 @@ function sendProxmoxCommand(action, vmid) {
 function renderServerTab(data) {
   latestProxmoxData = data || latestProxmoxData;
   if (data?.reclone_state) latestRecloneState = data.reclone_state;
+  renderProxmoxPending(Array.isArray(latestProxmoxData.pending_proxmox) ? latestProxmoxData.pending_proxmox : []);
+  renderProxmoxApproved(Array.isArray(latestProxmoxData.approved_proxmox) ? latestProxmoxData.approved_proxmox : []);
 
   const tabBtn = document.getElementById('tab-server-btn');
   const tabPanel = document.getElementById('tab-server');
@@ -550,6 +553,82 @@ function renderServerTab(data) {
         .catch((err) => showNotification(`Error: ${err.message}`, 'error'));
     });
   });
+}
+
+function renderProxmoxPending(pending) {
+  const card = document.getElementById('proxmox-pending-card');
+  const badge = document.getElementById('proxmox-pending-badge');
+  const tbody = document.getElementById('proxmox-pending-tbody');
+  if (!card || !badge || !tbody) return;
+
+  if (!pending.length) {
+    card.classList.add('d-none');
+    tbody.innerHTML = '';
+    badge.textContent = '0';
+    return;
+  }
+
+  card.classList.remove('d-none');
+  badge.textContent = pending.length;
+  tbody.innerHTML = pending.map((agent) => {
+    const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
+    return `
+      <tr>
+        <td><strong>${escHtml(agent.hostname || '')}</strong></td>
+        <td>${escHtml(agent.ip || '')}</td>
+        <td>${agent.first_seen ? new Date(agent.first_seen * 1000).toLocaleString() : '—'}</td>
+        <td>${agent.last_seen ? new Date(agent.last_seen * 1000).toLocaleString() : '—'}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-success me-1" onclick="approveProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Approve</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="rejectProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Reject</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderProxmoxApproved(approved) {
+  const card = document.getElementById('proxmox-approved-card');
+  const tbody = document.getElementById('proxmox-approved-tbody');
+  if (!card || !tbody) return;
+
+  if (!approved.length) {
+    card.classList.add('d-none');
+    tbody.innerHTML = '';
+    return;
+  }
+
+  card.classList.remove('d-none');
+  tbody.innerHTML = approved.map((agent) => {
+    const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
+    return `
+      <tr>
+        <td><strong>${escHtml(agent.hostname || '')}</strong></td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-danger" onclick="revokeProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Revoke</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function approveProxmoxAgent(hostname) {
+  await requestJson(`/api/proxmox/approve/${encodeURIComponent(hostname)}`, { method: 'POST' });
+}
+
+async function rejectProxmoxAgent(hostname) {
+  await requestJson(`/api/proxmox/reject/${encodeURIComponent(hostname)}`, { method: 'POST' });
+}
+
+async function revokeProxmoxAgent(hostname) {
+  if (!confirm(`Revoke key for ${hostname}?`)) return;
+  await requestJson(`/api/proxmox/approved/${encodeURIComponent(hostname)}`, { method: 'DELETE' });
+  loadProxmoxApproved().catch(() => {});
+}
+
+async function loadProxmoxApproved() {
+  const approved = await requestJson('/api/proxmox/approved');
+  renderProxmoxApproved(Array.isArray(approved) ? approved : []);
 }
 
 function applySettingsToUI(s) {
@@ -1041,6 +1120,10 @@ async function requestJson(url, options = {}) {
     throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function parseJsonList(value) {
@@ -2519,7 +2602,14 @@ function handleMessage(message) {
   }
 
   if (message.type === 'proxmox_update') {
+    if (message.pending_proxmox !== undefined) renderProxmoxPending(message.pending_proxmox || []);
+    if (message.approved_proxmox !== undefined) renderProxmoxApproved(message.approved_proxmox || []);
     renderServerTab(message);
+    return;
+  }
+
+  if (message.type === 'proxmox_pending_update') {
+    renderProxmoxPending(message.pending || []);
     return;
   }
 
@@ -3847,7 +3937,14 @@ loadSimulations();
 requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
 requestJson('/api/kill-switch/status').then(d => applyGkillSwitch(d.value)).catch(() => {});
 requestJson('/api/proxmox/status').then((data) => {
-  if (data.connected || (data.vms || []).length || (data.usb_state || []).length || (data.unknown_usb || []).length) renderServerTab(data);
+  if (
+    data.connected
+    || (data.vms || []).length
+    || (data.usb_state || []).length
+    || (data.unknown_usb || []).length
+    || (data.pending_proxmox || []).length
+    || (data.approved_proxmox || []).length
+  ) renderServerTab(data);
 }).catch(() => {});
 requestJson('/api/proxmox/reclone-status').then(renderRecloneStatus).catch(() => {});
 
