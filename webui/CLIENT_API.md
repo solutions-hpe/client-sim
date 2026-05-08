@@ -37,7 +37,7 @@ Expected response:
   "clients": 0,
   "repo_synced": true,
   "repo_error": null,
-  "installer_version": "0.03"
+  "installer_version": "0.38"
 }
 ```
 
@@ -71,7 +71,7 @@ GET /api/health
   "clients": 4,
   "repo_synced": true,
   "repo_error": null,
-  "installer_version": "0.01"
+  "installer_version": "0.38"
 }
 ```
 
@@ -290,4 +290,6 @@ Message types broadcast by the server:
 - `overrides_cleared` — overrides were removed from a client
 - `repo_status` — git sync status changed
 - `settings_update` — dashboard settings changed
-- `central_update` — Aruba Central poll completed
+- `central_update` — Aruba Central poll completed; payload now also includes `hardware_alerts` and `client_count_status`
+- `version_status` — installer version check result (`current_version`, `available_version`, `last_checked`, `update_available`, `update_in_progress`, `update_error`)
+- `relay_status` — relay connection status

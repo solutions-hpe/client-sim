@@ -1,6 +1,6 @@
 # Version Management
 
-**Last Updated**: March 19, 2026  
+**Last Updated**: May 8, 2026
 **Format**: SemVer-inspired (MAJOR.MINOR format)
 
 ---
@@ -8,6 +8,7 @@
 ## 📋 Table of Contents
 
 - [Version Overview](#version-overview)
+- [WebUI Dashboard](#webui-dashboard)
 - [Linux Scripts](#linux-scripts)
 - [Windows Scripts](#windows-scripts)
 - [Version History](#version-history)
@@ -30,6 +31,22 @@ The Client Simulation Suite uses a distributed versioning system where each scri
 - Linux and Windows versions are kept synchronized for the same script
 - Version numbers match between platforms (e.g., apt_update.sh v0.02 ↔ apt_update.ps1 v0.02)
 - Cross-platform compatibility is maintained at the same version level
+
+---
+
+## WebUI Dashboard
+
+#### Dashboard / install-lxc.sh
+- **Current Version**: 0.38
+- **Purpose**: FastAPI dashboard, LXC installer, GitHub sync hub, Aruba Central monitoring, and notification workflows
+- **Status**: Stable
+- **Last Updated**: May 8, 2026
+
+**Major Version Milestones:**
+- **v0.33-v0.35**: Initial WebUI setup, Aruba Central integration, simulation tiles, hardware alert tiles, and client count monitoring
+- **v0.36**: Notifications UI (email SMTP + Teams webhook), configurable GitHub sync interval, sim site → client drill-down with SIM/ALERT indicators, sudoers wildcard fix for self-update, and `nm-applet` suppression
+- **v0.37**: Hardware Alerts Setup UI in the Setup tab, self-update `SIGTERM` fix (`start_new_session=True`), and clients table UX cleanup
+- **v0.38**: Monitored Central Checks added as the fourth Simulations tab section, with `renderChecksList()` triggered on settings updates
 
 ---
 
@@ -507,7 +524,7 @@ Select-String 'version = ' C:\Scripts\simulation.ps1
 
 ---
 
-**Last Updated**: March 19, 2026  
-**Maintained By**: GitHub Copilot  
+**Last Updated**: May 8, 2026
+**Maintained By**: GitHub Copilot
 **Status**: Active & Current ✅
 

@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## Table of Contents
 
 - [Overview](#overview)
+- [WebUI Dashboard](#webui-dashboard)
+- [Linux Client v0.13–v0.15](#linux-client-v013v015)
 - [Version 0.91 - simulation.sh & simulation.ps1](#version-091---simulationsh--simulationps1)
 - [Version 0.33 - startup.sh & startup.ps1](#version-033---startupsh--startupps1)
 - [Version 0.21 - update.sh & update.ps1](#version-021---updatesh--updateps1)
@@ -32,16 +34,81 @@ This project uses a distributed versioning system where:
 
 ### Release Cycle
 
-- **Current Release**: March 19, 2026
+- **Current Release**: May 8, 2026
 - **Platform Support**: 24 months from release
 - **Update Frequency**: Monthly monitoring, patches as needed
 
 ---
 
+## WebUI Dashboard
+
+**Component**: `webui/install-lxc.sh` / FastAPI dashboard
+**Current Version**: 0.38
+**Release Window**: Post-March 19, 2026
+
+### Version 0.38
+
+#### Added
+- Monitored Central Checks as the fourth section in the **Simulations** tab.
+
+#### Changed
+- `renderChecksList()` now reruns when settings are updated so monitored checks refresh immediately in the UI.
+
+### Version 0.37
+
+#### Added
+- **Hardware Alerts** setup UI in the **Setup** tab with **Load Available Alert Types**, checkbox selection, device-type icons, and **Save Hardware Checks**.
+
+#### Changed
+- Clients table UX updates: **SIM Bucket** column rename, **Iteration** column removal, red impact dot indicator, and a narrower **Status** column.
+
+#### Fixed
+- Self-update now launches the installer with `start_new_session=True` so the updater is not interrupted by `SIGTERM`.
+
+### Version 0.36
+
+#### Added
+- Notifications UI for **Email (SMTP)** and **Teams webhook** setup, including test actions.
+- Configurable GitHub sync interval for dashboard repo pulls.
+- Sim site → client drill-down with **SIM** and **ALERT** indicators in the Simulations tab.
+
+#### Fixed
+- Sudoers wildcard rule updated so self-update can run installer arguments safely.
+- `nm-applet` suppression added to prevent desktop pop-ups during startup.
+
+---
+
+## Linux Client v0.13–v0.15
+
+**Component**: `linux/VERSION` / Linux client runtime
+**Current Version**: 0.15
+**Release Window**: Post-March 19, 2026
+
+### Related Earlier Change
+- v0.10-v0.12 adjusted the terminal window width across releases from 58 columns to 80 columns (58 / 80 / 80).
+
+### Version 0.15
+
+#### Fixed
+- Fixed unquoted variable bugs in `simulation.sh` (`$sim_phy`, `$vh_server`, `$ssidpw_fail`) that caused `unary operator expected` errors.
+
+### Version 0.14
+
+#### Changed
+- Set `allow_offline=no` in `simulation.conf`.
+- Version bump release for the Linux client package.
+
+### Version 0.13
+
+#### Fixed
+- Suppressed the `nm-applet` authentication popup in `startup.sh`.
+
+---
+
 ## Version 0.91 - simulation.sh & simulation.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Added
@@ -63,15 +130,15 @@ This project uses a distributed versioning system where:
 - **User Override Section**: 76% code reduction (70 → 17 lines)
   - Replaced 35 repetitive if/tempvar patterns with function + array
   - Reduced cognitive complexity significantly
-  
+
 - **WiFi Connection Logic**: 75% code reduction (16 → 4 lines per usage)
   - Eliminated 7+ duplicate WiFi connection blocks
   - Created `connect_wifi()` and `manage_connection()` helpers
-  
+
 - **WWW Traffic Simulation**: 55% code reduction (29 → 13 lines)
   - Simplified random website selection using direct array indexing
   - Replaced two-loop counting with array length property
-  
+
 - **Script Execution**: 67% code reduction (27 → 9 lines)
   - Created `run_simulation()` helper function
   - Unified logging to centralized sim.log
@@ -110,8 +177,8 @@ This project uses a distributed versioning system where:
 
 ## Version 0.33 - startup.sh & startup.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Features
@@ -142,8 +209,8 @@ This project uses a distributed versioning system where:
 
 ## Version 0.21 - update.sh & update.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Features
@@ -175,8 +242,8 @@ This project uses a distributed versioning system where:
 
 ## Version 0.18 - vhconnect.sh & vhconnect.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Features
@@ -201,8 +268,8 @@ This project uses a distributed versioning system where:
 
 ## Version 0.06 - sys_mon.sh & sys_mon.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Features
@@ -231,8 +298,8 @@ This project uses a distributed versioning system where:
 
 ## Version 0.02 - apt_update.sh & apt_update.ps1
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### Added
@@ -280,8 +347,8 @@ sudo apt install -y git wget gnome-terminal network-manager qemu-guest-agent \
 
 ## Version 0.01 - dns_fail.sh, download.sh, iperf.sh & PowerShell Equivalents
 
-**Release Date**: March 19, 2026  
-**Status**: Stable  
+**Release Date**: March 19, 2026
+**Status**: Stable
 **Platform**: Linux (bash) & Windows (PowerShell)
 
 ### dns_fail.sh & dns_fail.ps1
@@ -514,8 +581,8 @@ When updating versions:
 
 ---
 
-**Last Updated**: March 19, 2026  
-**Format Version**: 1.0  
-**Maintained By**: GitHub Copilot  
+**Last Updated**: March 19, 2026
+**Format Version**: 1.0
+**Maintained By**: GitHub Copilot
 **Status**: Active & Current ✅
 

@@ -150,6 +150,25 @@ server_url=http://169.253.1.1:8000
 
 ---
 
+## Self-Update System
+
+The dashboard checks GitHub every 24 hours by comparing the installed `INSTALLER_VERSION` with the `VERSION=` value in the synced `webui/install-lxc.sh`.
+
+If a newer version is available, the self-update flow runs automatically:
+1. Pull the latest repo content
+2. Run the installer again in place
+3. Restart the dashboard service
+
+You can also trigger the same flow manually from **Setup** → **Check & Update Now**. The update log streams live in the UI, and any failure is surfaced there as an error.
+
+Self-update requires the sudoers rule written by the installer:
+
+```bash
+dashboard ALL=(root) NOPASSWD: /bin/bash /opt/client-sim-repo/webui/install-lxc.sh *
+```
+
+---
+
 ## DHCP Configuration
 
 All DHCP settings are configurable via environment variables before running the installer:
@@ -280,6 +299,13 @@ bash install-lxc.sh --branch my-branch
 
 The active branch is persisted in `settings.json` and survives service restarts.
 
+### GitHub sync interval
+
+The repo pull interval is configurable in **Setup** → **GitHub Sync**:
+- **Default**: `300` seconds
+- **Allowed range**: `60-86400` seconds
+- **Persistence**: Saved in `settings.json`
+
 ### Private repository access
 
 If your repo requires authentication, configure git credentials **before** installing or starting the service. The recommended approach for a private GitHub repo is a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens):
@@ -309,6 +335,23 @@ REPO_URL=https://<token>@github.com/your-org/client-sim.git bash install-lxc.sh
 | `GET /api/scripts/windows/<file>` | `windows/<file>` |
 
 Scripts are served as-is (raw file content). Config is served with any in-dashboard per-client overrides merged in before delivery.
+
+---
+
+## Notifications Setup
+
+Notifications are configured from **Setup** and support both email and Microsoft Teams.
+
+### Email
+- Enable/disable toggle
+- SMTP host, port, username, password
+- From and To addresses
+- **Save** plus **Send Test** action
+
+### Teams
+- Enable/disable toggle
+- Incoming webhook URL
+- **Save** plus **Send Test** action
 
 ---
 
@@ -491,6 +534,23 @@ Click any site card to open the detail view, which shows:
 
 ---
 
+## Simulations Tab
+
+### Drill-Down
+- **Level 1**: Simulation check tiles for **SIM**, **HW**, **CC**, and **Monitored**
+- **Level 2**: Click a sim tile to open the site list (for example `MIA`, `DFW`) with client count and Central status badge
+- **Level 3**: Click a site to open the client list, where each client shows two indicators:
+  - **SIM dot**: green = simulation running, yellow = online but not running, grey = offline
+  - **ALERT dot**: green = Central alert firing, red = not firing, `N/A` = no check configured
+
+### Hardware Alerts
+- **Setup**: **Setup** → **Hardware Alerts** card → **Load Available Alert Types** → checkbox list → **Save Hardware Checks**
+- **Monitoring**: The **Simulations** tab shows a **Hardware Alerts** section with green/red tiles
+- **Drill-down level 1**: Click a tile to see the sites with affected devices
+- **Drill-down level 2**: Device details currently render inline under each site
+
+---
+
 ## API summary
 
 | Method | Path | Description |
@@ -501,11 +561,16 @@ Click any site card to open the detail view, which shows:
 | `GET` | `/api/scripts/{platform}/{filename}` | Download a script |
 | `POST` | `/api/status` | Client beacon (heartbeat) |
 | `GET` | `/api/clients` | List all known clients |
+| `GET` | `/api/simulations` | Simulation groups with client counts and Central PASS/FAIL |
+| `GET` | `/api/simulations/{sim_id}/clients` | Per-client status for one sim bucket |
+| `GET` | `/api/hardware-alerts` | Current hardware alert devices merged with check metadata |
 | `POST` | `/api/clients/{hostname}/control` | Push override to a client |
 | `DELETE` | `/api/clients/{hostname}/control` | Clear client override |
 | `POST` | `/api/clients/all/control` | Push override to all clients |
 | `GET` | `/api/settings` | Get current dashboard settings |
 | `POST` | `/api/settings` | Update dashboard settings |
+| `POST` | `/api/notifications/test` | Send a test email or Teams card |
+| `POST` | `/api/self-update` | Trigger an immediate self-update check |
 | `POST` | `/api/central/test-connection` | Test Aruba Central token |
 | `GET` | `/api/central/available` | Get available alert types and insight categories |
 | `GET` | `/api/central/sites` | Get site list from Central |
