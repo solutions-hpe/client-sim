@@ -1282,7 +1282,10 @@ async function ignoreUsbDevice(vidpid) {
 }
 
 async function addUnknownToCertified(vidpid, name) {
-  if (!vidpid) return;
+  if (!vidpid) {
+    showNotification('Could not certify: device has no VID:PID', 'error');
+    return;
+  }
   const type = 'wireless'; // default; user can change in the certified table after
   const devices = parseJsonList(currentSettings.usb_vidpids).filter((item) => item?.vidpid !== vidpid);
   devices.push({ vidpid: vidpid.toLowerCase(), type, label: name || vidpid });

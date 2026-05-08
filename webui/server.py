@@ -2518,11 +2518,30 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
             enriched["last_seen"] = client_last_seen.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         enriched_vms.append(enriched)
 
+    # Filter unknown_usb against currently certified and ignored vidpids so the device
+    # disappears from the UI immediately after a certify/ignore action, even before the
+    # Proxmox agent picks up the updated config on its next poll.
+    certified_vidpids: set[str] = {
+        str(item.get("vidpid", "")).strip().lower()
+        for item in _parse_json_list(settings.get("usb_vidpids", "[]"))
+        if isinstance(item, dict) and item.get("vidpid")
+    }
+    ignored_vidpids: set[str] = {
+        str(v).strip().lower()
+        for v in _parse_json_list(settings.get("usb_ignored_vidpids", "[]"))
+        if str(v).strip()
+    }
+    exclude_vidpids = certified_vidpids | ignored_vidpids
+    raw_unknown = body.get("unknown_usb", [])
+    proxmox_state["unknown_usb"] = [
+        d for d in raw_unknown
+        if str(d.get("vidpid", "")).strip().lower() not in exclude_vidpids
+    ]
+
     proxmox_state["connected"] = True
     proxmox_state["last_seen"] = now
     proxmox_state["node"] = node
     proxmox_state["vms"] = enriched_vms
-    proxmox_state["unknown_usb"] = body.get("unknown_usb", [])
     proxmox_state["usb_state"] = body.get("usb_state", [])
     await _broadcast_proxmox_state()
     return {"ok": True}
