@@ -2392,3 +2392,31 @@ loadSimulations();
     }
   } catch (_) { /* silent — version badge is non-critical */ }
 })();
+
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+(function initTheme() {
+  const THEME_KEY = 'cs-dashboard-theme';
+  const THEMES = { hpe: 'HPE Classic', central: 'Central Theme' };
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme === 'central' ? 'central' : '');
+    const btn = document.getElementById('theme-toggle');
+    const lbl = document.getElementById('theme-toggle-label');
+    if (lbl) lbl.textContent = theme === 'central' ? 'HPE Classic' : 'Central Theme';
+    if (btn) btn.title = `Switch to ${theme === 'central' ? 'HPE Classic' : 'Central'} theme`;
+    localStorage.setItem(THEME_KEY, theme);
+  }
+
+  // Restore saved theme before first paint
+  const saved = localStorage.getItem(THEME_KEY) || 'hpe';
+  applyTheme(saved);
+
+  // Wire up button after DOM is ready
+  const btn = document.getElementById('theme-toggle');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      const current = localStorage.getItem(THEME_KEY) || 'hpe';
+      applyTheme(current === 'central' ? 'hpe' : 'central');
+    });
+  }
+})();

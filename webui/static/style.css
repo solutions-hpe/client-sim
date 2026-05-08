@@ -500,6 +500,111 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   white-space: nowrap;
 }
 
+/* ── Theme toggle button ─────────────────────────────────────────── */
+.theme-toggle-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 20px;
+  color: rgba(255,255,255,0.8);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.theme-toggle-btn:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.6);
+  color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   New Central Theme  [data-theme="central"]
+   Matches the Aruba Central internal-ui light theme:
+   white header, light-gray page, clean card/table styles.
+   ══════════════════════════════════════════════════════════════════ */
+
+[data-theme="central"] body {
+  background: #f4f5f7;
+}
+
+/* Header — white with green accent border */
+[data-theme="central"] .topbar {
+  background: #ffffff;
+  color: #1a1a2e;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+[data-theme="central"] .topbar h1 { color: #1a1a2e; }
+[data-theme="central"] .topbar h1 .brand-name {
+  color: #444;
+  border-right-color: #e0e0e0;
+}
+[data-theme="central"] .ws-status,
+[data-theme="central"] .repo-status {
+  color: #555;
+  border-right-color: #e0e0e0;
+}
+[data-theme="central"] .repo-label { color: #888; }
+[data-theme="central"] .installer-version-badge { color: #999; }
+[data-theme="central"] .theme-toggle-btn {
+  border-color: #d0d0d0;
+  color: #555;
+}
+[data-theme="central"] .theme-toggle-btn:hover {
+  background: #f0f0f0;
+  border-color: var(--hpe-green);
+  color: var(--hpe-green);
+}
+
+/* Footer */
+[data-theme="central"] .page-footer {
+  background: #f0f1f3;
+  color: #999;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Tab nav */
+[data-theme="central"] .tab-nav {
+  background: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+}
+[data-theme="central"] .tab { color: #666; }
+[data-theme="central"] .tab:hover { color: #1a1a2e; background: #f4f5f7; }
+[data-theme="central"] .tab.active {
+  color: var(--hpe-green);
+  border-bottom-color: var(--hpe-green);
+}
+
+/* Table headers — light gray instead of navy */
+[data-theme="central"] th {
+  background: #f4f5f7;
+  color: #333;
+  border-right-color: #e0e0e0;
+  border-bottom: 2px solid #d0d0d0;
+}
+
+/* Count / nav badges */
+[data-theme="central"] .count-badge {
+  background: #e8e8e8;
+  color: #333;
+}
+
+/* Toolbar buttons — keep green primary, adjust secondary */
+[data-theme="central"] .btn-secondary {
+  border-color: #d0d0d0;
+  color: #444;
+  background: #fff;
+}
+[data-theme="central"] .btn-secondary:hover {
+  background: #f0f0f0;
+  border-color: var(--hpe-green);
+  color: var(--hpe-green);
+}
+
+
 .repo-status {
   display: flex;
   align-items: center;
