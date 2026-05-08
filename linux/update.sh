@@ -223,7 +223,7 @@ fi
 # source of truth for scripts and per-device configs.
 #============================================================
 API_CACHE="/usr/local/scripts/.api-cache"
-if [[ "$source_found" == false && -f "$API_CACHE/VERSION" ]]; then
+if [[ "$source_found" == false && "$web_server" == "on" && -f "$API_CACHE/VERSION" ]]; then
     echo "Tier 2: Trying local API cache ($API_CACHE)..." | tee -a "$debug"
     cache_ver=$(cat "$API_CACHE/VERSION" 2>/dev/null | tr -d '[:space:]')
     local_ver=$(cat /usr/local/scripts/VERSION 2>/dev/null | tr -d '[:space:]')
