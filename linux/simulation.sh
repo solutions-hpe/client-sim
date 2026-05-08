@@ -145,11 +145,22 @@ done
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------
-#Checking global kill switch — source of truth is linux/kill_switch.txt in the repo,
-#synced to this device by update.sh. To kill all simulations globally, set the file
-#to "on" in the GitHub repo; update.sh will pull it down on the next cycle.
+#Checking global kill switch — fetched live at runtime, never from a local file.
+# Priority: 1) WebUI API  2) Raw GitHub (solutions-hpe/main)  3) default "off"
+# This ensures a forked repo cannot override the global kill switch.
 #------------------------------------------------------------
-gkill_switch=$(cat /usr/local/scripts/kill_switch.txt 2>/dev/null || echo "off")
+_web_server=$(get_value 'server' 'server_url' 2>/dev/null || echo "")
+gkill_switch="off"
+if [[ -n "$_web_server" ]]; then
+    _gks=$(curl -sf --max-time 5 "$_web_server/api/kill-switch" 2>/dev/null | tr -d '[:space:]')
+    [[ "$_gks" == "on" || "$_gks" == "off" ]] && gkill_switch="$_gks"
+fi
+if [[ "$gkill_switch" == "off" ]]; then
+    _gks=$(curl -sf --max-time 10 \
+        "https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt" \
+        2>/dev/null | tr -d '[:space:]')
+    [[ "$_gks" == "on" || "$_gks" == "off" ]] && gkill_switch="$_gks"
+fi
 #------------------------------------------------------------
 #Generating a random number to have some variance in the scripts
 #------------------------------------------------------------
@@ -497,8 +508,8 @@ fi
 # updates, and restart cleanly. We exec-restart (not source) so the bash
 # call stack stays flat — see comment at the bottom.
 #------------------------------------------------------------
-echo "Kill Switch is $kill_switch" | tee -a "$debug"
-if [ "$kill_switch" == "off" ]; then
+echo "Kill Switch is $kill_switch (global: $gkill_switch)" | tee -a "$debug"
+if [ "$kill_switch" == "off" ] && [ "$gkill_switch" == "off" ]; then
  for z in {1..100}; do
   #----------------------------------------------------------
   # Per-iteration gateway check — used by report_error() and to decide

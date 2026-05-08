@@ -1192,6 +1192,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
     background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
+    background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -1213,6 +1214,8 @@ COMMAND_EXPIRE_SECS = 900  # 15 minutes
 ws_connections: list[WebSocket] = []
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
+gkill_switch_state: dict[str, Any] = {"value": "off", "last_fetched": None, "error": None}
+GKILL_SWITCH_URL = "https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt"
 relay_state: dict[str, Any] = {
     "enabled": False,
     "connected": False,
@@ -1620,6 +1623,30 @@ async def schedule_check() -> None:
             continue
         last_schedule_trigger = trigger_key
         asyncio.create_task(_run_rolling_reclone("scheduled"))
+
+
+async def gkill_switch_poller() -> None:
+    """Fetch the global kill switch from solutions-hpe/main every 5 minutes.
+    Serves as the authoritative value for /api/kill-switch — never relies on
+    a local file so a forked repo cannot override it."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        while True:
+            try:
+                resp = await client.get(GKILL_SWITCH_URL)
+                value = resp.text.strip().lower()
+                if value not in ("on", "off"):
+                    value = "off"
+                prev = gkill_switch_state["value"]
+                gkill_switch_state["value"] = value
+                gkill_switch_state["last_fetched"] = time.time()
+                gkill_switch_state["error"] = None
+                if value != prev:
+                    logger.warning("Global kill switch changed: %s → %s", prev, value)
+                    await broadcast({"type": "gkill_switch_update", "value": value})
+            except Exception as exc:
+                gkill_switch_state["error"] = str(exc)
+                logger.warning("gkill_switch fetch failed: %s", exc)
+            await asyncio.sleep(300)
 
 
 async def expire_commands() -> None:
@@ -3350,6 +3377,24 @@ async def api_logs_stream():
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     return await _api_health_payload()
+
+
+@app.get("/api/kill-switch", response_class=PlainTextResponse)
+async def api_kill_switch() -> str:
+    """Return the current global kill switch value ('on' or 'off').
+    Clients should poll this as their primary source — always fetched from
+    solutions-hpe/main so no fork can override it."""
+    return gkill_switch_state["value"]
+
+
+@app.get("/api/kill-switch/status")
+async def api_kill_switch_status() -> dict[str, Any]:
+    """Return full gkill_switch state for the WebUI dashboard."""
+    return {
+        "value": gkill_switch_state["value"],
+        "last_fetched": gkill_switch_state["last_fetched"],
+        "error": gkill_switch_state["error"],
+    }
 
 
 @app.post("/api/commands")

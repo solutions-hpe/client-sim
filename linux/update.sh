@@ -40,7 +40,13 @@ copy_local_files() {
         [[ "$(basename "$_f")" == "update.sh" ]] && continue
         sudo cp "$_f" /usr/local/scripts/
     done
-    (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
+    # Never copy kill_switch.txt — gkill_switch is always fetched live at runtime
+    local filtered_txt=()
+    for _t in "${txt_files[@]}"; do
+        [[ "$(basename "$_t")" == "kill_switch.txt" ]] && continue
+        filtered_txt+=("$_t")
+    done
+    (( ${#filtered_txt[@]} ))  && sudo cp "${filtered_txt[@]}"  /usr/local/scripts/
     (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
 
@@ -316,7 +322,13 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                     [[ "$_f" == "update.sh" ]] && continue
                     sudo cp "$_f" /usr/local/scripts/
                 done
-                (( ${#txt_files[@]} ))     && sudo cp "${txt_files[@]}"     /usr/local/scripts/
+                # Never copy kill_switch.txt — gkill_switch always fetched live
+                _filtered_txt=()
+                for _t in "${txt_files[@]}"; do
+                    [[ "$_t" == "kill_switch.txt" ]] && continue
+                    _filtered_txt+=("$_t")
+                done
+                (( ${#_filtered_txt[@]} ))  && sudo cp "${_filtered_txt[@]}"  /usr/local/scripts/
                 [[ -f "VERSION" ]]         && sudo cp VERSION               /usr/local/scripts/VERSION
                 cd ..
             else
