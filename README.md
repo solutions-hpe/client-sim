@@ -1108,6 +1108,21 @@ See [CHANGELOG.md](./CHANGELOG.md) for history.
 
 ---
 
+## Development
+
+### Versioning
+
+`linux/VERSION` and the `VERSION=` line in `webui/install-lxc.sh` share a single version number, auto-incremented by 0.01 on every commit via a pre-commit hook.
+
+After cloning, activate the hook once:
+```bash
+git config core.hooksPath .githooks
+```
+
+Without this, commits won't bump the version and the two files can drift out of sync.
+
+---
+
 ## Related Projects
 
 - [HPE Solutions](https://github.com/solutions-hpe/)
