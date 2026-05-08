@@ -26,41 +26,14 @@ const IMPACT_LABELS = {
   www_traffic: 'ℹ Web Traffic',
   ping_test: 'ℹ Ping Traffic'
 };
-const CONFIG_SIMULATION_FIELDS = [
-  { section: 'simulation', key: 'sim_load', type: 'number' },
-  { section: 'simulation', key: 'ssid', type: 'text' },
-  { section: 'simulation', key: 'ssidpw', type: 'text' },
-  { section: 'simulation', key: 'iperf_bw', type: 'text' },
-  { section: 'simulation', key: 'reboot_schedule', type: 'number' },
-  { section: 'server', key: 'server_url', type: 'text' },
-  { section: 'address', key: 'syslog_server', type: 'text' },
-  { section: 'address', key: 'ping_address', type: 'text' },
-  { section: 'address', key: 'iperf_server', type: 'text' }
-];
-const CONFIG_SIMULATION_TOGGLES = [
-  { section: 'simulation', key: 'kill_switch' },
-  { section: 'simulation', key: 'web_server' },
-  { section: 'simulation', key: 'vh_server' },
-  { section: 'simulation', key: 'site_based_ssid' },
-  { section: 'simulation', key: 'syslog' },
-  { section: 'simulation', key: 'allow_offline' },
-  { section: 'simulation', key: 'rapid_update' },
-  { section: 'simulation', key: 'github_repo' },
-  { section: 'simulation', key: 'smb_repo' }
-];
-const CONFIG_BUCKET_TEXT_FIELDS = ['name', 'wsite', 'ssid', 'ssidpw'];
-const CONFIG_BUCKET_TOGGLE_FIELDS = [
-  'dns_fail',
-  'dhcp_fail',
-  'assoc_fail',
-  'port_flap',
-  'ssidpw_fail',
-  'auth_fail',
-  'ping_test',
-  'download',
-  'www_traffic',
-  'iperf'
-];
+// ── Dynamic simulation.conf editor helpers ────────────────────────
+const BUCKET_SECTION_RE = /^s\d+$/;
+const BOOL_VALUE_SET = new Set(['on', 'off', 'yes', 'no', 'true', 'false']);
+const PW_KEY_RE = /pw$|password|secret/i;
+const KNOWN_SECTION_LABELS = { simulation: 'Simulation', server: 'Server', address: 'Addresses' };
+function _fmtConfigKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+function _fmtSection(s) { return KNOWN_SECTION_LABELS[s] || s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '); }
+function _isBoolVal(v) { return BOOL_VALUE_SET.has(String(v ?? '').toLowerCase().trim()); }
 
 const clients = new Map();
 const rowRefs = new Map();
@@ -156,9 +129,6 @@ function activateSetupSubtab(subtabId = 'setup-github') {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
-  if (subtabId === 'setup-simulation') {
-    loadConfigEditor().catch(() => {});
-  }
 }
 
 // ── Repo sync status ──────────────────────────────────────────────
@@ -2180,35 +2150,111 @@ function renderSimulationConfigForm() {
   if (!configSimulationForm) return;
   configSimulationForm.textContent = '';
 
-  CONFIG_SIMULATION_FIELDS.forEach((field) => {
-    const values = configData[field.section] || {};
-    const { group } = buildConfigInput(field, values[field.key] || '');
-    configSimulationForm.appendChild(group);
-  });
+  const sections = Object.keys(configData).filter(s => !BUCKET_SECTION_RE.test(s));
+  if (sections.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'No configuration sections found — sync from GitHub first.';
+    configSimulationForm.appendChild(p);
+    return;
+  }
 
-  const toggleTitle = document.createElement('h3');
-  toggleTitle.textContent = 'Feature Toggles';
-  configSimulationForm.appendChild(toggleTitle);
+  sections.forEach(section => {
+    const values = configData[section] || {};
+    const card = document.createElement('div');
+    card.className = 'setup-card setup-section-gap';
 
-  const toggleGrid = document.createElement('div');
-  toggleGrid.className = 'toggle-grid';
-  CONFIG_SIMULATION_TOGGLES.forEach((field) => {
-    const values = configData[field.section] || {};
-    toggleGrid.appendChild(buildConfigToggle(field, values[field.key]));
+    const hdr = document.createElement('div');
+    hdr.className = 'setup-card-header';
+    const h2 = document.createElement('h2');
+    h2.textContent = `[${_fmtSection(section)}]`;
+    hdr.appendChild(h2);
+    card.appendChild(hdr);
+
+    const form = document.createElement('div');
+    form.className = 'setup-form';
+
+    const textPairs = [], boolPairs = [];
+    Object.entries(values).forEach(([key, val]) => {
+      (_isBoolVal(val) ? boolPairs : textPairs).push([key, val]);
+    });
+
+    textPairs.forEach(([key, val]) => {
+      const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = _fmtConfigKey(key);
+      form.appendChild(group);
+    });
+
+    if (boolPairs.length) {
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Flags';
+      form.appendChild(h3);
+      const grid = document.createElement('div');
+      grid.className = 'toggle-grid';
+      boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
+      form.appendChild(grid);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.textContent = `Save [${section}] to GitHub`;
+    actions.appendChild(saveBtn);
+    form.appendChild(actions);
+
+    const msg = document.createElement('div');
+    msg.className = 'settings-message hidden';
+    form.appendChild(msg);
+
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        const updates = collectSectionedConfigState(form)[section] || {};
+        const result = await requestJson('/api/config/simulation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section, updates }),
+        });
+        showInlineMessage(msg, result?.pushed ? `[${section}] saved and pushed to GitHub.` : `[${section}] saved. GitHub push skipped.`, false, 7000);
+        await loadConfigEditor(true);
+      } catch (error) {
+        showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = `Save [${section}] to GitHub`;
+      }
+    });
+
+    card.appendChild(form);
+    configSimulationForm.appendChild(card);
   });
-  configSimulationForm.appendChild(toggleGrid);
 }
 
 function renderBucketEditors() {
   if (!configBucketsContainer) return;
   configBucketsContainer.textContent = '';
 
-  for (let index = 0; index < 10; index += 1) {
-    const section = `s${index}`;
+  const buckets = Object.keys(configData)
+    .filter(s => BUCKET_SECTION_RE.test(s))
+    .sort((a, b) => parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
+
+  if (buckets.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'No bucket sections (s0–s9) found in simulation.conf.';
+    configBucketsContainer.appendChild(p);
+    return;
+  }
+
+  buckets.forEach((section, idx) => {
     const values = configData[section] || {};
     const details = document.createElement('details');
     details.className = 'setup-card setup-section-gap';
-    if (index === 0) details.open = true;
+    if (idx === 0) details.open = true;
 
     const summary = document.createElement('summary');
     summary.textContent = buildBucketSummary(section, values);
@@ -2217,29 +2263,43 @@ function renderBucketEditors() {
     const body = document.createElement('div');
     body.className = 'setup-form';
 
-    const trackedValues = { ...values };
-    CONFIG_BUCKET_TEXT_FIELDS.forEach((key) => {
-      const { group, input } = buildConfigInput({ section, key, type: 'text' }, values[key] || '');
+    const tracked = { ...values };
+
+    // Text inputs (preserve file order, skip booleans and sim_phy)
+    Object.entries(values).forEach(([key, val]) => {
+      if (key === 'sim_phy' || _isBoolVal(val)) return;
+      const { group, input } = buildConfigInput(
+        { section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' },
+        val,
+      );
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = _fmtConfigKey(key);
       input.addEventListener('input', () => {
-        trackedValues[key] = input.value.trim();
-        summary.textContent = buildBucketSummary(section, trackedValues);
+        tracked[key] = input.value.trim();
+        summary.textContent = buildBucketSummary(section, tracked);
       });
       body.appendChild(group);
     });
 
-    const { group: simPhyGroup } = buildConfigSelect(section, 'sim_phy', ['wireless', 'ethernet'], values.sim_phy || 'wireless');
-    body.appendChild(simPhyGroup);
+    // sim_phy select (if present)
+    if ('sim_phy' in values) {
+      const { group } = buildConfigSelect(section, 'sim_phy', ['wireless', 'ethernet'], values.sim_phy || 'wireless');
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = 'Sim Phy';
+      body.appendChild(group);
+    }
 
-    const toggleTitle = document.createElement('h3');
-    toggleTitle.textContent = 'Flags';
-    body.appendChild(toggleTitle);
-
-    const toggleGrid = document.createElement('div');
-    toggleGrid.className = 'toggle-grid';
-    CONFIG_BUCKET_TOGGLE_FIELDS.forEach((key) => {
-      toggleGrid.appendChild(buildConfigToggle({ section, key }, values[key]));
-    });
-    body.appendChild(toggleGrid);
+    // Toggle flags
+    const boolPairs = Object.entries(values).filter(([k, v]) => k !== 'sim_phy' && _isBoolVal(v));
+    if (boolPairs.length) {
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Flags';
+      body.appendChild(h3);
+      const grid = document.createElement('div');
+      grid.className = 'toggle-grid';
+      boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
+      body.appendChild(grid);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'form-actions';
@@ -2255,7 +2315,6 @@ function renderBucketEditors() {
     body.appendChild(message);
 
     saveButton.addEventListener('click', async () => {
-      const originalLabel = saveButton.textContent;
       saveButton.disabled = true;
       saveButton.textContent = 'Saving…';
       try {
@@ -2263,7 +2322,7 @@ function renderBucketEditors() {
         const result = await requestJson('/api/config/simulation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ section, updates })
+          body: JSON.stringify({ section, updates }),
         });
         showInlineMessage(message, result?.pushed ? `Saved ${section} and pushed to GitHub.` : `Saved ${section}. GitHub push skipped.`, false, 7000);
         await loadConfigEditor(true);
@@ -2271,13 +2330,13 @@ function renderBucketEditors() {
         showInlineMessage(message, `Error: ${error.message}`, true, 7000);
       } finally {
         saveButton.disabled = false;
-        saveButton.textContent = originalLabel;
+        saveButton.textContent = 'Save Bucket';
       }
     });
 
     details.appendChild(body);
     configBucketsContainer.appendChild(details);
-  }
+  });
 }
 
 async function loadConfigEditor(force = false) {
@@ -3276,38 +3335,11 @@ if (centralTabButton) {
 
 if (configTabButton) {
   configTabButton.addEventListener('click', () => {
-    if (setupTabButton) setupTabButton.click();
-    activateSetupSubtab('setup-simulation');
-    loadConfigEditor(true).catch(() => {});
+    loadConfigEditor().catch(() => {});
   });
 }
 
-if (configSimulationSaveBtn) {
-  configSimulationSaveBtn.addEventListener('click', async () => {
-    const originalLabel = configSimulationSaveBtn.textContent;
-    configSimulationSaveBtn.disabled = true;
-    configSimulationSaveBtn.textContent = 'Saving…';
-    try {
-      const payloads = collectSectionedConfigState(configSimulationForm);
-      const results = [];
-      for (const [section, updates] of Object.entries(payloads)) {
-        results.push(await requestJson('/api/config/simulation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ section, updates })
-        }));
-      }
-      const pushed = results.some((result) => result?.pushed);
-      showInlineMessage(configSimulationMsg, pushed ? 'Simulation settings saved and pushed to GitHub.' : 'Simulation settings saved. GitHub push skipped.', false, 7000);
-      await loadConfigEditor(true);
-    } catch (error) {
-      showInlineMessage(configSimulationMsg, `Error: ${error.message}`, true, 7000);
-    } finally {
-      configSimulationSaveBtn.disabled = false;
-      configSimulationSaveBtn.textContent = originalLabel;
-    }
-  });
-}
+// configSimulationSaveBtn removed — each section now has its own per-section Save button
 
 if (setupSubtabButtons.length) {
   setupSubtabButtons.forEach((btn) => {

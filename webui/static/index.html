@@ -285,7 +285,18 @@
 
   <!-- ── Config tab ── -->
   <main id="tab-config" class="page tab-content hidden">
-  </main>
+  <!-- Dynamic sections rendered by renderSimulationConfigSections() -->
+  <div id="config-simulation-form"></div>
+
+  <div class="setup-card setup-section-gap">
+    <div class="setup-card-header">
+      <h2>Bucket Profiles</h2>
+      <p>Review and save individual simulation bucket sections (<strong>s0–s9</strong>).</p>
+    </div>
+    <div id="config-buckets-container"></div>
+    <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
+  </div>
+</main>
 
   <!-- ── Setup tab ── -->
   <main id="tab-setup" class="page tab-content hidden">
@@ -416,27 +427,12 @@
 
     <div id="setup-simulation" class="setup-subpanel hidden">
       <div class="setup-card">
-            <div class="setup-card-header">
-              <h2>Simulation Settings</h2>
-              <p>Edit the shared settings stored in <strong>configs/simulation.conf</strong> and push updates to GitHub.</p>
-            </div>
-            <div id="config-simulation-form" class="setup-form"></div>
-            <div class="setup-form">
-              <div class="form-actions">
-                <button id="config-simulation-save" class="btn btn-primary" type="button">Save to GitHub</button>
-              </div>
-              <div id="config-simulation-message" class="settings-message hidden" role="alert"></div>
-            </div>
-          </div>
-
-      <div class="setup-card setup-section-gap">
-            <div class="setup-card-header">
-              <h2>Bucket Profiles</h2>
-              <p>Review and save individual <strong>s0-s9</strong> simulation buckets.</p>
-            </div>
-            <div id="config-buckets-container"></div>
-            <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
-          </div>
+        <div class="setup-card-header">
+          <h2>Simulation Configuration</h2>
+          <p>Edit <strong>simulation.conf</strong> — all sections and keys are shown automatically.
+             Use the <strong>⚙ Config</strong> tab to edit settings and bucket profiles.</p>
+        </div>
+      </div>
 
       <div class="card setup-section-gap" id="commands-card">
             <div class="card-header">
