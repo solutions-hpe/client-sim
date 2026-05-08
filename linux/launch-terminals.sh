@@ -9,7 +9,7 @@
 #   3. If not supported (smaller display), scale offsets proportionally
 #
 # Layout designed for 1920x1080 @ Monospace 13 (≈10px wide × 24px tall per cell):
-#   Dashboard  (96x43)  +0+0       — left column  (96×10 = 960px right edge)
+#   Dashboard  (84x43)  +0+0       — left column  (84×10 = 840px right edge)
 #   Journal    (88x20)  +960+0     — center, top   (960+88×10 = 1840px right edge)
 #   Startup    (88x15)  +1460+525  — right, lower  (20×24+chrome ≈ 525px Y start)
 #
@@ -174,7 +174,7 @@ _launch() {
 # Dashboard — left column, full height (58 cols matches dashboard.sh content width)
 _launch "Dashboard" \
   --title="Dashboard" \
-  --geometry="96x43+0+0" \
+  --geometry="84x43+0+0" \
   -- bash -c "$SCRIPTS/dashboard.sh" &
 
 # Journal viewer — center, top
