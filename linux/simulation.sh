@@ -388,7 +388,18 @@ connect_wifi() {
     return 1
   fi
   echo "Attempting to connect to $target_ssid" | tee -a "$debug"
-  if ! nmcli device wifi connect "$target_ssid" password "$ssidpw"; then
+  # Pre-store the connection profile with credentials so NetworkManager never
+  # needs to prompt via a graphical agent (prevents the desktop auth dialog).
+  # If a profile already exists for this SSID, delete and recreate it to
+  # ensure the password is current.
+  nmcli connection delete "$target_ssid" >/dev/null 2>&1 || true
+  nmcli connection add type wifi \
+    con-name "$target_ssid" \
+    ssid "$target_ssid" \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$ssidpw" \
+    ifname "$wladapter" >/dev/null 2>&1
+  if ! nmcli connection up "$target_ssid" ifname "$wladapter"; then
     report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
     return 1
   fi
