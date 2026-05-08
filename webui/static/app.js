@@ -2160,7 +2160,7 @@ function openSimGroup(key) {
   for (const sim of group.sims) {
     const site = sim.wsite || '(no site)';
     if (!siteMap.has(site)) {
-      siteMap.set(site, { active: 0, centralPf: null });
+      siteMap.set(site, { active: 0, centralPf: null, simId: sim.id });
     }
     const entry = siteMap.get(site);
     entry.active += sim.active_client_count || 0;
@@ -2168,11 +2168,13 @@ function openSimGroup(key) {
     if (sim.central_pass_fail && !entry.centralPf) entry.centralPf = sim.central_pass_fail;
   }
 
-  for (const [site, { active, centralPf }] of siteMap) {
+  for (const [site, { active, centralPf, simId }] of siteMap) {
     const { label, cls } = simStatusBadge(centralPf);
 
     const siteRow = document.createElement('div');
     siteRow.className = 'sim-site-row';
+    siteRow.style.cursor = 'pointer';
+    siteRow.title = 'Click to see clients at this site';
 
     const siteName = document.createElement('span');
     siteName.className = 'sim-site-name';
@@ -2186,10 +2188,99 @@ function openSimGroup(key) {
     siteBadge.className = `sim-status-badge ${cls}`;
     siteBadge.textContent = label;
 
+    const arrow = document.createElement('span');
+    arrow.style.cssText = 'margin-left:auto;color:var(--muted);font-size:0.85rem;';
+    arrow.textContent = '›';
+
     siteRow.appendChild(siteName);
     siteRow.appendChild(siteCount);
     siteRow.appendChild(siteBadge);
+    siteRow.appendChild(arrow);
+    siteRow.addEventListener('click', () => openSimClients(simId, site, group.label));
     siteList.appendChild(siteRow);
+  }
+}
+
+async function openSimClients(simId, wsite, checkLabel) {
+  if (!simClientsPanel || !simDetail) return;
+  simDetail.classList.add('hidden');
+  simClientsPanel.classList.remove('hidden');
+
+  if (simClientsTitle) simClientsTitle.textContent = checkLabel || 'Clients';
+  if (simClientsSub)  simClientsSub.textContent  = `Site: ${wsite}`;
+  if (simClientsList) simClientsList.innerHTML = '<div class="sim-clients-loading">Loading…</div>';
+
+  try {
+    const data = await requestJson(`/api/simulations/${encodeURIComponent(simId)}/clients`);
+    const clientList = data.clients || [];
+    if (!simClientsList) return;
+    simClientsList.textContent = '';
+
+    if (!clientList.length) {
+      simClientsList.innerHTML = '<div class="sim-client-card" style="color:var(--muted)">No clients configured for this simulation.</div>';
+      return;
+    }
+
+    for (const c of clientList) {
+      const card = document.createElement('div');
+      card.className = 'sim-client-card';
+
+      // Hostname
+      const hostname = document.createElement('span');
+      hostname.className = 'sim-client-card-hostname';
+      hostname.textContent = c.hostname;
+
+      // Last seen
+      const lastSeen = document.createElement('span');
+      lastSeen.style.cssText = 'font-size:0.78rem;color:var(--muted);';
+      if (c.api_last_seen) {
+        const ago = Math.round((Date.now() - new Date(c.api_last_seen).getTime()) / 60000);
+        lastSeen.textContent = ago < 2 ? 'just now' : `${ago}m ago`;
+      } else {
+        lastSeen.textContent = 'never seen';
+      }
+
+      // Indicators container
+      const indicators = document.createElement('div');
+      indicators.className = 'sim-client-indicators';
+
+      // API indicator
+      const apiInd = document.createElement('div');
+      apiInd.className = 'sim-client-indicator';
+      const apiDot = document.createElement('span');
+      apiDot.className = `ind-dot ${c.api_online ? 'green' : c.api_last_seen ? 'yellow' : 'grey'}`;
+      const apiLabel = document.createElement('span');
+      apiLabel.className = 'ind-label';
+      apiLabel.textContent = 'API';
+      apiInd.title = c.api_online ? 'Reporting to API' : c.api_last_seen ? 'API — offline' : 'API — never seen';
+      apiInd.appendChild(apiDot);
+      apiInd.appendChild(apiLabel);
+
+      // Central indicator
+      const centralInd = document.createElement('div');
+      centralInd.className = 'sim-client-indicator';
+      const centralDot = document.createElement('span');
+      const centralConnected = c.central_connected;
+      centralDot.className = `ind-dot ${centralConnected === true ? 'green' : centralConnected === false ? 'grey' : 'unknown'}`;
+      const centralLabel = document.createElement('span');
+      centralLabel.className = 'ind-label';
+      centralLabel.textContent = 'Central';
+      centralInd.title = centralConnected === true ? 'Seen in Aruba Central'
+                       : centralConnected === false ? 'Not in Aruba Central'
+                       : 'Central not polled';
+      centralInd.appendChild(centralDot);
+      centralInd.appendChild(centralLabel);
+
+      indicators.appendChild(apiInd);
+      indicators.appendChild(centralInd);
+
+      card.appendChild(hostname);
+      card.appendChild(lastSeen);
+      card.appendChild(indicators);
+      simClientsList.appendChild(card);
+    }
+  } catch (err) {
+    if (simClientsList) simClientsList.innerHTML = `<div class="sim-client-card" style="color:#e74c3c">Error loading clients: ${err.message}</div>`;
   }
 }
 
@@ -2322,6 +2413,10 @@ if (checksFilterInput) {
 }
 
 if (simDetailBack) simDetailBack.addEventListener('click', closeSimDetail);
+if (simClientsBack) simClientsBack.addEventListener('click', () => {
+  if (simClientsPanel) simClientsPanel.classList.add('hidden');
+  if (simDetail) simDetail.classList.remove('hidden');
+});
 if (hwDetailBack) hwDetailBack.addEventListener('click', closeHwDetail);
 if (ccDetailBack) ccDetailBack.addEventListener('click', closeCcDetail);
 
