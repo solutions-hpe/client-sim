@@ -46,6 +46,10 @@ chmod +x "$AGENT_BIN"
 echo "  OK: $AGENT_BIN"
 
 echo "[2/5] Writing environment file..."
+# Preserve existing API key if --key was not provided
+if [[ -z "$API_KEY" && -f "$ENV_FILE" ]]; then
+    API_KEY=$(grep -oP '(?<=CLIENT_SIM_API_KEY=).*' "$ENV_FILE" || true)
+fi
 cat > "$ENV_FILE" <<ENV
 CLIENT_SIM_SERVER_URL=${SERVER_URL}
 CLIENT_SIM_API_KEY=${API_KEY}
@@ -75,9 +79,10 @@ WantedBy=multi-user.target
 UNIT
 echo "  OK: /etc/systemd/system/${SERVICE_NAME}.service"
 
-echo "[4/5] Enabling and starting service..."
+echo "[4/5] Enabling and (re)starting service..."
 systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME"
+systemctl enable "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
 sleep 3
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "  OK: service running"
