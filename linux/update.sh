@@ -95,6 +95,23 @@ check_api_up() {
 }
 
 #============================================================
+# Wait for API server on first boot (retry up to 2 minutes)
+#============================================================
+if [[ "$web_server" == "on" && -n "$server_url" ]]; then
+    _api_wait_retries=24   # 24 × 5s = 120s max
+    _api_wait_count=0
+    while ! check_api_up "$server_url" 2>/dev/null; do
+        _api_wait_count=$((_api_wait_count + 1))
+        if [[ $_api_wait_count -ge $_api_wait_retries ]]; then
+            echo "API not reachable after 120s — proceeding without server" | tee -a "$debug" "$log"
+            break
+        fi
+        echo "API not ready (attempt $_api_wait_count/$_api_wait_retries) — retrying in 5s..." | tee -a "$debug"
+        sleep 5
+    done
+fi
+
+#============================================================
 # TIER 1 — Web Server
 #============================================================
 echo "Updating Scripts" | tee -a "$debug" "$log"

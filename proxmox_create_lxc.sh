@@ -252,7 +252,8 @@ pct create "$CTID" "${TMPL_STORAGE}:vztmpl/${TEMPLATE}" \
   --unprivileged 1 \
   --features    nesting=1 \
   --start       0 \
-  --onboot      1
+  --onboot      1 \
+  --startup     "order=1,up=30"
 
 ok "Container ${CTID} created"
 

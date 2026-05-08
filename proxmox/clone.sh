@@ -133,6 +133,9 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
         qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null
 
         qm clone "$tpl_id" "$vmid" --name "${vm_name}-${vmid}"
+        # Enable autostart; startup order 2 with 60s up-delay so the WebUI LXC
+        # (order 1) is fully ready before clients try to connect to the API.
+        qm set "$vmid" --onboot 1 --startup "order=2,up=60"
         qm start "$vmid"
 
         # Wait for the QEMU guest agent to become responsive before running commands
@@ -169,6 +172,7 @@ if [[ "$cmd" == "re-create" ]]; then
         qm destroy "$i" --skiplock --purge --destroy-unreferenced-disks
 
         qm clone "$tpl_id" "$i" --name "${vm_name}-${i}" --pool "$pool_name"
+        qm set "$i" --onboot 1 --startup "order=2,up=60"
         qm start "$i"
         sleep "$sleep_time"
     done
