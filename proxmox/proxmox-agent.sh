@@ -464,10 +464,20 @@ collect_telemetry() {
 
     vms_json="[]"
     if command -v qm &>/dev/null; then
-        vms_json=$(qm list 2>/dev/null | awk -v t1="$IMAGE1_TEMPLATE_ID" -v t2="$IMAGE2_TEMPLATE_ID" 'NR>1 {
-            type_val = ($1+0==t1+0) ? "template-1" : ($1+0==t2+0) ? "template-2" : "vm"
-            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"mem\":%s,\"maxmem\":%s,\"type\":\"%s\"},",
-            $1,$2,$3,$4,$5,type_val
+        # Detect Proxmox-native templates by checking each VM's config for "template: 1"
+        local tmpl_ids=""
+        for conf in /etc/pve/qemu-server/*.conf; do
+            [[ -f "$conf" ]] || continue
+            grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
+        done
+        tmpl_ids="${tmpl_ids%,}"
+        vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
+            n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
+        }
+        NR>1 {
+            is_tmpl = ($1 in tmpl_set) ? "true" : "false"
+            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"mem\":%s,\"maxmem\":%s,\"is_template\":%s},",
+            $1,$2,$3,$4,$5,is_tmpl
         }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
     fi
 

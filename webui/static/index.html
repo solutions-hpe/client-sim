@@ -167,14 +167,33 @@
       </div>
     </div>
 
-    <table class="data-table" id="server-vm-table">
+    <!-- VM Templates (read-only — managed by Proxmox, cloned by auto-provisioning) -->
+    <div id="server-template-section" class="setup-card setup-section-gap hidden">
+      <div class="setup-card-header">
+        <h2>VM Templates</h2>
+        <p>These are Proxmox template VMs used as clone sources. They cannot be started or modified from here.</p>
+      </div>
+      <table class="data-table" id="server-template-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>VM ID</th>
+            <th>Name</th>
+            <th>RAM</th>
+          </tr>
+        </thead>
+        <tbody id="server-template-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Active VMs -->
+    <table class="data-table setup-section-gap" id="server-vm-table">
       <thead>
         <tr>
           <th style="width:36px;"><input type="checkbox" id="server-th-check" disabled></th>
           <th>Status</th>
           <th>VM ID</th>
           <th>Name</th>
-          <th>Type</th>
           <th>CPU %</th>
           <th>RAM</th>
           <th>Actions</th>

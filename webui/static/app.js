@@ -533,6 +533,8 @@ function renderServerTab(data) {
   renderUsbSummary(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
 
+  const templateSection = document.getElementById('server-template-section');
+  const templateTbody = document.getElementById('server-template-tbody');
   const tbody = document.getElementById('server-vm-tbody');
   const empty = document.getElementById('server-empty');
   const selectAll = document.getElementById('server-select-all');
@@ -543,14 +545,38 @@ function renderServerTab(data) {
   );
   if (!tbody) return;
 
+  const templates = vms.filter((v) => v.is_template === true || v.is_template === 'true' || v.type === 'template-1' || v.type === 'template-2');
+  const regularVms = vms.filter((v) => !templates.includes(v));
+
+  // Render templates section
+  if (templateSection && templateTbody) {
+    if (templates.length > 0) {
+      templateSection.classList.remove('hidden');
+      templateTbody.innerHTML = templates.map((vm) => {
+        const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
+        const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
+        const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+        return `<tr class="vm-row-template">
+          <td>${statusDot} ${vm.status || 'unknown'}</td>
+          <td>${vm.vmid}</td>
+          <td>${escHtml(vm.name || '—')}</td>
+          <td>${memUsedGB}/${memTotalGB} GB</td>
+        </tr>`;
+      }).join('');
+    } else {
+      templateSection.classList.add('hidden');
+      templateTbody.innerHTML = '';
+    }
+  }
+
   tbody.innerHTML = '';
   if (selectAll) selectAll.checked = false;
   if (thCheck) {
-    thCheck.disabled = vms.length === 0;
+    thCheck.disabled = regularVms.length === 0;
     thCheck.checked = false;
   }
 
-  if (vms.length === 0) {
+  if (regularVms.length === 0) {
     if (empty) empty.style.display = '';
     return;
   }
@@ -564,41 +590,24 @@ function renderServerTab(data) {
     { action: 'reclone_vm', label: '⎘', title: 'Reclone' },
     { action: 'delete_vm', label: '✕', title: 'Delete' },
   ];
-  const TEMPLATE_ACTIONS = [
-    { action: 'start_vm', label: '▶', title: 'Start' },
-    { action: 'stop_vm', label: '■', title: 'Stop' },
-  ];
 
-  vms.forEach((vm) => {
+  regularVms.forEach((vm) => {
     const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
     const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
     const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
-    const isTemplate = vm.type === 'template-1' || vm.type === 'template-2';
-    const actions = isTemplate ? TEMPLATE_ACTIONS : VM_ACTIONS;
-    const actionBtns = actions.map((a) =>
+    const actionBtns = VM_ACTIONS.map((a) =>
       `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}" title="${a.title}">${a.label}</button>`
     ).join(' ');
     const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
       ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
       : '';
 
-    let typeBadge;
-    if (vm.type === 'template-1') {
-      typeBadge = '<span class="badge badge-blue" title="VM Image 1 template — cloned for new USB devices">Template Img 1</span>';
-    } else if (vm.type === 'template-2') {
-      typeBadge = '<span class="badge badge-blue" title="VM Image 2 template — cloned for new USB devices">Template Img 2</span>';
-    } else {
-      typeBadge = '<span class="badge badge-grey">VM</span>';
-    }
-
     const tr = document.createElement('tr');
-    if (isTemplate) tr.classList.add('vm-row-template');
     tr.innerHTML = `
-      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"${isTemplate ? ' disabled' : ''}></td>
+      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
       <td>${statusDot} ${vm.status || 'unknown'}</td>
       <td>${vm.vmid}</td>
-      <td>${vm.name || '—'}${recoveryBadge}</td>
-      <td>${typeBadge}</td>
+      <td>${escHtml(vm.name || '—')}${recoveryBadge}</td>
       <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
       <td>${memUsedGB}/${memTotalGB} GB</td>
       <td>${actionBtns}</td>
