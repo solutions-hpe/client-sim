@@ -230,7 +230,8 @@ settings: dict[str, Any] = {
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
-    "usb_template_id": str(_persisted.get("usb_template_id", "100")),
+    "usb_linux_template_id": str(_persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100"))),
+    "usb_windows_template_id": str(_persisted.get("usb_windows_template_id", "200")),
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
@@ -1365,6 +1366,8 @@ class SettingsUpdate(BaseModel):
     usb_vidpids: str | None = None
     usb_missing_timeout: str | None = None
     usb_template_id: str | None = None
+    usb_linux_template_id: str | None = None
+    usb_windows_template_id: str | None = None
     usb_auto_provision: str | None = None
     usb_ignored_vidpids: str | None = None
     vm_silent_timeout: str | None = None
@@ -1511,7 +1514,9 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
-        "template_id": _setting_int("usb_template_id", 100, 1),
+        "template_id": _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1),
+        "linux_template_id": _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1),
+        "windows_template_id": _setting_int("usb_windows_template_id", 200, 1),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
     }
@@ -1534,12 +1539,23 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
     return [{"hostname": hostname} for hostname in approved_proxmox_agents]
 
 
+def _client_os_counts() -> dict[str, int]:
+    """Count connected clients by platform (linux/windows)."""
+    counts: dict[str, int] = {"linux": 0, "windows": 0}
+    for c in clients.values():
+        platform = str(c.get("platform", "")).lower()
+        if platform in counts:
+            counts[platform] += 1
+    return counts
+
+
 def _proxmox_status_payload() -> dict[str, Any]:
     return {
         **proxmox_state,
         "pending_proxmox": _pending_proxmox_payload(),
         "approved_proxmox": _approved_proxmox_payload(),
         "reclone_state": dict(reclone_state),
+        "client_os_counts": _client_os_counts(),
     }
 
 
@@ -2225,7 +2241,8 @@ async def api_settings_get() -> dict[str, Any]:
         "hardware_checks": settings.get("hardware_checks", []),
         "usb_vidpids": settings.get("usb_vidpids", "[]"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
-        "usb_template_id": settings.get("usb_template_id", "100"),
+        "usb_linux_template_id": settings.get("usb_linux_template_id", settings.get("usb_template_id", "100")),
+        "usb_windows_template_id": settings.get("usb_windows_template_id", "200"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
@@ -2353,7 +2370,13 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["usb_missing_timeout"] = str(max(1, int(update.usb_missing_timeout.strip() or "60")))
 
     if update.usb_template_id is not None:
-        settings["usb_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
+        settings["usb_linux_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
+
+    if update.usb_linux_template_id is not None:
+        settings["usb_linux_template_id"] = str(max(1, int(update.usb_linux_template_id.strip() or "100")))
+
+    if update.usb_windows_template_id is not None:
+        settings["usb_windows_template_id"] = str(max(1, int(update.usb_windows_template_id.strip() or "200")))
 
     if update.usb_auto_provision is not None:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
@@ -2455,7 +2478,7 @@ async def api_proxmox_reclone_status() -> dict[str, Any]:
     return dict(reclone_state)
 
 
-@app.post("/api/proxmox/telemetry")
+@app.post("/api/proxmox/telemetry", response_model=None)
 async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[str, bool] | JSONResponse:
     """Receive telemetry from the Proxmox host agent."""
     node = body.get("node", {}) or {}
