@@ -20,6 +20,14 @@ xset s noblank
 xset -dpms
 xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
+# Kill nm-applet so it never pops up auth dialogs — WiFi is managed by scripts
+pkill -x nm-applet 2>/dev/null || true
+# Suppress nm-applet autostart for this user session
+mkdir -p "$HOME/.config/autostart"
+cat > "$HOME/.config/autostart/nm-applet.desktop" <<'NMEOF'
+[Desktop Entry]
+Hidden=true
+NMEOF
 # NOTE: xrandr / display setup is handled exclusively by launch-terminals.sh,
 # which runs before this script and owns the resolution.  Do NOT call xrandr
 # here — a mode-switch event after terminals are placed causes the window
