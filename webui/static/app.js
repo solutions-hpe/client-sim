@@ -316,6 +316,11 @@ const vmSilentTimeoutInput = document.getElementById('vm-silent-timeout');
 const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-enabled');
 const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
 const recloneScheduleTimeInput = document.getElementById('reclone-schedule-time');
+const saveUsbSettingsBtn = document.getElementById('save-usb-settings-btn');
+const usbSettingsMsg = document.getElementById('usb-settings-message');
+const saveVmMaintenanceBtn = document.getElementById('save-vm-maintenance-btn');
+const vmMaintenanceMsg = document.getElementById('vm-maintenance-message');
+const addVidPidBtn = document.getElementById('add-vidpid-btn');
 const usbSummaryPanel = document.getElementById('usb-summary-panel');
 const usbSummaryTbody = document.getElementById('usb-summary-tbody');
 const unknownUsbSection = document.getElementById('unknown-usb-section');
@@ -3565,6 +3570,54 @@ if (saveRelayBtn) {
     } finally {
       saveRelayBtn.disabled = false;
       saveRelayBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (addVidPidBtn) {
+  addVidPidBtn.addEventListener('click', addVidPid);
+}
+
+if (saveUsbSettingsBtn) {
+  saveUsbSettingsBtn.addEventListener('click', async () => {
+    saveUsbSettingsBtn.disabled = true;
+    saveUsbSettingsBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectUsbSettingsPayload())
+      });
+      showInlineMessage(usbSettingsMsg, 'USB settings saved.', false);
+    } catch (error) {
+      showInlineMessage(usbSettingsMsg, `Error: ${error.message}`, true);
+    } finally {
+      saveUsbSettingsBtn.disabled = false;
+      saveUsbSettingsBtn.textContent = 'Save USB Settings';
+    }
+  });
+}
+
+if (saveVmMaintenanceBtn) {
+  saveVmMaintenanceBtn.addEventListener('click', async () => {
+    saveVmMaintenanceBtn.disabled = true;
+    saveVmMaintenanceBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vm_silent_timeout: String(vmSilentTimeoutInput?.value || '24'),
+          reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
+          reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
+        })
+      });
+      showInlineMessage(vmMaintenanceMsg, 'VM maintenance settings saved.', false);
+    } catch (error) {
+      showInlineMessage(vmMaintenanceMsg, `Error: ${error.message}`, true);
+    } finally {
+      saveVmMaintenanceBtn.disabled = false;
+      saveVmMaintenanceBtn.textContent = 'Save VM Maintenance';
     }
   });
 }

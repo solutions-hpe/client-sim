@@ -527,52 +527,150 @@
     </div>
 
     <div id="setup-proxmox" class="setup-subpanel hidden">
+      <!-- USB Auto-Provisioning card -->
       <div class="setup-card setup-section-gap">
-            <div class="setup-card-header">
-              <h2>USB Auto-Provisioning</h2>
-              <p>Configure certified USB dongles, provisioning behavior, and ignored devices.</p>
+        <div class="setup-card-header">
+          <h2>USB Auto-Provisioning</h2>
+          <p>Configure certified USB dongles, provisioning behavior, and VM template assignments.</p>
+        </div>
+        <div class="setup-form">
+
+          <!-- Provisioning toggles -->
+          <div class="settings-section">
+            <div class="settings-section-title">Provisioning Behavior</div>
+            <div class="toggle-grid">
+              <label class="toggle-label">
+                <input type="checkbox" id="usb-auto-provision">
+                <span>Auto-Provision VMs</span>
+              </label>
             </div>
-            <div class="card" id="usb-provision-card">
-              <h3>USB Auto-Provisioning</h3>
-              <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
-              <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
-              <label>VM Image 1 Template VMID: <input type="number" id="vm-image-1-template-id" value="100" min="1"></label>
-              <label>VM Image 2 Template VMID: <input type="number" id="vm-image-2-template-id" value="200" min="1"></label>
-              <label>VM Image 1 %: <input type="number" id="vm-image-1-pct" value="50" min="0" max="100"> <small>(Image 2 = remainder)</small></label>
-              <h4>Certified Devices</h4>
-              <table id="usb-vidpid-table">
-                <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
-                <tbody id="usb-vidpid-tbody"></tbody>
-              </table>
-              <div class="row">
-                <input type="text" id="new-vidpid" placeholder="e.g. 2357:012d">
-                <select id="new-vidpid-type"><option value="wireless">Wireless</option><option value="wired">Wired</option></select>
-                <input type="text" id="new-vidpid-label" placeholder="Friendly name">
-                <button type="button" class="btn btn-secondary" onclick="addVidPid()">+ Add</button>
+            <div class="form-row" style="margin-top:12px;">
+              <div class="form-group">
+                <label class="form-label" for="usb-missing-timeout">Destroy after missing (minutes)</label>
+                <input id="usb-missing-timeout" class="form-input" type="number" value="60" min="1"
+                       placeholder="60">
+                <span class="form-hint">How long a dongle can be absent before its VM is destroyed.</span>
               </div>
-              <h4>Ignored Devices</h4>
-              <div id="usb-ignored-list"></div>
             </div>
           </div>
 
-      <div class="setup-card setup-section-gap">
-            <div class="setup-card-header">
-              <h2>VM Maintenance</h2>
-              <p>Configure auto-recovery and scheduled fleet reclones.</p>
-            </div>
-            <div class="card" id="vm-maintenance-card">
-              <h3>VM Maintenance</h3>
-              <label>Auto-recovery (reclone if silent): <input type="number" id="vm-silent-timeout" value="24" min="1"> hours</label>
-              <label>Scheduled reclone: <input type="checkbox" id="reclone-schedule-enabled"></label>
-              <div id="reclone-schedule-fields">
-                <select id="reclone-schedule-day">
-                  <option>sunday</option><option>monday</option><option>tuesday</option>
-                  <option>wednesday</option><option>thursday</option><option>friday</option><option>saturday</option>
-                </select>
-                <input type="time" id="reclone-schedule-time" value="02:00">
+          <!-- VM templates -->
+          <div class="settings-section">
+            <div class="settings-section-title">VM Templates</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="vm-image-1-template-id">VM Image 1 Template VMID</label>
+                <input id="vm-image-1-template-id" class="form-input" type="number" value="100" min="1">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vm-image-2-template-id">VM Image 2 Template VMID</label>
+                <input id="vm-image-2-template-id" class="form-input" type="number" value="200" min="1">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vm-image-1-pct">VM Image 1 % target</label>
+                <input id="vm-image-1-pct" class="form-input" type="number" value="50" min="0" max="100">
+                <span class="form-hint">Image 2 gets the remainder.</span>
               </div>
             </div>
           </div>
+
+          <!-- Certified devices table -->
+          <div class="settings-section">
+            <div class="settings-section-title">Certified Devices</div>
+            <table class="data-table" id="usb-vidpid-table">
+              <thead>
+                <tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr>
+              </thead>
+              <tbody id="usb-vidpid-tbody"></tbody>
+            </table>
+            <div class="form-row" style="margin-top:8px;align-items:flex-end;">
+              <div class="form-group" style="flex:1;">
+                <label class="form-label" for="new-vidpid">VID:PID</label>
+                <input id="new-vidpid" class="form-input" type="text" placeholder="e.g. 2357:012d"
+                       autocomplete="off" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="new-vidpid-type">Type</label>
+                <select id="new-vidpid-type" class="form-input">
+                  <option value="wireless">Wireless</option>
+                  <option value="wired">Wired</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex:2;">
+                <label class="form-label" for="new-vidpid-label">Label</label>
+                <input id="new-vidpid-label" class="form-input" type="text" placeholder="Friendly name">
+              </div>
+              <div class="form-group" style="padding-top:4px;">
+                <button type="button" class="btn btn-secondary" id="add-vidpid-btn">+ Add Device</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ignored devices -->
+          <div class="settings-section">
+            <div class="settings-section-title">Ignored Devices</div>
+            <div id="usb-ignored-list" class="badge-list"></div>
+          </div>
+
+          <div class="form-actions">
+            <button id="save-usb-settings-btn" class="btn btn-primary" type="button">Save USB Settings</button>
+          </div>
+          <div id="usb-settings-message" class="settings-message hidden" role="alert"></div>
+
+        </div>
+      </div>
+
+      <!-- VM Maintenance card -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>VM Maintenance</h2>
+          <p>Configure auto-recovery and scheduled fleet reclones.</p>
+        </div>
+        <div class="setup-form">
+
+          <div class="settings-section">
+            <div class="settings-section-title">Auto-Recovery</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="vm-silent-timeout">Reclone if silent for (hours)</label>
+                <input id="vm-silent-timeout" class="form-input" type="number" value="24" min="1"
+                       placeholder="24">
+                <span class="form-hint">VMs not reporting telemetry for this long are automatically recloned.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">Scheduled Reclone</div>
+            <div class="toggle-grid">
+              <label class="toggle-label">
+                <input type="checkbox" id="reclone-schedule-enabled">
+                <span>Enable Scheduled Reclone</span>
+              </label>
+            </div>
+            <div id="reclone-schedule-fields" class="form-row" style="margin-top:12px;">
+              <div class="form-group">
+                <label class="form-label" for="reclone-schedule-day">Day of week</label>
+                <select id="reclone-schedule-day" class="form-input">
+                  <option>sunday</option><option>monday</option><option>tuesday</option>
+                  <option>wednesday</option><option>thursday</option><option>friday</option>
+                  <option>saturday</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="reclone-schedule-time">Time (UTC)</label>
+                <input type="time" id="reclone-schedule-time" class="form-input" value="02:00">
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="save-vm-maintenance-btn" class="btn btn-primary" type="button">Save VM Maintenance</button>
+          </div>
+          <div id="vm-maintenance-message" class="settings-message hidden" role="alert"></div>
+
+        </div>
+      </div>
     </div>
 
     <div id="setup-relay" class="setup-subpanel hidden">
