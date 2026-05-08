@@ -38,6 +38,7 @@ STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
+CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
 CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
 CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
@@ -306,6 +307,14 @@ CLIENT_COUNT_DROP_PCT = 25.0  # percent drop that triggers alert
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
+
+# Load persisted client count baseline so the UI has a reference point
+# immediately after a restart instead of showing NO_DATA for an hour.
+_client_count_baseline: dict[str, Any] = {}
+try:
+    _client_count_baseline = json.loads(CLIENT_COUNT_BASELINE_FILE.read_text(encoding="utf-8"))
+except Exception:
+    pass
 
 # Hardware alert state: {check_id: {wsite: [device_name, ...]}}
 # Populated during each Central poll cycle from alert objects.
@@ -942,6 +951,9 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
     hardware_alert_devices = new_hw_devices
     await _check_transitions_and_notify(now)
 
+    # ── Persist client count baseline ─────────────────────────────
+    _save_client_count_baseline()
+
     # ── Persist history ───────────────────────────────────────────
     if new_records:
         cutoff = _history_cutoff()
@@ -995,8 +1007,28 @@ def _hw_alerts_payload() -> list[dict[str, Any]]:
     return result
 
 
+def _save_client_count_baseline() -> None:
+    """Persist the current per-site hourly averages to disk so a restart
+    can display the last known baseline instead of NO_DATA."""
+    snapshot: dict[str, Any] = {}
+    now = time.time()
+    for wsite, samples in _client_count_samples.items():
+        if len(samples) < CLIENT_COUNT_MIN_SAMPLES:
+            continue
+        avg = sum(s[1] for s in samples) / len(samples)
+        snapshot[wsite] = {"hourly_avg": round(avg, 1), "recorded_at": now}
+    if snapshot:
+        try:
+            CLIENT_COUNT_BASELINE_FILE.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+            _client_count_baseline.update(snapshot)
+        except Exception as exc:
+            logger.warning("Could not save client count baseline: %s", exc)
+
+
 def _client_count_payload() -> dict[str, Any]:
-    """Per-site client count status based on 60-min rolling average."""
+    """Per-site client count status based on 60-min rolling average.
+    Falls back to persisted baseline when live samples are insufficient
+    so the UI shows the last known baseline instead of NO_DATA after restart."""
     site_mappings = settings.get("site_mappings", {})
     result: dict[str, Any] = {}
     for wsite, samples in _client_count_samples.items():
@@ -1005,14 +1037,32 @@ def _client_count_payload() -> dict[str, Any]:
         current = samples[-1][1]
         site_name = site_mappings.get(wsite, wsite)
         if len(samples) < CLIENT_COUNT_MIN_SAMPLES:
-            result[wsite] = {
-                "site_name": site_name,
-                "current": current,
-                "hourly_avg": current,
-                "drop_pct": 0.0,
-                "status": "NO_DATA",
-                "ts": samples[-1][0],
-            }
+            # Use persisted baseline average if available
+            saved = _client_count_baseline.get(wsite)
+            if saved:
+                avg = saved["hourly_avg"]
+                drop_pct = max(0.0, (avg - current) / avg * 100.0) if avg >= 1 else 0.0
+                status = "DEGRADED" if drop_pct >= CLIENT_COUNT_DROP_PCT else "OK"
+                result[wsite] = {
+                    "site_name": site_name,
+                    "current": current,
+                    "hourly_avg": avg,
+                    "drop_pct": drop_pct,
+                    "status": status,
+                    "ts": samples[-1][0],
+                    "baseline_stale": True,
+                    "baseline_recorded_at": saved["recorded_at"],
+                }
+            else:
+                result[wsite] = {
+                    "site_name": site_name,
+                    "current": current,
+                    "hourly_avg": current,
+                    "drop_pct": 0.0,
+                    "status": "NO_DATA",
+                    "ts": samples[-1][0],
+                    "baseline_stale": False,
+                }
             continue
         avg = sum(s[1] for s in samples) / len(samples)
         if avg < 1:
@@ -1028,6 +1078,7 @@ def _client_count_payload() -> dict[str, Any]:
             "drop_pct": drop_pct,
             "status": status,
             "ts": samples[-1][0],
+            "baseline_stale": False,
         }
     return result
 

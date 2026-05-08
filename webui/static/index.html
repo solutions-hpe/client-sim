@@ -285,524 +285,540 @@
 
   <!-- ── Config tab ── -->
   <main id="tab-config" class="page tab-content hidden">
-    <div class="setup-card">
-      <div class="setup-card-header">
-        <h2>Simulation Settings</h2>
-        <p>Edit the shared settings stored in <strong>configs/simulation.conf</strong> and push updates to GitHub.</p>
-      </div>
-      <div id="config-simulation-form" class="setup-form"></div>
-      <div class="setup-form">
-        <div class="form-actions">
-          <button id="config-simulation-save" class="btn btn-primary" type="button">Save to GitHub</button>
-        </div>
-        <div id="config-simulation-message" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Bucket Profiles</h2>
-        <p>Review and save individual <strong>s0-s9</strong> simulation buckets.</p>
-      </div>
-      <div id="config-buckets-container"></div>
-      <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
-    </div>
   </main>
 
   <!-- ── Setup tab ── -->
   <main id="tab-setup" class="page tab-content hidden">
-    <div class="setup-card">
-      <div class="setup-card-header">
-        <h2>Repository Settings</h2>
-        <p>Choose which branch of <strong>solutions-hpe/client-sim</strong> the dashboard syncs from.
-           The repository URL is fixed. Changes take effect immediately and persist across restarts.</p>
-      </div>
+    <nav class="setup-subnav" role="tablist">
+      <button class="setup-subtab active" data-subtab="setup-github" role="tab">GitHub</button>
+      <button class="setup-subtab" data-subtab="setup-simulation" role="tab">Simulation</button>
+      <button class="setup-subtab" data-subtab="setup-proxmox" role="tab">Proxmox</button>
+      <button class="setup-subtab" data-subtab="setup-relay" role="tab">Relay</button>
+      <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
+      <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
+    </nav>
 
-      <div class="setup-form">
-        <div class="form-group">
-          <label class="form-label" for="repo-url-input">Repository</label>
-          <input id="repo-url-input" class="form-input input-readonly" type="text"
-                 value="https://github.com/solutions-hpe/client-sim.git" readonly>
-          <span class="form-hint">Fixed — only branch can be changed.</span>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="branch-input">Branch</label>
-          <input id="branch-input" class="form-input" type="text"
-                 placeholder="e.g. main, lrb, feature/test" autocomplete="off" spellcheck="false">
-          <span class="form-hint">Letters, numbers, hyphens, underscores, dots, and slashes only.</span>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="github-token-input">GitHub Token</label>
-          <input id="github-token-input" class="form-input" type="password"
-                 placeholder="Paste token — leave blank to keep current" autocomplete="new-password">
-          <span class="form-hint" id="github-token-status"></span>
-        </div>
-
-        <div class="form-actions">
-          <button id="save-settings" class="btn btn-primary" type="button">Save &amp; Sync</button>
-          <button id="sync-now-btn" class="btn btn-secondary" type="button">⬇ Sync from GitHub Now</button>
-        </div>
-
-        <div id="sync-now-message" class="settings-message hidden" role="alert"></div>
-
-        <div id="settings-message" class="settings-message hidden" role="alert"></div>
-      </div>
-
-      <hr class="setup-divider">
-
-      <div class="setup-status-grid">
-        <div class="setup-status-item">
-          <span class="setup-status-label">GitHub Sync Status</span>
-          <span id="setup-sync-state" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Last Synced</span>
-          <span id="setup-sync-time" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Active branch</span>
-          <span id="setup-active-branch" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Repo version</span>
-          <span id="setup-repo-version" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Last error</span>
-          <span id="setup-sync-error" class="setup-status-value muted">—</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>USB Auto-Provisioning</h2>
-        <p>Configure certified USB dongles, provisioning behavior, and ignored devices.</p>
-      </div>
-      <div class="card" id="usb-provision-card">
-        <h3>USB Auto-Provisioning</h3>
-        <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
-        <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
-        <label>Clone Template VMID: <input type="number" id="usb-template-id" value="100"></label>
-        <h4>Certified Devices</h4>
-        <table id="usb-vidpid-table">
-          <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
-          <tbody id="usb-vidpid-tbody"></tbody>
-        </table>
-        <div class="row">
-          <input type="text" id="new-vidpid" placeholder="e.g. 2357:012d">
-          <select id="new-vidpid-type"><option value="wireless">Wireless</option><option value="wired">Wired</option></select>
-          <input type="text" id="new-vidpid-label" placeholder="Friendly name">
-          <button type="button" class="btn btn-secondary" onclick="addVidPid()">+ Add</button>
-        </div>
-        <h4>Ignored Devices</h4>
-        <div id="usb-ignored-list"></div>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>VM Maintenance</h2>
-        <p>Configure auto-recovery and scheduled fleet reclones.</p>
-      </div>
-      <div class="card" id="vm-maintenance-card">
-        <h3>VM Maintenance</h3>
-        <label>Auto-recovery (reclone if silent): <input type="number" id="vm-silent-timeout" value="24" min="1"> hours</label>
-        <label>Scheduled reclone: <input type="checkbox" id="reclone-schedule-enabled"></label>
-        <div id="reclone-schedule-fields">
-          <select id="reclone-schedule-day">
-            <option>sunday</option><option>monday</option><option>tuesday</option>
-            <option>wednesday</option><option>thursday</option><option>friday</option><option>saturday</option>
-          </select>
-          <input type="time" id="reclone-schedule-time" value="02:00">
-        </div>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Relay</h2>
-        <p>Configure optional relay sync between this WebUI and a central management server.</p>
-      </div>
-
-      <div class="setup-form">
-        <div class="settings-section">
-          <div class="settings-section-title">Relay (Central Server)</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Relay Enabled</label>
-              <select id="relay-enabled-select" data-key="relay_enabled">
-                <option value="off">Off</option>
-                <option value="on">On</option>
-              </select>
+    <div id="setup-github" class="setup-subpanel active">
+      <div class="setup-card">
+            <div class="setup-card-header">
+              <h2>Repository Settings</h2>
+              <p>Choose which branch of <strong>solutions-hpe/client-sim</strong> the dashboard syncs from.
+                 The repository URL is fixed. Changes take effect immediately and persist across restarts.</p>
             </div>
-            <div class="form-group">
-              <label>Island ID</label>
-              <input id="relay-island-id-input" type="text" data-key="relay_island_id" placeholder="e.g. island-lab-01">
+
+            <div class="setup-form">
+              <div class="form-group">
+                <label class="form-label" for="repo-url-input">Repository</label>
+                <input id="repo-url-input" class="form-input input-readonly" type="text"
+                       value="https://github.com/solutions-hpe/client-sim.git" readonly>
+                <span class="form-hint">Fixed — only branch can be changed.</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="branch-input">Branch</label>
+                <input id="branch-input" class="form-input" type="text"
+                       placeholder="e.g. main, lrb, feature/test" autocomplete="off" spellcheck="false">
+                <span class="form-hint">Letters, numbers, hyphens, underscores, dots, and slashes only.</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="github-token-input">GitHub Token</label>
+                <input id="github-token-input" class="form-input" type="password"
+                       placeholder="Paste token — leave blank to keep current" autocomplete="new-password">
+                <span class="form-hint" id="github-token-status"></span>
+              </div>
+
+              <div class="form-actions">
+                <button id="save-settings" class="btn btn-primary" type="button">Save &amp; Sync</button>
+                <button id="sync-now-btn" class="btn btn-secondary" type="button">⬇ Sync from GitHub Now</button>
+              </div>
+
+              <div id="sync-now-message" class="settings-message hidden" role="alert"></div>
+
+              <div id="settings-message" class="settings-message hidden" role="alert"></div>
+            </div>
+
+            <hr class="setup-divider">
+
+            <div class="setup-status-grid">
+              <div class="setup-status-item">
+                <span class="setup-status-label">GitHub Sync Status</span>
+                <span id="setup-sync-state" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Last Synced</span>
+                <span id="setup-sync-time" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Active branch</span>
+                <span id="setup-active-branch" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Repo version</span>
+                <span id="setup-repo-version" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Last error</span>
+                <span id="setup-sync-error" class="setup-status-value muted">—</span>
+              </div>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group" style="flex:2;">
-              <label>Central Server URL</label>
-              <input id="relay-server-url-input" type="text" data-key="relay_server_url" placeholder="https://central.example.com">
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>GitHub Sync</h2>
+              <p>How often the server pulls the latest scripts from the repository. Default: 5 minutes.</p>
             </div>
-            <div class="form-group" style="flex:1;">
-              <label>API Key</label>
-              <input id="relay-api-key-input" type="password" data-key="relay_api_key" placeholder="shared secret" autocomplete="new-password">
+            <div class="setup-form">
+              <div class="form-row">
+                <label class="form-label" for="sync-interval-input">Sync interval (seconds)</label>
+                <input id="sync-interval-input" class="form-input" type="number" min="60" max="86400" placeholder="300" style="width:120px;" />
+                <span class="form-hint" style="margin-left:.5rem;">Min 60 · Max 86400 (24 hr)</span>
+              </div>
+              <div class="form-actions">
+                <button id="save-sync-interval-btn" class="btn btn-primary" type="button">Save</button>
+              </div>
+              <div id="sync-interval-msg" class="settings-message hidden" role="alert"></div>
             </div>
           </div>
-        </div>
 
-        <div class="form-actions">
-          <button id="save-relay-btn" class="btn btn-primary" type="button">Save Relay Settings</button>
-        </div>
-        <div id="relay-message" class="settings-message hidden" role="alert"></div>
-
-        <div class="setup-status-grid" style="margin-top: 1rem;">
-          <div class="setup-status-item">
-            <span class="setup-status-label">Status</span>
-            <span id="relay-state-text" class="setup-status-value">—</span>
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>WebUI Version</h2>
+              <p>The WebUI checks for a new installer version every 24 hours and updates automatically. Use the button below to check and apply immediately.</p>
+            </div>
+            <div class="setup-status-grid">
+              <div class="setup-status-item">
+                <span class="setup-status-label">Installed version</span>
+                <span id="version-current" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Available version</span>
+                <span id="version-available" class="setup-status-value">—</span>
+              </div>
+              <div class="setup-status-item">
+                <span class="setup-status-label">Last checked</span>
+                <span id="version-last-checked" class="setup-status-value muted">—</span>
+              </div>
+            </div>
+            <div class="setup-form">
+              <div class="form-actions">
+                <button id="check-update-btn" class="btn btn-primary" type="button">🔄 Check &amp; Update Now</button>
+              </div>
+              <div id="update-message" class="settings-message hidden" role="alert"></div>
+              <details id="update-log-details" class="hidden" style="margin-top:10px;">
+                <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.6);">Show install output</summary>
+                <pre id="update-log-output" class="update-log-pre"></pre>
+              </details>
+            </div>
           </div>
-          <div class="setup-status-item">
-            <span class="setup-status-label">Last Sync</span>
-            <span id="relay-last-time" class="setup-status-value">—</span>
-          </div>
-          <div class="setup-status-item">
-            <span class="setup-status-label">Last Error</span>
-            <span id="relay-last-error" class="setup-status-value muted">—</span>
-          </div>
-        </div>
-      </div>
     </div>
 
-    <!-- ── WebUI Version / Auto-Update ── -->
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>WebUI Version</h2>
-        <p>The WebUI checks for a new installer version every 24 hours and updates automatically. Use the button below to check and apply immediately.</p>
-      </div>
-      <div class="setup-status-grid">
-        <div class="setup-status-item">
-          <span class="setup-status-label">Installed version</span>
-          <span id="version-current" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Available version</span>
-          <span id="version-available" class="setup-status-value">—</span>
-        </div>
-        <div class="setup-status-item">
-          <span class="setup-status-label">Last checked</span>
-          <span id="version-last-checked" class="setup-status-value muted">—</span>
-        </div>
-      </div>
-      <div class="setup-form">
-        <div class="form-actions">
-          <button id="check-update-btn" class="btn btn-primary" type="button">🔄 Check &amp; Update Now</button>
-        </div>
-        <div id="update-message" class="settings-message hidden" role="alert"></div>
-        <details id="update-log-details" class="hidden" style="margin-top:10px;">
-          <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.6);">Show install output</summary>
-          <pre id="update-log-output" class="update-log-pre"></pre>
-        </details>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Aruba Central Connection</h2>
-        <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.</p>
-      </div>
-
-      <div class="setup-form">
-        <!-- API Version toggle -->
-        <div class="form-group">
-          <label class="form-label">API Version</label>
-          <div class="segmented-control" id="central-api-version-control">
-            <button type="button" class="active" data-value="classic" id="central-api-classic">Classic Central</button>
-            <button type="button" data-value="new_central" id="central-api-new">New Central (CNX)</button>
-          </div>
-        </div>
-
-        <!-- Cluster URL — shared by both but hint changes -->
-        <div class="form-group">
-          <label class="form-label" for="central-cluster-url">Cluster URL</label>
-          <input id="central-cluster-url" class="form-input" type="text"
-                 placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
-          <span class="form-hint" id="central-cluster-url-hint">
-            Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>
-          </span>
-        </div>
-
-        <!-- Classic-only fields -->
-        <div id="central-classic-fields">
-          <div class="form-group">
-            <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
-            <input id="central-access-token" class="form-input" type="password"
-                   placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
-            <span class="form-hint" id="central-access-token-status"></span>
+    <div id="setup-simulation" class="setup-subpanel hidden">
+      <div class="setup-card">
+            <div class="setup-card-header">
+              <h2>Simulation Settings</h2>
+              <p>Edit the shared settings stored in <strong>configs/simulation.conf</strong> and push updates to GitHub.</p>
+            </div>
+            <div id="config-simulation-form" class="setup-form"></div>
+            <div class="setup-form">
+              <div class="form-actions">
+                <button id="config-simulation-save" class="btn btn-primary" type="button">Save to GitHub</button>
+              </div>
+              <div id="config-simulation-message" class="settings-message hidden" role="alert"></div>
+            </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
-            <input id="central-refresh-token" class="form-input" type="password"
-                   placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
-            <span class="form-hint" id="central-refresh-token-status"></span>
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Bucket Profiles</h2>
+              <p>Review and save individual <strong>s0-s9</strong> simulation buckets.</p>
+            </div>
+            <div id="config-buckets-container"></div>
+            <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
           </div>
 
-          <hr class="setup-divider">
-          <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
-
-          <div class="form-group">
-            <label class="form-label" for="central-customer-id">Customer ID</label>
-            <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
-            <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
+      <div class="card setup-section-gap" id="commands-card">
+            <div class="card-header">
+              <span class="card-title">📨 Command Inbox</span>
+            </div>
+            <div class="card-body">
+              <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                <div class="form-group" style="min-width:160px;">
+                  <label>Target</label>
+                  <select id="cmd-target">
+                    <option value="all">— All Clients —</option>
+                    <option value="proxmox">Proxmox Host</option>
+                  </select>
+                </div>
+                <div class="form-group" style="min-width:160px;">
+                  <label>Action</label>
+                  <select id="cmd-action">
+                    <optgroup label="Client Actions">
+                      <option value="restart_sim">Restart Simulation</option>
+                      <option value="reboot">Reboot Device</option>
+                      <option value="update_now">Force Update</option>
+                      <option value="kill_switch">Kill Switch</option>
+                    </optgroup>
+                    <optgroup label="Proxmox Actions">
+                      <option value="reclone_vms">Reclone VMs</option>
+                      <option value="snapshot_vms">Snapshot VMs</option>
+                      <option value="start_vms">Start VMs</option>
+                      <option value="stop_vms">Stop VMs</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <button class="btn btn-primary" id="cmd-send-btn" type="button">Send Command</button>
+                <button class="btn btn-secondary" id="cmd-clear-btn" type="button" style="margin-left:auto;">Clear History</button>
+              </div>
+              <div id="cmd-msg" class="form-msg" style="margin-top:6px;"></div>
+              <table class="data-table" id="cmd-table" style="margin-top:12px;">
+                <thead>
+                  <tr>
+                    <th>Target</th>
+                    <th>Action</th>
+                    <th>Status</th>
+                    <th>Age</th>
+                    <th>Message</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="cmd-tbody"></tbody>
+              </table>
+              <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
+            </div>
           </div>
-        </div>
-
-        <!-- New Central (CNX) fields -->
-        <div id="central-new-fields" class="hidden">
-          <p class="form-hint" style="margin:0 0 12px">
-            New Central uses HPE GreenLake client credentials. Go to <strong>Manage Workspace → Personal API clients</strong>
-            and create a credential scoped to your Central instance.
-            Tokens are fetched and renewed automatically using your Client ID and Secret — no manual token pasting needed.
-          </p>
-        </div>
-
-        <!-- Client ID + Secret — shown for both (Classic: optional refresh; New Central: required) -->
-        <div class="form-group">
-          <label class="form-label" for="central-client-id">
-            Client ID <span id="central-client-id-badge" class="token-optional-badge">optional — for auto-renewal</span>
-          </label>
-          <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="central-client-secret">
-            Client Secret <span id="central-client-secret-badge" class="token-optional-badge">optional — for auto-renewal</span>
-          </label>
-          <input id="central-client-secret" class="form-input" type="password"
-                 placeholder="Leave blank to keep current" autocomplete="new-password">
-          <span class="form-hint" id="central-client-secret-status"></span>
-        </div>
-
-        <div class="form-actions">
-          <button id="central-test-btn" class="btn btn-primary" type="button">Save &amp; Test Connection</button>
-        </div>
-
-        <div id="central-test-msg" class="settings-message hidden" role="alert"></div>
-      </div>
     </div>
 
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Site Mappings</h2>
-        <p>Match your simulation.conf wsite values to Aruba Central site names. Click <strong>Load Sites</strong> to populate dropdowns from both sources.</p>
-      </div>
-
-      <div class="setup-form">
-        <div class="form-actions" style="margin-bottom:0.75rem;">
-          <button id="load-sites-btn" class="btn btn-secondary" type="button">🔄 Load Sites</button>
-          <span id="sites-load-status" class="form-hint" style="margin-left:0.75rem;"></span>
-        </div>
-
-        <table class="mapping-table">
-          <thead>
-            <tr>
-              <th>simulation.conf wsite</th>
-              <th>Aruba Central Site</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="site-mappings-body"></tbody>
-        </table>
-
-        <div class="form-actions">
-          <button id="add-mapping-btn" class="btn btn-secondary" type="button">+ Add Row</button>
-          <button id="save-mappings-btn" class="btn btn-primary" type="button">Save Mappings</button>
-        </div>
-
-        <div id="central-mappings-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Monitored Checks</h2>
-        <p>Select which Aruba Central alerts and AI Insights to monitor. OK = present during polling. ERROR = missing.</p>
-      </div>
-
-      <div class="setup-form">
-        <div id="selected-checks-preview" class="form-hint">No checks selected yet.</div>
-        <div class="form-actions">
-          <button id="central-load-checks-btn" class="btn btn-secondary" type="button">Load Available Checks</button>
-          <button id="save-checks-btn" class="btn btn-primary" type="button">Save Monitored Checks</button>
-        </div>
-
-        <div id="available-checks-container"></div>
-        <div id="central-checks-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <!-- ── Hardware Alerts ── -->
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Hardware Alerts</h2>
-        <p>Select which Aruba Central alert types to monitor as hardware health checks (e.g. AP Down, Switch Down).</p>
-      </div>
-      <div class="setup-form">
-        <div id="hw-checks-preview" class="form-hint">No hardware checks selected yet.</div>
-        <div class="form-actions">
-          <button id="hw-load-alerts-btn" class="btn btn-secondary" type="button">Load Available Alert Types</button>
-          <button id="hw-save-btn" class="btn btn-primary" type="button">Save Hardware Checks</button>
-        </div>
-        <div id="hw-checks-container"></div>
-        <div id="hw-checks-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <!-- ── GitHub Sync Interval ── -->
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>GitHub Sync</h2>
-        <p>How often the server pulls the latest scripts from the repository. Default: 5 minutes.</p>
-      </div>
-      <div class="setup-form">
-        <div class="form-row">
-          <label class="form-label" for="sync-interval-input">Sync interval (seconds)</label>
-          <input id="sync-interval-input" class="form-input" type="number" min="60" max="86400" placeholder="300" style="width:120px;" />
-          <span class="form-hint" style="margin-left:.5rem;">Min 60 · Max 86400 (24 hr)</span>
-        </div>
-        <div class="form-actions">
-          <button id="save-sync-interval-btn" class="btn btn-primary" type="button">Save</button>
-        </div>
-        <div id="sync-interval-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <!-- ── Email Notifications ── -->
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Email Notifications</h2>
-        <p>Send an email when a simulation check transitions from OK to failing.</p>
-      </div>
-      <div class="setup-form">
-        <div class="form-row">
-          <label class="form-label">Enable</label>
-          <label class="toggle-switch">
-            <input id="email-enabled-toggle" type="checkbox" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-host">SMTP Host</label>
-          <input id="smtp-host" class="form-input" type="text" placeholder="smtp.example.com" />
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-port">SMTP Port</label>
-          <input id="smtp-port" class="form-input" type="number" placeholder="587" style="width:100px;" />
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-user">Username</label>
-          <input id="smtp-user" class="form-input" type="text" placeholder="user@example.com" />
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-password">Password</label>
-          <input id="smtp-password" class="form-input" type="password" placeholder="••••••••" autocomplete="new-password" />
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-from">From address</label>
-          <input id="smtp-from" class="form-input" type="email" placeholder="client-sim@example.com" />
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="smtp-to">To (comma-separated)</label>
-          <input id="smtp-to" class="form-input" type="text" placeholder="ops@example.com, noc@example.com" />
-        </div>
-        <div class="form-actions">
-          <button id="save-email-btn" class="btn btn-primary" type="button">Save</button>
-          <button id="test-email-btn" class="btn btn-secondary" type="button">Send Test</button>
-        </div>
-        <div id="email-notif-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <!-- ── Teams Webhook ── -->
-    <div class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Teams Webhook</h2>
-        <p>Post an Adaptive Card to a Microsoft Teams channel when a check fails.</p>
-      </div>
-      <div class="setup-form">
-        <div class="form-row">
-          <label class="form-label">Enable</label>
-          <label class="toggle-switch">
-            <input id="teams-enabled-toggle" type="checkbox" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="teams-webhook-url">Webhook URL</label>
-          <input id="teams-webhook-url" class="form-input" type="url" placeholder="https://outlook.office.com/webhook/..." />
-        </div>
-        <div class="form-actions">
-          <button id="save-teams-btn" class="btn btn-primary" type="button">Save</button>
-          <button id="test-teams-btn" class="btn btn-secondary" type="button">Send Test</button>
-        </div>
-        <div id="teams-notif-msg" class="settings-message hidden" role="alert"></div>
-      </div>
-    </div>
-
-    <!-- Commands Card -->
-    <div class="card setup-section-gap" id="commands-card">
-      <div class="card-header">
-        <span class="card-title">📨 Command Inbox</span>
-      </div>
-      <div class="card-body">
-        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
-          <div class="form-group" style="min-width:160px;">
-            <label>Target</label>
-            <select id="cmd-target">
-              <option value="all">— All Clients —</option>
-              <option value="proxmox">Proxmox Host</option>
-            </select>
+    <div id="setup-proxmox" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>USB Auto-Provisioning</h2>
+              <p>Configure certified USB dongles, provisioning behavior, and ignored devices.</p>
+            </div>
+            <div class="card" id="usb-provision-card">
+              <h3>USB Auto-Provisioning</h3>
+              <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
+              <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
+              <label>Clone Template VMID: <input type="number" id="usb-template-id" value="100"></label>
+              <h4>Certified Devices</h4>
+              <table id="usb-vidpid-table">
+                <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
+                <tbody id="usb-vidpid-tbody"></tbody>
+              </table>
+              <div class="row">
+                <input type="text" id="new-vidpid" placeholder="e.g. 2357:012d">
+                <select id="new-vidpid-type"><option value="wireless">Wireless</option><option value="wired">Wired</option></select>
+                <input type="text" id="new-vidpid-label" placeholder="Friendly name">
+                <button type="button" class="btn btn-secondary" onclick="addVidPid()">+ Add</button>
+              </div>
+              <h4>Ignored Devices</h4>
+              <div id="usb-ignored-list"></div>
+            </div>
           </div>
-          <div class="form-group" style="min-width:160px;">
-            <label>Action</label>
-            <select id="cmd-action">
-              <optgroup label="Client Actions">
-                <option value="restart_sim">Restart Simulation</option>
-                <option value="reboot">Reboot Device</option>
-                <option value="update_now">Force Update</option>
-                <option value="kill_switch">Kill Switch</option>
-              </optgroup>
-              <optgroup label="Proxmox Actions">
-                <option value="reclone_vms">Reclone VMs</option>
-                <option value="snapshot_vms">Snapshot VMs</option>
-                <option value="start_vms">Start VMs</option>
-                <option value="stop_vms">Stop VMs</option>
-              </optgroup>
-            </select>
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>VM Maintenance</h2>
+              <p>Configure auto-recovery and scheduled fleet reclones.</p>
+            </div>
+            <div class="card" id="vm-maintenance-card">
+              <h3>VM Maintenance</h3>
+              <label>Auto-recovery (reclone if silent): <input type="number" id="vm-silent-timeout" value="24" min="1"> hours</label>
+              <label>Scheduled reclone: <input type="checkbox" id="reclone-schedule-enabled"></label>
+              <div id="reclone-schedule-fields">
+                <select id="reclone-schedule-day">
+                  <option>sunday</option><option>monday</option><option>tuesday</option>
+                  <option>wednesday</option><option>thursday</option><option>friday</option><option>saturday</option>
+                </select>
+                <input type="time" id="reclone-schedule-time" value="02:00">
+              </div>
+            </div>
           </div>
-          <button class="btn btn-primary" id="cmd-send-btn" type="button">Send Command</button>
-          <button class="btn btn-secondary" id="cmd-clear-btn" type="button" style="margin-left:auto;">Clear History</button>
-        </div>
-        <div id="cmd-msg" class="form-msg" style="margin-top:6px;"></div>
-        <table class="data-table" id="cmd-table" style="margin-top:12px;">
-          <thead>
-            <tr>
-              <th>Target</th>
-              <th>Action</th>
-              <th>Status</th>
-              <th>Age</th>
-              <th>Message</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="cmd-tbody"></tbody>
-        </table>
-        <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
-      </div>
+    </div>
+
+    <div id="setup-relay" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Relay</h2>
+              <p>Configure optional relay sync between this WebUI and a central management server.</p>
+            </div>
+
+            <div class="setup-form">
+              <div class="settings-section">
+                <div class="settings-section-title">Relay (Central Server)</div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Relay Enabled</label>
+                    <select id="relay-enabled-select" data-key="relay_enabled">
+                      <option value="off">Off</option>
+                      <option value="on">On</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Island ID</label>
+                    <input id="relay-island-id-input" type="text" data-key="relay_island_id" placeholder="e.g. island-lab-01">
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group" style="flex:2;">
+                    <label>Central Server URL</label>
+                    <input id="relay-server-url-input" type="text" data-key="relay_server_url" placeholder="https://central.example.com">
+                  </div>
+                  <div class="form-group" style="flex:1;">
+                    <label>API Key</label>
+                    <input id="relay-api-key-input" type="password" data-key="relay_api_key" placeholder="shared secret" autocomplete="new-password">
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="save-relay-btn" class="btn btn-primary" type="button">Save Relay Settings</button>
+              </div>
+              <div id="relay-message" class="settings-message hidden" role="alert"></div>
+
+              <div class="setup-status-grid" style="margin-top: 1rem;">
+                <div class="setup-status-item">
+                  <span class="setup-status-label">Status</span>
+                  <span id="relay-state-text" class="setup-status-value">—</span>
+                </div>
+                <div class="setup-status-item">
+                  <span class="setup-status-label">Last Sync</span>
+                  <span id="relay-last-time" class="setup-status-value">—</span>
+                </div>
+                <div class="setup-status-item">
+                  <span class="setup-status-label">Last Error</span>
+                  <span id="relay-last-error" class="setup-status-value muted">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+    </div>
+
+    <div id="setup-central" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Aruba Central Connection</h2>
+              <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.</p>
+            </div>
+
+            <div class="setup-form">
+              <!-- API Version toggle -->
+              <div class="form-group">
+                <label class="form-label">API Version</label>
+                <div class="segmented-control" id="central-api-version-control">
+                  <button type="button" class="active" data-value="classic" id="central-api-classic">Classic Central</button>
+                  <button type="button" data-value="new_central" id="central-api-new">New Central (CNX)</button>
+                </div>
+              </div>
+
+              <!-- Cluster URL — shared by both but hint changes -->
+              <div class="form-group">
+                <label class="form-label" for="central-cluster-url">Cluster URL</label>
+                <input id="central-cluster-url" class="form-input" type="text"
+                       placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
+                <span class="form-hint" id="central-cluster-url-hint">
+                  Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>
+                </span>
+              </div>
+
+              <!-- Classic-only fields -->
+              <div id="central-classic-fields">
+                <div class="form-group">
+                  <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
+                  <input id="central-access-token" class="form-input" type="password"
+                         placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
+                  <span class="form-hint" id="central-access-token-status"></span>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
+                  <input id="central-refresh-token" class="form-input" type="password"
+                         placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
+                  <span class="form-hint" id="central-refresh-token-status"></span>
+                </div>
+
+                <hr class="setup-divider">
+                <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-customer-id">Customer ID</label>
+                  <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+                  <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
+                </div>
+              </div>
+
+              <!-- New Central (CNX) fields -->
+              <div id="central-new-fields" class="hidden">
+                <p class="form-hint" style="margin:0 0 12px">
+                  New Central uses HPE GreenLake client credentials. Go to <strong>Manage Workspace → Personal API clients</strong>
+                  and create a credential scoped to your Central instance.
+                  Tokens are fetched and renewed automatically using your Client ID and Secret — no manual token pasting needed.
+                </p>
+              </div>
+
+              <!-- Client ID + Secret — shown for both (Classic: optional refresh; New Central: required) -->
+              <div class="form-group">
+                <label class="form-label" for="central-client-id">
+                  Client ID <span id="central-client-id-badge" class="token-optional-badge">optional — for auto-renewal</span>
+                </label>
+                <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="central-client-secret">
+                  Client Secret <span id="central-client-secret-badge" class="token-optional-badge">optional — for auto-renewal</span>
+                </label>
+                <input id="central-client-secret" class="form-input" type="password"
+                       placeholder="Leave blank to keep current" autocomplete="new-password">
+                <span class="form-hint" id="central-client-secret-status"></span>
+              </div>
+
+              <div class="form-actions">
+                <button id="central-test-btn" class="btn btn-primary" type="button">Save &amp; Test Connection</button>
+              </div>
+
+              <div id="central-test-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Site Mappings</h2>
+              <p>Match your simulation.conf wsite values to Aruba Central site names. Click <strong>Load Sites</strong> to populate dropdowns from both sources.</p>
+            </div>
+
+            <div class="setup-form">
+              <div class="form-actions" style="margin-bottom:0.75rem;">
+                <button id="load-sites-btn" class="btn btn-secondary" type="button">🔄 Load Sites</button>
+                <span id="sites-load-status" class="form-hint" style="margin-left:0.75rem;"></span>
+              </div>
+
+              <table class="mapping-table">
+                <thead>
+                  <tr>
+                    <th>simulation.conf wsite</th>
+                    <th>Aruba Central Site</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="site-mappings-body"></tbody>
+              </table>
+
+              <div class="form-actions">
+                <button id="add-mapping-btn" class="btn btn-secondary" type="button">+ Add Row</button>
+                <button id="save-mappings-btn" class="btn btn-primary" type="button">Save Mappings</button>
+              </div>
+
+              <div id="central-mappings-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Monitored Checks</h2>
+              <p>Select which Aruba Central alerts and AI Insights to monitor. OK = present during polling. ERROR = missing.</p>
+            </div>
+
+            <div class="setup-form">
+              <div id="selected-checks-preview" class="form-hint">No checks selected yet.</div>
+              <div class="form-actions">
+                <button id="central-load-checks-btn" class="btn btn-secondary" type="button">Load Available Checks</button>
+                <button id="save-checks-btn" class="btn btn-primary" type="button">Save Monitored Checks</button>
+              </div>
+
+              <div id="available-checks-container"></div>
+              <div id="central-checks-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Hardware Alerts</h2>
+              <p>Select which Aruba Central alert types to monitor as hardware health checks (e.g. AP Down, Switch Down).</p>
+            </div>
+            <div class="setup-form">
+              <div id="hw-checks-preview" class="form-hint">No hardware checks selected yet.</div>
+              <div class="form-actions">
+                <button id="hw-load-alerts-btn" class="btn btn-secondary" type="button">Load Available Alert Types</button>
+                <button id="hw-save-btn" class="btn btn-primary" type="button">Save Hardware Checks</button>
+              </div>
+              <div id="hw-checks-container"></div>
+              <div id="hw-checks-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
+    </div>
+
+    <div id="setup-notifications" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Email Notifications</h2>
+              <p>Send an email when a simulation check transitions from OK to failing.</p>
+            </div>
+            <div class="setup-form">
+              <div class="form-row">
+                <label class="form-label">Enable</label>
+                <label class="toggle-switch">
+                  <input id="email-enabled-toggle" type="checkbox" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-host">SMTP Host</label>
+                <input id="smtp-host" class="form-input" type="text" placeholder="smtp.example.com" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-port">SMTP Port</label>
+                <input id="smtp-port" class="form-input" type="number" placeholder="587" style="width:100px;" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-user">Username</label>
+                <input id="smtp-user" class="form-input" type="text" placeholder="user@example.com" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-password">Password</label>
+                <input id="smtp-password" class="form-input" type="password" placeholder="••••••••" autocomplete="new-password" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-from">From address</label>
+                <input id="smtp-from" class="form-input" type="email" placeholder="client-sim@example.com" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="smtp-to">To (comma-separated)</label>
+                <input id="smtp-to" class="form-input" type="text" placeholder="ops@example.com, noc@example.com" />
+              </div>
+              <div class="form-actions">
+                <button id="save-email-btn" class="btn btn-primary" type="button">Save</button>
+                <button id="test-email-btn" class="btn btn-secondary" type="button">Send Test</button>
+              </div>
+              <div id="email-notif-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
+
+      <div class="setup-card setup-section-gap">
+            <div class="setup-card-header">
+              <h2>Teams Webhook</h2>
+              <p>Post an Adaptive Card to a Microsoft Teams channel when a check fails.</p>
+            </div>
+            <div class="setup-form">
+              <div class="form-row">
+                <label class="form-label">Enable</label>
+                <label class="toggle-switch">
+                  <input id="teams-enabled-toggle" type="checkbox" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="teams-webhook-url">Webhook URL</label>
+                <input id="teams-webhook-url" class="form-input" type="url" placeholder="https://outlook.office.com/webhook/..." />
+              </div>
+              <div class="form-actions">
+                <button id="save-teams-btn" class="btn btn-primary" type="button">Save</button>
+                <button id="test-teams-btn" class="btn btn-secondary" type="button">Send Test</button>
+              </div>
+              <div id="teams-notif-msg" class="settings-message hidden" role="alert"></div>
+            </div>
+          </div>
     </div>
   </main>
 

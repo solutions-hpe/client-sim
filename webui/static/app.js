@@ -123,8 +123,23 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.classList.add('active');
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
+    if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
   });
 });
+
+function activateSetupSubtab(subtabId = 'setup-github') {
+  setupSubtabButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.subtab === subtabId);
+  });
+  setupSubpanels.forEach((panel) => {
+    const isActive = panel.id === subtabId;
+    panel.classList.toggle('active', isActive);
+    panel.classList.toggle('hidden', !isActive);
+  });
+  if (subtabId === 'setup-simulation') {
+    loadConfigEditor().catch(() => {});
+  }
+}
 
 // ── Repo sync status ──────────────────────────────────────────────
 let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
@@ -226,6 +241,8 @@ const centralTabButton = document.querySelector('.tab[data-tab="central"]');
 const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
+const setupSubtabButtons = document.querySelectorAll('.setup-subtab');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-grid');
 const centralEmpty = document.getElementById('central-empty');
@@ -2721,7 +2738,11 @@ function renderChecksList() {
   for (const [wsite, info] of Object.entries(clientCountData)) {
     const degraded = info.status === 'DEGRADED';
     const noData = info.status === 'NO_DATA';
+    const stale = info.baseline_stale;
     const dotCls = noData ? 'dot-unknown' : degraded ? 'dot-err' : 'dot-ok';
+    const staleLabel = stale
+      ? ` ⏱ last baseline ${info.baseline_recorded_at ? new Date(info.baseline_recorded_at * 1000).toLocaleTimeString() : 'saved'}`
+      : '';
     ccRows.push({
       key: wsite,
       label: info.site_name || wsite,
@@ -2730,7 +2751,7 @@ function renderChecksList() {
       badgeCls: 'check-badge-cc',
       detail: noData
         ? 'Collecting baseline…'
-        : `Current: ${info.current} / Avg: ${Math.round(info.hourly_avg)} (${formatClientCountDelta(info.drop_pct)})`,
+        : `Current: ${info.current} / Avg: ${Math.round(info.hourly_avg)} (${formatClientCountDelta(info.drop_pct)})${staleLabel}`,
       ts: info.ts,
       priority: degraded ? 0 : noData ? 3 : 2,
       onClick: () => openCcDetail(wsite),
@@ -3097,7 +3118,8 @@ function openCcDetail(wsite) {
   if (ccDetailTitle) ccDetailTitle.textContent = info.site_name || wsite;
   const degraded = info.status === 'DEGRADED';
   const noData = info.status === 'NO_DATA';
-  if (ccDetailSub) ccDetailSub.textContent = `Client count monitoring — ${info.status}`;
+  const stale = info.baseline_stale;
+  if (ccDetailSub) ccDetailSub.textContent = `Client count monitoring — ${info.status}${stale ? ' (last session baseline)' : ''}`;
   if (ccDetailBadge) {
     ccDetailBadge.textContent = noData ? 'Collecting baseline' : degraded ? `${info.drop_pct.toFixed(1)}% drop` : '✓ OK';
     ccDetailBadge.className = `sim-status-badge ${noData ? 'sim-unknown' : degraded ? 'sim-fail' : 'sim-pass'}`;
@@ -3107,13 +3129,16 @@ function openCcDetail(wsite) {
   const row = document.createElement('div');
   row.className = 'sim-site-row';
   row.style.cursor = 'default';
+  const staleNote = stale && info.baseline_recorded_at
+    ? `<span style="font-size:0.8rem;color:var(--muted)"> ⏱ Baseline from ${new Date(info.baseline_recorded_at * 1000).toLocaleString()} — rebuilding live average</span>`
+    : '';
   row.innerHTML = `
     <span class="sim-site-name">${info.site_name || wsite}</span>
     <span style="font-size:0.85rem;color:var(--muted)">
       Current: <strong>${info.current}</strong> &nbsp;|&nbsp;
       60-min avg: <strong>${Math.round(info.hourly_avg)}</strong> &nbsp;|&nbsp;
       Δ: <strong style="color:${degraded ? '#e74c3c' : 'var(--hpe-green-dark)'}">${noData ? '—' : formatClientCountDelta(info.drop_pct)}</strong>
-    </span>
+    </span>${staleNote}
   `;
   ccSiteDetail.appendChild(row);
 }
@@ -3211,6 +3236,8 @@ if (centralTabButton) {
 
 if (configTabButton) {
   configTabButton.addEventListener('click', () => {
+    if (setupTabButton) setupTabButton.click();
+    activateSetupSubtab('setup-simulation');
     loadConfigEditor(true).catch(() => {});
   });
 }
@@ -3242,8 +3269,17 @@ if (configSimulationSaveBtn) {
   });
 }
 
+if (setupSubtabButtons.length) {
+  setupSubtabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activateSetupSubtab(btn.dataset.subtab);
+    });
+  });
+}
+
 if (setupTabButton) {
   setupTabButton.addEventListener('click', () => {
+    activateSetupSubtab('setup-github');
     if (!currentSettings.repo_url && !currentSettings.repo_branch) {
       loadSettings();
     }
@@ -3717,6 +3753,7 @@ document.getElementById('server-th-check')?.addEventListener('change', (e) => {
 });
 
 updateCentralToolbar();
+activateSetupSubtab('setup-github');
 connectWebSocket();
 loadSimulations();
 requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});

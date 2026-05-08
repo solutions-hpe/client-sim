@@ -594,6 +594,37 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 
 .tab-content.hidden { display: none; }
 
+/* Setup sub-tabs */
+.setup-subnav {
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px 0;
+  border-bottom: 2px solid var(--border);
+  background: var(--card-bg, var(--panel));
+  flex-wrap: wrap;
+}
+.setup-subtab {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 4px 4px 0 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.setup-subtab:hover { color: var(--text); }
+.setup-subtab.active {
+  color: var(--hpe-green);
+  border-bottom-color: var(--hpe-green);
+  font-weight: 600;
+}
+.setup-subpanel { padding-top: 8px; }
+.setup-subpanel.hidden { display: none; }
+
 /* ── Setup card ─────────────────────────────────────────────────── */
 .card {
   background: var(--panel);
