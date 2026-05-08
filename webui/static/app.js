@@ -313,6 +313,20 @@ const recloneVmLog = document.getElementById('reclone-vm-log');
 const recloneLastRun = document.getElementById('reclone-last-run');
 const recloneNowBtn = document.getElementById('reclone-now-btn');
 
+
+// Event delegation for unknown USB action buttons — attached once to the static tbody element
+if (unknownUsbTbody) {
+  unknownUsbTbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const vidpid = btn.dataset.vidpid;
+    const name = btn.dataset.name;
+    if (action === 'certify') addUnknownToCertified(vidpid, name);
+    else if (action === 'ignore') ignoreUsbDevice(vidpid);
+  });
+}
+
 function getCentralApiVersion() {
   const active = document.querySelector('#central-api-version-control button.active');
   return active ? active.dataset.value : 'classic';
@@ -1332,27 +1346,20 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
     usbSummaryTbody.appendChild(tr);
   });
 
-  unknownUsbTbody.innerHTML = '';
-  unknownUsb.forEach((device) => {
-    const tr = document.createElement('tr');
-    const actions = document.createElement('td');
-    actions.className = 'usb-actions';
-    const certifyBtn = document.createElement('button');
-    certifyBtn.type = 'button';
-    certifyBtn.className = 'btn btn-secondary btn-small';
-    certifyBtn.textContent = 'Add to certified';
-    certifyBtn.addEventListener('click', () => addUnknownToCertified(device.vidpid, device.name));
-    const ignoreBtn = document.createElement('button');
-    ignoreBtn.type = 'button';
-    ignoreBtn.className = 'btn btn-secondary btn-small';
-    ignoreBtn.textContent = 'Ignore';
-    ignoreBtn.addEventListener('click', () => ignoreUsbDevice(device.vidpid));
-    actions.appendChild(certifyBtn);
-    actions.appendChild(ignoreBtn);
-    tr.innerHTML = `<td>${device.name || device.bus_path || 'Unknown device'}</td><td>${device.vidpid || '—'}</td>`;
-    tr.appendChild(actions);
-    unknownUsbTbody.appendChild(tr);
-  });
+  unknownUsbTbody.innerHTML = unknownUsb.map((device) => {
+    const vid = escHtml(device.vidpid || '');
+    const nameLabel = escHtml(device.name || device.bus_path || 'Unknown device');
+    return `<tr>
+      <td>${nameLabel}</td>
+      <td>${vid || '—'}</td>
+      <td class="usb-actions">
+        <button type="button" class="btn btn-secondary btn-small" data-action="certify" data-vidpid="${vid}" data-name="${nameLabel}">Add to certified</button>
+        <button type="button" class="btn btn-secondary btn-small" data-action="ignore" data-vidpid="${vid}">Ignore</button>
+      </td>
+    </tr>`;
+  }).join('');
+  // Use event delegation — one listener on the static tbody handles all button clicks
+  unknownUsbTbody._delegated = true;
 
   unknownUsbSection.style.display = unknownUsb.length ? '' : 'none';
   usbSummaryPanel.style.display = certified.length || unknownUsb.length ? '' : 'none';
