@@ -139,7 +139,26 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             "$server_url/api/scripts/linux/VERSION" 2>/dev/null | tr -d '[:space:]')
         echo "Version check: local=$local_ver remote=$remote_ver" | tee -a "$debug"
         if [[ -n "$remote_ver" && "$remote_ver" == "$local_ver" ]]; then
-            echo "Already up to date (v$local_ver) — skipping full sync" | tee -a "$debug" "$log"
+            echo "Already up to date (v$local_ver) — checking for config changes..." | tee -a "$debug" "$log"
+            # Scripts are current, but simulation.conf may have changed independently.
+            # Always fetch and apply it so kill_switch / other config tweaks propagate
+            # without requiring a full script version bump.
+            _cfg_tmp=$(mktemp)
+            _cfg_code=$(curl -sS --max-time 10 \
+                -o "$_cfg_tmp" \
+                -w "%{http_code}" \
+                "$server_url/api/config?hostname=$(hostname)" 2>/dev/null)
+            if [[ "$_cfg_code" == "200" && -s "$_cfg_tmp" ]]; then
+                if ! diff -q "$_cfg_tmp" /usr/local/scripts/simulation.conf >/dev/null 2>&1; then
+                    echo "simulation.conf changed — updating" | tee -a "$debug" "$log"
+                    sudo cp "$_cfg_tmp" /usr/local/scripts/simulation.conf
+                else
+                    echo "simulation.conf unchanged" | tee -a "$debug"
+                fi
+            else
+                echo "Config fetch failed (code: $_cfg_code) — keeping existing" | tee -a "$debug"
+            fi
+            rm -f "$_cfg_tmp"
             source_found=true
         else
             echo "Update available ($local_ver → $remote_ver) — syncing..." | tee -a "$debug" "$log"
@@ -306,7 +325,12 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
         remote_ver=$(cat linux/VERSION 2>/dev/null | tr -d '[:space:]')
         echo "Version check: local=$local_ver remote=$remote_ver" | tee -a "$debug"
         if [[ -n "$remote_ver" && "$remote_ver" == "$local_ver" ]]; then
-            echo "Already up to date (v$local_ver) — skipping file copy" | tee -a "$debug" "$log"
+            echo "Already up to date (v$local_ver) — checking for config changes..." | tee -a "$debug" "$log"
+            # Scripts are current but configs/ may have changed. Always apply
+            # simulation.conf (and user-overrides.conf) so config tweaks like
+            # kill_switch propagate without requiring a script version bump.
+            [[ -f "configs/simulation.conf" ]]    && sudo cp "configs/simulation.conf"    /usr/local/scripts/simulation.conf
+            [[ -f "configs/user-overrides.conf" ]] && sudo cp "configs/user-overrides.conf" /usr/local/scripts/user-overrides.conf
             source_found=true
         else
             echo "Update available ($local_ver → $remote_ver) — copying files..." | tee -a "$debug" "$log"
