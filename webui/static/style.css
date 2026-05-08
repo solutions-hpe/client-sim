@@ -721,6 +721,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   border-radius: 6px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.08);
   padding: 28px 32px;
+  overflow: hidden;
 }
 
 /* Setup tab forms stay narrow; all other tabs get full width */
