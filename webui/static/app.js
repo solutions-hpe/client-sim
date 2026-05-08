@@ -1395,8 +1395,8 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   // Use event delegation — one listener on the static tbody handles all button clicks
   unknownUsbTbody._delegated = true;
 
-  unknownUsbSection.style.display = unknownUsb.length ? '' : 'none';
-  usbSummaryPanel.style.display = certified.length || unknownUsb.length ? '' : 'none';
+  unknownUsbSection.classList.toggle('hidden', unknownUsb.length === 0);
+  usbSummaryPanel.classList.toggle('hidden', certified.length === 0 && unknownUsb.length === 0);
 
   if (usbCountdownTimer) window.clearInterval(usbCountdownTimer);
   updateUsbCountdowns();
@@ -1442,7 +1442,7 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   const total = Number(state.total || 0);
   const done = Number(state.completed || 0) + Number(state.failed || 0);
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  recloneProgressWrap.style.display = status === 'running' || done > 0 ? '' : 'none';
+  recloneProgressWrap.classList.toggle('hidden', status !== 'running' && done === 0);
   recloneProgressBar.style.width = `${pct}%`;
   recloneProgressLabel.textContent = total ? `${done}/${total} VMs` : 'No VMs queued';
 

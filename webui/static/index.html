@@ -96,28 +96,23 @@
       <span class="server-last-seen">Last seen: <span id="server-last-seen">—</span></span>
     </div>
 
-    <div id="proxmox-pending-card" class="card mb-3 hidden">
-      <div class="card-header d-flex align-items-center gap-2">
-        <span class="badge bg-warning text-dark" id="proxmox-pending-badge">0</span>
-        <strong>Pending Proxmox Agents</strong>
-        <small class="text-muted ms-auto">Approve agents to allow telemetry</small>
+    <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
+      <div class="setup-card-header">
+        <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
+        <p>Approve agents below to allow telemetry from this Proxmox host.</p>
       </div>
-      <div class="card-body p-0">
-        <table class="table table-sm mb-0" id="proxmox-pending-table">
-          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
-          <tbody id="proxmox-pending-tbody"></tbody>
-        </table>
-      </div>
+      <table class="data-table" id="proxmox-pending-table">
+        <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
+        <tbody id="proxmox-pending-tbody"></tbody>
+      </table>
     </div>
 
-    <div id="proxmox-approved-card" class="card mb-3 hidden">
-      <div class="card-header"><strong>Approved Proxmox Agents</strong></div>
-      <div class="card-body p-0">
-        <table class="table table-sm mb-0">
-          <thead><tr><th>Hostname</th><th></th></tr></thead>
-          <tbody id="proxmox-approved-tbody"></tbody>
-        </table>
-      </div>
+    <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
+      <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
+      <table class="data-table">
+        <thead><tr><th>Hostname</th><th></th></tr></thead>
+        <tbody id="proxmox-approved-tbody"></tbody>
+      </table>
     </div>
 
     <div class="server-bulk-bar">
@@ -128,13 +123,12 @@
       <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
     </div>
 
-    <div id="reclone-status-panel" class="card">
-      <div class="reclone-header">
-        <h3>Fleet Reclone</h3>
-        <span id="reclone-status-badge" class="badge badge-grey">Idle</span>
+    <div id="reclone-status-panel" class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Fleet Reclone <span id="reclone-status-badge" class="badge badge-grey">Idle</span></h2>
         <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
       </div>
-      <div id="reclone-progress-wrap" style="display:none">
+      <div id="reclone-progress-wrap" class="hidden">
         <div class="progress-bar-wrap"><div id="reclone-progress-bar" class="progress-bar"></div></div>
         <div id="reclone-progress-label"></div>
         <div id="reclone-vm-log" class="reclone-log"></div>
@@ -142,15 +136,22 @@
       <div id="reclone-last-run"></div>
     </div>
 
-    <div id="usb-summary-panel" class="card" style="display:none">
-      <h3>USB Devices</h3>
-      <table id="usb-summary-table">
-        <thead><tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Free Slots</th></tr></thead>
+    <div id="usb-summary-panel" class="setup-card setup-section-gap hidden">
+      <div class="setup-card-header">
+        <h2>USB Devices</h2>
+      </div>
+      <table class="data-table" id="usb-summary-table">
+        <thead>
+          <tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Free Slots</th></tr>
+        </thead>
         <tbody id="usb-summary-tbody"></tbody>
       </table>
-      <div id="unknown-usb-section" style="display:none">
-        <h4>⚠️ Uncertified Devices Detected</h4>
-        <table id="unknown-usb-table">
+      <div id="unknown-usb-section" class="hidden" style="margin-top:16px;">
+        <div class="setup-card-header" style="padding:0 0 8px;">
+          <h3>⚠️ Uncertified Devices Detected</h3>
+          <p>These USB devices are connected but not in the certified list. Add or ignore them below.</p>
+        </div>
+        <table class="data-table" id="unknown-usb-table">
           <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
           <tbody id="unknown-usb-tbody"></tbody>
         </table>
