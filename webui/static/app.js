@@ -129,8 +129,34 @@ document.querySelectorAll('.tab').forEach((tab) => {
 // ── Repo sync status ──────────────────────────────────────────────
 let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
 
-function setRelayStatus(data = {}) {
-  const stateText = document.getElementById('relay-state-text');
+const simDisabledState = { global: false, local: false };
+
+function renderSimDisabledBanner() {
+  const banner = document.getElementById('gkill-indicator');
+  if (!banner) return;
+  const { global: g, local: l } = simDisabledState;
+  if (!g && !l) {
+    banner.style.display = 'none';
+    document.title = 'Client-Sim Dashboard';
+    return;
+  }
+  const scope = g && l ? 'Globally & Locally' : g ? 'Globally' : 'Locally';
+  const tip = g && l
+    ? 'Kill switch active in both the global repo and local config'
+    : g ? 'Global kill switch ON in solutions-hpe/main — all islands affected'
+        : 'Local kill switch ON in simulation.conf — this island only';
+  banner.textContent = `🛑 Simulation Disabled — ${scope}`;
+  banner.title = tip;
+  banner.style.display = '';
+  document.title = `🛑 Simulation Disabled (${scope}) — Client-Sim`;
+}
+
+function applyGkillSwitch(value) {
+  simDisabledState.global = value === 'on';
+  renderSimDisabledBanner();
+}
+
+function setRelayStatus(data = {}) {  const stateText = document.getElementById('relay-state-text');
   const lastTime = document.getElementById('relay-last-time');
   const lastError = document.getElementById('relay-last-error');
   const dot = document.getElementById('relay-indicator');
@@ -521,6 +547,11 @@ function renderServerTab(data) {
 
 function applySettingsToUI(s) {
   const settings = mergeSettings(s);
+  // Local kill switch — from simulation.conf [simulation] kill_switch
+  if ('kill_switch' in settings) {
+    simDisabledState.local = settings.kill_switch === 'on';
+    renderSimDisabledBanner();
+  }
   if (repoUrlInput) repoUrlInput.value = settings.repo_url || repoUrlInput.value;
   if (branchInput && !branchInput.matches(':focus')) branchInput.value = settings.repo_branch || '';
   if (setupActiveBranch) setupActiveBranch.textContent = settings.repo_branch || '—';
@@ -2417,6 +2448,11 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'gkill_switch_update') {
+    applyGkillSwitch(message.value);
+    return;
+  }
+
   if (['status_update', 'overrides_update', 'overrides_cleared'].includes(message.type) && message.client) {
     upsertClient(message.client);
     updateCmdTargetDropdown();
@@ -3684,6 +3720,7 @@ updateCentralToolbar();
 connectWebSocket();
 loadSimulations();
 requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
+requestJson('/api/kill-switch/status').then(d => applyGkillSwitch(d.value)).catch(() => {});
 requestJson('/api/proxmox/status').then((data) => {
   if (data.connected || (data.vms || []).length || (data.usb_state || []).length || (data.unknown_usb || []).length) renderServerTab(data);
 }).catch(() => {});

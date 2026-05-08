@@ -525,6 +525,23 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .ind-dot.grey { background: var(--grey); }
 .ind-dot.green { background: var(--hpe-green); box-shadow: 0 0 0 3px rgba(1,169,130,0.25); }
 .ind-dot.red { background: var(--hpe-red); }
+.gkill-banner {
+  display: inline-flex;
+  align-items: center;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  animation: gkill-pulse 1.8s ease-in-out infinite;
+  cursor: default;
+}
+@keyframes gkill-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
 
 /* ── Footer ─────────────────────────────────────────────────────── */
 .page-footer {
