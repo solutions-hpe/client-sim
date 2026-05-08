@@ -127,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="0.35"
+VERSION="0.36"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -255,6 +255,20 @@ EOF
   ip addr flush dev "$DHCP_IFACE" 2>/dev/null || true
   ip addr add "${DHCP_GATEWAY}/${DHCP_PREFIX}" dev "$DHCP_IFACE" 2>/dev/null || true
   ok "${DHCP_IFACE} configured with ${DHCP_GATEWAY}/${DHCP_PREFIX}"
+
+  # ── rp_filter: use loose mode so DestNat / port-forwarded traffic from
+  #    other subnets isn't silently dropped by the kernel's strict reverse-
+  #    path check.  Without this, a firewall DestNat pointing at this LXC
+  #    (which has 2 NICs) works from the same subnet but fails from others.
+  sysctl -w net.ipv4.conf.all.rp_filter=2     >>"$LOG" 2>&1 || true
+  sysctl -w net.ipv4.conf.default.rp_filter=2 >>"$LOG" 2>&1 || true
+  cat >/etc/sysctl.d/10-client-sim.conf <<'SYSCTL'
+# Loose reverse-path filter — allows DestNat / port-forward traffic on
+# multi-homed LXC containers (management NIC + sim-client DHCP NIC).
+net.ipv4.conf.all.rp_filter=2
+net.ipv4.conf.default.rp_filter=2
+SYSCTL
+  ok "rp_filter set to loose mode (DestNat-compatible)"
 
   # ── dnsmasq config scoped only to the internal interface ──────────────────
   DNSMASQ_CONF="/etc/dnsmasq.d/client-sim.conf"
