@@ -49,7 +49,7 @@ REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.gi
 # Falls back to plaintext if key file or cryptography package is unavailable.
 _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
-_SENSITIVE_TOP_KEYS = {"relay_token", "github_token"}
+_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
 
 try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
@@ -118,7 +118,7 @@ OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 MAX_CLIENT_ERRORS = 50
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
-RELAY_INTERVAL_DEFAULT = 900  # 15 minutes
+RELAY_INTERVAL_DEFAULT = 60   # 1 minute
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
 HISTORY_HOURS = 24
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
@@ -151,6 +151,12 @@ def _save_settings() -> None:
         SETTINGS_FILE.write_text(json.dumps(_encrypt_settings(settings), indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
+
+
+def _normalize_relay_enabled(value: Any) -> str:
+    if isinstance(value, str):
+        return "on" if value.lower() == "on" else "off"
+    return "on" if value else "off"
 
 
 def _clamp_relay_interval(value: Any) -> int:
@@ -193,13 +199,12 @@ settings: dict[str, Any] = {
         "teams_webhook_url": "",
     }),
     "repo_sync_interval": _persisted.get("repo_sync_interval", SYNC_INTERVAL),
+    "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
+    "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
+    "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
+    "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
+    "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
 }
-settings.setdefault("relay_url", None)
-settings.setdefault("relay_token", None)
-settings.setdefault("relay_site_id", socket.gethostname())
-settings.setdefault("relay_enabled", False)
-settings.setdefault("relay_interval", RELAY_INTERVAL_DEFAULT)
-settings["relay_interval"] = _clamp_relay_interval(settings.get("relay_interval"))
 
 # Initialise in-memory token from persisted values so a restart
 # doesn't require the user to re-enter credentials.
@@ -1174,7 +1179,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
     background_tasks["central_poller"] = asyncio.create_task(central_poller())
     background_tasks["update_checker"] = asyncio.create_task(check_for_update())
-    background_tasks["relay"] = asyncio.create_task(relay_worker())
+    background_tasks["relay"] = asyncio.create_task(relay_loop())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     yield
@@ -1200,19 +1205,16 @@ state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
 relay_state: dict[str, Any] = {
     "enabled": False,
-    "url": None,
-    "token": None,
-    "site_id": None,
-    "interval": RELAY_INTERVAL_DEFAULT,
     "connected": False,
-    "last_relay": None,
-    "last_error": None,
+    "last_sync": None,
+    "error": None,
 }
-relay_state["url"] = settings["relay_url"]
-relay_state["token"] = settings["relay_token"]
-relay_state["site_id"] = settings["relay_site_id"]
-relay_state["enabled"] = bool(settings["relay_enabled"])
-relay_state["interval"] = _clamp_relay_interval(settings["relay_interval"])
+proxmox_state: dict[str, Any] = {
+    "connected": False,
+    "last_seen": None,
+    "node": {},
+    "vms": [],
+}
 relay_sites: dict[str, dict[str, Any]] = {}
 background_tasks: dict[str, asyncio.Task[Any]] = {}
 
@@ -1250,11 +1252,11 @@ class SettingsUpdate(BaseModel):
     hardware_checks: list[dict[str, str]] | None = None
     notifications: dict[str, Any] | None = None
     repo_sync_interval: int | None = None
-    relay_url: str | None = None
-    relay_token: str | None = None
-    relay_site_id: str | None = None
-    relay_enabled: bool | None = None
-    relay_interval: int | None = None
+    relay_enabled: str | None = None
+    relay_server_url: str | None = None
+    relay_api_key: str | None = None
+    relay_island_id: str | None = None
+    relay_poll_interval: int | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -1370,113 +1372,73 @@ async def broadcast_full_state() -> None:
 
 
 def _relay_status_payload() -> dict[str, Any]:
-    tenant_id = settings.get("central_config", {}).get("customer_id") or None
-    return {
-        "enabled": relay_state["enabled"],
-        "url": relay_state["url"],
-        "site_id": relay_state["site_id"],
-        "tenant_id": tenant_id,
-        "interval": relay_state["interval"],
-        "connected": relay_state["connected"],
-        "last_relay": relay_state["last_relay"],
-        "last_error": relay_state["last_error"],
-        "token_configured": bool(relay_state.get("token")),
-    }
+    return dict(relay_state)
 
 
-def _build_relay_payload() -> dict[str, Any]:
-    """Build the site snapshot payload to push to the central server.
-    Includes all data the central server needs — it will NOT poll Aruba Central
-    independently; everything must come from this payload.
-    """
-    tenant_id = settings.get("central_config", {}).get("customer_id") or None
-    return {
-        # ── Site identity ──────────────────────────────────────────
-        "site_id": relay_state["site_id"] or socket.gethostname(),
-        "site_url": f"http://{socket.gethostname()}:8000",
-        "site_version": INSTALLER_VERSION,
-        "tenant_id": tenant_id,           # derived from Aruba Central customer_id
-        "timestamp": time.time(),
-        "relay_interval": relay_state["interval"],
-        # ── Sim clients ────────────────────────────────────────────
-        "client_count": len(clients),
-        "clients": [serialize_client(hostname, client) for hostname, client in sorted(clients.items())],
-        # ── Aruba Central data (central aggregator must use this) ──
-        "central_status": _central_status_payload(),
-        "central_token_valid": bool(
-            settings.get("central_config", {}).get("access_token")
-            or central_token.get("access_token")
-        ),
-        "central_token_state": _central_token_state(),
-        # ── Simulation profiles & site mappings ────────────────────
-        "site_mappings": settings.get("site_mappings", {}),
-    }
-
-
-async def _do_relay() -> None:
-    """POST current site snapshot to the central server."""
-    if not _HTTPX_AVAILABLE or httpx is None:
-        relay_state["connected"] = False
-        relay_state["last_error"] = "httpx not installed — central relay unavailable"
-        await broadcast({"type": "relay_status", **_relay_status_payload()})
-        logger.warning("Relay requested but httpx is not installed")
+async def relay_sync_once() -> None:
+    if settings.get("relay_enabled") != "on" or not settings.get("relay_server_url"):
+        relay_state["enabled"] = False
         return
 
-    url = relay_state["url"].rstrip("/") + "/api/relay/ingest"
-    token = relay_state.get("token") or ""
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    if not _HTTPX_AVAILABLE or httpx is None:
+        relay_state.update({"enabled": True, "connected": False, "error": "httpx not installed"})
+        await broadcast({"type": "relay_status", **relay_state})
+        return
 
-    async with state_lock:
-        payload = _build_relay_payload()
+    relay_state["enabled"] = True
+    server_url = settings["relay_server_url"].rstrip("/")
+    island_id = settings.get("relay_island_id", "")
+    api_key = settings.get("relay_api_key", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
 
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=30) as client_http:
-                resp = await client_http.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-            relay_state["connected"] = True
-            relay_state["last_relay"] = time.time()
-            relay_state["last_error"] = None
-            await broadcast({"type": "relay_status", **_relay_status_payload()})
-            logger.info("Relayed site snapshot to %s (%d clients)", url, payload["client_count"])
-            return
-        except httpx.HTTPStatusError as exc:
-            retryable = exc.response.status_code >= 500 and attempt == 0
-            if retryable:
-                await asyncio.sleep(5)
-                continue
-            relay_state["connected"] = False
-            relay_state["last_error"] = str(exc)
-            await broadcast({"type": "relay_status", **_relay_status_payload()})
-            logger.warning("Relay to %s failed: %s", url, exc)
-            return
-        except httpx.RequestError as exc:
-            if attempt == 0:
-                await asyncio.sleep(5)
-                continue
-            relay_state["connected"] = False
-            relay_state["last_error"] = str(exc)
-            await broadcast({"type": "relay_status", **_relay_status_payload()})
-            logger.warning("Relay to %s failed: %s", url, exc)
-            return
-        except Exception as exc:
-            relay_state["connected"] = False
-            relay_state["last_error"] = str(exc)
-            await broadcast({"type": "relay_status", **_relay_status_payload()})
-            logger.warning("Relay to %s failed: %s", url, exc)
-            return
+    try:
+        async with state_lock:
+            telemetry = {
+                "island_id": island_id,
+                "clients": [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)],
+                "timestamp": time.time(),
+            }
+
+        async with httpx.AsyncClient(timeout=10) as hc:
+            await hc.post(f"{server_url}/api/islands/{island_id}/telemetry", json=telemetry, headers=headers)
+            resp = await hc.get(f"{server_url}/api/islands/{island_id}/inbox", headers=headers)
+            resp.raise_for_status()
+            remote_cmds = resp.json()
+
+        if not isinstance(remote_cmds, list):
+            remote_cmds = []
+
+        async with state_lock:
+            for rc in remote_cmds:
+                target = rc.get("target", "")
+                action = rc.get("action", "")
+                args = rc.get("args", {})
+                if not target or not action:
+                    continue
+                if target == "all":
+                    for hostname in list(clients.keys()):
+                        commands.append(_make_command(hostname, action, args))
+                else:
+                    commands.append(_make_command(target, action, args))
+                if len(commands) > COMMAND_MAX:
+                    del commands[:len(commands) - COMMAND_MAX]
+
+        if remote_cmds:
+            await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+
+        relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+    except Exception as exc:
+        relay_state.update({"connected": False, "error": str(exc)})
+        logger.warning("Relay sync failed: %s", exc)
+
+    await broadcast({"type": "relay_status", **relay_state})
 
 
-async def relay_worker() -> None:
-    """Periodically push a site snapshot to the central relay server."""
+async def relay_loop() -> None:
     while True:
-        interval = relay_state.get("interval") or RELAY_INTERVAL_DEFAULT
+        interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
+        await relay_sync_once()
         await asyncio.sleep(interval)
-        if not relay_state["enabled"] or not relay_state["url"]:
-            continue
-        await _do_relay()
 
 
 def ensure_repo_ready() -> None:
@@ -1841,13 +1803,11 @@ async def api_settings_get() -> dict[str, Any]:
             k: v for k, v in settings.get("notifications", {}).items()
             if k != "smtp_password"  # never expose password
         },
-        "relay": {
-            "enabled": relay_state["enabled"],
-            "url": relay_state["url"],
-            "site_id": relay_state["site_id"],
-            "interval": relay_state["interval"],
-            "token_configured": bool(relay_state.get("token")),
-        },
+        "relay_enabled": settings.get("relay_enabled", "off"),
+        "relay_server_url": settings.get("relay_server_url", ""),
+        "relay_island_id": settings.get("relay_island_id", ""),
+        "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
+        "relay_api_key_configured": bool(settings.get("relay_api_key")),
     }
 
 
@@ -1868,39 +1828,34 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         if token:  # blank = keep existing
             settings["github_token"] = token
 
-    if update.relay_url is not None:
-        settings["relay_url"] = update.relay_url.strip() or None
-        relay_state["url"] = settings["relay_url"]
+    if update.relay_server_url is not None:
+        settings["relay_server_url"] = update.relay_server_url.strip()
         relay_config_changed = True
 
-    if update.relay_token is not None:
-        tok = update.relay_token.strip()
-        if tok:
-            settings["relay_token"] = tok
-            relay_state["token"] = tok
+    if update.relay_api_key is not None:
+        api_key = update.relay_api_key.strip()
+        if api_key:
+            settings["relay_api_key"] = api_key
             relay_config_changed = True
 
-    if update.relay_site_id is not None:
-        sid = update.relay_site_id.strip()
-        if sid:
-            settings["relay_site_id"] = sid
-            relay_state["site_id"] = sid
-            relay_config_changed = True
+    if update.relay_island_id is not None:
+        settings["relay_island_id"] = update.relay_island_id.strip()
+        relay_config_changed = True
 
     if update.relay_enabled is not None:
-        settings["relay_enabled"] = update.relay_enabled
-        relay_state["enabled"] = update.relay_enabled
+        settings["relay_enabled"] = _normalize_relay_enabled(update.relay_enabled)
         relay_config_changed = True
 
-    if update.relay_interval is not None:
-        interval = _clamp_relay_interval(update.relay_interval)
-        settings["relay_interval"] = interval
-        relay_state["interval"] = interval
+    if update.relay_poll_interval is not None:
+        settings["relay_poll_interval"] = _clamp_relay_interval(update.relay_poll_interval)
         relay_config_changed = True
 
     if relay_config_changed:
-        relay_state["connected"] = False
-        relay_state["last_error"] = None
+        relay_state.update({
+            "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
+            "connected": False,
+            "error": None,
+        })
 
     if update.central_config is not None:
         merged = dict(settings["central_config"])
@@ -1977,13 +1932,13 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
 @app.post("/api/relay/trigger")
 async def api_relay_trigger() -> dict[str, Any]:
-    """Manually trigger an immediate relay push."""
-    if not relay_state["enabled"]:
+    """Manually trigger an immediate relay sync."""
+    if settings.get("relay_enabled") != "on":
         raise HTTPException(status_code=400, detail="Relay is not enabled")
-    if not relay_state["url"]:
-        raise HTTPException(status_code=400, detail="Relay URL not configured")
-    asyncio.create_task(_do_relay())
-    return {"status": "ok", "message": "Relay push triggered"}
+    if not settings.get("relay_server_url"):
+        raise HTTPException(status_code=400, detail="Relay server URL not configured")
+    asyncio.create_task(relay_sync_once())
+    return {"status": "ok", "message": "Relay sync triggered"}
 
 
 @app.post("/api/relay/ingest")
@@ -2020,7 +1975,23 @@ async def api_relay_sites(tenant_id: str | None = Query(None)) -> dict[str, Any]
 
 @app.get("/api/relay/status")
 async def api_relay_status_endpoint() -> dict[str, Any]:
-    return _relay_status_payload()
+    return relay_state
+
+
+@app.post("/api/proxmox/telemetry")
+async def proxmox_telemetry(body: dict = Body(...)) -> dict[str, bool]:
+    """Receive telemetry from the Proxmox host agent."""
+    proxmox_state["connected"] = True
+    proxmox_state["last_seen"] = time.time()
+    proxmox_state["node"] = body.get("node", {})
+    proxmox_state["vms"] = body.get("vms", [])
+    await broadcast({"type": "proxmox_update", **proxmox_state})
+    return {"ok": True}
+
+
+@app.get("/api/proxmox/status")
+async def get_proxmox_status() -> dict[str, Any]:
+    return proxmox_state
 
 
 # ── Aruba Central API endpoints ───────────────────────────────────────────────
@@ -3169,6 +3140,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
+    if proxmox_state["connected"] or proxmox_state["vms"]:
+        await websocket.send_text(json.dumps({"type": "proxmox_update", **proxmox_state}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
 
     try:

@@ -87,7 +87,11 @@ let currentSettings = {
   central_config: { cluster_url: '', client_id: '', customer_id: '' },
   site_mappings: {},
   monitored_checks: [],
-  relay: { enabled: false, url: '', site_id: '', interval: 900, token_configured: false }
+  relay_enabled: 'off',
+  relay_server_url: '',
+  relay_island_id: '',
+  relay_poll_interval: 60,
+  relay_api_key_configured: false
 };
 let configData = {};
 let configLoaded = false;
@@ -113,46 +117,21 @@ document.querySelectorAll('.tab').forEach((tab) => {
 // ── Repo sync status ──────────────────────────────────────────────
 let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
 
-function setRelayStatus(data) {
-  const dot = document.getElementById('relay-dot');
-  const text = document.getElementById('relay-text');
+function setRelayStatus(data = {}) {
   const stateText = document.getElementById('relay-state-text');
   const lastTime = document.getElementById('relay-last-time');
   const lastError = document.getElementById('relay-last-error');
-  const tokenStatus = document.getElementById('relay-token-status');
-  const tenantIdEl = document.getElementById('relay-tenant-id');
+  const dot = document.getElementById('relay-indicator');
 
-  if (!dot || !text) return;
+  if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : data.error ? '✗ Error' : 'Enabled (pending)';
+  if (lastTime) lastTime.textContent = data.last_sync ? new Date(data.last_sync * 1000).toLocaleTimeString() : '—';
+  if (lastError) lastError.textContent = data.error || '—';
 
-  if (!data.enabled) {
-    dot.className = 'status-dot warning';
-    text.textContent = 'Disabled';
-  } else if (data.connected) {
-    dot.className = 'status-dot online';
-    text.textContent = 'Connected';
-  } else {
-    dot.className = 'status-dot offline';
-    text.textContent = data.last_error ? 'Error' : 'Pending';
-  }
-
-  const statusEl = document.getElementById('relay-status');
-  if (statusEl) {
-    if (!data.enabled) statusEl.title = 'Client-Sim Cloud Platform: disabled';
-    else if (data.connected) statusEl.title = `CS Cloud: connected to ${data.url} (tenant: ${data.tenant_id || 'none'})`;
-    else statusEl.title = data.last_error ? `CS Cloud error: ${data.last_error}` : 'CS Cloud: enabled — pending first push';
-  }
-
-  if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : data.last_error ? '✗ Error' : 'Enabled (pending)';
-  if (lastTime) {
-    lastTime.textContent = data.last_relay
-      ? new Date(data.last_relay * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      : '—';
-  }
-  if (lastError) lastError.textContent = data.last_error || '—';
-  if (tokenStatus) tokenStatus.textContent = data.token_configured ? '✓ Token configured' : 'No token — auth disabled';
-  if (tenantIdEl) {
-    tenantIdEl.textContent = data.tenant_id || 'Not configured — set customer ID in Central settings';
-    tenantIdEl.className = `form-static ${data.tenant_id ? '' : 'muted'}`;
+  if (dot) {
+    dot.className = data.connected ? 'ind-dot green' : 'ind-dot red';
+    dot.title = data.connected
+      ? `Relay connected — last sync: ${new Date((data.last_sync || 0) * 1000).toLocaleTimeString()}`
+      : `Relay disconnected: ${data.error || 'unknown'}`;
   }
 }
 
@@ -238,20 +217,11 @@ const centralClassicFields = document.getElementById('central-classic-fields');
 const centralNewFields = document.getElementById('central-new-fields');
 const centralClientIdBadge = document.getElementById('central-client-id-badge');
 const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
-const relayEnabledCheck = document.getElementById('relay-enabled-check');
-const relayEnabledLabel = document.getElementById('relay-enabled-label');
-if (relayEnabledCheck && relayEnabledLabel) {
-  relayEnabledCheck.addEventListener('change', () => {
-    relayEnabledLabel.textContent = relayEnabledCheck.checked ? 'Enabled' : 'Disabled';
-  });
-}
-const relayUrlInput = document.getElementById('relay-url-input');
-const relaySiteIdInput = document.getElementById('relay-site-id-input');
-const relayIntervalInput = document.getElementById('relay-interval-input');
-const relayTokenInput = document.getElementById('relay-token-input');
-const relayTokenStatus = document.getElementById('relay-token-status');
+const relayEnabledSelect = document.getElementById('relay-enabled-select');
+const relayIslandIdInput = document.getElementById('relay-island-id-input');
+const relayServerUrlInput = document.getElementById('relay-server-url-input');
+const relayApiKeyInput = document.getElementById('relay-api-key-input');
 const saveRelayBtn = document.getElementById('save-relay-btn');
-const relayNowBtn = document.getElementById('relay-now-btn');
 const relayMsg = document.getElementById('relay-message');
 
 // Notifications + sync interval
@@ -343,15 +313,11 @@ function mergeSettings(next = {}) {
     monitored_checks: Array.isArray(next.monitored_checks)
       ? next.monitored_checks
       : (currentSettings.monitored_checks || []),
-    relay: {
-      enabled: false,
-      url: '',
-      site_id: '',
-      interval: 900,
-      token_configured: false,
-      ...(currentSettings.relay || {}),
-      ...(next.relay || {})
-    }
+    relay_enabled: next.relay_enabled ?? currentSettings.relay_enabled ?? 'off',
+    relay_server_url: next.relay_server_url ?? currentSettings.relay_server_url ?? '',
+    relay_island_id: next.relay_island_id ?? currentSettings.relay_island_id ?? '',
+    relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
+    relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false
   };
   currentSettings = merged;
   return merged;
@@ -378,6 +344,129 @@ function showInlineMessage(element, text, isError, timeout = 5000) {
   }
 }
 
+function showNotification(message, level = 'info') {
+  let notice = document.getElementById('app-notification');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'app-notification';
+    document.body.appendChild(notice);
+  }
+  clearTimeout(notice._timer);
+  notice.textContent = message;
+  notice.className = `app-notification settings-message ${level === 'error' ? 'error' : 'success'}`;
+  notice._timer = setTimeout(() => {
+    notice.className = 'app-notification settings-message hidden';
+  }, 4000);
+}
+
+function formatRelativeTime(ts) {
+  if (!ts) return '—';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function sendProxmoxCommand(action, vmid) {
+  const args = vmid ? { vmid: parseInt(vmid, 10) } : {};
+  return fetch('/api/commands', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: 'proxmox', action, args }),
+  }).then((r) => r.json().then((data) => {
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    return data;
+  }));
+}
+
+function renderServerTab(data) {
+  const tabBtn = document.getElementById('tab-server-btn');
+  const tabPanel = document.getElementById('tab-server');
+  if (tabBtn) tabBtn.style.display = '';
+  if (tabPanel) tabPanel.style.display = '';
+
+  const node = data.node || {};
+  const setEl = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+
+  setEl('server-node-name', node.hostname || 'Proxmox');
+  setEl('server-cpu', node.cpu_percent != null && !Number.isNaN(Number(node.cpu_percent)) ? Number(node.cpu_percent).toFixed(1) : '—');
+  const ramUsedGB = node.mem_used_kb ? (Number(node.mem_used_kb) / 1024 / 1024).toFixed(1) : '—';
+  const ramTotalGB = node.mem_total_kb ? (Number(node.mem_total_kb) / 1024 / 1024).toFixed(1) : '—';
+  setEl('server-ram', `${ramUsedGB}/${ramTotalGB} GB`);
+  setEl('server-last-seen', formatRelativeTime(data.last_seen));
+
+  const storagePills = document.getElementById('server-storage-pills');
+  if (storagePills && Array.isArray(node.storage)) {
+    storagePills.innerHTML = node.storage.map((s) => {
+      const usedGB = ((Number(s.used) || 0) / 1024 / 1024 / 1024).toFixed(0);
+      const totalGB = ((Number(s.total) || 0) / 1024 / 1024 / 1024).toFixed(0);
+      return `<span class="server-stat-pill" title="${s.name}">💿 ${s.name}: ${usedGB}/${totalGB}GB</span>`;
+    }).join('');
+  }
+
+  const tbody = document.getElementById('server-vm-tbody');
+  const empty = document.getElementById('server-empty');
+  const selectAll = document.getElementById('server-select-all');
+  const thCheck = document.getElementById('server-th-check');
+  const vms = Array.isArray(data.vms) ? data.vms : [];
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+  if (selectAll) selectAll.checked = false;
+  if (thCheck) {
+    thCheck.disabled = vms.length === 0;
+    thCheck.checked = false;
+  }
+
+  if (vms.length === 0) {
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const VM_ACTIONS = [
+    { action: 'start_vm', label: '▶', title: 'Start' },
+    { action: 'stop_vm', label: '■', title: 'Stop' },
+    { action: 'reboot_vm', label: '↺', title: 'Reboot' },
+    { action: 'snapshot_vm', label: '📷', title: 'Snapshot' },
+    { action: 'reclone_vm', label: '⎘', title: 'Reclone' },
+    { action: 'delete_vm', label: '✕', title: 'Delete' },
+  ];
+
+  vms.forEach((vm) => {
+    const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
+    const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
+    const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+    const actionBtns = VM_ACTIONS.map((a) =>
+      `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}" title="${a.title}">${a.label}</button>`
+    ).join(' ');
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
+      <td>${statusDot} ${vm.status || 'unknown'}</td>
+      <td>${vm.vmid}</td>
+      <td>${vm.name || '—'}</td>
+      <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
+      <td>${memUsedGB}/${memTotalGB} GB</td>
+      <td>${actionBtns}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.vm-action-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      sendProxmoxCommand(btn.dataset.action, btn.dataset.vmid)
+        .then(() => showNotification(`${btn.title} command sent for VM ${btn.dataset.vmid}`, 'info'))
+        .catch((err) => showNotification(`Error: ${err.message}`, 'error'));
+    });
+  });
+}
+
 function applySettingsToUI(s) {
   const settings = mergeSettings(s);
   if (repoUrlInput) repoUrlInput.value = settings.repo_url || repoUrlInput.value;
@@ -399,16 +488,14 @@ function applySettingsToUI(s) {
   if (atStatus) atStatus.textContent = settings.central_config.access_token_configured ? '✓ Token configured — paste new value to replace.' : 'No token saved yet.';
   if (rtStatus) rtStatus.textContent = settings.central_config.refresh_token_configured ? '✓ Refresh token configured — paste new value to replace.' : 'Optional — enables automatic renewal when the access token expires.';
   if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
-  const relay = settings.relay || {};
-  if (relayEnabledCheck) {
-    relayEnabledCheck.checked = !!relay.enabled;
-    const lbl = document.getElementById('relay-enabled-label');
-    if (lbl) lbl.textContent = relay.enabled ? 'Enabled' : 'Disabled';
+  if (relayEnabledSelect && !relayEnabledSelect.matches(':focus')) relayEnabledSelect.value = settings.relay_enabled || 'off';
+  setInputValueIfIdle(relayServerUrlInput, settings.relay_server_url || '');
+  setInputValueIfIdle(relayIslandIdInput, settings.relay_island_id || '');
+  const relayIndicator = document.getElementById('relay-indicator');
+  if (relayIndicator) {
+    const relayOn = settings.relay_enabled === 'on' && settings.relay_server_url;
+    relayIndicator.style.display = relayOn ? '' : 'none';
   }
-  setInputValueIfIdle(relayUrlInput, relay.url || '');
-  setInputValueIfIdle(relaySiteIdInput, relay.site_id || '');
-  if (relayIntervalInput && !relayIntervalInput.matches(':focus')) relayIntervalInput.value = relay.interval || 900;
-  if (relayTokenStatus) relayTokenStatus.textContent = relay.token_configured ? '✓ Token configured' : 'No token — auth disabled';
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
   renderHwChecksPreview();
@@ -1954,6 +2041,11 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'proxmox_update') {
+    renderServerTab(message);
+    return;
+  }
+
   if (message.type === 'version_status') {
     applyVersionStatus(message);
     return;
@@ -2788,13 +2880,12 @@ if (saveRelayBtn) {
   saveRelayBtn.addEventListener('click', async () => {
     const originalLabel = saveRelayBtn.textContent;
     const payload = {
-      relay_enabled: relayEnabledCheck?.checked ?? false,
-      relay_url: relayUrlInput?.value?.trim() || null,
-      relay_site_id: relaySiteIdInput?.value?.trim() || null,
-      relay_interval: parseInt(relayIntervalInput?.value || '900', 10)
+      relay_enabled: relayEnabledSelect?.value || 'off',
+      relay_server_url: relayServerUrlInput?.value?.trim() || '',
+      relay_island_id: relayIslandIdInput?.value?.trim() || ''
     };
-    const tokenVal = relayTokenInput?.value?.trim();
-    if (tokenVal) payload.relay_token = tokenVal;
+    const apiKey = relayApiKeyInput?.value?.trim();
+    if (apiKey) payload.relay_api_key = apiKey;
     saveRelayBtn.disabled = true;
     saveRelayBtn.textContent = 'Saving…';
     try {
@@ -2804,30 +2895,14 @@ if (saveRelayBtn) {
         body: JSON.stringify(payload)
       });
       showInlineMessage(relayMsg, 'Relay settings saved.', false);
-      if (relayTokenInput) relayTokenInput.value = '';
+      if (relayApiKeyInput) relayApiKeyInput.value = '';
       await loadSettings();
+      await requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
     } catch (error) {
       showInlineMessage(relayMsg, `Error: ${error.message}`, true);
     } finally {
       saveRelayBtn.disabled = false;
       saveRelayBtn.textContent = originalLabel;
-    }
-  });
-}
-
-if (relayNowBtn) {
-  relayNowBtn.addEventListener('click', async () => {
-    const originalLabel = relayNowBtn.textContent;
-    try {
-      relayNowBtn.disabled = true;
-      relayNowBtn.textContent = '⬆ Relaying…';
-      await requestJson('/api/relay/trigger', { method: 'POST' });
-      showInlineMessage(relayMsg, 'Relay push triggered — status will update shortly.', false);
-    } catch (error) {
-      showInlineMessage(relayMsg, `Error: ${error.message}`, true);
-    } finally {
-      relayNowBtn.disabled = false;
-      relayNowBtn.textContent = originalLabel;
     }
   });
 }
@@ -3247,9 +3322,33 @@ if (testTeamsBtn) {
     }
   });
 }
+document.getElementById('server-select-all')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.vm-check').forEach((cb) => { cb.checked = e.target.checked; });
+  const thCheck = document.getElementById('server-th-check');
+  if (thCheck) thCheck.checked = e.target.checked;
+});
+document.getElementById('server-th-check')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.vm-check').forEach((cb) => { cb.checked = e.target.checked; });
+  const selectAll = document.getElementById('server-select-all');
+  if (selectAll) selectAll.checked = e.target.checked;
+});
+['start', 'stop', 'reclone', 'delete'].forEach((op) => {
+  document.getElementById(`server-bulk-${op}`)?.addEventListener('click', () => {
+    const vmids = [...document.querySelectorAll('.vm-check:checked')].map((cb) => cb.dataset.vmid);
+    if (!vmids.length) return;
+    const action = op === 'reclone' ? 'reclone_vm' : op === 'delete' ? 'delete_vm' : `${op}_vm`;
+    vmids.forEach((vmid) => sendProxmoxCommand(action, vmid));
+    showNotification(`${op} sent for ${vmids.length} VM(s)`, 'info');
+  });
+});
+
 updateCentralToolbar();
 connectWebSocket();
 loadSimulations();
+requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
+fetch('/api/proxmox/status').then((r) => r.json()).then((data) => {
+  if (data.connected) renderServerTab(data);
+}).catch(() => {});
 
 // Fetch installer version once on load and display in header
 (async () => {

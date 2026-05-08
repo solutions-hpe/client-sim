@@ -31,11 +31,7 @@
           <span class="repo-label">Central API:</span>
           <span id="central-api-text">Unknown</span>
         </div>
-        <div id="relay-status" class="repo-status" title="Client-Sim Cloud Platform status" aria-live="polite">
-          <span id="relay-dot" class="status-dot offline"></span>
-          <span class="repo-label">CS Cloud:</span>
-          <span id="relay-text">Disabled</span>
-        </div>
+        <span id="relay-indicator" class="ind-dot grey" title="Relay not configured" style="display:none;"></span>
         <div class="ws-status" aria-live="polite">
           <span id="ws-dot" class="status-dot offline"></span>
           <span class="repo-label">API Status:</span>
@@ -52,6 +48,7 @@
     <button class="tab" role="tab" aria-selected="false" data-tab="central">🔗 Central</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="config">⚙ Config</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
+    <button class="tab tab-btn" id="tab-server-btn" role="tab" aria-selected="false" data-tab="server" style="display:none;">Server</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="logs">📋 Logs</button>
   </nav>
 
@@ -87,6 +84,42 @@
         </tbody>
       </table>
     </section>
+  </main>
+
+  <main id="tab-server" class="page tab-content hidden tab-panel" style="display:none;">
+    <div id="server-node-bar" class="server-node-bar">
+      <span id="server-node-name" class="server-node-name">—</span>
+      <span class="server-stat-pill" title="CPU">⚙ <span id="server-cpu">—</span>%</span>
+      <span class="server-stat-pill" title="RAM">💾 <span id="server-ram">—</span></span>
+      <span id="server-storage-pills"></span>
+      <span class="server-last-seen">Last seen: <span id="server-last-seen">—</span></span>
+    </div>
+
+    <div class="server-bulk-bar">
+      <label><input type="checkbox" id="server-select-all"> Select All</label>
+      <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>
+      <button class="btn btn-secondary" id="server-bulk-stop">■ Stop</button>
+      <button class="btn btn-warning" id="server-bulk-reclone">↺ Reclone</button>
+      <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
+    </div>
+
+    <table class="data-table" id="server-vm-table">
+      <thead>
+        <tr>
+          <th style="width:36px;"><input type="checkbox" id="server-th-check" disabled></th>
+          <th>Status</th>
+          <th>VM ID</th>
+          <th>Name</th>
+          <th>CPU %</th>
+          <th>RAM</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="server-vm-tbody"></tbody>
+    </table>
+    <div id="server-empty" style="text-align:center;color:var(--muted);padding:32px;">
+      Waiting for Proxmox agent to check in…
+    </div>
   </main>
 
   <!-- ── Simulations tab ── -->
@@ -315,48 +348,40 @@
 
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">
-        <h2>Client-Sim Cloud Platform</h2>
-        <p>Push site snapshots to the Client-Sim Cloud Platform. Configure the URL, site identifier, and push interval.</p>
+        <h2>Relay</h2>
+        <p>Configure optional relay sync between this WebUI and a central management server.</p>
       </div>
 
       <div class="setup-form">
-        <div class="form-group">
-          <label class="form-label">Relay to Cloud Platform</label>
-          <div class="toggle-row">
-            <label class="switch">
-              <input type="checkbox" id="relay-enabled-check">
-              <span class="slider"></span>
-            </label>
-            <span class="toggle-row-label" id="relay-enabled-label">Disabled</span>
+        <div class="settings-section">
+          <div class="settings-section-title">Relay (Central Server)</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Relay Enabled</label>
+              <select id="relay-enabled-select" data-key="relay_enabled">
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Island ID</label>
+              <input id="relay-island-id-input" type="text" data-key="relay_island_id" placeholder="e.g. island-lab-01">
+            </div>
           </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="relay-url-input">Central Server URL</label>
-          <input id="relay-url-input" class="form-input" type="url" placeholder="http://central-server:8000">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="relay-site-id-input">Site ID</label>
-          <input id="relay-site-id-input" class="form-input" type="text" placeholder="lab-01">
-          <span class="form-hint">Unique name for this site in the central dashboard.</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Tenant ID</label>
-          <div class="form-static" id="relay-tenant-id">—</div>
-          <span class="form-hint">Derived from Aruba Central customer ID — not user-configurable.</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="relay-interval-input">Relay Interval (seconds)</label>
-          <input id="relay-interval-input" class="form-input" type="number" min="60" max="86400" value="900">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="relay-token-input">Relay Token</label>
-          <input id="relay-token-input" class="form-input" type="password" placeholder="Leave blank — auth not required yet" autocomplete="new-password">
-          <span class="form-hint" id="relay-token-status"></span>
+          <div class="form-row">
+            <div class="form-group" style="flex:2;">
+              <label>Central Server URL</label>
+              <input id="relay-server-url-input" type="text" data-key="relay_server_url" placeholder="https://central.example.com">
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label>API Key</label>
+              <input id="relay-api-key-input" type="password" data-key="relay_api_key" placeholder="shared secret" autocomplete="new-password">
+            </div>
+          </div>
         </div>
 
         <div class="form-actions">
           <button id="save-relay-btn" class="btn btn-primary" type="button">Save Relay Settings</button>
-          <button id="relay-now-btn" class="btn btn-secondary" type="button">⬆ Relay Now</button>
         </div>
         <div id="relay-message" class="settings-message hidden" role="alert"></div>
 
@@ -366,7 +391,7 @@
             <span id="relay-state-text" class="setup-status-value">—</span>
           </div>
           <div class="setup-status-item">
-            <span class="setup-status-label">Last Relay</span>
+            <span class="setup-status-label">Last Sync</span>
             <span id="relay-last-time" class="setup-status-value">—</span>
           </div>
           <div class="setup-status-item">
