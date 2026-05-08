@@ -102,8 +102,13 @@
           <button id="sim-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
         </div>
       </section>
-      <div id="sim-cards-grid" class="sim-cards-grid"></div>
-      <div id="sim-empty" class="central-empty hidden">No simulation profiles found — check that simulation.conf is synced.</div>
+      <div class="checks-toolbar">
+        <input id="checks-filter" class="checks-filter-input" type="text" placeholder="Filter checks…" spellcheck="false" />
+        <span id="checks-count" class="checks-count-badge">0 checks</span>
+      </div>
+      <div id="sim-checks-list" class="sim-checks-list">
+        <div id="sim-checks-empty" class="central-empty hidden">No checks configured — sync simulation.conf and configure hardware alerts.</div>
+      </div>
     </div>
 
     <!-- Drill-down panel (hidden until a card is clicked) -->
@@ -132,6 +137,32 @@
       <div id="sim-clients-list" class="sim-clients-list">
         <div class="sim-clients-loading">Loading…</div>
       </div>
+    </div>
+
+    <!-- Hardware alert drill-down panel -->
+    <div id="hw-detail" class="central-detail-panel hidden">
+      <div class="central-detail-header">
+        <button id="hw-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+        <div>
+          <h2 id="hw-detail-title">Hardware Alert</h2>
+          <p id="hw-detail-sub" class="central-detail-sub">—</p>
+        </div>
+        <div id="hw-detail-badge" class="sim-status-badge sim-unknown">—</div>
+      </div>
+      <div id="hw-site-list" class="sim-site-list"></div>
+    </div>
+
+    <!-- Client count drill-down panel -->
+    <div id="cc-detail" class="central-detail-panel hidden">
+      <div class="central-detail-header">
+        <button id="cc-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+        <div>
+          <h2 id="cc-detail-title">Client Count Monitor</h2>
+          <p id="cc-detail-sub" class="central-detail-sub">—</p>
+        </div>
+        <div id="cc-detail-badge" class="sim-status-badge sim-unknown">—</div>
+      </div>
+      <div id="cc-site-detail" class="sim-site-list"></div>
     </div>
   </main>
 

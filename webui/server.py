@@ -276,6 +276,11 @@ ALLOWED_CONFIG_SECTIONS = {"simulation", "address", "server", *(f"s{i}" for i in
 # {wsite: {check_id: {status, count, ts, check_name, check_type}}}
 central_status: dict[str, dict[str, Any]] = {}
 central_wireless_clients: dict[str, int] = {}   # wsite → client count from Central API
+# wsite → list of (timestamp_float, client_count_int) samples (rolling 60 min)
+_client_count_samples: dict[str, list[tuple[float, int]]] = {}
+CLIENT_COUNT_WINDOW = 3600   # seconds of history to keep
+CLIENT_COUNT_MIN_SAMPLES = 3  # minimum samples before flagging
+CLIENT_COUNT_DROP_PCT = 25.0  # percent drop that triggers alert
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
@@ -681,12 +686,12 @@ async def central_token_manager() -> None:
                         if not ok:
                             logger.warning("Central token load failed: %s", msg)
                         # Broadcast updated token state regardless of success
-                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()})
+                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()})
                     elif expiring and _can_refresh():
                         ok, msg = await _refresh_central_token(client)
                         if not ok:
                             logger.warning("Central token refresh failed: %s", msg)
-                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()})
+                        await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()})
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -904,6 +909,12 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             logger.warning("Central wireless client count fetch failed for site %s: %s", central_site, exc)
         central_wireless_clients[wsite] = wl_count
 
+        _client_count_samples.setdefault(wsite, []).append((now, wl_count))
+        cutoff_cc = now - CLIENT_COUNT_WINDOW
+        _client_count_samples[wsite] = [
+            s for s in _client_count_samples[wsite] if s[0] >= cutoff_cc
+        ]
+
     # ── Commit hardware alert devices + detect transitions ────────
     global hardware_alert_devices
     hardware_alert_devices = new_hw_devices
@@ -917,7 +928,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             central_history.extend(new_records)
         await asyncio.to_thread(_append_and_trim_history, new_records)
 
-    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "ts": now, "token_state": _central_token_state()})
+    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": now, "token_state": _central_token_state()})
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -962,6 +973,43 @@ def _hw_alerts_payload() -> list[dict[str, Any]]:
     return result
 
 
+def _client_count_payload() -> dict[str, Any]:
+    """Per-site client count status based on 60-min rolling average."""
+    site_mappings = settings.get("site_mappings", {})
+    result: dict[str, Any] = {}
+    for wsite, samples in _client_count_samples.items():
+        if not samples:
+            continue
+        current = samples[-1][1]
+        site_name = site_mappings.get(wsite, wsite)
+        if len(samples) < CLIENT_COUNT_MIN_SAMPLES:
+            result[wsite] = {
+                "site_name": site_name,
+                "current": current,
+                "hourly_avg": current,
+                "drop_pct": 0.0,
+                "status": "NO_DATA",
+                "ts": samples[-1][0],
+            }
+            continue
+        avg = sum(s[1] for s in samples) / len(samples)
+        if avg < 1:
+            status = "OK"
+            drop_pct = 0.0
+        else:
+            drop_pct = (avg - current) / avg * 100.0
+            status = "DEGRADED" if drop_pct >= CLIENT_COUNT_DROP_PCT else "OK"
+        result[wsite] = {
+            "site_name": site_name,
+            "current": current,
+            "hourly_avg": avg,
+            "drop_pct": drop_pct,
+            "status": status,
+            "ts": samples[-1][0],
+        }
+    return result
+
+
 async def _check_transitions_and_notify(now: float) -> None:
     """Detect green→red transitions for sim checks and hardware checks, fire notifications."""
     notif = settings.get("notifications", {})
@@ -997,6 +1045,24 @@ async def _check_transitions_and_notify(now: float) -> None:
                 "type": "hardware",
                 "name": name,
                 "detail": f"Hardware alert '{name}' is now active ({total} device(s) affected)",
+            })
+
+    for wsite, info in _client_count_payload().items():
+        key = f"cc:{wsite}"
+        new_state = info["status"]
+        if new_state == "NO_DATA":
+            _prev_check_states[key] = new_state
+            continue
+        old_state = _prev_check_states.get(key)
+        _prev_check_states[key] = new_state
+        if old_state == "OK" and new_state == "DEGRADED":
+            transitions.append({
+                "type": "client_count",
+                "name": f"Client count — {info['site_name']}",
+                "detail": (
+                    f"Client count at {info['site_name']} dropped {info['drop_pct']:.1f}% "
+                    f"(current: {info['current']}, avg: {info['hourly_avg']:.1f})"
+                ),
             })
 
     if not transitions:
@@ -2049,6 +2115,8 @@ async def api_central_status() -> dict[str, Any]:
     return {
         "status": _central_status_payload(),
         "wireless_clients": dict(central_wireless_clients),
+        "hardware_alerts": _hw_alerts_payload(),
+        "client_count_status": _client_count_payload(),
         "site_mappings": settings.get("site_mappings", {}),
         "monitored_checks": settings.get("monitored_checks", []),
         "token_valid": bool(central_token.get("access_token") and time.time() < central_token["expires_at"]),
@@ -2890,7 +2958,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
     await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
     await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": time.time(), "token_state": _central_token_state()}))
+    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
 
     try:
         while True:

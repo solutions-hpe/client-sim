@@ -77,6 +77,8 @@ let openControlHost = null;
 let centralSiteDetailOpen = null;
 let centralStatusData = {};
 let centralWirelessClients = {};   // wsite → client count from Central API
+let hwAlertsData    = [];   // latest hardware_alerts array from WS
+let clientCountData = {};   // wsite → { site_name, current, hourly_avg, drop_pct, status, ts }
 let availableChecks = { alerts: [], insights: [] };
 let currentSettings = {
   repo_url: '',
@@ -1288,11 +1290,14 @@ function closeSiteDetail() {
   if (centralOverview) centralOverview.classList.remove('hidden');
 }
 
-function handleCentralUpdate(status, ts, wirelessClients) {
+function handleCentralUpdate(status, ts, wirelessClients, hwAlerts, ccStatus) {
   centralStatusData = status || {};
   if (wirelessClients) centralWirelessClients = wirelessClients;
+  if (hwAlerts) hwAlertsData = hwAlerts;
+  if (ccStatus) clientCountData = ccStatus;
   centralLastSyncedTs = ts ? ts * 1000 : Date.now();
   renderCentralOverview();
+  renderChecksList();
   if (centralSiteDetailOpen) {
     renderSiteClients(centralSiteDetailOpen);
     renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
@@ -1319,7 +1324,13 @@ async function loadCentralStatus() {
     });
     centralTokenValid = Boolean(data.token_valid);
     setCentralApiStatus(centralTokenValid, data.token_state);
-    handleCentralUpdate(data.status || {}, Date.now() / 1000, data.wireless_clients || {});
+    handleCentralUpdate(
+      data.status || {},
+      Date.now() / 1000,
+      data.wireless_clients || {},
+      data.hardware_alerts || [],
+      data.client_count_status || {}
+    );
     renderSelectedChecksPreview();
     renderSiteMappingsTable();
   } catch (error) {
@@ -1756,7 +1767,7 @@ function handleMessage(message) {
   }
 
   if (message.type === 'central_update') {
-    handleCentralUpdate(message.status, message.ts, message.wireless_clients);
+    handleCentralUpdate(message.status, message.ts, message.wireless_clients, message.hardware_alerts, message.client_count_status);
     if (message.token_state) {
       const ts = message.token_state;
       setCentralApiStatus(ts.state === 'connected', ts);
@@ -1814,8 +1825,8 @@ function connectWebSocket() {
 }
 
 // ── Simulations tab ───────────────────────────────────────────────
-const simCardsGrid    = document.getElementById('sim-cards-grid');
-const simEmpty        = document.getElementById('sim-empty');
+const simChecksList   = document.getElementById('sim-checks-list');
+const simEmpty        = document.getElementById('sim-checks-empty');
 const simOverview     = document.getElementById('sim-overview');
 const simDetail       = document.getElementById('sim-detail');
 const simDetailBack   = document.getElementById('sim-detail-back');
@@ -1830,6 +1841,18 @@ const simClientsTitle  = document.getElementById('sim-clients-title');
 const simClientsSub    = document.getElementById('sim-clients-sub');
 const simClientsBadge  = document.getElementById('sim-clients-central-badge');
 const simClientsList   = document.getElementById('sim-clients-list');
+const hwDetailPanel  = document.getElementById('hw-detail');
+const hwDetailBack   = document.getElementById('hw-detail-back');
+const hwDetailTitle  = document.getElementById('hw-detail-title');
+const hwDetailSub    = document.getElementById('hw-detail-sub');
+const hwDetailBadge  = document.getElementById('hw-detail-badge');
+const hwSiteList     = document.getElementById('hw-site-list');
+const ccDetailPanel  = document.getElementById('cc-detail');
+const ccDetailBack   = document.getElementById('cc-detail-back');
+const ccDetailTitle  = document.getElementById('cc-detail-title');
+const ccDetailSub    = document.getElementById('cc-detail-sub');
+const ccDetailBadge  = document.getElementById('cc-detail-badge');
+const ccSiteDetail   = document.getElementById('cc-site-detail');
 
 let simulationsData = [];
 let openSimId = null;   // key into getSimGroups() map
@@ -1942,70 +1965,167 @@ function buildClientRows(sim, container) {
   });
 }
 
-function renderSimulationCards() {
-  if (!simCardsGrid) return;
-  simCardsGrid.textContent = '';
+function formatClientCountDelta(dropPct) {
+  if (!Number.isFinite(dropPct) || Math.abs(dropPct) < 0.05) return '0.0%';
+  return dropPct > 0
+    ? `-${dropPct.toFixed(1)}%`
+    : `+${Math.abs(dropPct).toFixed(1)}%`;
+}
 
-  if (!simulationsData.length) {
-    if (simEmpty) simEmpty.classList.remove('hidden');
-    return;
+function renderChecksList() {
+  const list = simChecksList;
+  const emptyEl = simEmpty;
+  const filterInput = document.getElementById('checks-filter');
+  const countBadge = document.getElementById('checks-count');
+  if (!list) return;
+
+  const filterText = filterInput ? filterInput.value.trim().toLowerCase() : '';
+
+  list.textContent = '';
+  if (emptyEl) {
+    emptyEl.textContent = 'No checks configured — sync simulation.conf and configure hardware alerts.';
+    emptyEl.classList.add('hidden');
+    list.appendChild(emptyEl);
   }
-  if (simEmpty) simEmpty.classList.add('hidden');
 
   const groups = getSimGroups();
 
+  const simRows = [];
   for (const [key, group] of groups) {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'sim-card';
-    card.addEventListener('click', () => openSimGroup(key));
+    const dotCls = group.aggCls === 'sim-pass' ? 'dot-ok'
+      : group.aggCls === 'sim-fail' ? 'dot-err'
+      : group.aggCls === 'sim-warn' ? 'dot-warn' : 'dot-unknown';
+    const sites = [...new Set(group.sims.map((s) => s.wsite).filter(Boolean))];
+    let latestTs = null;
+    for (const sim of group.sims) {
+      const pf = sim.central_pass_fail;
+      if (pf && pf.ts && (!latestTs || pf.ts > latestTs)) latestTs = pf.ts;
+    }
+    simRows.push({
+      key,
+      label: group.label,
+      dotCls,
+      badge: 'SIM',
+      badgeCls: 'check-badge-sim',
+      detail: sites.length ? sites.join(' · ') : '— no sites',
+      ts: latestTs,
+      priority: dotCls === 'dot-err' ? 0 : dotCls === 'dot-warn' ? 1 : dotCls === 'dot-ok' ? 2 : 3,
+      onClick: () => openSimGroup(key),
+    });
+  }
+  simRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 
-    const header = document.createElement('div');
-    header.className = 'sim-card-header';
+  const hwRows = [];
+  for (const hw of hwAlertsData) {
+    const affected = hw.total || 0;
+    const dotCls = affected > 0 ? 'dot-err' : 'dot-ok';
+    const siteNames = Object.values(hw.sites || {}).map((s) => s.site_name || '').filter(Boolean);
+    hwRows.push({
+      key: hw.id,
+      label: hw.name || hw.id,
+      dotCls,
+      badge: (hw.device_type || 'HW').toUpperCase(),
+      badgeCls: 'check-badge-hw',
+      detail: affected > 0
+        ? `${affected} device${affected !== 1 ? 's' : ''} affected${siteNames.length ? ` — ${siteNames.slice(0, 3).join(', ')}` : ''}`
+        : 'No active alerts',
+      ts: null,
+      priority: affected > 0 ? 0 : 2,
+      onClick: () => openHwDetail(hw.id),
+    });
+  }
+  hwRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 
-    const nameEl = document.createElement('p');
-    nameEl.className = 'sim-card-name';
-    nameEl.textContent = group.label;
+  const ccRows = [];
+  for (const [wsite, info] of Object.entries(clientCountData)) {
+    const degraded = info.status === 'DEGRADED';
+    const noData = info.status === 'NO_DATA';
+    const dotCls = noData ? 'dot-unknown' : degraded ? 'dot-err' : 'dot-ok';
+    ccRows.push({
+      key: wsite,
+      label: info.site_name || wsite,
+      dotCls,
+      badge: 'CC',
+      badgeCls: 'check-badge-cc',
+      detail: noData
+        ? 'Collecting baseline…'
+        : `Current: ${info.current} / Avg: ${Math.round(info.hourly_avg)} (${formatClientCountDelta(info.drop_pct)})`,
+      ts: info.ts,
+      priority: degraded ? 0 : noData ? 3 : 2,
+      onClick: () => openCcDetail(wsite),
+    });
+  }
+  ccRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+
+  const totalChecks = simRows.length + hwRows.length + ccRows.length;
+  if (countBadge) countBadge.textContent = `${totalChecks} check${totalChecks !== 1 ? 's' : ''}`;
+
+  if (!totalChecks) {
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+
+  function makeRow(item) {
+    const matchesFilter = !filterText
+      || item.label.toLowerCase().includes(filterText)
+      || item.detail.toLowerCase().includes(filterText);
+    if (!matchesFilter) return null;
+
+    const row = document.createElement('div');
+    row.className = 'check-row';
+    row.dataset.key = item.key;
+
+    const dot = document.createElement('span');
+    dot.className = `check-dot ${item.dotCls}`;
+
+    const name = document.createElement('span');
+    name.className = 'check-name';
+    name.textContent = item.label;
 
     const badge = document.createElement('span');
-    badge.className = `sim-status-badge ${group.aggCls}`;
-    badge.textContent = group.aggLabel;
+    badge.className = `check-badge ${item.badgeCls}`;
+    badge.textContent = item.badge;
 
-    header.appendChild(nameEl);
-    header.appendChild(badge);
+    const detail = document.createElement('span');
+    detail.className = 'check-detail';
+    detail.textContent = item.detail;
 
-    const sites = [...new Set(group.sims.map(s => s.wsite).filter(Boolean))];
-    const meta = document.createElement('div');
-    meta.className = 'sim-card-meta';
-    meta.textContent = sites.length ? sites.join('  ·  ') : '— no sites configured';
-
-    // Central seen = sum of wireless clients Central reports per unique site
-    const centralSeen = sites.reduce((a, site) => {
-      const n = centralWirelessClients[site];
-      return a + (n != null ? n : 0);
-    }, 0);
-    const hasCentralData = sites.some(site => centralWirelessClients[site] != null);
-
-    // API reporting = clients actively sending heartbeats to the local API
-    const totalReporting = group.sims.reduce((a, s) => a + (s.active_client_count || 0), 0);
-
-    const clientsRow = document.createElement('div');
-    clientsRow.className = 'sim-card-clients';
-    if (hasCentralData) {
-      const warn = centralSeen < totalReporting;
-      clientsRow.innerHTML = warn
-        ? `<span class="sim-card-clients-warn">${centralSeen} Central / ${totalReporting} API</span>`
-        : `<span>${centralSeen} Central / ${totalReporting} API</span>`;
-      clientsRow.title = 'Clients seen by Aruba Central / Clients reporting to local API';
+    const tsEl = document.createElement('span');
+    tsEl.className = 'check-ts';
+    if (item.ts) {
+      const ago = Math.round((Date.now() / 1000 - item.ts) / 60);
+      tsEl.textContent = ago < 2 ? 'just now' : `${ago}m ago`;
     } else {
-      clientsRow.innerHTML = `<span>${totalReporting} reporting to API (Central not polled)</span>`;
-      clientsRow.title = 'Central not configured or not yet polled';
+      tsEl.textContent = '—';
     }
 
-    card.appendChild(header);
-    card.appendChild(meta);
-    card.appendChild(clientsRow);
-    simCardsGrid.appendChild(card);
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(badge);
+    row.appendChild(detail);
+    row.appendChild(tsEl);
+    row.addEventListener('click', item.onClick);
+    return row;
+  }
+
+  function appendSection(title, rows) {
+    const visibleRows = rows.map(makeRow).filter(Boolean);
+    if (!visibleRows.length) return;
+    const hdr = document.createElement('div');
+    hdr.className = 'checks-section-header';
+    hdr.textContent = title;
+    list.appendChild(hdr);
+    visibleRows.forEach((row) => list.appendChild(row));
+  }
+
+  appendSection('Simulation Checks', simRows);
+  appendSection('Hardware Alerts', hwRows);
+  appendSection('Client Count Monitoring', ccRows);
+
+  const visibleCount = list.querySelectorAll('.check-row').length;
+  if (!visibleCount && emptyEl) {
+    emptyEl.textContent = 'No checks match the current filter.';
+    emptyEl.classList.remove('hidden');
   }
 }
 
@@ -2077,11 +2197,108 @@ function closeSimDetail() {
   if (simOverview) simOverview.classList.remove('hidden');
 }
 
+function openHwDetail(checkId) {
+  const hw = hwAlertsData.find((item) => item.id === checkId);
+  if (!hw || !hwDetailPanel || !simOverview) return;
+  simOverview.classList.add('hidden');
+  hwDetailPanel.classList.remove('hidden');
+
+  if (hwDetailTitle) hwDetailTitle.textContent = hw.name || hw.id;
+  const totalDevices = hw.total || 0;
+  if (hwDetailSub) hwDetailSub.textContent = totalDevices > 0 ? `${totalDevices} device(s) affected` : 'No active alerts';
+  if (hwDetailBadge) {
+    hwDetailBadge.textContent = totalDevices > 0 ? `${totalDevices} DOWN` : '✓ Clear';
+    hwDetailBadge.className = `sim-status-badge ${totalDevices > 0 ? 'sim-fail' : 'sim-pass'}`;
+  }
+
+  if (!hwSiteList) return;
+  hwSiteList.textContent = '';
+  const sites = Object.entries(hw.sites || {});
+  if (!sites.length) {
+    const empty = document.createElement('div');
+    empty.className = 'sim-site-row';
+    empty.textContent = 'No sites with active alerts.';
+    hwSiteList.appendChild(empty);
+    return;
+  }
+  for (const [wsite, info] of sites) {
+    const row = document.createElement('div');
+    row.className = 'sim-site-row';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.alignItems = 'flex-start';
+    row.style.cursor = 'default';
+
+    const top = document.createElement('div');
+    top.style.cssText = 'display:flex;justify-content:space-between;width:100%;align-items:center;';
+    const siteName = document.createElement('span');
+    siteName.className = 'sim-site-name';
+    siteName.textContent = info.site_name || wsite;
+    const siteBadge = document.createElement('span');
+    siteBadge.className = 'sim-status-badge sim-fail';
+    siteBadge.textContent = `${(info.devices || []).length} device(s)`;
+    top.appendChild(siteName);
+    top.appendChild(siteBadge);
+
+    const deviceList = document.createElement('ul');
+    deviceList.style.cssText = 'margin:0;padding-left:1.2rem;font-size:0.82rem;color:var(--muted);';
+    for (const dev of (info.devices || [])) {
+      const li = document.createElement('li');
+      li.textContent = dev;
+      deviceList.appendChild(li);
+    }
+
+    row.appendChild(top);
+    row.appendChild(deviceList);
+    hwSiteList.appendChild(row);
+  }
+}
+
+function closeHwDetail() {
+  if (hwDetailPanel) hwDetailPanel.classList.add('hidden');
+  if (simOverview) simOverview.classList.remove('hidden');
+}
+
+function openCcDetail(wsite) {
+  const info = clientCountData[wsite];
+  if (!info || !ccDetailPanel || !simOverview) return;
+  simOverview.classList.add('hidden');
+  ccDetailPanel.classList.remove('hidden');
+
+  if (ccDetailTitle) ccDetailTitle.textContent = info.site_name || wsite;
+  const degraded = info.status === 'DEGRADED';
+  const noData = info.status === 'NO_DATA';
+  if (ccDetailSub) ccDetailSub.textContent = `Client count monitoring — ${info.status}`;
+  if (ccDetailBadge) {
+    ccDetailBadge.textContent = noData ? 'Collecting baseline' : degraded ? `${info.drop_pct.toFixed(1)}% drop` : '✓ OK';
+    ccDetailBadge.className = `sim-status-badge ${noData ? 'sim-unknown' : degraded ? 'sim-fail' : 'sim-pass'}`;
+  }
+  if (!ccSiteDetail) return;
+  ccSiteDetail.textContent = '';
+  const row = document.createElement('div');
+  row.className = 'sim-site-row';
+  row.style.cursor = 'default';
+  row.innerHTML = `
+    <span class="sim-site-name">${info.site_name || wsite}</span>
+    <span style="font-size:0.85rem;color:var(--muted)">
+      Current: <strong>${info.current}</strong> &nbsp;|&nbsp;
+      60-min avg: <strong>${Math.round(info.hourly_avg)}</strong> &nbsp;|&nbsp;
+      Δ: <strong style="color:${degraded ? '#e74c3c' : 'var(--hpe-green-dark)'}">${noData ? '—' : formatClientCountDelta(info.drop_pct)}</strong>
+    </span>
+  `;
+  ccSiteDetail.appendChild(row);
+}
+
+function closeCcDetail() {
+  if (ccDetailPanel) ccDetailPanel.classList.add('hidden');
+  if (simOverview) simOverview.classList.remove('hidden');
+}
+
 async function loadSimulations() {
   try {
     const data = await requestJson('/api/simulations');
     simulationsData = (data.simulations || []).sort((a, b) => a.id.localeCompare(b.id));
-    renderSimulationCards();
+    renderChecksList();
     if (simLastRefreshed) {
       simLastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
     }
@@ -2089,14 +2306,22 @@ async function loadSimulations() {
       openSimGroup(openSimId);
     }
   } catch (err) {
-    if (simEmpty) {
-      simEmpty.textContent = `Error loading simulations: ${err.message}`;
-      simEmpty.classList.remove('hidden');
+    const emptyEl = simEmpty;
+    if (emptyEl) {
+      emptyEl.textContent = `Error loading simulations: ${err.message}`;
+      emptyEl.classList.remove('hidden');
     }
   }
 }
 
+const checksFilterInput = document.getElementById('checks-filter');
+if (checksFilterInput) {
+  checksFilterInput.addEventListener('input', renderChecksList);
+}
+
 if (simDetailBack) simDetailBack.addEventListener('click', closeSimDetail);
+if (hwDetailBack) hwDetailBack.addEventListener('click', closeHwDetail);
+if (ccDetailBack) ccDetailBack.addEventListener('click', closeCcDetail);
 
 // ── Purge client history ───────────────────────────────────────────────────
 const purgeHistoryBtn = document.getElementById('purge-history-btn');
