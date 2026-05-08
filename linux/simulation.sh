@@ -435,8 +435,8 @@ fi
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a "$debug"
-if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then
+if [ "$sim_phy" == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
+if [ "$sim_phy" == "wireless" ] && [ "$vh_server" == "off" ]; then
   ea_down
 fi
 echo Generating MAC address | tee -a "$debug"
@@ -483,7 +483,7 @@ fi
 if [ "${sim_load:-100}" -lt "${rn_sim_load:-0}" ]; then
   echo Simulation load under threshold | tee -a "$debug"
   echo Skipping Simulations but staying associated | tee -a "$debug"
-  if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
+  if [ "$ssidpw_fail" != "on" ] && [[ -n ${wladapter} ]]; then
     manage_connection up 180
   fi
   sleep 5
