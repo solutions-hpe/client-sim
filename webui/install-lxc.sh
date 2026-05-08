@@ -127,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="0.38"
+VERSION="0.39"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -287,6 +287,22 @@ EOF
   if [[ -f /etc/dnsmasq.conf ]]; then
     sed -i 's/^#\?interface=.*$//' /etc/dnsmasq.conf 2>/dev/null || true
   fi
+
+  # Systemd drop-in: wait for the DHCP interface to appear before dnsmasq starts.
+  # Without this, dnsmasq fails with "unknown interface" on reboot because the
+  # LXC bridge attachment (net1) isn't ready when dnsmasq is first started.
+  mkdir -p /etc/systemd/system/dnsmasq.service.d
+  cat > /etc/systemd/system/dnsmasq.service.d/wait-for-interface.conf <<DROPIN
+[Unit]
+After=network.target network-online.target
+
+[Service]
+ExecStartPre=/bin/bash -c 'n=0; until ip link show ${DHCP_IFACE} >/dev/null 2>&1; do n=\$((n+1)); [ \$n -ge 30 ] && exit 1; sleep 1; done'
+Restart=on-failure
+RestartSec=5
+DROPIN
+  systemctl daemon-reload >>"$LOG" 2>&1
+  ok "dnsmasq systemd drop-in written (waits for ${DHCP_IFACE})"
 
   systemctl enable dnsmasq >>"$LOG" 2>&1
   systemctl restart dnsmasq >>"$LOG" 2>&1
