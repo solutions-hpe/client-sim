@@ -3,6 +3,8 @@
 # Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--key apikey] [--interval 60]
 # Or run directly: bash install-proxmox-agent.sh --server http://... --key ...
 
+SCRIPT_VERSION="0.02"
+
 set -euo pipefail
 
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
@@ -29,12 +31,12 @@ if [[ -z "$SERVER_URL" ]]; then
     exit 1
 fi
 
-if ! command -v qm &>/dev/null; then
-    echo "ERROR: 'qm' not found — this script must run on a Proxmox host."
+if ! command -v qm &>/dev/null && [[ ! -x /usr/sbin/qm ]]; then
+    echo "ERROR: 'qm' not found in PATH or /usr/sbin — this script must run on a Proxmox host."
     exit 1
 fi
 
-echo "=== Client-Sim Proxmox Agent Installer ==="
+echo "=== Client-Sim Proxmox Agent Installer v${SCRIPT_VERSION} ==="
 echo "Server : $SERVER_URL"
 echo "Key    : ${API_KEY:+(set)}"
 echo
