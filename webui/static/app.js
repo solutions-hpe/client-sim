@@ -562,13 +562,13 @@ function renderProxmoxPending(pending) {
   if (!card || !badge || !tbody) return;
 
   if (!pending.length) {
-    card.classList.add('d-none');
+    card.classList.add('hidden');
     tbody.innerHTML = '';
     badge.textContent = '0';
     return;
   }
 
-  card.classList.remove('d-none');
+  card.classList.remove('hidden');
   badge.textContent = pending.length;
   tbody.innerHTML = pending.map((agent) => {
     const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
@@ -593,12 +593,12 @@ function renderProxmoxApproved(approved) {
   if (!card || !tbody) return;
 
   if (!approved.length) {
-    card.classList.add('d-none');
+    card.classList.add('hidden');
     tbody.innerHTML = '';
     return;
   }
 
-  card.classList.remove('d-none');
+  card.classList.remove('hidden');
   tbody.innerHTML = approved.map((agent) => {
     const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
     return `
@@ -1247,6 +1247,12 @@ async function ignoreUsbDevice(vidpid) {
   const ignored = new Set(parseJsonList(currentSettings.usb_ignored_vidpids));
   ignored.add(String(vidpid || '').toLowerCase());
   currentSettings.usb_ignored_vidpids = serializeJsonList([...ignored].sort());
+  // Optimistically remove from local unknown_usb so the device disappears immediately
+  if (Array.isArray(latestProxmoxData.unknown_usb)) {
+    latestProxmoxData.unknown_usb = latestProxmoxData.unknown_usb.filter(
+      (d) => String(d.vidpid || '').toLowerCase() !== String(vidpid || '').toLowerCase()
+    );
+  }
   try {
     await requestJson('/api/settings', {
       method: 'POST',
@@ -1257,7 +1263,7 @@ async function ignoreUsbDevice(vidpid) {
     renderUsbSummary(latestProxmoxData);
     showNotification(`${vidpid} added to ignored devices`, 'success');
   } catch (error) {
-    showNotification(`Error: ${error.message}`, 'error');
+    showNotification(`Error saving: ${error.message}`, 'error');
   }
 }
 
@@ -1268,6 +1274,12 @@ async function addUnknownToCertified(vidpid, name) {
   devices.push({ vidpid: vidpid.toLowerCase(), type, label: name || vidpid });
   devices.sort((a, b) => String(a.vidpid).localeCompare(String(b.vidpid)));
   currentSettings.usb_vidpids = serializeJsonList(devices);
+  // Optimistically remove from local unknown_usb so the device disappears immediately
+  if (Array.isArray(latestProxmoxData.unknown_usb)) {
+    latestProxmoxData.unknown_usb = latestProxmoxData.unknown_usb.filter(
+      (d) => String(d.vidpid || '').toLowerCase() !== String(vidpid || '').toLowerCase()
+    );
+  }
   try {
     await requestJson('/api/settings', {
       method: 'POST',
@@ -1278,7 +1290,7 @@ async function addUnknownToCertified(vidpid, name) {
     renderUsbSummary(latestProxmoxData);
     showNotification(`${name || vidpid} added to certified devices`, 'success');
   } catch (error) {
-    showNotification(`Error: ${error.message}`, 'error');
+    showNotification(`Error saving: ${error.message}`, 'error');
   }
 }
 

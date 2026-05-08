@@ -96,7 +96,7 @@
       <span class="server-last-seen">Last seen: <span id="server-last-seen">—</span></span>
     </div>
 
-    <div id="proxmox-pending-card" class="card mb-3 d-none">
+    <div id="proxmox-pending-card" class="card mb-3 hidden">
       <div class="card-header d-flex align-items-center gap-2">
         <span class="badge bg-warning text-dark" id="proxmox-pending-badge">0</span>
         <strong>Pending Proxmox Agents</strong>
@@ -110,7 +110,7 @@
       </div>
     </div>
 
-    <div id="proxmox-approved-card" class="card mb-3 d-none">
+    <div id="proxmox-approved-card" class="card mb-3 hidden">
       <div class="card-header"><strong>Approved Proxmox Agents</strong></div>
       <div class="card-body p-0">
         <table class="table table-sm mb-0">
@@ -520,7 +520,8 @@
               <h3>USB Auto-Provisioning</h3>
               <label>Auto-Provision: <input type="checkbox" id="usb-auto-provision"></label>
               <label>Destroy after missing (minutes): <input type="number" id="usb-missing-timeout" value="60" min="5"></label>
-              <label>Clone Template VMID: <input type="number" id="usb-template-id" value="100"></label>
+              <label>Linux Clone Template VMID: <input type="number" id="usb-linux-template-id" value="100"></label>
+              <label>Windows Clone Template VMID: <input type="number" id="usb-windows-template-id" value="200"></label>
               <h4>Certified Devices</h4>
               <table id="usb-vidpid-table">
                 <thead><tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr></thead>
