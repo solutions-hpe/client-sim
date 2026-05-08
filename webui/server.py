@@ -1340,7 +1340,11 @@ async def _run_self_update() -> None:
         # This is more robust than exec when systemd strips the PATH env.
         full_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         installer = _shlex.quote(str(_INSTALLER_PATH))
-        shell_cmd = f'bash {installer}' if _os.geteuid() == 0 else f'sudo bash {installer}'
+        # Pass --branch and --port so the bootstrap step can curl the right branch.
+        _branch = _shlex.quote(os.environ.get("REPO_BRANCH", "lrb"))
+        _port   = _shlex.quote(os.environ.get("PORT", "8000"))
+        _base   = f'bash {installer} --branch {_branch} --port {_port}'
+        shell_cmd = _base if _os.geteuid() == 0 else f'sudo {_base}'
         logger.info("Self-update: shell_cmd=%s", shell_cmd)
         proc = await asyncio.create_subprocess_shell(
             shell_cmd,

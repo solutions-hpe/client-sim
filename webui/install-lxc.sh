@@ -113,6 +113,12 @@ fi
 ###############################################################################
 if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   export _CLIENT_SIM_BOOTSTRAPPED=1
+  # If REPO_BRANCH is still the default "main", try reading from the installed
+  # .env file — this happens when the WebUI calls the script without --branch.
+  if [[ "${REPO_BRANCH}" == "main" && -f "${INSTALL_DIR}/.env" ]]; then
+    _env_br=$(grep '^REPO_BRANCH=' "${INSTALL_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"'"'"' ')
+    [[ -n "${_env_br}" ]] && REPO_BRANCH="${_env_br}"
+  fi
   _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui/install-lxc.sh"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
@@ -121,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="0.27"
+VERSION="0.28"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
