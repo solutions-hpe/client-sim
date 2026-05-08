@@ -545,6 +545,23 @@
       </div>
     </div>
 
+    <!-- ── Hardware Alerts ── -->
+    <div class="setup-card setup-section-gap">
+      <div class="setup-card-header">
+        <h2>Hardware Alerts</h2>
+        <p>Select which Aruba Central alert types to monitor as hardware health checks (e.g. AP Down, Switch Down).</p>
+      </div>
+      <div class="setup-form">
+        <div id="hw-checks-preview" class="form-hint">No hardware checks selected yet.</div>
+        <div class="form-actions">
+          <button id="hw-load-alerts-btn" class="btn btn-secondary" type="button">Load Available Alert Types</button>
+          <button id="hw-save-btn" class="btn btn-primary" type="button">Save Hardware Checks</button>
+        </div>
+        <div id="hw-checks-container"></div>
+        <div id="hw-checks-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+    </div>
+
     <!-- ── GitHub Sync Interval ── -->
     <div class="setup-card setup-section-gap">
       <div class="setup-card-header">

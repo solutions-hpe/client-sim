@@ -829,6 +829,14 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .mapping-table input { border: 1px solid var(--border); border-radius: 3px; padding: 5px 8px; font-family: inherit; font-size: 0.88rem; width: 100%; box-sizing: border-box; }
 .mapping-table input:focus { outline: none; border-color: var(--hpe-green); }
 
+/* Hardware check selector rows */
+.hw-check-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); margin-bottom: 5px; background: #fff; transition: background 0.1s; }
+.hw-check-row:hover { background: var(--hpe-green-light); }
+.hw-check-row input[type="checkbox"] { margin: 0; flex-shrink: 0; accent-color: var(--hpe-green); }
+.hw-check-icon { font-size: 1rem; flex-shrink: 0; }
+.hw-check-name { font-size: 0.88rem; font-weight: 500; flex: 1; }
+.hw-check-id { font-size: 0.75rem; color: var(--muted); font-family: monospace; }
+
 /* Check selector */
 .checks-group { margin-bottom: 16px; }
 .checks-group-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }

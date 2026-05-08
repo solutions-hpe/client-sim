@@ -316,6 +316,11 @@ const loadChecksBtn = document.getElementById('central-load-checks-btn');
 const saveChecksBtn = document.getElementById('save-checks-btn');
 const availableChecksContainer = document.getElementById('available-checks-container');
 const centralChecksMsg = document.getElementById('central-checks-msg');
+const hwLoadAlertsBtn = document.getElementById('hw-load-alerts-btn');
+const hwSaveBtn = document.getElementById('hw-save-btn');
+const hwChecksContainer = document.getElementById('hw-checks-container');
+const hwChecksMsg = document.getElementById('hw-checks-msg');
+const hwChecksPreview = document.getElementById('hw-checks-preview');
 const configSimulationForm = document.getElementById('config-simulation-form');
 const configSimulationSaveBtn = document.getElementById('config-simulation-save');
 const configSimulationMsg = document.getElementById('config-simulation-message');
@@ -406,6 +411,7 @@ function applySettingsToUI(s) {
   if (relayTokenStatus) relayTokenStatus.textContent = relay.token_configured ? '✓ Token configured' : 'No token — auth disabled';
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
+  renderHwChecksPreview();
   if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
     renderAvailableChecks();
   }
@@ -999,6 +1005,16 @@ function renderSelectedChecksPreview() {
     return;
   }
   selectedChecksPreview.textContent = `Currently selected: ${checks.map((check) => `${check.name || check.id} (${check.type})`).join(', ')}`;
+}
+
+function renderHwChecksPreview() {
+  if (!hwChecksPreview) return;
+  const checks = currentSettings.hardware_checks || [];
+  if (!checks.length) {
+    hwChecksPreview.textContent = 'No hardware checks selected yet.';
+    return;
+  }
+  hwChecksPreview.textContent = `Currently selected: ${checks.map((c) => c.name || c.id).join(', ')}`;
 }
 
 function renderAvailableChecks() {
@@ -2850,6 +2866,104 @@ if (saveChecksBtn) {
     } finally {
       saveChecksBtn.disabled = false;
       saveChecksBtn.textContent = originalLabel;
+    }
+  });
+}
+
+// ── Hardware Checks ────────────────────────────────────────────────────────
+let availableAlertTypes = []; // loaded from /api/central/available
+
+function renderHwChecksList() {
+  if (!hwChecksContainer) return;
+  hwChecksContainer.textContent = '';
+  if (!availableAlertTypes.length) return;
+
+  const selectedIds = new Set((currentSettings.hardware_checks || []).map((c) => c.id));
+  const deviceTypeIcons = { ap: '📡', gateway: '🌐', switch: '🔀' };
+
+  availableAlertTypes.forEach((alert) => {
+    const row = document.createElement('label');
+    row.className = 'hw-check-row';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.id = alert.id;
+    cb.dataset.name = alert.name || alert.id;
+    cb.dataset.deviceType = alert.device_type || '';
+    cb.checked = selectedIds.has(alert.id);
+
+    const icon = document.createElement('span');
+    icon.className = 'hw-check-icon';
+    const dtype = (alert.device_type || '').toLowerCase();
+    icon.textContent = deviceTypeIcons[dtype] || '⚠';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'hw-check-name';
+    nameSpan.textContent = alert.name || alert.id;
+
+    const idSpan = document.createElement('span');
+    idSpan.className = 'hw-check-id';
+    idSpan.textContent = alert.id;
+
+    row.appendChild(cb);
+    row.appendChild(icon);
+    row.appendChild(nameSpan);
+    row.appendChild(idSpan);
+    hwChecksContainer.appendChild(row);
+  });
+}
+
+if (hwLoadAlertsBtn) {
+  hwLoadAlertsBtn.addEventListener('click', async () => {
+    hwLoadAlertsBtn.disabled = true;
+    hwLoadAlertsBtn.textContent = 'Loading…';
+    if (hwChecksContainer) hwChecksContainer.textContent = 'Loading available alert types…';
+    try {
+      const data = await requestJson('/api/central/available');
+      availableAlertTypes = data.alerts || [];
+      renderHwChecksList();
+      const warn = data.warning ? ` ⚠ ${data.warning}` : '';
+      showInlineMessage(hwChecksMsg, `${availableAlertTypes.length} alert type(s) loaded.${warn}`, !!data.warning, data.warning ? 10000 : 3000);
+    } catch (err) {
+      availableAlertTypes = [];
+      if (hwChecksContainer) hwChecksContainer.textContent = '';
+      showInlineMessage(hwChecksMsg, `Error: ${err.message}`, true, 7000);
+    } finally {
+      hwLoadAlertsBtn.disabled = false;
+      hwLoadAlertsBtn.textContent = 'Load Available Alert Types';
+    }
+  });
+}
+
+if (hwSaveBtn) {
+  hwSaveBtn.addEventListener('click', async () => {
+    const allInputs = hwChecksContainer
+      ? [...hwChecksContainer.querySelectorAll('input[type="checkbox"]')]
+      : [];
+    const hardwareChecks = allInputs.length
+      ? allInputs.filter((cb) => cb.checked).map((cb) => ({
+          id: cb.dataset.id,
+          name: cb.dataset.name || cb.dataset.id,
+          device_type: cb.dataset.deviceType || ''
+        }))
+      : (currentSettings.hardware_checks || []);
+    hwSaveBtn.disabled = true;
+    hwSaveBtn.textContent = 'Saving…';
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hardware_checks: hardwareChecks })
+      });
+      currentSettings.hardware_checks = hardwareChecks;
+      renderHwChecksPreview();
+      if (availableAlertTypes.length) renderHwChecksList();
+      showInlineMessage(hwChecksMsg, 'Hardware checks saved.', false);
+    } catch (err) {
+      showInlineMessage(hwChecksMsg, `Error: ${err.message}`, true, 7000);
+    } finally {
+      hwSaveBtn.disabled = false;
+      hwSaveBtn.textContent = 'Save Hardware Checks';
     }
   });
 }
