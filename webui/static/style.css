@@ -724,11 +724,6 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   overflow: hidden;
 }
 
-/* Setup tab forms stay narrow; all other tabs get full width */
-#tab-setup .setup-card {
-  max-width: 680px;
-}
-
 /* Tables break out of card padding so the dark header is edge-to-edge,
    clipped symmetrically by the card's overflow:hidden + border-radius */
 .setup-card .data-table {
