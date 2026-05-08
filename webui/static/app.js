@@ -1767,6 +1767,14 @@ function handleMessage(message) {
   if (['status_update', 'overrides_update', 'overrides_cleared'].includes(message.type) && message.client) {
     upsertClient(message.client);
   }
+
+  if (message.type === 'clients_purged') {
+    clients.clear();
+    document.querySelectorAll('#clients-body tr:not(#empty-row)').forEach(r => r.remove());
+    const emptyRow = document.getElementById('empty-row');
+    if (emptyRow) emptyRow.classList.remove('hidden');
+    updateClientCount();
+  }
 }
 
 function connectWebSocket() {
@@ -1816,6 +1824,12 @@ const simDetailSub    = document.getElementById('sim-detail-sub');
 const simDetailBadge  = document.getElementById('sim-detail-badge');
 const simLastRefreshed = document.getElementById('sim-last-refreshed');
 const simRefreshBtn   = document.getElementById('sim-refresh-btn');
+const simClientsPanel  = document.getElementById('sim-clients-panel');
+const simClientsBack   = document.getElementById('sim-clients-back');
+const simClientsTitle  = document.getElementById('sim-clients-title');
+const simClientsSub    = document.getElementById('sim-clients-sub');
+const simClientsBadge  = document.getElementById('sim-clients-central-badge');
+const simClientsList   = document.getElementById('sim-clients-list');
 
 let simulationsData = [];
 let openSimId = null;   // key into getSimGroups() map
@@ -2083,6 +2097,25 @@ async function loadSimulations() {
 }
 
 if (simDetailBack) simDetailBack.addEventListener('click', closeSimDetail);
+
+// ── Purge client history ───────────────────────────────────────────────────
+const purgeHistoryBtn = document.getElementById('purge-history-btn');
+if (purgeHistoryBtn) {
+  purgeHistoryBtn.addEventListener('click', async () => {
+    if (!confirm('Clear all client history? Records on disk will also be deleted. This cannot be undone.')) return;
+    purgeHistoryBtn.disabled = true;
+    purgeHistoryBtn.textContent = '⏳ Purging…';
+    try {
+      const resp = await fetch('/api/clients/history', { method: 'DELETE' });
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+    } catch (err) {
+      alert(`Purge failed: ${err.message}`);
+    } finally {
+      purgeHistoryBtn.disabled = false;
+      purgeHistoryBtn.textContent = '🗑 Purge History';
+    }
+  });
+}
 
 if (simTabButton) {
   simTabButton.addEventListener('click', () => {

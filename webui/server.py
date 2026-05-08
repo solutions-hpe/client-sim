@@ -36,6 +36,9 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
+CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
+CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
+CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
 
@@ -172,8 +175,22 @@ settings: dict[str, Any] = {
     }),
     # {wsite_value: central_site_name}
     "site_mappings": _persisted.get("site_mappings", {}),
-    # [{type: "alert"|"insight", id: "...", name: "..."}]
+    # [{type: "alert"|"insight", id: "...", name: "..."}]  — sim check monitors
     "monitored_checks": _persisted.get("monitored_checks", []),
+    # [{id: "AP_DOWN", name: "AP Down", device_type: "ap"|"gateway"|"switch"}]
+    "hardware_checks": _persisted.get("hardware_checks", []),
+    # Notification settings
+    "notifications": _persisted.get("notifications", {
+        "email_enabled": False,
+        "smtp_host": "",
+        "smtp_port": 587,
+        "smtp_user": "",
+        "smtp_password": "",
+        "smtp_from": "",
+        "smtp_to": [],
+        "teams_enabled": False,
+        "teams_webhook_url": "",
+    }),
 }
 settings.setdefault("relay_url", None)
 settings.setdefault("relay_token", None)
@@ -263,6 +280,50 @@ central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
 
+# Hardware alert state: {check_id: {wsite: [device_name, ...]}}
+# Populated during each Central poll cycle from alert objects.
+hardware_alert_devices: dict[str, dict[str, list[str]]] = {}
+
+# Previous check states for transition detection (green→red email/Teams trigger).
+# {check_key: "OK"|"ERROR"}  where check_key = f"{check_id}:{wsite}" or just check_id for hw
+_prev_check_states: dict[str, str] = {}
+
+# Friendly-name map for known Central alert types
+_HW_FRIENDLY: dict[str, str] = {
+    "AP_DOWN": "AP Down",
+    "AP_DISCONNECTED": "AP Disconnected",
+    "AP_REBOOT": "AP Rebooted",
+    "AP_FLAP": "AP Flapping",
+    "GW_DOWN": "Gateway Down",
+    "GW_DISCONNECTED": "Gateway Disconnected",
+    "GW_FAILOVER": "Gateway Failover",
+    "SWITCH_DOWN": "Switch Down",
+    "SWITCH_DISCONNECTED": "Switch Disconnected",
+    "SWITCH_PORT_DOWN": "Switch Port Down",
+    "UPLINK_DOWN": "Uplink Down",
+    "TUNNEL_DOWN": "Tunnel Down",
+    "CONTROLLER_DOWN": "Controller Down",
+}
+
+# Device-type auto-detection from alert_type prefix
+_ALERT_DEVICE_TYPE: dict[str, str] = {
+    "AP_": "ap",
+    "GW_": "gateway",
+    "SWITCH_": "switch",
+    "UPLINK_": "gateway",
+    "TUNNEL_": "gateway",
+    "CONTROLLER_": "gateway",
+}
+
+
+def _auto_device_type(alert_id: str) -> str:
+    """Guess device type from alert_type prefix."""
+    upper = alert_id.upper()
+    for prefix, dtype in _ALERT_DEVICE_TYPE.items():
+        if upper.startswith(prefix):
+            return dtype
+    return "ap"  # sensible default
+
 
 # ── History file helpers ──────────────────────────────────────────────────────
 def _history_cutoff() -> float:
@@ -319,7 +380,69 @@ def _append_and_trim_history(new_records: list[dict[str, Any]]) -> None:
         logger.warning("Could not write history file: %s", exc)
 
 
-# ── Aruba Central OAuth helpers ───────────────────────────────────────────────
+# ── Client history persistence ────────────────────────────────────────────────
+
+def _client_history_cutoff() -> datetime:
+    return datetime.now(tz=timezone.utc) - timedelta(days=CLIENT_HISTORY_DAYS)
+
+
+def _load_client_history() -> dict[str, dict[str, Any]]:
+    """Load persisted client records from disk, dropping entries older than 7 days."""
+    if not CLIENT_HISTORY_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(CLIENT_HISTORY_FILE.read_text(encoding="utf-8"))
+        cutoff = _client_history_cutoff()
+        kept: dict[str, dict[str, Any]] = {}
+        for hostname, record in raw.items():
+            ls = record.get("last_seen")
+            if ls:
+                try:
+                    dt = datetime.fromisoformat(ls)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt >= cutoff:
+                        kept[hostname] = record
+                        continue
+                except Exception:
+                    pass
+        logger.info("Loaded %d client record(s) from history (%d expired)",
+                    len(kept), len(raw) - len(kept))
+        return kept
+    except Exception as exc:
+        logger.warning("Could not load client history: %s", exc)
+        return {}
+
+
+def _save_client_history() -> None:
+    """Serialise the in-memory clients dict to disk, pruning entries older than 7 days."""
+    try:
+        cutoff = _client_history_cutoff()
+        snapshot: dict[str, Any] = {}
+        for hostname, c in clients.items():
+            ls = c.get("last_seen")
+            if isinstance(ls, datetime):
+                if ls.tzinfo is None:
+                    ls = ls.replace(tzinfo=timezone.utc)
+                if ls < cutoff:
+                    continue  # expired — do not persist
+                entry = dict(c)
+                entry["last_seen"] = ls.isoformat()
+            else:
+                entry = dict(c)
+            snapshot[hostname] = entry
+        CLIENT_HISTORY_FILE.write_text(json.dumps(snapshot, default=str), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not save client history: %s", exc)
+
+
+async def client_history_saver() -> None:
+    """Background task: flush clients to disk every CLIENT_SAVE_INTERVAL seconds."""
+    while True:
+        await asyncio.sleep(CLIENT_SAVE_INTERVAL)
+        await asyncio.to_thread(_save_client_history)
+
+
 def _central_cfg() -> dict[str, str]:
     return settings.get("central_config", {})
 
@@ -579,14 +702,20 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
 
     site_mappings: dict[str, str] = settings.get("site_mappings", {})
     monitored: list[dict[str, Any]] = settings.get("monitored_checks", [])
-    if not site_mappings or not monitored:
+    hw_checks: list[dict[str, Any]] = settings.get("hardware_checks", [])
+    if not site_mappings or (not monitored and not hw_checks):
         return
+
+    hw_check_ids: set[str] = {c["id"] for c in hw_checks}
 
     cfg = _central_cfg()
     base_url = cfg["cluster_url"].rstrip("/")
     headers = _central_headers()
     now = time.time()
     new_records: list[dict[str, Any]] = []
+
+    # Accumulate hardware alert devices across all sites this cycle
+    new_hw_devices: dict[str, dict[str, list[str]]] = {c["id"]: {} for c in hw_checks}
 
     for wsite, central_site in site_mappings.items():
         site_check_status: dict[str, Any] = {}
@@ -655,6 +784,14 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
                             atype = alert.get("alert_type") or alert.get("type", "")
                             if atype:
                                 alert_type_counts[atype] = alert_type_counts.get(atype, 0) + 1
+                                # Collect device names for hardware checks
+                                if atype in hw_check_ids:
+                                    dev = (alert.get("device_name") or alert.get("hostname")
+                                           or alert.get("name") or "").strip()
+                                    if dev:
+                                        new_hw_devices.setdefault(atype, {}).setdefault(wsite, [])
+                                        if dev not in new_hw_devices[atype][wsite]:
+                                            new_hw_devices[atype][wsite].append(dev)
                         break
                     if resp.status_code == 404:
                         continue
@@ -767,6 +904,11 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             logger.warning("Central wireless client count fetch failed for site %s: %s", central_site, exc)
         central_wireless_clients[wsite] = wl_count
 
+    # ── Commit hardware alert devices + detect transitions ────────
+    global hardware_alert_devices
+    hardware_alert_devices = new_hw_devices
+    await _check_transitions_and_notify(now)
+
     # ── Persist history ───────────────────────────────────────────
     if new_records:
         cutoff = _history_cutoff()
@@ -775,7 +917,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             central_history.extend(new_records)
         await asyncio.to_thread(_append_and_trim_history, new_records)
 
-    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": now, "token_state": _central_token_state()})
+    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "ts": now, "token_state": _central_token_state()})
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -793,6 +935,150 @@ def _central_status_payload() -> dict[str, Any]:
         }
         for wsite, checks in central_status.items()
     }
+
+
+def _hw_alerts_payload() -> list[dict[str, Any]]:
+    """Serialize hardware_alert_devices merged with check metadata for broadcast."""
+    hw_checks: list[dict[str, Any]] = settings.get("hardware_checks", [])
+    site_mappings: dict[str, str] = settings.get("site_mappings", {})
+    result = []
+    for check in hw_checks:
+        cid = check["id"]
+        devices_by_wsite = hardware_alert_devices.get(cid, {})
+        total = sum(len(devs) for devs in devices_by_wsite.values())
+        sites_out = {}
+        for wsite, devs in devices_by_wsite.items():
+            sites_out[wsite] = {
+                "site_name": site_mappings.get(wsite, wsite),
+                "devices": devs,
+            }
+        result.append({
+            "id": cid,
+            "name": check.get("name") or _HW_FRIENDLY.get(cid, cid),
+            "device_type": check.get("device_type") or _auto_device_type(cid),
+            "total": total,
+            "sites": sites_out,
+        })
+    return result
+
+
+async def _check_transitions_and_notify(now: float) -> None:
+    """Detect green→red transitions for sim checks and hardware checks, fire notifications."""
+    notif = settings.get("notifications", {})
+    transitions: list[dict[str, Any]] = []
+
+    # ── Sim check transitions ─────────────────────────────────────
+    for wsite, checks in central_status.items():
+        for check_id, info in checks.items():
+            key = f"sim:{check_id}:{wsite}"
+            new_state = info["status"]  # "OK" or "ERROR"
+            old_state = _prev_check_states.get(key)
+            _prev_check_states[key] = new_state
+            if old_state == "OK" and new_state == "ERROR":
+                transitions.append({
+                    "type": "sim",
+                    "name": info.get("check_name", check_id),
+                    "wsite": wsite,
+                    "detail": f"Check '{info.get('check_name', check_id)}' turned red at site {wsite}",
+                })
+
+    # ── Hardware alert transitions ────────────────────────────────
+    hw_checks: list[dict[str, Any]] = settings.get("hardware_checks", [])
+    for check in hw_checks:
+        cid = check["id"]
+        total = sum(len(d) for d in hardware_alert_devices.get(cid, {}).values())
+        new_state = "ERROR" if total > 0 else "OK"
+        key = f"hw:{cid}"
+        old_state = _prev_check_states.get(key)
+        _prev_check_states[key] = new_state
+        if old_state == "OK" and new_state == "ERROR":
+            name = check.get("name") or _HW_FRIENDLY.get(cid, cid)
+            transitions.append({
+                "type": "hardware",
+                "name": name,
+                "detail": f"Hardware alert '{name}' is now active ({total} device(s) affected)",
+            })
+
+    if not transitions:
+        return
+
+    # ── Send notifications ────────────────────────────────────────
+    for t in transitions:
+        logger.warning("ALERT TRANSITION: %s", t["detail"])
+
+    if notif.get("teams_enabled") and notif.get("teams_webhook_url"):
+        await _send_teams_notifications(notif["teams_webhook_url"], transitions)
+
+    if notif.get("email_enabled") and notif.get("smtp_host") and notif.get("smtp_to"):
+        await asyncio.to_thread(_send_email_notifications, notif, transitions)
+
+
+async def _send_teams_notifications(webhook_url: str, transitions: list[dict]) -> None:
+    """POST an Adaptive Card to a Teams incoming webhook for each transition."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for t in transitions:
+                card = {
+                    "type": "message",
+                    "attachments": [{
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "body": [
+                                {"type": "TextBlock", "size": "Medium", "weight": "Bolder",
+                                 "text": f"🔴 Client-Sim Alert: {t['name']}"},
+                                {"type": "TextBlock", "text": t["detail"], "wrap": True},
+                            ],
+                        },
+                    }],
+                }
+                resp = await client.post(webhook_url, json=card)
+                if resp.status_code not in (200, 202):
+                    logger.warning("Teams webhook returned %s: %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("Teams notification failed: %s", exc)
+
+
+def _send_email_notifications(notif: dict, transitions: list[dict]) -> None:
+    """Send SMTP email for each transition (runs in thread pool)."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    to_addrs = notif.get("smtp_to", [])
+    if isinstance(to_addrs, str):
+        to_addrs = [a.strip() for a in to_addrs.split(",") if a.strip()]
+    if not to_addrs:
+        return
+
+    body_lines = ["Client-Sim Dashboard Alert\n"]
+    for t in transitions:
+        body_lines.append(f"• {t['detail']}")
+    body = "\n".join(body_lines)
+
+    msg = MIMEMultipart()
+    msg["From"] = notif.get("smtp_from", "client-sim@localhost")
+    msg["To"] = ", ".join(to_addrs)
+    msg["Subject"] = f"[Client-Sim] {len(transitions)} check(s) turned RED"
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        host = notif.get("smtp_host", "")
+        port = int(notif.get("smtp_port", 587))
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.ehlo()
+            if port != 25:
+                smtp.starttls()
+            user = notif.get("smtp_user", "")
+            pwd = notif.get("smtp_password", "")
+            if user and pwd:
+                smtp.login(user, pwd)
+            smtp.sendmail(msg["From"], to_addrs, msg.as_string())
+        logger.info("Email notification sent to %s", to_addrs)
+    except Exception as exc:
+        logger.warning("Email notification failed: %s", exc)
 
 
 async def central_poller() -> None:
@@ -821,7 +1107,10 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["central_poller"] = asyncio.create_task(central_poller())
     background_tasks["update_checker"] = asyncio.create_task(check_for_update())
     background_tasks["relay"] = asyncio.create_task(relay_worker())
+    background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     yield
+    # Flush client history to disk on shutdown
+    await asyncio.to_thread(_save_client_history)
     for task in background_tasks.values():
         task.cancel()
     for task in background_tasks.values():
@@ -830,7 +1119,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
-clients: dict[str, dict[str, Any]] = {}
+clients: dict[str, dict[str, Any]] = _load_client_history()
 ws_connections: list[WebSocket] = []
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
@@ -883,6 +1172,8 @@ class SettingsUpdate(BaseModel):
     central_config: dict[str, str] | None = None
     site_mappings: dict[str, str] | None = None
     monitored_checks: list[dict[str, str]] | None = None
+    hardware_checks: list[dict[str, str]] | None = None
+    notifications: dict[str, Any] | None = None
     relay_url: str | None = None
     relay_token: str | None = None
     relay_site_id: str | None = None
@@ -1515,6 +1806,25 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             for c in update.monitored_checks
             if c.get("type") and c.get("id")
         ]
+
+    if update.hardware_checks is not None:
+        settings["hardware_checks"] = [
+            {
+                "id": c.get("id", ""),
+                "name": c.get("name") or _HW_FRIENDLY.get(c.get("id", ""), c.get("id", "")),
+                "device_type": c.get("device_type") or _auto_device_type(c.get("id", "")),
+            }
+            for c in update.hardware_checks
+            if c.get("id")
+        ]
+
+    if update.notifications is not None:
+        merged_notif = dict(settings.get("notifications", {}))
+        merged_notif.update(update.notifications)
+        # Ensure smtp_to is always a list
+        if isinstance(merged_notif.get("smtp_to"), str):
+            merged_notif["smtp_to"] = [a.strip() for a in merged_notif["smtp_to"].split(",") if a.strip()]
+        settings["notifications"] = merged_notif
 
     _save_settings()
 
@@ -2228,7 +2538,13 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
     }
 
 
-@app.get("/api/health")
+@app.get("/api/hardware-alerts")
+async def api_hardware_alerts() -> dict[str, Any]:
+    """Return configured hardware checks merged with current alert device data."""
+    return {"hardware_alerts": _hw_alerts_payload()}
+
+
+
 async def api_health() -> dict[str, Any]:
     async with state_lock:
         client_count = len(clients)
@@ -2452,6 +2768,17 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
 @app.get("/api/clients")
 async def api_clients() -> list[dict[str, Any]]:
     return await current_clients()
+
+
+@app.delete("/api/clients/history")
+async def api_purge_client_history() -> dict[str, Any]:
+    """Purge all persisted client records (in-memory and on disk)."""
+    async with state_lock:
+        clients.clear()
+    await asyncio.to_thread(_save_client_history)
+    await broadcast({"type": "clients_purged"})
+    logger.info("Client history purged by user request")
+    return {"status": "ok", "message": "Client history cleared"}
 
 
 @app.post("/api/clients/{hostname}/control", response_model=ClientControlResponse)
