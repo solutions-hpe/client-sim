@@ -535,22 +535,39 @@ function setWsStatus(connected, label) {
   wsText.textContent = label;
 }
 
-function setCentralApiStatus(valid) {
+function setCentralApiStatus(valid, tokenState) {
   const dot = document.getElementById('central-api-dot');
   const text = document.getElementById('central-api-text');
+  const indicator = document.getElementById('central-api-status');
   if (!dot || !text) return;
-  if (valid === null) {
-    dot.className = 'status-dot warning';
-    text.textContent = 'Unknown';
-    document.getElementById('central-api-status').title = 'Central API: token status not yet checked';
-  } else if (valid) {
+
+  const state = tokenState?.state;
+  const detail = tokenState?.detail || '';
+
+  if (state === 'connected' || valid === true) {
     dot.className = 'status-dot online';
     text.textContent = 'Connected';
-    document.getElementById('central-api-status').title = 'Central API: token valid and connected';
-  } else {
+    if (indicator) indicator.title = `Central API: connected — ${detail}`;
+  } else if (state === 'not_configured') {
+    dot.className = 'status-dot offline';
+    text.textContent = 'Not Configured';
+    if (indicator) indicator.title = `Central API: ${detail}`;
+  } else if (state === 'auth_failed') {
+    dot.className = 'status-dot offline';
+    text.textContent = 'Auth Failed';
+    if (indicator) indicator.title = `Central API: ${detail}`;
+  } else if (state === 'token_expired') {
+    dot.className = 'status-dot warning';
+    text.textContent = 'Token Expired';
+    if (indicator) indicator.title = `Central API: ${detail}`;
+  } else if (valid === false) {
     dot.className = 'status-dot offline';
     text.textContent = 'No Token';
-    document.getElementById('central-api-status').title = 'Central API: token missing or invalid — check Setup tab';
+    if (indicator) indicator.title = 'Central API: token missing or invalid — check Setup tab';
+  } else {
+    dot.className = 'status-dot warning';
+    text.textContent = 'Unknown';
+    if (indicator) indicator.title = 'Central API: status not yet checked';
   }
 }
 
@@ -1286,7 +1303,7 @@ async function loadCentralStatus() {
       monitored_checks: data.monitored_checks || []
     });
     centralTokenValid = Boolean(data.token_valid);
-    setCentralApiStatus(centralTokenValid);
+    setCentralApiStatus(centralTokenValid, data.token_state);
     handleCentralUpdate(data.status || {}, Date.now() / 1000, data.wireless_clients || {});
     renderSelectedChecksPreview();
     renderSiteMappingsTable();
@@ -1725,6 +1742,10 @@ function handleMessage(message) {
 
   if (message.type === 'central_update') {
     handleCentralUpdate(message.status, message.ts, message.wireless_clients);
+    if (message.token_state) {
+      const ts = message.token_state;
+      setCentralApiStatus(ts.state === 'connected', ts);
+    }
     return;
   }
 

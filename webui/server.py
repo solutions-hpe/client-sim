@@ -194,6 +194,7 @@ ALLOWED_CONFIG_SECTIONS = {"simulation", "address", "server", *(f"s{i}" for i in
 central_status: dict[str, dict[str, Any]] = {}
 central_wireless_clients: dict[str, int] = {}   # wsite → client count from Central API
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
+central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
 
 
@@ -273,6 +274,29 @@ def _central_ready() -> bool:
     return bool(cfg.get("access_token") or central_token.get("access_token"))
 
 
+def _central_token_state() -> dict[str, str]:
+    """Return {state, detail} describing the current Central API auth status.
+
+    States: not_configured | auth_failed | token_expired | connected
+    """
+    cfg = _central_cfg()
+    if not cfg.get("cluster_url"):
+        return {"state": "not_configured", "detail": "No cluster URL — configure in Setup tab"}
+    if _is_new_central_api():
+        if not cfg.get("client_id") or not cfg.get("client_secret"):
+            return {"state": "not_configured", "detail": "client_id / client_secret required for New Central"}
+    else:
+        if not cfg.get("access_token") and not central_token.get("access_token"):
+            return {"state": "not_configured", "detail": "No access token — configure in Setup tab"}
+    tok = central_token.get("access_token")
+    if not tok:
+        err = central_auth_error or "Authentication not yet attempted"
+        return {"state": "auth_failed", "detail": err}
+    if time.time() >= central_token.get("expires_at", 0):
+        return {"state": "token_expired", "detail": "Token has expired — will refresh on next poll"}
+    return {"state": "connected", "detail": "Token valid"}
+
+
 def _can_refresh() -> bool:
     """True when we can obtain a fresh token automatically."""
     cfg = _central_cfg()
@@ -324,12 +348,16 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
     For Classic: loads the user-pasted token from settings and probes the API.
     Returns (success, detail_message).
     """
+    global central_auth_error
     if _is_new_central_api():
         ok, msg = await _fetch_new_central_token(client)
         if not ok:
+            central_auth_error = msg
             return False, msg
         # Probe to confirm the token works against the base URL
-        return await _probe_central_token(client)
+        ok, msg = await _probe_central_token(client)
+        central_auth_error = None if ok else msg
+        return ok, msg
 
     cfg = _central_cfg()
     token = cfg.get("access_token", "").strip()
@@ -341,7 +369,10 @@ async def _fetch_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         central_token["refresh_token"] = cfg["refresh_token"]
     central_token["expires_at"] = time.time() + 7200
 
-    return await _probe_central_token(client)
+    global central_auth_error
+    ok, msg = await _probe_central_token(client)
+    central_auth_error = None if ok else msg
+    return ok, msg
 
 
 async def _probe_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
@@ -663,7 +694,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             central_history.extend(new_records)
         await asyncio.to_thread(_append_and_trim_history, new_records)
 
-    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": now})
+    await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "ts": now, "token_state": _central_token_state()})
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -889,6 +920,7 @@ def _build_relay_payload() -> dict[str, Any]:
             settings.get("central_config", {}).get("access_token")
             or central_token.get("access_token")
         ),
+        "central_token_state": _central_token_state(),
         # ── Simulation profiles & site mappings ────────────────────
         "site_mappings": settings.get("site_mappings", {}),
     }
@@ -1624,6 +1656,7 @@ async def api_central_status() -> dict[str, Any]:
         "site_mappings": settings.get("site_mappings", {}),
         "monitored_checks": settings.get("monitored_checks", []),
         "token_valid": bool(central_token.get("access_token") and time.time() < central_token["expires_at"]),
+        "token_state": _central_token_state(),
     }
 
 
