@@ -1714,8 +1714,8 @@ async def _run_self_update() -> None:
         # Pass --branch and --port so the bootstrap step can curl the right branch.
         _branch = _shlex.quote(os.environ.get("REPO_BRANCH", "lrb"))
         _port   = _shlex.quote(os.environ.get("PORT", "8000"))
-        _base   = f'bash {installer} --branch {_branch} --port {_port}'
-        shell_cmd = _base if _os.geteuid() == 0 else f'sudo {_base}'
+        _base     = f'/bin/bash {installer} --branch {_branch} --port {_port}'
+        shell_cmd = _base if _os.geteuid() == 0 else f'sudo -n /bin/bash {installer} --branch {_branch} --port {_port}'
         logger.info("Self-update: shell_cmd=%s", shell_cmd)
         proc = await asyncio.create_subprocess_shell(
             shell_cmd,

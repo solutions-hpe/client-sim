@@ -1,5 +1,5 @@
 #!/bin/bash
-# launch-terminals.sh v0.04
+# launch-terminals.sh v0.05
 # Launches and positions gnome-terminal windows for client-sim.
 # Called from openbox autostart — replaces individual .desktop autostart entries.
 #
@@ -9,8 +9,8 @@
 #   3. If not supported (smaller display), scale offsets proportionally
 #
 # Layout designed for 1920x1080 @ Monospace 13 (≈10px wide × 24px tall per cell):
-#   Dashboard  (84x43)  +0+0       — left column  (84×10 = 840px right edge)
-#   Journal    (88x20)  +840+0     — center, top   (840+88×10 = 1720px right edge)
+#   Dashboard  (96x43)  +0+0       — left column  (96×10 = 960px right edge)
+#   Journal    (88x20)  +960+0     — center, top   (960+88×10 = 1840px right edge)
 #   Startup    (88x15)  +1460+525  — right, lower  (20×24+chrome ≈ 525px Y start)
 #
 # IMPORTANT: startup.sh must NOT call xrandr — it runs after windows are placed
@@ -131,7 +131,7 @@ echo "$(date) launch-terminals: screen=${SCREEN_W}x${SCREEN_H} output=${OUTPUT}"
 # ── Calculate pixel offsets proportional to actual resolution ────────────────
 # Baseline values match the 1920x1080 layout above (TARGET_W/H = 1920×1080).
 # On smaller screens the offsets scale down proportionally.
-JOUR_X=$(( SCREEN_W * 840  / TARGET_W ))
+JOUR_X=$(( SCREEN_W * 960  / TARGET_W ))
 START_X=$(( SCREEN_W * 1460 / TARGET_W ))
 START_Y=$(( SCREEN_H * 525  / TARGET_H ))
 
@@ -174,7 +174,7 @@ _launch() {
 # Dashboard — left column, full height (58 cols matches dashboard.sh content width)
 _launch "Dashboard" \
   --title="Dashboard" \
-  --geometry="84x43+0+0" \
+  --geometry="96x43+0+0" \
   -- bash -c "$SCRIPTS/dashboard.sh" &
 
 # Journal viewer — center, top
