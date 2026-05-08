@@ -2,5 +2,5 @@
 Type=Application
 Name=Simulation Log Viewer
 Comment=Simulation Script Startup
-Exec=gnome-terminal --geometry=50x43+0+0 -- bash -c "/usr/local/scripts/dashboard.sh"
+Exec=gnome-terminal --geometry=96x43+0+0 -- bash -c "/usr/local/scripts/dashboard.sh"
 
