@@ -720,8 +720,12 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.08);
-  max-width: 680px;
   padding: 28px 32px;
+}
+
+/* Setup tab forms stay narrow; all other tabs get full width */
+#tab-setup .setup-card {
+  max-width: 680px;
 }
 
 .setup-card-header h2 {
