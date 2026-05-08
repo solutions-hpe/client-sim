@@ -1168,19 +1168,35 @@ async function ignoreUsbDevice(vidpid) {
     await requestJson('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usb_ignored_vidpids: currentSettings.usb_ignored_vidpids })
+      body: JSON.stringify(collectUsbSettingsPayload())
     });
     renderIgnoredUsbList();
     renderUsbSummary(latestProxmoxData);
+    showNotification(`${vidpid} added to ignored devices`, 'success');
   } catch (error) {
     showNotification(`Error: ${error.message}`, 'error');
   }
 }
 
-function addUnknownToCertified(vidpid, name) {
-  if (newVidPidInput) newVidPidInput.value = vidpid || '';
-  if (newVidPidLabelInput) newVidPidLabelInput.value = name || '';
-  if (newVidPidInput) newVidPidInput.focus();
+async function addUnknownToCertified(vidpid, name) {
+  if (!vidpid) return;
+  const type = 'wireless'; // default; user can change in the certified table after
+  const devices = parseJsonList(currentSettings.usb_vidpids).filter((item) => item?.vidpid !== vidpid);
+  devices.push({ vidpid: vidpid.toLowerCase(), type, label: name || vidpid });
+  devices.sort((a, b) => String(a.vidpid).localeCompare(String(b.vidpid)));
+  currentSettings.usb_vidpids = serializeJsonList(devices);
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectUsbSettingsPayload())
+    });
+    renderUsbVidPidTable();
+    renderUsbSummary(latestProxmoxData);
+    showNotification(`${name || vidpid} added to certified devices`, 'success');
+  } catch (error) {
+    showNotification(`Error: ${error.message}`, 'error');
+  }
 }
 
 function updateUsbCountdowns() {
