@@ -497,6 +497,22 @@ function sendProxmoxCommand(action, vmid) {
   }));
 }
 
+async function triggerAgentUpdate() {
+  const btn = document.getElementById('agent-update-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Updating…'; }
+  try {
+    await sendProxmoxCommand('update_agent');
+    if (btn) { btn.textContent = '✓ Queued'; }
+  } catch (e) {
+    showToast('Failed to queue agent update: ' + e.message, 'error');
+    if (btn) { btn.textContent = '⬆ Update Agent'; btn.disabled = false; }
+    return;
+  }
+  setTimeout(() => {
+    if (btn) { btn.textContent = '⬆ Update Agent'; btn.disabled = false; }
+  }, 5000);
+}
+
 function renderServerTab(data) {
   latestProxmoxData = data || latestProxmoxData;
   if (data?.reclone_state) latestRecloneState = data.reclone_state;
@@ -507,6 +523,12 @@ function renderServerTab(data) {
   const tabPanel = document.getElementById('tab-server');
   if (tabBtn) tabBtn.style.display = '';
   if (tabPanel) tabPanel.style.display = '';
+
+  const updateBtn = document.getElementById('agent-update-btn');
+  if (updateBtn && !updateBtn._bound) {
+    updateBtn.addEventListener('click', triggerAgentUpdate);
+    updateBtn._bound = true;
+  }
 
   const node = latestProxmoxData.node || {};
   const setEl = (id, value) => {

@@ -523,6 +523,30 @@ execute_vm_command() {
             ;;
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do qm stop  "$vid" || true; done ;;
+        update_agent)
+            local agent_script="/usr/local/bin/client-sim-proxmox-agent"
+            local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
+            local tmp_file
+            tmp_file=$(mktemp)
+            log "Checking for agent update from GitHub..."
+            if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
+                rm -f "$tmp_file"
+                log "ERROR: Failed to download agent update"
+                return 1
+            fi
+            local current_hash new_hash
+            current_hash=$(sha256sum "$agent_script" 2>/dev/null | awk '{print $1}')
+            new_hash=$(sha256sum "$tmp_file" | awk '{print $1}')
+            if [[ "$current_hash" == "$new_hash" ]]; then
+                rm -f "$tmp_file"
+                log "Agent is already up to date"
+            else
+                chmod +x "$tmp_file"
+                mv "$tmp_file" "$agent_script"
+                log "Agent updated successfully — restarting in 5s..."
+                ( sleep 5 && systemctl restart client-sim-proxmox-agent ) &
+            fi
+            ;;
         *)          return 1 ;;
     esac
 }
