@@ -124,8 +124,27 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
+    resetTabDrilldowns(tab.dataset.tab);
   });
 });
+
+// Reset any open drill-down panels back to the overview when the top-level
+// tab is clicked — so you never land in a stale detail view.
+function resetTabDrilldowns(tabName) {
+  if (tabName === 'central' || tabName === 'simulations') {
+    // Central site detail
+    if (typeof closeSiteDetail === 'function') closeSiteDetail();
+    // Sim check detail
+    if (simDetail) simDetail.classList.add('hidden');
+    if (simOverview) simOverview.classList.remove('hidden');
+    // Sim clients panel
+    if (simClientsPanel) simClientsPanel.classList.add('hidden');
+    // HW alert detail
+    if (hwDetailPanel) hwDetailPanel.classList.add('hidden');
+    // Client count detail
+    if (ccDetailPanel) ccDetailPanel.classList.add('hidden');
+  }
+}
 
 function activateSetupSubtab(subtabId = 'setup-github') {
   setupSubtabButtons.forEach((button) => {
