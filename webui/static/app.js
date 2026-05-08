@@ -156,7 +156,7 @@ function setRelayStatus(data) {
   }
 }
 
-function setRepoStatus(synced, error, lastSync) {
+function setRepoStatus(synced, error, lastSync, repoVersion) {
   if (lastSync) lastKnownSyncTime = lastSync;   // only update when we have a real value
 
   repoDot.className = `status-dot ${synced ? 'online' : error ? 'offline' : 'warning'}`;
@@ -177,11 +177,13 @@ function setRepoStatus(synced, error, lastSync) {
   repoText.title = '';
 
   // Update setup tab status panel
-  const syncState = document.getElementById('setup-sync-state');
-  const syncError = document.getElementById('setup-sync-error');
-  const syncTime = document.getElementById('setup-sync-time');
-  if (syncState) syncState.textContent = synced ? '✓ Synced' : error ? '✗ Failed' : 'Syncing…';
-  if (syncError) syncError.textContent = error || '—';
+  const syncState   = document.getElementById('setup-sync-state');
+  const syncError   = document.getElementById('setup-sync-error');
+  const syncTime    = document.getElementById('setup-sync-time');
+  const syncVersion = document.getElementById('setup-repo-version');
+  if (syncState)   syncState.textContent   = synced ? '✓ Synced' : error ? '✗ Failed' : 'Syncing…';
+  if (syncError)   syncError.textContent   = error || '—';
+  if (syncVersion) syncVersion.textContent = repoVersion || '—';
   if (syncTime && lastKnownSyncTime) {
     const d = new Date(lastKnownSyncTime * 1000);
     syncTime.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
@@ -1747,7 +1749,7 @@ function handleMessage(message) {
   }
 
   if (message.type === 'repo_status') {
-    setRepoStatus(message.synced, message.error, message.last_sync);
+    setRepoStatus(message.synced, message.error, message.last_sync, message.repo_version);
     return;
   }
 
