@@ -200,8 +200,28 @@ async function loadAgentLogs() {
   try {
     const data = await requestJson('/api/proxmox/logs');
     agentLogLines = data.lines || [];
+    if (!agentLogLines.length) {
+      // Check agent version to give a useful hint
+      const agentVer = document.getElementById('server-agent-version');
+      const ver = agentVer ? agentVer.textContent.trim() : '';
+      const hint = ver && parseFloat(ver) < 0.99
+        ? `Agent v${ver} detected — update to v0.99+ to enable log streaming (click ⬆ Update Agent)`
+        : 'No logs yet — logs arrive on the next agent telemetry poll (≤60s after activity).';
+      if (agentLogViewer) {
+        agentLogViewer.textContent = '';
+        const el = document.createElement('div');
+        el.className = 'agent-log-line log-warn';
+        el.textContent = hint;
+        agentLogViewer.appendChild(el);
+      }
+      return;
+    }
     renderAgentLog();
-  } catch (_) { /* ignore */ }
+  } catch (e) {
+    if (agentLogViewer) {
+      agentLogViewer.textContent = `Failed to load logs: ${e.message}`;
+    }
+  }
 }
 
 function appendAgentLogLines(lines) {

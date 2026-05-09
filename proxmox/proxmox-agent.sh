@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.99"
+AGENT_VERSION="1.00"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -560,24 +560,35 @@ refresh_usb_telemetry_only() {
 
 collect_log_lines() {
     # Read new log lines since last send, return as JSON array of strings.
-    # Tracks byte offset so we never resend lines.
-    local offset=0 current_size new_lines json_lines
-    [[ -f "$AGENT_LOG_OFFSET_FILE" ]] && offset=$(<"$AGENT_LOG_OFFSET_FILE")
+    # Uses tail -c +N for fast byte-offset seeking (avoids slow dd bs=1).
+    [[ -f "$AGENT_LOG" ]] || { echo "[]"; return; }
+
+    local offset=0 current_size new_content
+    [[ -f "$AGENT_LOG_OFFSET_FILE" ]] && offset=$(<"$AGENT_LOG_OFFSET_FILE" 2>/dev/null || echo 0)
     current_size=$(wc -c < "$AGENT_LOG" 2>/dev/null || echo 0)
+
     # If log was rotated (shrunk), reset offset
-    if (( current_size < offset )); then offset=0; fi
+    (( current_size < offset )) && offset=0
+
     if (( current_size <= offset )); then echo "[]"; return; fi
 
-    new_lines=$(dd if="$AGENT_LOG" bs=1 skip="$offset" count=$(( current_size - offset )) 2>/dev/null || true)
+    # On first call (offset=0) only send last 100 lines to avoid flooding
+    if (( offset == 0 )); then
+        new_content=$(tail -n 100 "$AGENT_LOG" 2>/dev/null || true)
+    else
+        # tail -c +N starts at byte N (1-based)
+        new_content=$(tail -c +$(( offset + 1 )) "$AGENT_LOG" 2>/dev/null || true)
+    fi
+
     echo "$current_size" > "$AGENT_LOG_OFFSET_FILE"
 
-    # Convert to JSON array — escape quotes/backslashes, one element per line
-    json_lines=$(echo "$new_lines" | grep -v '^$' | python3 -c "
+    [[ -z "$new_content" ]] && { echo "[]"; return; }
+
+    echo "$new_content" | python3 -c "
 import sys, json
 lines = [l.rstrip() for l in sys.stdin if l.strip()]
-print(json.dumps(lines))
-" 2>/dev/null || echo "[]")
-    echo "${json_lines:-[]}"
+print(json.dumps(lines[-200:]))
+" 2>/dev/null || echo "[]"
 }
 
 collect_telemetry() {
