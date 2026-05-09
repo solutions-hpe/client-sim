@@ -27,9 +27,14 @@ echo "Inbox response: $response" | tee -a "$debug"
 
 # Process each command (simple JSON parsing without jq — one command per line approach)
 # Extract id and action pairs using grep/sed
-echo "$response" | grep -o '"id":"[^"]*","action":"[^"]*"' | while IFS= read -r pair; do
-  cmd_id=$(echo "$pair" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
-  action=$(echo "$pair" | grep -o '"action":"[^"]*"' | cut -d'"' -f4)
+echo "$response" | python3 -c "
+import json, sys
+cmds = json.load(sys.stdin)
+for c in cmds:
+    print(c.get('id',''), c.get('action',''), json.dumps(c.get('args', {})))
+" 2>/dev/null | while IFS=' ' read -r cmd_id action args_json; do
+  # Extract a simple 'value' arg if present (e.g. {"value":"off"})
+  arg_value=$(echo "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null || true)
 
   echo "Executing command: $cmd_id action=$action" | tee -a "$debug" "$log"
   status="completed"
@@ -56,10 +61,20 @@ echo "$response" | grep -o '"id":"[^"]*","action":"[^"]*"' | while IFS= read -r 
       message="Update triggered"
       ;;
     kill_switch)
-      # Set kill_switch=on in simulation.conf
-      sed -i 's/^kill_switch=.*/kill_switch=on/' /usr/local/scripts/simulation.conf
-      pkill -f simulation.sh 2>/dev/null || true
-      message="Kill switch activated"
+      # Set kill_switch to the requested value (default: on) in simulation.conf
+      ks_val="${arg_value:-on}"
+      if [[ "$ks_val" != "on" && "$ks_val" != "off" ]]; then ks_val="on"; fi
+      sed -i "s/^kill_switch=.*/kill_switch=${ks_val}/" /usr/local/scripts/simulation.conf
+      if [[ "$ks_val" == "on" ]]; then
+        pkill -f simulation.sh 2>/dev/null || true
+        message="Kill switch activated"
+      else
+        # Turn off: restart simulation so it picks up the new config
+        pkill -f simulation.sh 2>/dev/null || true
+        sleep 1
+        bash /usr/local/scripts/startup.sh &
+        message="Kill switch deactivated — simulation restarting"
+      fi
       ;;
     *)
       status="failed"

@@ -671,6 +671,12 @@ fi
 echo "Closing Firefox" | tee -a "$debug"
 pkill -f firefox 2>/dev/null &
 echo "Running Updates" | tee -a "$debug"
+# Pull fresh simulation.conf from WebUI before exec-restart.
+# WHY: If kill_switch was turned off in the WebUI while this client was
+# parked in the kill-switch sleep, the exec-restart must pick up the new
+# config immediately. Without this call the client re-reads the same
+# on-disk config and stays stuck in the kill-switch loop indefinitely.
+bash /usr/local/scripts/update.sh 2>/dev/null || true
 bash /usr/local/scripts/apt_update.sh &
 if [ "$allow_offline" == "on" ]; then
   #------------------------------------------------------------

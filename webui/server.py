@@ -3725,6 +3725,17 @@ async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any
     except ValueError:
         pushed = False
 
+    # When the kill switch is turned OFF, immediately push the change down to
+    # all clients via the command inbox so they don't stay stuck in the
+    # kill-switch loop waiting for their next exec-restart cycle (up to 5 min).
+    if section == "simulation" and updates.get("kill_switch") == "off":
+        ks_cmd = _make_command("all", "kill_switch", {"value": "off"})
+        async with state_lock:
+            commands.append(ks_cmd)
+            if len(commands) > COMMAND_MAX:
+                commands.pop(0)
+        await broadcast({"type": "commands_update", "commands": _commands_payload()})
+
     return {"status": "ok", "pushed": pushed}
 
 
