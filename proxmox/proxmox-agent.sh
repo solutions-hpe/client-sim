@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.76"
+AGENT_VERSION="1.77"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -764,6 +764,8 @@ usb_provision_loop() {
                 _active_pids=("${_live_pids[@]}")
                 [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]] && sleep 3
             done
+            # Stagger clone starts to avoid all VMs hammering storage at the same time
+            (( _i > 0 )) && sleep 15
             (
                 if clone_vm_for_usb "${_prov_vmids[$_i]}" "${_prov_buses[$_i]}" \
                     "${_prov_products[$_i]}" "${_prov_images[$_i]}" "${_prov_types[$_i]}"; then
