@@ -55,12 +55,13 @@
 
   <!-- ── Dashboard tab ── -->
   <main id="tab-dashboard" class="page tab-content hidden">
-    <section class="toolbar">
-      <div class="toolbar-actions">
-        <button id="purge-history-btn" class="btn btn-danger btn-small" type="button" title="Remove all client records from memory and disk">🗑 Purge History</button>
-      </div>
-      <div id="client-count" class="count-badge">0 clients</div>
-    </section>
+    <div id="clients-node-bar" class="server-node-bar">
+      <span class="server-node-name">Clients</span>
+      <span class="server-stat-pill" id="client-count" title="Connected clients">0 clients</span>
+      <span class="server-stat-pill" id="clients-online-pill" title="Online clients">🟢 <span id="clients-online-count">0</span> online</span>
+      <span class="server-stat-pill" id="clients-offline-pill" title="Offline clients">🔴 <span id="clients-offline-count">0</span> offline</span>
+      <button id="purge-history-btn" class="btn btn-danger btn-small" type="button" style="margin-left:auto;" title="Remove all client records from memory and disk">🗑 Purge History</button>
+    </div>
 
     <section class="table-wrap">
       <table>
