@@ -292,6 +292,7 @@ settings: dict[str, Any] = {
     "vm_image_1_pct": str(_persisted.get("vm_image_1_pct", "50")),
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
+    "ignored_hostnames": _persisted.get("ignored_hostnames", '["sim-rpi-0000"]'),
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
     "reclone_schedule_enabled": _normalize_relay_enabled(_persisted.get("reclone_schedule_enabled", "off")),
     "reclone_schedule_cron": _persisted.get("reclone_schedule_cron", "sunday 02:00"),
@@ -1466,6 +1467,7 @@ class SettingsUpdate(BaseModel):
     vm_image_1_pct: str | None = None
     usb_auto_provision: str | None = None
     usb_ignored_vidpids: str | None = None
+    ignored_hostnames: str | None = None
     vm_silent_timeout: str | None = None
     reclone_schedule_enabled: str | None = None
     reclone_schedule_cron: str | None = None
@@ -2508,6 +2510,7 @@ async def api_settings_get() -> dict[str, Any]:
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
+        "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
         "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
         "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
@@ -2650,6 +2653,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.usb_ignored_vidpids is not None:
         settings["usb_ignored_vidpids"] = _ensure_json_list(update.usb_ignored_vidpids.strip(), "usb_ignored_vidpids")
+
+    if update.ignored_hostnames is not None:
+        settings["ignored_hostnames"] = _ensure_json_list(update.ignored_hostnames.strip(), "ignored_hostnames")
 
     if update.vm_silent_timeout is not None:
         settings["vm_silent_timeout"] = str(max(1, int(update.vm_silent_timeout.strip() or "24")))
@@ -3849,7 +3855,7 @@ async def api_scripts_get(platform: str, filename: str) -> FileResponse:
 async def api_status(status: ClientStatus) -> dict[str, Any]:
     # Ignore the Proxmox template VM — it uses the default hostname before
     # being cloned and renamed.  Registering it would pollute the dashboard.
-    _IGNORED_HOSTNAMES = {"sim-rpi-0000"}
+    _IGNORED_HOSTNAMES = set(_parse_json_list(settings.get("ignored_hostnames", '["sim-rpi-0000"]')))
     if status.hostname in _IGNORED_HOSTNAMES:
         return {"status": "ignored", "reason": "template hostname"}
 

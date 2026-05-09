@@ -806,6 +806,28 @@
         </div>
       </div>
 
+      <!-- Ignored Clients card -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Ignored Clients</h2>
+          <p>Clients with these hostnames are silently ignored — no telemetry processed, not shown in the dashboard. Useful for template VMs that have not yet been renamed.</p>
+        </div>
+        <div class="setup-form">
+          <div class="settings-section">
+            <div id="ignored-hostnames-list" class="badge-list"></div>
+            <div class="form-row" style="margin-top:10px;">
+              <div class="form-group">
+                <input id="new-ignored-hostname" class="form-input" type="text"
+                       placeholder="e.g. sim-rpi-0000" spellcheck="false">
+              </div>
+              <div class="form-group" style="padding-top:4px;">
+                <button type="button" class="btn btn-secondary" id="add-ignored-hostname-btn">+ Ignore</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- VM Maintenance card -->
       <div class="setup-card setup-section-gap">
         <div class="setup-card-header">

@@ -76,6 +76,7 @@ let currentSettings = {
   vm_image_1_pct: '50',
   usb_auto_provision: 'off',
   usb_ignored_vidpids: '[]',
+  ignored_hostnames: '["sim-rpi-0000"]',
   vm_silent_timeout: '24',
   reclone_schedule_enabled: 'off',
   reclone_schedule_cron: 'sunday 02:00',
@@ -463,6 +464,9 @@ const newVidPidInput = document.getElementById('new-vidpid');
 const newVidPidTypeInput = document.getElementById('new-vidpid-type');
 const newVidPidLabelInput = document.getElementById('new-vidpid-label');
 const usbIgnoredList = document.getElementById('usb-ignored-list');
+const ignoredHostnamesList = document.getElementById('ignored-hostnames-list');
+const newIgnoredHostnameInput = document.getElementById('new-ignored-hostname');
+const addIgnoredHostnameBtn = document.getElementById('add-ignored-hostname-btn');
 const vmSilentTimeoutInput = document.getElementById('vm-silent-timeout');
 const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-enabled');
 const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
@@ -584,6 +588,7 @@ function mergeSettings(next = {}) {
     vm_image_1_pct: next.vm_image_1_pct ?? currentSettings.vm_image_1_pct ?? '50',
     usb_auto_provision: next.usb_auto_provision ?? currentSettings.usb_auto_provision ?? 'off',
     usb_ignored_vidpids: next.usb_ignored_vidpids ?? currentSettings.usb_ignored_vidpids ?? '[]',
+    ignored_hostnames: next.ignored_hostnames ?? currentSettings.ignored_hostnames ?? '["sim-rpi-0000"]',
     vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
     reclone_schedule_enabled: next.reclone_schedule_enabled ?? currentSettings.reclone_schedule_enabled ?? 'off',
     reclone_schedule_cron: next.reclone_schedule_cron ?? currentSettings.reclone_schedule_cron ?? 'sunday 02:00',
@@ -1004,6 +1009,7 @@ function applySettingsToUI(s) {
   if (recloneScheduleTimeInput && !recloneScheduleTimeInput.matches(':focus')) recloneScheduleTimeInput.value = schedule.time;
   renderUsbVidPidTable();
   renderIgnoredUsbList();
+  renderIgnoredHostnamesList();
   renderSiteMappingsTable();
   renderSelectedChecksPreview();
   renderHwChecksPreview();
@@ -1536,7 +1542,40 @@ function renderIgnoredUsbList() {
   });
 }
 
-async function loadUsbConfig() {
+function renderIgnoredHostnamesList() {
+  if (!ignoredHostnamesList) return;
+  ignoredHostnamesList.innerHTML = '';
+  const hostnames = parseJsonList(currentSettings.ignored_hostnames);
+  if (!hostnames.length) {
+    ignoredHostnamesList.textContent = 'No ignored hostnames.';
+    return;
+  }
+  hostnames.forEach((hostname) => {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-grey';
+    badge.textContent = hostname;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = ' ✕';
+    button.addEventListener('click', async () => {
+      const current = parseJsonList(currentSettings.ignored_hostnames);
+      currentSettings.ignored_hostnames = serializeJsonList(current.filter((h) => h !== hostname));
+      renderIgnoredHostnamesList();
+      try {
+        await requestJson('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ignored_hostnames: currentSettings.ignored_hostnames }),
+        });
+        showNotification(`${hostname} removed from ignored clients`, 'success');
+      } catch (err) {
+        showNotification(`Error saving: ${err.message}`, 'error');
+      }
+    });
+    badge.appendChild(button);
+    ignoredHostnamesList.appendChild(badge);
+  });
+}
   const data = await requestJson('/api/proxmox/usb-config');
   currentSettings.usb_vidpids = serializeJsonList(data.vidpids || []);
   currentSettings.usb_ignored_vidpids = serializeJsonList(data.ignored_vidpids || []);
@@ -4237,7 +4276,31 @@ if (addVidPidBtn) {
   addVidPidBtn.addEventListener('click', addVidPid);
 }
 
-if (saveUsbSettingsBtn) {
+if (addIgnoredHostnameBtn) {
+  addIgnoredHostnameBtn.addEventListener('click', async () => {
+    const hostname = (newIgnoredHostnameInput?.value || '').trim();
+    if (!hostname) return;
+    const current = parseJsonList(currentSettings.ignored_hostnames);
+    if (current.includes(hostname)) {
+      showNotification(`${hostname} is already in the list`, 'error');
+      return;
+    }
+    current.push(hostname);
+    currentSettings.ignored_hostnames = serializeJsonList(current);
+    if (newIgnoredHostnameInput) newIgnoredHostnameInput.value = '';
+    renderIgnoredHostnamesList();
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored_hostnames: currentSettings.ignored_hostnames }),
+      });
+      showNotification(`${hostname} added to ignored clients`, 'success');
+    } catch (err) {
+      showNotification(`Error saving: ${err.message}`, 'error');
+    }
+  });
+}
   saveUsbSettingsBtn.addEventListener('click', async () => {
     saveUsbSettingsBtn.disabled = true;
     saveUsbSettingsBtn.textContent = 'Saving…';
