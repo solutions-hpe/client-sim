@@ -519,6 +519,8 @@ def _load_client_history() -> dict[str, dict[str, Any]]:
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt >= cutoff:
+                        record = dict(record)
+                        record["last_seen"] = dt  # ensure datetime type for serialize_client
                         kept[hostname] = record
                         continue
                 except Exception:
@@ -1941,7 +1943,7 @@ async def broadcast(message: dict[str, Any]) -> None:
     if not ws_connections:
         return
 
-    payload = json.dumps(message)
+    payload = json.dumps(message, default=str)
     stale: list[WebSocket] = []
     for websocket in list(ws_connections):
         try:
@@ -4371,25 +4373,54 @@ async def api_notifications_test(body: dict[str, Any]) -> dict[str, Any]:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     ws_connections.append(websocket)
-    await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}))
-    _repo_ver = await asyncio.to_thread(_get_repo_version)
-    await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}))
-    await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}))
-    await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}))
-    if (
-        proxmox_state["connected"]
-        or proxmox_state["vms"]
-        or proxmox_state.get("usb_state")
-        or proxmox_state.get("unknown_usb")
-        or pending_proxmox_agents
-        or approved_proxmox_agents
-    ):
-        await websocket.send_text(json.dumps({"type": "proxmox_update", **_proxmox_status_payload()}))
-    await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}))
-    await websocket.send_text(json.dumps({"type": "update_all_progress", **dict(update_all_state)}))
-    await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
-    # Send current kill switch state so reconnecting clients don't miss a change
-    await websocket.send_text(json.dumps({"type": "gkill_switch_update", "value": gkill_switch_state["value"]}))
+    # Send initial state snapshot — each message is individually guarded so one
+    # serialisation error cannot take down the entire connection.
+    try:
+        await websocket.send_text(json.dumps({"type": "full_state", "clients": await current_clients()}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect full_state error: %s", exc)
+    try:
+        _repo_ver = await asyncio.to_thread(_get_repo_version)
+        await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect repo_status error: %s", exc)
+    try:
+        await websocket.send_text(json.dumps({"type": "relay_status", **_relay_status_payload()}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect relay_status error: %s", exc)
+    try:
+        await websocket.send_text(json.dumps({"type": "settings_update", "settings": await api_settings_get()}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect settings_update error: %s", exc)
+    try:
+        if (
+            proxmox_state["connected"]
+            or proxmox_state["vms"]
+            or proxmox_state.get("usb_state")
+            or proxmox_state.get("unknown_usb")
+            or pending_proxmox_agents
+            or approved_proxmox_agents
+        ):
+            await websocket.send_text(json.dumps({"type": "proxmox_update", **_proxmox_status_payload()}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect proxmox_update error: %s", exc)
+    try:
+        await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect reclone_update error: %s", exc)
+    try:
+        await websocket.send_text(json.dumps({"type": "update_all_progress", **dict(update_all_state)}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect update_all_progress error: %s", exc)
+    try:
+        await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}, default=str))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect central_update error: %s", exc)
+    try:
+        # Send current kill switch state so reconnecting clients don't miss a change
+        await websocket.send_text(json.dumps({"type": "gkill_switch_update", "value": gkill_switch_state["value"]}))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("WS on-connect gkill_switch_update error: %s", exc)
 
     try:
         while True:
