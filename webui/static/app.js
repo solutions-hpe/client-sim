@@ -161,15 +161,13 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb', 'server-logs', 'setup-server-logs'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
-  if (subtabId === 'server-logs') loadAgentLogs();
-  if (subtabId === 'setup-server-logs') loadServiceLogs();
 }
 
 // ── Agent Log Viewer ─────────────────────────────────────────────────────
