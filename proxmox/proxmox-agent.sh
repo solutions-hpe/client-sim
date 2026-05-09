@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.14"
+AGENT_VERSION="1.15"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -386,18 +386,20 @@ clone_vm_for_usb() {
         log "WARNING: Guest agent not ready after 120s for VM $vmid — attempting hostname set anyway"
     fi
 
-    # Set hostname — write /etc/hostname directly (survives reboot regardless of
-    # cloud-init) AND call hostnamectl for the running session. Also suppress
-    # cloud-init from resetting it on next boot.
+    # Set hostname — write /etc/hostname + suppress cloud-init from overriding it.
+    # IMPORTANT: qm guest exec defaults to --timeout 0 (async/fire-and-forget).
+    # We must pass --timeout explicitly so PVE waits for the commands to finish
+    # before returning. Without this the reboot fires before the write completes.
+    # Also avoid hostnamectl: it communicates via D-Bus which may not be ready
+    # right after boot and can hang the entire bash script.
     local hostname_set=0
     for _ in $(seq 1 6); do
-        if timeout 30 qm guest exec "$vmid" -- bash -c "
-            echo '${full_name}' > /etc/hostname &&
-            hostname '${full_name}' &&
-            hostnamectl set-hostname '${full_name}' 2>/dev/null || true &&
-            sed -i 's/^127\.0\.1\.1.*/127.0.1.1\t${full_name}/' /etc/hosts &&
-            mkdir -p /etc/cloud/cloud.cfg.d &&
+        if timeout 90 qm guest exec "$vmid" --timeout 60 -- bash -c "
+            echo '${full_name}' > /etc/hostname
+            sed -i 's/^127\.0\.1\.1.*/127.0.1.1\t${full_name}/' /etc/hosts 2>/dev/null || true
+            mkdir -p /etc/cloud/cloud.cfg.d
             echo 'preserve_hostname: true' > /etc/cloud/cloud.cfg.d/99_preserve_hostname.cfg
+            rm -f /var/lib/cloud/sem/config_set_hostname 2>/dev/null || true
         " >/dev/null 2>&1; then
             hostname_set=1
             break
@@ -412,12 +414,12 @@ clone_vm_for_usb() {
 
     log "Set hostname to $full_name on VM $vmid"
 
-    # Write USB device type for startup.sh
-    timeout 30 qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
+    # Write USB device type for startup.sh (also synchronous)
+    timeout 90 qm guest exec "$vmid" --timeout 60 -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
         && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
         || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
 
-    timeout 30 qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
+    timeout 30 qm guest exec "$vmid" --timeout 10 -- reboot >/dev/null 2>&1 || true
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
