@@ -2233,8 +2233,9 @@ async def _run_self_update() -> None:
             start_new_session=True,  # detach from server's process group so SIGTERM on restart doesn't kill installer
         )
         assert proc.stdout is not None
+        _ansi_re = re.compile(r'\x1b(?:\[[0-9;]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[^[\]])')
         async for raw in proc.stdout:
-            line = raw.decode(errors="replace").rstrip()
+            line = _ansi_re.sub('', raw.decode(errors="replace")).rstrip()
             update_state["update_log"].append(line)
             logger.info("self-update: %s", line)
             await broadcast({"type": "version_status", **update_state})
