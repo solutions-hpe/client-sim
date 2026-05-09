@@ -1,532 +1,509 @@
-let authToken = localStorage.getItem('centralAuthToken');
+'use strict';
+
+// ── Auth state ────────────────────────────────────────────────────
+let authToken = localStorage.getItem('csw_token') || null;
 let currentUser = null;
-const state = {
-  sites: [],
-  workspaces: [],
-  checks: [],
-  commands: []
-};
 
-document.addEventListener('DOMContentLoaded', () => {
-  bindUI();
-  updateAuthUI();
-  showTab('dashboard');
-  checkAuth().finally(() => {
-    loadDashboard();
-  });
-});
-
-function bindUI() {
-  document.querySelectorAll('.tab').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.dataset.auth === 'required' && !authToken) {
-        openLoginModal();
-        return;
-      }
-      showTab(button.dataset.tab);
-    });
-  });
-
-  document.getElementById('login-button').addEventListener('click', () => {
-    if (authToken) {
-      logout();
-      return;
-    }
-    openLoginModal();
-  });
-
-  document.getElementById('refresh-dashboard').addEventListener('click', loadDashboard);
-  document.getElementById('refresh-sites').addEventListener('click', loadSitesTab);
-  document.getElementById('refresh-workspaces').addEventListener('click', loadWorkspacesTab);
-  document.getElementById('refresh-checks').addEventListener('click', loadChecksTab);
-  document.getElementById('refresh-commands').addEventListener('click', loadCommandsTab);
-
-  document.getElementById('login-close').addEventListener('click', closeLoginModal);
-  document.getElementById('login-cancel').addEventListener('click', closeLoginModal);
-  document.getElementById('login-modal').addEventListener('click', (event) => {
-    if (event.target.id === 'login-modal') closeLoginModal();
-  });
-  document.getElementById('login-form').addEventListener('submit', submitLogin);
-
-  document.getElementById('workspace-form').addEventListener('submit', createWorkspace);
-  document.getElementById('check-form').addEventListener('submit', createCheck);
-  document.getElementById('command-form').addEventListener('submit', createCommand);
-}
-
+// ── API helper ────────────────────────────────────────────────────
 async function apiFetch(url, opts = {}) {
-  const options = { ...opts };
-  const headers = new Headers(opts.headers || {});
-  const isJsonBody = options.body && !(options.body instanceof FormData);
-
-  if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
-  if (isJsonBody && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (isJsonBody && headers.get('Content-Type') === 'application/json' && typeof options.body !== 'string') {
-    options.body = JSON.stringify(options.body);
-  }
-
-  options.headers = headers;
-  const response = await fetch(url, options);
-
-  if (response.status === 401) {
-    clearAuth();
-    updateAuthUI();
-  }
-
-  if (response.status === 204) return null;
-
-  const contentType = response.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    const message = typeof payload === 'string' ? payload : payload.detail || payload.message || 'Request failed';
-    throw new Error(message);
-  }
-
-  return payload;
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const res = await fetch(url, { ...opts, headers });
+  if (res.status === 401) { logout(); return null; }
+  return res;
 }
+
+// ── Toast notifications ───────────────────────────────────────────
+function showToast(msg, level = 'ok') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'settings-message ' + (level === 'ok' ? 'success' : 'error');
+  toast.textContent = msg;
+  toast.style.cssText = 'min-width:240px;max-width:380px;box-shadow:0 4px 16px rgba(0,0,0,0.15);cursor:pointer;';
+  toast.addEventListener('click', () => toast.remove());
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 5000);
+}
+
+// ── Tab switching ─────────────────────────────────────────────────
+let activeTab = 'dashboard';
 
 function showTab(tabId) {
-  document.querySelectorAll('.tab').forEach((button) => {
-    const active = button.dataset.tab === tabId;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-selected', String(active));
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabId);
+    btn.setAttribute('aria-selected', btn.dataset.tab === tabId ? 'true' : 'false');
   });
-
-  document.querySelectorAll('.tab-panel').forEach((panel) => {
-    panel.classList.toggle('hidden', panel.id !== `tab-${tabId}`);
-  });
-
+  const panel = document.getElementById('tab-' + tabId);
+  if (panel) panel.classList.remove('hidden');
+  activeTab = tabId;
   if (tabId === 'dashboard') loadDashboard();
-  if (tabId === 'sites' && authToken) loadSitesTab();
-  if (tabId === 'workspaces' && authToken) loadWorkspacesTab();
-  if (tabId === 'checks' && authToken) loadChecksTab();
-  if (tabId === 'commands' && authToken) loadCommandsTab();
-  if (tabId === 'settings' && authToken) loadSettingsTab();
+  else if (tabId === 'sites') loadSites();
+  else if (tabId === 'workspaces') loadWorkspaces();
+  else if (tabId === 'checks') loadChecks();
+  else if (tabId === 'commands') loadCommands();
+  else if (tabId === 'settings') setupSettingsTab();
 }
 
-function showNotification(message, level = 'info') {
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${level}`;
-  toast.textContent = message;
-  document.getElementById('toast-container').appendChild(toast);
-  window.setTimeout(() => {
-    toast.classList.add('toast-fade');
-    window.setTimeout(() => toast.remove(), 250);
-  }, 3500);
+// ── Settings sub-tabs ─────────────────────────────────────────────
+function activateSettingsSubtab(subtabId) {
+  document.querySelectorAll('.settings-subtab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.subtab === subtabId);
+  });
+  document.querySelectorAll('#tab-settings .setup-subpanel').forEach(panel => {
+    panel.classList.toggle('hidden', panel.id !== subtabId);
+  });
+}
+
+// ── Auth ──────────────────────────────────────────────────────────
+async function checkAuth() {
+  if (!authToken) { updateAuthUI(false); return; }
+  const res = await apiFetch('/api/auth/me');
+  if (!res || !res.ok) { logout(); return; }
+  currentUser = await res.json();
+  updateAuthUI(true);
+}
+
+function updateAuthUI(loggedIn) {
+  const loginBtn = document.getElementById('login-btn');
+  const topbarUser = document.getElementById('topbar-user');
+  const usernameEl = document.getElementById('topbar-username');
+  const mgmtTabs = document.querySelectorAll('.management-tab');
+
+  if (loggedIn && currentUser) {
+    loginBtn.classList.add('hidden');
+    topbarUser.classList.remove('hidden');
+    if (usernameEl) usernameEl.textContent = currentUser.username;
+    mgmtTabs.forEach(t => t.classList.remove('hidden'));
+    // Set API info URL
+    const regUrl = document.getElementById('api-register-url');
+    if (regUrl) regUrl.textContent = window.location.origin + '/api/islands/register';
+  } else {
+    loginBtn.classList.remove('hidden');
+    topbarUser.classList.add('hidden');
+    mgmtTabs.forEach(t => t.classList.add('hidden'));
+    // If on a management tab, switch to dashboard
+    if (activeTab !== 'dashboard') showTab('dashboard');
+  }
 }
 
 function openLoginModal() {
   document.getElementById('login-modal').classList.remove('hidden');
-  document.querySelector('#login-form input[name="username"]').focus();
+  document.getElementById('login-username').focus();
 }
 
 function closeLoginModal() {
   document.getElementById('login-modal').classList.add('hidden');
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
 }
 
-async function submitLogin(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  try {
-    const data = await apiFetch('/api/auth/login', {
-      method: 'POST',
-      body: {
-        username: String(form.get('username') || '').trim(),
-        password: String(form.get('password') || '')
-      }
-    });
+async function submitLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if (!username || !password) { errEl.textContent = 'Enter username and password.'; return; }
 
-    authToken = data.access_token;
-    localStorage.setItem('centralAuthToken', authToken);
-    closeLoginModal();
-    event.target.reset();
-    await checkAuth();
-    showNotification('Logged in successfully.', 'success');
-    loadDashboard();
-  } catch (error) {
-    showNotification(error.message, 'error');
-  }
-}
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
 
-async function checkAuth() {
-  if (!authToken) {
-    clearAuth();
-    updateAuthUI();
-    return false;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    errEl.textContent = err.detail || 'Invalid credentials.';
+    return;
   }
 
-  try {
-    currentUser = await apiFetch('/api/auth/me');
-    updateAuthUI();
-    return true;
-  } catch (error) {
-    clearAuth();
-    updateAuthUI();
-    return false;
-  }
-}
-
-function clearAuth() {
-  authToken = null;
-  currentUser = null;
-  localStorage.removeItem('centralAuthToken');
+  const data = await res.json();
+  authToken = data.access_token;
+  localStorage.setItem('csw_token', authToken);
+  closeLoginModal();
+  await checkAuth();
+  showToast('Signed in successfully.', 'ok');
 }
 
 function logout() {
-  clearAuth();
-  updateAuthUI();
-  showTab('dashboard');
-  showNotification('Logged out.', 'info');
+  authToken = null;
+  currentUser = null;
+  localStorage.removeItem('csw_token');
+  updateAuthUI(false);
+  showToast('Signed out.', 'ok');
 }
 
-function updateAuthUI() {
-  const loginButton = document.getElementById('login-button');
-  loginButton.textContent = authToken && currentUser ? `${currentUser.username} · Logout` : 'Login';
-
-  document.querySelectorAll('.management-tab').forEach((tab) => {
-    tab.classList.toggle('hidden', !authToken || !currentUser);
-  });
-
-  const activeManagementTab = document.querySelector('.tab.active[data-auth="required"]');
-  if (activeManagementTab && (!authToken || !currentUser)) {
-    showTab('dashboard');
-  }
-}
-
+// ── Dashboard ─────────────────────────────────────────────────────
 async function loadDashboard() {
-  try {
-    state.sites = await apiFetch('/api/sites');
-    renderSitesSummary(state.sites);
-  } catch (error) {
-    showNotification(`Dashboard load failed: ${error.message}`, 'error');
-  }
-}
+  const res = await fetch('/api/sites');
+  if (!res || !res.ok) return;
+  const sites = await res.json();
 
-function renderSitesSummary(sites) {
-  const summary = document.getElementById('dashboard-summary');
+  const grid = document.getElementById('dashboard-grid');
   const empty = document.getElementById('dashboard-empty');
-  summary.innerHTML = '';
+  const sitesPill = document.getElementById('dash-sites-pill');
+  const clientsPill = document.getElementById('dash-clients-pill');
+  const lastUpdated = document.getElementById('dash-last-updated');
 
-  if (!sites.length) {
+  const approved = sites.filter(s => s.status === 'approved');
+  if (sitesPill) sitesPill.textContent = `${approved.length} site${approved.length !== 1 ? 's' : ''}`;
+
+  let totalClients = 0;
+  approved.forEach(s => {
+    try { const t = JSON.parse(s.telemetry_json || '{}'); totalClients += (t.clients || []).length; } catch {}
+  });
+  if (clientsPill) clientsPill.textContent = `${totalClients} client${totalClients !== 1 ? 's' : ''}`;
+  if (lastUpdated) lastUpdated.textContent = new Date().toLocaleTimeString();
+
+  if (!approved.length) {
+    grid.textContent = '';
     empty.classList.remove('hidden');
     return;
   }
   empty.classList.add('hidden');
+  grid.innerHTML = '';
 
-  const counts = sites.reduce((acc, site) => {
-    acc[site.status] = (acc[site.status] || 0) + 1;
-    return acc;
-  }, {});
+  approved.forEach(site => {
+    const telemetry = (() => { try { return JSON.parse(site.telemetry_json || '{}'); } catch { return {}; } })();
+    const isOnline = site.last_seen && (Date.now() / 1000 - new Date(site.last_seen).getTime() / 1000) < 120;
 
-  const headline = document.createElement('div');
-  headline.className = 'site-card site-card-summary';
-  headline.innerHTML = `
-    <div class="site-card-header"><h3>Summary</h3><span class="status-pill status-approved">${sites.length} total</span></div>
-    <p>Approved: ${counts.approved || 0}</p>
-    <p>Pending: ${counts.pending || 0}</p>
-    <p>Revoked: ${counts.revoked || 0}</p>
-  `;
-  summary.appendChild(headline);
-
-  sites.forEach((site) => {
-    const card = document.createElement('article');
+    const card = document.createElement('div');
     card.className = 'site-card';
+
     card.innerHTML = `
       <div class="site-card-header">
-        <h3>${escapeHtml(site.label || site.hostname)}</h3>
-        <span class="status-pill status-${site.status}">${site.status}</span>
+        <div>
+          <p class="site-card-hostname">${escHtml(site.hostname)}</p>
+          <p class="site-card-label">${escHtml(site.label || site.workspace_id || '—')}</p>
+        </div>
+        <span class="site-status-pill ${isOnline ? 'online' : 'offline'}">
+          <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+          ${isOnline ? 'Online' : 'Offline'}
+        </span>
       </div>
-      <p><strong>Hostname:</strong> ${escapeHtml(site.hostname)}</p>
-      <p><strong>Workspace:</strong> ${site.workspace_id || '—'}</p>
-      <p><strong>Last Seen:</strong> ${formatDate(site.last_seen)}</p>
-      <p><strong>Registered:</strong> ${formatDate(site.created_at)}</p>
-    `;
-    summary.appendChild(card);
+      <div class="site-card-meta">
+        <span class="server-stat-pill">👥 ${(telemetry.clients || []).length} clients</span>
+        ${site.last_seen ? `<span class="server-stat-pill">🕐 ${relativeTime(site.last_seen)}</span>` : ''}
+      </div>`;
+    grid.appendChild(card);
   });
 }
 
-async function loadSitesTab() {
-  try {
-    state.sites = await apiFetch('/api/sites');
-    const body = document.getElementById('sites-table-body');
-    body.innerHTML = '';
+// ── Sites ─────────────────────────────────────────────────────────
+async function loadSites() {
+  const res = await apiFetch('/api/sites');
+  if (!res || !res.ok) return;
+  const sites = await res.json();
 
-    state.sites.forEach((site) => {
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td>${escapeHtml(site.hostname)}</td>
-        <td>${escapeHtml(site.label || '—')}</td>
-        <td><span class="status-pill status-${site.status}">${site.status}</span></td>
-        <td>${formatDate(site.last_seen)}</td>
-        <td>${formatDate(site.created_at)}</td>
-        <td class="actions-cell">
-          <button class="btn btn-secondary btn-small" data-action="approve" data-id="${site.id}">Approve</button>
-          <button class="btn btn-secondary btn-small" data-action="revoke" data-id="${site.id}">Revoke</button>
-          <button class="btn btn-danger btn-small" data-action="delete" data-id="${site.id}">Delete</button>
-        </td>
-      `;
-      body.appendChild(row);
-    });
+  const pending = sites.filter(s => s.status === 'pending');
+  const approved = sites.filter(s => s.status === 'approved');
 
-    body.querySelectorAll('button').forEach((button) => button.addEventListener('click', handleSiteAction));
-  } catch (error) {
-    showNotification(`Sites load failed: ${error.message}`, 'error');
-  }
+  const pendingSection = document.getElementById('sites-pending-section');
+  const pendingTbody = document.getElementById('sites-pending-tbody');
+  const approvedTbody = document.getElementById('sites-approved-tbody');
+  const pendingCount = document.getElementById('sites-pending-count');
+  const approvedCount = document.getElementById('sites-approved-count');
+  const countPill = document.getElementById('sites-count-pill');
+
+  if (pendingCount) pendingCount.textContent = pending.length;
+  if (approvedCount) approvedCount.textContent = approved.length;
+  if (countPill) countPill.textContent = `${sites.length} site${sites.length !== 1 ? 's' : ''}`;
+
+  pendingSection.classList.toggle('hidden', pending.length === 0);
+
+  pendingTbody.innerHTML = '';
+  pending.forEach(site => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${escHtml(site.hostname)}</code></td>
+      <td>${escHtml(site.label || '—')}</td>
+      <td>${fmtDate(site.created_at)}</td>
+      <td>${fmtDate(site.last_seen)}</td>
+      <td>
+        <button class="btn btn-primary btn-small" onclick="approveSite('${site.id}')">Approve</button>
+        <button class="btn btn-danger btn-small" onclick="deleteSite('${site.id}')">Delete</button>
+      </td>`;
+    pendingTbody.appendChild(tr);
+  });
+
+  approvedTbody.innerHTML = '';
+  approved.forEach(site => {
+    const isOnline = site.last_seen && (Date.now() - new Date(site.last_seen).getTime()) < 120000;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${escHtml(site.hostname)}</code></td>
+      <td>${escHtml(site.label || '—')}</td>
+      <td>${escHtml(site.workspace_id || '—')}</td>
+      <td>${fmtDate(site.last_seen)}</td>
+      <td><span class="site-status-pill ${isOnline ? 'online' : 'offline'}">${isOnline ? 'Online' : 'Offline'}</span></td>
+      <td>
+        <button class="btn btn-danger btn-small" onclick="revokeSite('${site.id}')">Revoke</button>
+        <button class="btn btn-secondary btn-small" onclick="deleteSite('${site.id}')">Delete</button>
+      </td>`;
+    approvedTbody.appendChild(tr);
+  });
 }
 
-async function handleSiteAction(event) {
-  const { action, id } = event.currentTarget.dataset;
-  try {
-    if (action === 'approve') {
-      const result = await apiFetch(`/api/sites/${id}/approve`, { method: 'POST' });
-      showNotification(`Site approved. API key: ${result.api_key}`, 'success');
-    } else if (action === 'revoke') {
-      await apiFetch(`/api/sites/${id}/revoke`, { method: 'POST' });
-      showNotification('Site revoked.', 'info');
-    } else if (action === 'delete') {
-      await apiFetch(`/api/sites/${id}`, { method: 'DELETE' });
-      showNotification('Site deleted.', 'info');
-    }
-    await loadSitesTab();
-    loadDashboard();
-  } catch (error) {
-    showNotification(error.message, 'error');
+async function approveSite(id) {
+  const res = await apiFetch(`/api/sites/${id}/approve`, { method: 'POST' });
+  if (!res || !res.ok) { showToast('Failed to approve site.', 'err'); return; }
+  const data = await res.json();
+  if (data.api_key) {
+    document.getElementById('key-once-value').textContent = data.api_key;
+    document.getElementById('key-once-banner').classList.remove('hidden');
   }
+  showToast('Site approved.', 'ok');
+  loadSites();
 }
 
-async function loadWorkspacesTab() {
-  try {
-    state.workspaces = await apiFetch('/api/workspaces');
-    renderWorkspaceList();
-    populateWorkspaceSelects();
-  } catch (error) {
-    showNotification(`Workspaces load failed: ${error.message}`, 'error');
-  }
+async function revokeSite(id) {
+  if (!confirm('Revoke this site\'s API key?')) return;
+  const res = await apiFetch(`/api/sites/${id}/revoke`, { method: 'POST' });
+  if (!res || !res.ok) { showToast('Failed to revoke.', 'err'); return; }
+  showToast('Site revoked.', 'ok');
+  loadSites();
 }
 
-function renderWorkspaceList() {
-  const container = document.getElementById('workspace-list');
-  container.innerHTML = '';
+async function deleteSite(id) {
+  if (!confirm('Delete this site record?')) return;
+  const res = await apiFetch(`/api/sites/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Failed to delete.', 'err'); return; }
+  showToast('Site deleted.', 'ok');
+  loadSites();
+}
 
-  if (!state.workspaces.length) {
-    container.innerHTML = '<div class="card empty-card">No workspaces created yet.</div>';
+// ── Workspaces ────────────────────────────────────────────────────
+async function loadWorkspaces() {
+  const res = await apiFetch('/api/workspaces');
+  if (!res || !res.ok) return;
+  const workspaces = await res.json();
+
+  const grid = document.getElementById('workspaces-grid');
+  const empty = document.getElementById('workspaces-empty');
+  const pill = document.getElementById('workspaces-count-pill');
+  if (pill) pill.textContent = `${workspaces.length} workspace${workspaces.length !== 1 ? 's' : ''}`;
+
+  if (!workspaces.length) {
+    grid.innerHTML = '';
+    empty.classList.remove('hidden');
     return;
   }
+  empty.classList.add('hidden');
+  grid.innerHTML = '';
 
-  state.workspaces.forEach((workspace) => {
-    const card = document.createElement('article');
-    card.className = 'card workspace-card';
+  workspaces.forEach(ws => {
+    const card = document.createElement('div');
+    card.className = 'setup-card';
     card.innerHTML = `
-      <div class="card-header card-header-inline">
-        <span class="card-title">${escapeHtml(workspace.name)}</span>
-        <span class="status-pill status-${workspace.ownership === 'remote' ? 'pending' : 'approved'}">${workspace.ownership}</span>
+      <div class="setup-card-header">
+        <h2>${escHtml(ws.name)}</h2>
+        <p>Ownership: <strong>${ws.ownership}</strong> · Central poll: ${ws.central_poll_enabled ? '✓ on' : '✗ off'}</p>
       </div>
-      <div class="card-body">
-        <p><strong>Aruba Workspace ID:</strong> ${escapeHtml(workspace.aruba_workspace_id || '—')}</p>
-        <p><strong>Central Polling:</strong> ${workspace.central_poll_enabled ? 'Enabled' : 'Disabled'}</p>
-        <p><strong>Created:</strong> ${formatDate(workspace.created_at)}</p>
-        <button class="btn btn-danger btn-small" data-workspace-delete="${workspace.id}">Delete</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="server-stat-pill">ID: ${ws.id.slice(0, 8)}…</span>
+        ${ws.aruba_workspace_id ? `<span class="server-stat-pill">☁ ${escHtml(ws.aruba_workspace_id)}</span>` : ''}
       </div>
-    `;
-    container.appendChild(card);
-  });
-
-  container.querySelectorAll('[data-workspace-delete]').forEach((button) => {
-    button.addEventListener('click', async (event) => {
-      try {
-        await apiFetch(`/api/workspaces/${event.currentTarget.dataset.workspaceDelete}`, { method: 'DELETE' });
-        showNotification('Workspace deleted.', 'info');
-        await loadWorkspacesTab();
-      } catch (error) {
-        showNotification(error.message, 'error');
-      }
-    });
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        <button class="btn btn-secondary btn-small" onclick="deleteWorkspace('${ws.id}')">Delete</button>
+      </div>`;
+    grid.appendChild(card);
   });
 }
 
-function populateWorkspaceSelects() {
-  const select = document.getElementById('check-workspace');
-  select.innerHTML = '';
-  state.workspaces.forEach((workspace) => {
-    const option = document.createElement('option');
-    option.value = workspace.id;
-    option.textContent = workspace.name;
-    select.appendChild(option);
-  });
+async function deleteWorkspace(id) {
+  if (!confirm('Delete this workspace?')) return;
+  const res = await apiFetch(`/api/workspaces/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Failed to delete workspace.', 'err'); return; }
+  showToast('Workspace deleted.', 'ok');
+  loadWorkspaces();
 }
 
-async function createWorkspace(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  try {
-    await apiFetch('/api/workspaces', {
-      method: 'POST',
-      body: {
-        name: String(form.get('name') || '').trim(),
-        aruba_workspace_id: String(form.get('aruba_workspace_id') || '').trim() || null,
-        ownership: String(form.get('ownership') || 'local'),
-        aruba_config: {},
-        notification_config: {},
-        central_poll_enabled: form.get('central_poll_enabled') === 'on'
-      }
-    });
-    event.target.reset();
-    showNotification('Workspace created.', 'success');
-    await loadWorkspacesTab();
-  } catch (error) {
-    showNotification(error.message, 'error');
+// ── Checks ────────────────────────────────────────────────────────
+async function loadChecks() {
+  const res = await apiFetch('/api/checks');
+  if (!res || !res.ok) return;
+  const checks = await res.json();
+
+  const tbody = document.getElementById('checks-tbody');
+  const pill = document.getElementById('checks-count-pill');
+  if (pill) pill.textContent = `${checks.length} check${checks.length !== 1 ? 's' : ''}`;
+
+  tbody.innerHTML = '';
+  checks.forEach(chk => {
+    const statusCls = chk.status === 'green' ? 'badge-green' : chk.status === 'red' ? 'badge-red' : 'badge-grey';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(chk.check_name)}</td>
+      <td>${escHtml(chk.check_type)}</td>
+      <td>${escHtml(chk.workspace_id || '—')}</td>
+      <td>${chk.timeout_minutes} min</td>
+      <td><span class="badge ${statusCls}">${chk.status}</span></td>
+      <td><button class="btn btn-danger btn-small" onclick="deleteCheck('${chk.id}')">Remove</button></td>`;
+    tbody.appendChild(tr);
+  });
+
+  if (!checks.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No checks configured.</td></tr>';
   }
 }
 
-async function loadChecksTab() {
-  try {
-    const [checks, workspaces] = await Promise.all([
-      apiFetch('/api/checks'),
-      apiFetch('/api/workspaces')
-    ]);
-    state.checks = checks;
-    state.workspaces = workspaces;
-    populateWorkspaceSelects();
+async function deleteCheck(id) {
+  if (!confirm('Remove this check?')) return;
+  const res = await apiFetch(`/api/checks/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Failed to remove check.', 'err'); return; }
+  showToast('Check removed.', 'ok');
+  loadChecks();
+}
 
-    const lookup = Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace.name]));
-    const body = document.getElementById('checks-table-body');
-    body.innerHTML = '';
-    checks.forEach((check) => {
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td>${escapeHtml(check.check_name)}</td>
-        <td>${escapeHtml(check.check_type)}</td>
-        <td><span class="status-pill status-${statusToClass(check.status)}">${check.status}</span></td>
-        <td>${escapeHtml(lookup[check.workspace_id] || check.workspace_id)}</td>
-        <td><button class="btn btn-danger btn-small" data-check-delete="${check.id}">Delete</button></td>
-      `;
-      body.appendChild(row);
-    });
+// ── Commands ──────────────────────────────────────────────────────
+async function loadCommands() {
+  const res = await apiFetch('/api/commands');
+  if (!res || !res.ok) return;
+  const commands = await res.json();
 
-    body.querySelectorAll('[data-check-delete]').forEach((button) => {
-      button.addEventListener('click', async (event) => {
-        try {
-          await apiFetch(`/api/checks/${event.currentTarget.dataset.checkDelete}`, { method: 'DELETE' });
-          showNotification('Check deleted.', 'info');
-          await loadChecksTab();
-        } catch (error) {
-          showNotification(error.message, 'error');
-        }
+  const tbody = document.getElementById('commands-tbody');
+  const queued = commands.filter(c => c.status === 'queued').length;
+  const pill = document.getElementById('commands-count-pill');
+  if (pill) pill.textContent = `${queued} queued`;
+
+  tbody.innerHTML = '';
+  commands.forEach(cmd => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${escHtml(cmd.target)}</code></td>
+      <td>${escHtml(cmd.type)}</td>
+      <td><span class="badge cmd-status-${cmd.status}">${cmd.status}</span></td>
+      <td>${fmtDate(cmd.created_at)}</td>
+      <td>${fmtDate(cmd.executed_at || cmd.delivered_at)}</td>
+      <td><button class="btn btn-secondary btn-small" onclick="deleteCommand('${cmd.id}')">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+
+  if (!commands.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No commands in queue.</td></tr>';
+  }
+
+  // Populate target dropdown
+  const targetSel = document.getElementById('cmd-target');
+  if (targetSel && targetSel.options.length === 1) {
+    const sitesRes = await apiFetch('/api/sites');
+    if (sitesRes && sitesRes.ok) {
+      const sites = await sitesRes.json();
+      sites.filter(s => s.status === 'approved').forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.hostname;
+        opt.textContent = s.hostname;
+        targetSel.appendChild(opt);
       });
-    });
-  } catch (error) {
-    showNotification(`Checks load failed: ${error.message}`, 'error');
+    }
   }
 }
 
-async function createCheck(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
+async function deleteCommand(id) {
+  const res = await apiFetch(`/api/commands/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Failed to delete command.', 'err'); return; }
+  loadCommands();
+}
+
+async function sendCommand() {
+  const target = document.getElementById('cmd-target').value;
+  const type = document.getElementById('cmd-type').value;
+  const msgEl = document.getElementById('cmd-msg');
+  msgEl.textContent = '';
+  const res = await apiFetch('/api/commands', {
+    method: 'POST',
+    body: JSON.stringify({ target, type, payload_json: '{}' }),
+  });
+  if (!res || !res.ok) {
+    msgEl.textContent = 'Failed to send command.';
+    msgEl.className = 'form-msg msg-error';
+    return;
+  }
+  msgEl.textContent = 'Command queued.';
+  msgEl.className = 'form-msg msg-ok';
+  setTimeout(() => { msgEl.textContent = ''; }, 3000);
+  loadCommands();
+}
+
+// ── Settings tab ──────────────────────────────────────────────────
+function setupSettingsTab() {
+  const regUrl = document.getElementById('api-register-url');
+  if (regUrl) regUrl.textContent = window.location.origin + '/api/islands/register';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
   try {
-    await apiFetch('/api/checks', {
-      method: 'POST',
-      body: {
-        workspace_id: String(form.get('workspace_id')),
-        check_name: String(form.get('check_name') || '').trim(),
-        check_type: String(form.get('check_type') || 'alert'),
-        timeout_minutes: Number(form.get('timeout_minutes') || 60),
-        status: 'unknown'
-      }
-    });
-    event.target.reset();
-    showNotification('Check created.', 'success');
-    await loadChecksTab();
-  } catch (error) {
-    showNotification(error.message, 'error');
-  }
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMin = Math.round((now - d) / 60000);
+    if (diffMin < 2) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 1440) return `${Math.round(diffMin / 60)}h ago`;
+    return d.toLocaleDateString();
+  } catch { return '—'; }
 }
 
-async function loadCommandsTab() {
+function relativeTime(iso) { return fmtDate(iso); }
+
+// ── Wiring ────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('management-tab') && !authToken) {
+      openLoginModal(); return;
+    }
+    showTab(btn.dataset.tab);
+  });
+});
+
+document.querySelectorAll('.settings-subtab').forEach(btn => {
+  btn.addEventListener('click', () => activateSettingsSubtab(btn.dataset.subtab));
+});
+
+document.getElementById('login-btn')?.addEventListener('click', openLoginModal);
+document.getElementById('logout-btn')?.addEventListener('click', logout);
+document.getElementById('login-submit-btn')?.addEventListener('click', submitLogin);
+document.getElementById('login-cancel-btn')?.addEventListener('click', closeLoginModal);
+document.getElementById('login-modal')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeLoginModal();
+});
+document.getElementById('login-password')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitLogin();
+});
+
+document.getElementById('refresh-dashboard-btn')?.addEventListener('click', loadDashboard);
+document.getElementById('refresh-sites-btn')?.addEventListener('click', loadSites);
+document.getElementById('refresh-commands-btn')?.addEventListener('click', loadCommands);
+document.getElementById('send-command-btn')?.addEventListener('click', sendCommand);
+document.getElementById('add-workspace-btn')?.addEventListener('click', () => {
+  const name = prompt('Workspace name:');
+  if (!name) return;
+  apiFetch('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) })
+    .then(res => { if (res && res.ok) { showToast('Workspace created.', 'ok'); loadWorkspaces(); } });
+});
+
+// ── Init ──────────────────────────────────────────────────────────
+(async () => {
+  await checkAuth();
+  loadDashboard();
+  // Ping API status
   try {
-    state.commands = await apiFetch('/api/commands');
-    const body = document.getElementById('commands-table-body');
-    body.innerHTML = '';
-
-    state.commands.forEach((command) => {
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td>${escapeHtml(command.target)}</td>
-        <td>${escapeHtml(command.type)}</td>
-        <td><span class="status-pill status-${statusToClass(command.status)}">${command.status}</span></td>
-        <td>${formatDate(command.created_at)}</td>
-        <td><button class="btn btn-danger btn-small" data-command-delete="${command.id}">Delete</button></td>
-      `;
-      body.appendChild(row);
-    });
-
-    body.querySelectorAll('[data-command-delete]').forEach((button) => {
-      button.addEventListener('click', async (event) => {
-        try {
-          await apiFetch(`/api/commands/${event.currentTarget.dataset.commandDelete}`, { method: 'DELETE' });
-          showNotification('Command deleted.', 'info');
-          await loadCommandsTab();
-        } catch (error) {
-          showNotification(error.message, 'error');
-        }
-      });
-    });
-  } catch (error) {
-    showNotification(`Commands load failed: ${error.message}`, 'error');
+    const res = await fetch('/api/auth/me', { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} });
+    const dot = document.getElementById('api-dot');
+    const text = document.getElementById('api-text');
+    if (dot) dot.className = 'status-dot ' + (res.ok || res.status === 401 ? 'online' : 'offline');
+    if (text) text.textContent = res.ok || res.status === 401 ? 'Connected' : 'Error';
+  } catch {
+    const dot = document.getElementById('api-dot');
+    const text = document.getElementById('api-text');
+    if (dot) dot.className = 'status-dot offline';
+    if (text) text.textContent = 'Disconnected';
   }
-}
-
-async function createCommand(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  try {
-    const payload = JSON.parse(String(form.get('payload') || '{}'));
-    await apiFetch('/api/commands', {
-      method: 'POST',
-      body: {
-        target: String(form.get('target') || '').trim(),
-        type: String(form.get('type') || '').trim(),
-        site_id: String(form.get('site_id') || '').trim() || null,
-        workspace_id: String(form.get('workspace_id') || '').trim() || null,
-        payload
-      }
-    });
-    showNotification('Command queued.', 'success');
-    await loadCommandsTab();
-  } catch (error) {
-    showNotification(`Command creation failed: ${error.message}`, 'error');
-  }
-}
-
-function loadSettingsTab() {
-  const card = document.getElementById('settings-card');
-  card.innerHTML = `
-    <div class="card-header"><span class="card-title">Session</span></div>
-    <div class="card-body">
-      <p><strong>User:</strong> ${escapeHtml(currentUser?.username || 'Not logged in')}</p>
-      <p><strong>Token Stored:</strong> ${authToken ? 'Yes' : 'No'}</p>
-      <button id="logout-inline" class="btn btn-secondary" type="button">Logout</button>
-    </div>
-  `;
-  document.getElementById('logout-inline').addEventListener('click', logout);
-}
-
-function formatDate(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function statusToClass(status) {
-  if (status === 'green' || status === 'approved' || status === 'executed') return 'approved';
-  if (status === 'waiting' || status === 'pending' || status === 'queued' || status === 'delivered' || status === 'unknown') return 'pending';
-  return 'revoked';
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+})();
