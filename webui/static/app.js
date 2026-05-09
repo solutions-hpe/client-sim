@@ -543,6 +543,13 @@ function renderServerTab(data) {
   setEl('server-ram', `${ramUsedGB}/${ramTotalGB} GB`);
   setEl('server-last-seen', formatRelativeTime(latestProxmoxData.last_seen));
 
+  const agentVerPill = document.getElementById('server-agent-version-pill');
+  const agentVer = latestProxmoxData.agent_version;
+  if (agentVerPill) {
+    agentVerPill.style.display = agentVer ? '' : 'none';
+    setEl('server-agent-version', agentVer || '—');
+  }
+
   const storagePills = document.getElementById('server-storage-pills');
   if (storagePills && Array.isArray(node.storage)) {
     storagePills.innerHTML = node.storage.map((s) => {

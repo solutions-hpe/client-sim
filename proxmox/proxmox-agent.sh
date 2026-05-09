@@ -5,6 +5,7 @@
 
 set -euo pipefail
 
+AGENT_VERSION="0.76"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -551,6 +552,7 @@ print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
     "mem_total_kb": ${mem_total:-0},
     "storage": ${storage_json:-[]}
   },
+  "agent_version": "${AGENT_VERSION}",
   "vms": ${vms_json:-[]},
   "unknown_usb": ${UNKNOWN_USB_JSON:-[]},
   "usb_state": ${USB_STATE_JSON:-[]},

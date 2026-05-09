@@ -5,6 +5,7 @@
 
 LINUX_VER_FILE="linux/VERSION"
 INSTALLER="webui/install-lxc.sh"
+AGENT="proxmox/proxmox-agent.sh"
 
 current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
 if [[ -z "$current" ]]; then
@@ -23,4 +24,7 @@ echo "$new" > "$LINUX_VER_FILE"
 # Update VERSION="x.xx" in install-lxc.sh
 sed -i.bak "s/^VERSION=\"[^\"]*\"/VERSION=\"$new\"/" "$INSTALLER" && rm -f "${INSTALLER}.bak"
 
-git add "$LINUX_VER_FILE" "$INSTALLER"
+# Update AGENT_VERSION="x.xx" in proxmox-agent.sh
+sed -i.bak "s/^AGENT_VERSION=\"[^\"]*\"/AGENT_VERSION=\"$new\"/" "$AGENT" && rm -f "${AGENT}.bak"
+
+git add "$LINUX_VER_FILE" "$INSTALLER" "$AGENT"
