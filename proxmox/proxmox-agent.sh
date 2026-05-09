@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.64"
+AGENT_VERSION="1.65"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -608,6 +608,28 @@ usb_provision_loop() {
     scan_usb_devices
     load_state_file
 
+    # ── Stale state cleanup: remove entries for VMIDs that no longer exist ────
+    # Prevents dongles from being "stuck" assigned to a manually-deleted VM.
+    local -A _existing_vmids=()
+    while IFS= read -r _vid; do
+        [[ -n "$_vid" ]] && _existing_vmids["$_vid"]="1"
+    done < <(qm list 2>/dev/null | awk 'NR>1{print $1}')
+    local _state_changed=0
+    for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
+        if [[ -z "${_existing_vmids[$vmid]:-}" ]]; then
+            local _stale_bus="${STATE_VMID_TO_BUS[$vmid]:-}"
+            log "State cleanup: VM $vmid no longer exists — releasing bus ${_stale_bus:-unknown} for re-provision"
+            [[ -n "$_stale_bus" ]] && {
+                unset "STATE_BUS_TO_VMID[$_stale_bus]"
+                unset "STATE_MISSING_BY_BUS[$_stale_bus]"
+            }
+            unset "STATE_VMID_TO_BUS[$vmid]"
+            unset "STATE_VMID_TO_IMAGE[$vmid]"
+            _state_changed=1
+        fi
+    done
+    [[ "$_state_changed" -eq 1 ]] && save_state_file
+
     # ── Parallel provision: new USB dongles not yet assigned a VM ─────────────
     # Pre-assign VMIDs in the parent before forking so parallel subshells
     # cannot race and pick the same slot. Associative arrays (STATE_*, CERTIFIED_TYPES)
@@ -881,6 +903,10 @@ execute_vm_command() {
             destroy_vm "$vmid"
             ;;
         reclone_vms)  [[ -f /opt/client-sim-repo/proxmox/clone.sh ]] && bash /opt/client-sim-repo/proxmox/clone.sh ;;
+        provision_unassigned)
+            log "provision_unassigned: running USB provision loop to assign dongles without VMs"
+            usb_provision_loop || log "WARNING: provision_unassigned loop failed"
+            ;;
         snapshot_vms)
             for vid in $(qm list | awk 'NR>1{print $1}'); do
                 qm snapshot "$vid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim" || true

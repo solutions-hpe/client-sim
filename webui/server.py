@@ -1892,6 +1892,25 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                 await _broadcast_reclone_state()
                 await asyncio.gather(*(_reclone_one(vm) for vm in batch))
 
+            # After recloning existing VMs, trigger provisioning for any
+            # unassigned dongles (present USB device with no VM allocated).
+            assigned_buses = {
+                str(entry.get("bus_path", ""))
+                for entry in proxmox_state.get("usb_state", [])
+                if entry.get("vmid") is not None
+            }
+            unassigned = [
+                entry for entry in proxmox_state.get("usb_state", [])
+                if entry.get("vmid") is None
+                and str(entry.get("bus_path", "")) not in assigned_buses
+            ]
+            if unassigned:
+                logger.info(
+                    "Rolling reclone: found %d unassigned dongle(s) — queuing provision_unassigned",
+                    len(unassigned),
+                )
+                await _queue_proxmox_command("provision_unassigned", {}, command_type=trigger_type)
+
             reclone_state["status"] = "failed" if reclone_state["failed"] else "completed"
         except Exception as exc:
             logger.exception("Rolling reclone failed: %s", exc)
@@ -2828,13 +2847,17 @@ async def api_proxmox_reclone_all() -> dict[str, Any]:
         and int(vm.get("vmid", 0)) > 9000
         and not vm.get("is_template")
     ]
-    if not eligible:
+    unassigned_dongles = [
+        e for e in proxmox_state.get("usb_state", [])
+        if e.get("vmid") is None
+    ]
+    if not eligible and not unassigned_dongles:
         raise HTTPException(
             status_code=400,
-            detail=f"No eligible VMs found to reclone (proxmox_state has {len(proxmox_state.get('vms', []))} VMs total)"
+            detail=f"No eligible VMs or unassigned dongles found (proxmox_state has {len(proxmox_state.get('vms', []))} VMs total)"
         )
     asyncio.create_task(_run_rolling_reclone("manual"))
-    return {"status": "started", "vm_count": len(eligible)}
+    return {"status": "started", "vm_count": len(eligible), "unassigned_dongles": len(unassigned_dongles)}
 
 
 @app.get("/api/proxmox/reclone-status")

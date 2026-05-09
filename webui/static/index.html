@@ -42,7 +42,7 @@
           <span class="repo-label">Refresh:</span>
           <select id="refresh-interval-select" style="font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--panel);color:var(--text);">
             <option value="0">Off</option>
-            <option value="10">10s</option>
+            <option value="10" selected>10s</option>
             <option value="30">30s</option>
             <option value="60">1m</option>
             <option value="300">5m</option>
@@ -115,7 +115,7 @@
             <span id="server-storage-pills"></span>
             <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
           </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+          <div style="display:flex;flex-direction:column;align-items:stretch;gap:4px;flex-shrink:0;min-width:130px;">
             <button id="agent-approve-btn" class="btn btn-secondary" style="display:none;"></button>
             <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
             <span class="server-last-seen" style="font-size:11px;">Last seen: <span id="server-last-seen">—</span></span>
