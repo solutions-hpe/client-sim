@@ -5,13 +5,13 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.83"
+AGENT_VERSION="1.84"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
-POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-60}"
+POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-10}"
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
@@ -1055,21 +1055,18 @@ log "Background telemetry sender started (PID $TELEMETRY_PID, interval ${TELEMET
 
 post_telemetry || true
 
-while true; do
-    refresh_usb_config || true
-    if [[ "$AUTO_PROVISION" == "on" ]]; then
-        usb_provision_loop || log "WARNING: USB auto-provisioning loop failed"
-    else
-        refresh_usb_telemetry_only || true
-    fi
-
-    # Post telemetry after USB scan (has fresh USB state in this process)
-    post_telemetry
-
+# ── Inbox command processor ────────────────────────────────────────────────────
+# Extracted as a function so it can be called at the TOP of the main loop
+# (before USB provisioning work) to keep command latency low. Previously the
+# inbox check lived after usb_provision_loop which could block for minutes.
+process_inbox() {
+    local response
     response=$(curl_api GET "/api/inbox?hostname=$h" "" 2>/dev/null || echo "[]")
-    if [[ -n "$response" && "$response" != "[]" ]]; then
-        log "Commands received: $response"
-        parsed_commands=$(python3 - "$response" <<'PY' 2>/dev/null || true
+    [[ -z "$response" || "$response" == "[]" ]] && return 0
+
+    log "Commands received: $response"
+    local parsed_commands
+    parsed_commands=$(python3 - "$response" <<'PY' 2>/dev/null || true
 import json
 import sys
 
@@ -1086,123 +1083,126 @@ for cmd in commands:
     print(f"{cid}\t{action}\t{vmid}\t{ctype}")
 PY
 )
-        _seq_ids=()
-        _seq_actions=()
-        _seq_vmids=()
-        _seq_types=()
-        _rc_ids=()
-        _rc_vmids=()
-        while IFS=$'\t' read -r cmd_id action vmid cmd_type; do
-            [[ -z "$cmd_id" || -z "$action" ]] && continue
-            if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
-                _rc_ids+=("$cmd_id")
-                _rc_vmids+=("$vmid")
-            else
-                _seq_ids+=("$cmd_id")
-                _seq_actions+=("$action")
-                _seq_vmids+=("$vmid")
-                _seq_types+=("$cmd_type")
-            fi
-        done <<< "$parsed_commands"
+    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=()
+    local _rc_ids=() _rc_vmids=()
+    while IFS=$'\t' read -r cmd_id action vmid cmd_type; do
+        [[ -z "$cmd_id" || -z "$action" ]] && continue
+        if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
+            _rc_ids+=("$cmd_id")
+            _rc_vmids+=("$vmid")
+        else
+            _seq_ids+=("$cmd_id")
+            _seq_actions+=("$action")
+            _seq_vmids+=("$vmid")
+            _seq_types+=("$cmd_type")
+        fi
+    done <<< "$parsed_commands"
 
-        for _si in "${!_seq_ids[@]}"; do
-            log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
-            status="completed"
-            message=""
-            if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" 2>>"$AGENT_LOG"; then
-                message="${_seq_actions[$_si]} completed"
-            else
-                status="failed"
-                message="${_seq_actions[$_si]} failed — check $AGENT_LOG"
+    for _si in "${!_seq_ids[@]}"; do
+        log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
+        local status="completed" message=""
+        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" 2>>"$AGENT_LOG"; then
+            message="${_seq_actions[$_si]} completed"
+        else
+            status="failed"
+            message="${_seq_actions[$_si]} failed — check $AGENT_LOG"
+        fi
+        curl_api POST /api/inbox/ack "{\"id\":\"${_seq_ids[$_si]}\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
+        log "ACK: ${_seq_ids[$_si]} status=$status"
+        post_telemetry
+    done
+
+    if [[ ${#_rc_vmids[@]} -gt 0 ]]; then
+        load_state_file
+        local _rc_active_pids=() _rc_pids=() _rc_batch_ids=() _rc_batch_vmids=() _rc_batch_buses=()
+        local _conc="${RECLONE_CONCURRENCY:-1}"
+
+        for _ri in "${!_rc_vmids[@]}"; do
+            local _vmid="${_rc_vmids[$_ri]}" _cmd_id="${_rc_ids[$_ri]}"
+            local _bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
+            if [[ -z "$_bus" ]]; then
+                local _usb_line
+                _usb_line=$(qm config "$_vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ' || true)
+                if [[ "$_usb_line" =~ host=([^,[:space:]]+) ]]; then
+                    _bus="${BASH_REMATCH[1]}"
+                    log "Recovered USB bus_path=$_bus for VM $_vmid from qm config"
+                    STATE_VMID_TO_BUS["$_vmid"]="$_bus"
+                    STATE_BUS_TO_VMID["$_bus"]="$_vmid"
+                fi
             fi
-            curl_api POST /api/inbox/ack "{\"id\":\"${_seq_ids[$_si]}\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
-            log "ACK: ${_seq_ids[$_si]} status=$status"
-            post_telemetry  # reflect VM state change immediately
+            local _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
+            local _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
+            local _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
+            local _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
+
+            if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
+                log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
+                curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"USB device not present for VM $_vmid\"}" >/dev/null 2>&1
+                continue
+            fi
+            if [[ "$_dtype" != "$SIM_PHY" ]]; then
+                log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
+                curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY\"}" >/dev/null 2>&1
+                continue
+            fi
+
+            while [[ ${#_rc_active_pids[@]} -ge $_conc ]]; do
+                local _live=()
+                for _p in "${_rc_active_pids[@]}"; do
+                    kill -0 "$_p" 2>/dev/null && _live+=("$_p")
+                done
+                _rc_active_pids=("${_live[@]}")
+                [[ ${#_rc_active_pids[@]} -ge $_conc ]] && sleep 5
+            done
+
+            _RECLONE_CMD_IDS["$_vmid"]="$_cmd_id"
+            log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
+            (
+                _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
+            ) &
+            local _pid=$!
+            _rc_active_pids+=("$_pid")
+            _rc_pids+=("$_pid")
+            _rc_batch_ids+=("$_cmd_id")
+            _rc_batch_vmids+=("$_vmid")
+            _rc_batch_buses+=("$_bus")
         done
 
-        if [[ ${#_rc_vmids[@]} -gt 0 ]]; then
-            load_state_file
-            _rc_active_pids=()
-            _rc_pids=()
-            _rc_batch_ids=()
-            _rc_batch_vmids=()
-            _rc_batch_buses=()
-            _conc="${RECLONE_CONCURRENCY:-1}"
+        for _rpi in "${!_rc_pids[@]}"; do
+            local _rc_status="completed" _rc_msg="reclone_vm completed"
+            if ! wait "${_rc_pids[$_rpi]}" 2>/dev/null; then
+                _rc_status="failed"
+                _rc_msg="reclone_vm failed — check $AGENT_LOG"
+                unset 'STATE_VMID_TO_BUS[${_rc_batch_vmids[$_rpi]}]'
+                unset 'STATE_VMID_TO_IMAGE[${_rc_batch_vmids[$_rpi]}]'
+                unset 'STATE_BUS_TO_VMID[${_rc_batch_buses[$_rpi]}]'
+                unset 'STATE_MISSING_BY_BUS[${_rc_batch_buses[$_rpi]}]'
+            fi
+            curl_api POST /api/inbox/ack "{\"id\":\"${_rc_batch_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
+            log "ACK: ${_rc_batch_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_rc_batch_vmids[$_rpi]})"
+            unset '_RECLONE_CMD_IDS[${_rc_batch_vmids[$_rpi]}]'
+        done
 
-            for _ri in "${!_rc_vmids[@]}"; do
-                _vmid="${_rc_vmids[$_ri]}"
-                _cmd_id="${_rc_ids[$_ri]}"
-                _bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
-                if [[ -z "$_bus" ]]; then
-                    _usb_line=$(qm config "$_vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ' || true)
-                    if [[ "$_usb_line" =~ host=([^,[:space:]]+) ]]; then
-                        _bus="${BASH_REMATCH[1]}"
-                        log "Recovered USB bus_path=$_bus for VM $_vmid from qm config"
-                        STATE_VMID_TO_BUS["$_vmid"]="$_bus"
-                        STATE_BUS_TO_VMID["$_bus"]="$_vmid"
-                    fi
-                fi
-                _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
-                _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
-                _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
-                _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
-
-                if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
-                    log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
-                    curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"USB device not present for VM $_vmid\"}" >/dev/null 2>&1
-                    continue
-                fi
-                if [[ "$_dtype" != "$SIM_PHY" ]]; then
-                    log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
-                    curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY\"}" >/dev/null 2>&1
-                    continue
-                fi
-
-                while [[ ${#_rc_active_pids[@]} -ge $_conc ]]; do
-                    _live=()
-                    for _p in "${_rc_active_pids[@]}"; do
-                        kill -0 "$_p" 2>/dev/null && _live+=("$_p")
-                    done
-                    _rc_active_pids=("${_live[@]}")
-                    [[ ${#_rc_active_pids[@]} -ge $_conc ]] && sleep 5
-                done
-
-                _RECLONE_CMD_IDS["$_vmid"]="$_cmd_id"
-                log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
-                (
-                    _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
-                ) &
-                _pid=$!
-                _rc_active_pids+=("$_pid")
-                _rc_pids+=("$_pid")
-                _rc_batch_ids+=("$_cmd_id")
-                _rc_batch_vmids+=("$_vmid")
-                _rc_batch_buses+=("$_bus")
-            done
-
-            for _rpi in "${!_rc_pids[@]}"; do
-                _rc_status="completed"
-                _rc_msg="reclone_vm completed"
-                if ! wait "${_rc_pids[$_rpi]}" 2>/dev/null; then
-                    _rc_status="failed"
-                    _rc_msg="reclone_vm failed — check $AGENT_LOG"
-                    unset 'STATE_VMID_TO_BUS[${_rc_batch_vmids[$_rpi]}]'
-                    unset 'STATE_VMID_TO_IMAGE[${_rc_batch_vmids[$_rpi]}]'
-                    unset 'STATE_BUS_TO_VMID[${_rc_batch_buses[$_rpi]}]'
-                    unset 'STATE_MISSING_BY_BUS[${_rc_batch_buses[$_rpi]}]'
-                fi
-                curl_api POST /api/inbox/ack "{\"id\":\"${_rc_batch_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
-                log "ACK: ${_rc_batch_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_rc_batch_vmids[$_rpi]})"
-                unset '_RECLONE_CMD_IDS[${_rc_batch_vmids[$_rpi]}]'
-            done
-
-            for _vmid in "${_rc_batch_vmids[@]}"; do
-                _b="${STATE_VMID_TO_BUS[$_vmid]:-}"
-                [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
-            done
-            save_state_file
-        fi
+        for _vmid in "${_rc_batch_vmids[@]}"; do
+            local _b="${STATE_VMID_TO_BUS[$_vmid]:-}"
+            [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
+        done
+        save_state_file
     fi
+}
+
+while true; do
+    process_inbox || true
+
+    refresh_usb_config || true
+    if [[ "$AUTO_PROVISION" == "on" ]]; then
+        usb_provision_loop || log "WARNING: USB auto-provisioning loop failed"
+    else
+        refresh_usb_telemetry_only || true
+    fi
+
+    # Post telemetry after USB scan (has fresh USB state in this process)
+    post_telemetry
 
     sleep "$POLL_INTERVAL"
 done
