@@ -1,10 +1,14 @@
 #!/bin/bash
-version=.02
+version=.03
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
 
-# Instance guard — prevent multiple concurrent startups from racing
+# Instance guard — prevent multiple concurrent startups from racing.
+# The lock is a directory (atomic mkdir). On boot any leftover lock is
+# stale (the previous session is gone), so we remove it first.
+# A stale lock would cause startup.sh to exit 0 → systemctl reboot loop.
 _LOCK_FILE="/usr/local/scripts/.startup.lock"
+rmdir "$_LOCK_FILE" 2>/dev/null || true   # clear any stale lock from last session
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
     echo "$(date): startup.sh already running (lock held), exiting" >> "$debug"
     exit 0
