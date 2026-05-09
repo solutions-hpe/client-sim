@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.04
+version=.05
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
 echo Simulation Script Version $version | tee "$debug"
@@ -86,6 +86,15 @@ hw_type=$(detect_hardware)
 #------------------------------------------------------------
 #Global Variable Export Enable
 set -a
+# Source INI parser here so simulation.sh is self-contained for exec-restarts.
+# When startup.sh does `exec bash simulation.sh`, all shell functions (including
+# get_value) are lost — they live in the process that exec replaces. Re-sourcing
+# ini-parser.sh and re-parsing the config ensures fresh, correct values every run.
+source '/usr/local/scripts/ini-parser.sh'
+process_ini_file '/usr/local/scripts/simulation.conf'
+if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
+  process_ini_file '/usr/local/scripts/user-overrides.conf'
+fi
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
@@ -154,6 +163,12 @@ override_keys=(kill_switch sim_load github_repo repo_location vh_server site_bas
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
+# USB device physical-layer override — written by Proxmox agent at provisioning
+# time based on the certified USB device type (wireless/wired). Sourced LAST so it
+# wins over simulation.conf and any user-section overrides for sim_phy.
+if [[ -f '/usr/local/scripts/usb-phy-override.conf' ]]; then
+  source '/usr/local/scripts/usb-phy-override.conf'
+fi
 #------------------------------------------------------------
 #End User/Device Specific Overrides
 #------------------------------------------------------------
