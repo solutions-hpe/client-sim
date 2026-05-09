@@ -662,6 +662,53 @@ async function triggerAgentUpdate() {
   }, 5000);
 }
 
+function handleUpdateAllProgress(state) {
+  const btn = document.getElementById('update-all-btn');
+  if (!btn) return;
+  if (!state.running && state.phase === 'idle') {
+    btn.textContent = '⬆ Update All';
+    btn.disabled = false;
+    return;
+  }
+  if (state.phase === 'agents') {
+    btn.textContent = `⏳ Agents ${state.completed_agents}/${state.total_agents}…`;
+    btn.disabled = true;
+  } else if (state.phase === 'webui') {
+    btn.textContent = '⏳ Updating Server…';
+    btn.disabled = true;
+  } else if (state.phase === 'done') {
+    btn.textContent = '✓ Done';
+    btn.disabled = true;
+    setTimeout(() => {
+      btn.textContent = '⬆ Update All';
+      btn.disabled = false;
+    }, 5000);
+  } else if (state.phase === 'failed') {
+    showToast('Update All failed: ' + (state.error || 'unknown error'), 'error');
+    btn.textContent = '⬆ Update All';
+    btn.disabled = false;
+  }
+}
+
+async function triggerUpdateAll() {
+  const btn = document.getElementById('update-all-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Starting…';
+  }
+  try {
+    const res = await fetch('/api/update-all', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  } catch (e) {
+    showToast('Failed to start Update All: ' + e.message, 'error');
+    if (btn) {
+      btn.textContent = '⬆ Update All';
+      btn.disabled = false;
+    }
+  }
+}
+
 function renderServerTab(data) {
   latestProxmoxData = data || latestProxmoxData;
   if (data?.reclone_state) latestRecloneState = data.reclone_state;
@@ -3078,6 +3125,11 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.type === 'update_all_progress') {
+    handleUpdateAllProgress(message);
+    return;
+  }
+
   if (message.type === 'settings_update') {
     applySettingsToUI(message.settings);
     return;
@@ -4586,6 +4638,11 @@ document.getElementById('server-th-check')?.addEventListener('change', (e) => {
 
 updateCentralToolbar();
 activateSetupSubtab('setup-github');
+const updateAllBtn = document.getElementById('update-all-btn');
+if (updateAllBtn && !updateAllBtn._bound) {
+  updateAllBtn.addEventListener('click', triggerUpdateAll);
+  updateAllBtn._bound = true;
+}
 connectWebSocket();
 loadSimulations();
 
@@ -4599,6 +4656,8 @@ loadSimulations();
     }
     // Reclone
     if (init.reclone) renderRecloneStatus(init.reclone);
+    // Update All
+    if (init.update_all) handleUpdateAllProgress(init.update_all);
     // Central
     if (init.central) {
       centralTokenValid = Boolean(init.central.token_valid);

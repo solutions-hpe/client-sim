@@ -1383,6 +1383,16 @@ reclone_state: dict[str, Any] = {
     "last_run": None,
     "started_at": None,
 }
+update_all_state: dict[str, Any] = {
+    "running": False,
+    "phase": "idle",
+    "total_agents": 0,
+    "completed_agents": 0,
+    "failed_agents": 0,
+    "agent_cmds": [],
+    "started_at": None,
+    "error": None,
+}
 relay_sites: dict[str, dict[str, Any]] = {}
 background_tasks: dict[str, asyncio.Task[Any]] = {}
 reclone_run_lock = asyncio.Lock()
@@ -2248,6 +2258,81 @@ async def check_for_update() -> None:
             logger.info("New version %s available — triggering self-update", available)
             await _run_self_update()
         await asyncio.sleep(UPDATE_CHECK_INTERVAL)
+
+
+async def _run_update_all() -> None:
+    """Fan out update_agent to all approved hosts, wait for ACKs, then self-update the WebUI."""
+    global update_all_state
+
+    approved = list(approved_proxmox_agents.keys())
+    agent_cmd_ids: list[str] = []
+
+    try:
+        async with state_lock:
+            for hostname in approved:
+                cmd = _make_command(hostname, "update_agent")
+                commands.append(cmd)
+                if len(commands) > COMMAND_MAX:
+                    del commands[:len(commands) - COMMAND_MAX]
+                agent_cmd_ids.append(cmd["id"])
+
+        update_all_state.update({
+            "running": True,
+            "phase": "agents",
+            "total_agents": len(approved),
+            "completed_agents": 0,
+            "failed_agents": 0,
+            "agent_cmds": agent_cmd_ids,
+            "started_at": time.time(),
+            "error": None,
+        })
+        await broadcast({"type": "update_all_progress", **update_all_state})
+        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+
+        if agent_cmd_ids:
+            deadline = time.time() + 300
+            while time.time() < deadline:
+                await asyncio.sleep(5)
+                async with state_lock:
+                    command_statuses = {
+                        c["id"]: c["status"]
+                        for c in commands
+                        if c["id"] in agent_cmd_ids
+                    }
+                done = sum(1 for status in command_statuses.values() if status in ("completed", "failed"))
+                failed = sum(1 for status in command_statuses.values() if status == "failed")
+                update_all_state["completed_agents"] = done
+                update_all_state["failed_agents"] = failed
+                await broadcast({"type": "update_all_progress", **update_all_state})
+                if done >= len(agent_cmd_ids):
+                    break
+
+        if len(approved) == 0:
+            logger.info("Update All: no approved agents, proceeding directly to WebUI update")
+        else:
+            logger.info(
+                "Update All: agents done (%d/%d), proceeding to WebUI update",
+                update_all_state["completed_agents"],
+                update_all_state["total_agents"],
+            )
+
+        update_all_state["phase"] = "webui"
+        await broadcast({"type": "update_all_progress", **update_all_state})
+
+        await _run_self_update()
+        if update_state.get("update_error"):
+            update_all_state["phase"] = "failed"
+            update_all_state["error"] = str(update_state["update_error"])
+            logger.error("Update All: WebUI self-update failed: %s", update_state["update_error"])
+        else:
+            update_all_state["phase"] = "done"
+    except Exception as exc:
+        update_all_state["phase"] = "failed"
+        update_all_state["error"] = str(exc)
+        logger.error("Update All failed: %s", exc)
+    finally:
+        update_all_state["running"] = False
+        await broadcast({"type": "update_all_progress", **update_all_state})
 
 
 async def _run_self_update() -> None:
@@ -3492,6 +3577,28 @@ async def api_version() -> dict[str, Any]:
     }
 
 
+@app.post("/api/update-all")
+async def api_update_all() -> dict[str, Any]:
+    """Queue agent updates for all approved Proxmox hosts, then self-update the WebUI."""
+    if update_all_state["running"]:
+        raise HTTPException(status_code=409, detail="Update All already in progress")
+    if update_state["update_in_progress"]:
+        raise HTTPException(status_code=409, detail="WebUI update already in progress")
+    update_all_state.update({
+        "running": True,
+        "phase": "agents",
+        "total_agents": 0,
+        "completed_agents": 0,
+        "failed_agents": 0,
+        "agent_cmds": [],
+        "started_at": time.time(),
+        "error": None,
+    })
+    await broadcast({"type": "update_all_progress", **update_all_state})
+    asyncio.create_task(_run_update_all())
+    return {"status": "ok", "message": "Update All started"}
+
+
 @app.post("/api/self-update")
 async def api_self_update() -> dict[str, Any]:
     """Manually trigger a self-update check and apply if a new version is available."""
@@ -3803,6 +3910,7 @@ async def api_init() -> dict[str, Any]:
     return {
         "proxmox": _proxmox_status_payload(),
         "reclone": dict(reclone_state),
+        "update_all": dict(update_all_state),
         "central": {
             "status": _central_status_payload(),
             "wireless_clients": dict(central_wireless_clients),
@@ -3890,7 +3998,10 @@ async def poll_inbox(hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
     if not hostname:
         raise HTTPException(status_code=422, detail="hostname is required")
-    pending = [c for c in commands if c["status"] == "pending" and c["target"] == hostname]
+    pending = [
+        c for c in commands
+        if c["status"] == "pending" and (c["target"] == hostname or c["target"] == "proxmox")
+    ]
     now = time.time()
     for cmd in pending:
         cmd["status"] = "delivered"
@@ -3989,6 +4100,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     ):
         await websocket.send_text(json.dumps({"type": "proxmox_update", **_proxmox_status_payload()}))
     await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}))
+    await websocket.send_text(json.dumps({"type": "update_all_progress", **dict(update_all_state)}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
 
     try:

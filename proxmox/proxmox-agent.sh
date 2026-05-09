@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.06"
+AGENT_VERSION="1.07"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -740,7 +740,7 @@ while true; do
         && log "Telemetry sent" \
         || log "WARNING: telemetry POST failed"
 
-    response=$(curl_api GET "/api/inbox?hostname=proxmox" "" 2>/dev/null || echo "[]")
+    response=$(curl_api GET "/api/inbox?hostname=$h" "" 2>/dev/null || echo "[]")
     if [[ -n "$response" && "$response" != "[]" ]]; then
         log "Commands received: $response"
         parsed_commands=$(python3 - "$response" <<'PY' 2>/dev/null || true
