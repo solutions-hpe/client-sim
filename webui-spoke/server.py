@@ -165,7 +165,7 @@ HISTORY_HOURS = 24
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
 
 # Self-update: the installer lives inside the synced repo
-_INSTALLER_PATH = REPO_DIR / "webui" / "install-lxc.sh"
+_INSTALLER_PATH = REPO_DIR / "webui-spoke" / "install-lxc.sh"
 
 update_state: dict[str, Any] = {
     "current_version": INSTALLER_VERSION,

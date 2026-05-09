@@ -119,7 +119,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
     _env_br=$(grep '^REPO_BRANCH=' "${INSTALL_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"'"'"' ')
     [[ -n "${_env_br}" ]] && REPO_BRANCH="${_env_br}"
   fi
-  _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui/install-lxc.sh"
+  _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/install-lxc.sh"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
@@ -127,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="1.77"
+VERSION="1.81"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -408,7 +408,7 @@ rsync -a --delete \
   --exclude='.env' \
   --exclude='settings.json' \
   --exclude='.secret_key' \
-  "$REPO_CACHE/webui/" "$INSTALL_DIR/" >>"$LOG" 2>&1
+  "$REPO_CACHE/webui-spoke/" "$INSTALL_DIR/" >>"$LOG" 2>&1
 
 # Restore settings.json if it existed before sync
 if [[ -n "$SETTINGS_BACKUP" && ! -f "$INSTALL_DIR/settings.json" ]]; then
@@ -532,7 +532,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
 echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
 # Allow service user to self-update by re-running this installer as root
 SUDOERS_FILE="/etc/sudoers.d/client-sim-dashboard"
-SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui/install-lxc.sh *"
+SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui-spoke/install-lxc.sh *"
 mkdir -p /etc/sudoers.d
 # Remove old file first (may have 440 perms from a prior install)
 rm -f "$SUDOERS_FILE"

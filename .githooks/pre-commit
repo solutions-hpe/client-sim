@@ -4,7 +4,7 @@
 set -euo pipefail
 
 LINUX_VER_FILE="linux/VERSION"
-INSTALLER="webui/install-lxc.sh"
+INSTALLER="webui-spoke/install-lxc.sh"
 AGENT="proxmox/proxmox-agent.sh"
 
 # ── Syntax checks ─────────────────────────────────────────────────────────────
