@@ -1,11 +1,69 @@
 #!/bin/bash
-# Auto-increment both version numbers on every commit.
-# Reads linux/VERSION, adds 0.01, writes it back and updates
-# the VERSION= line in webui/install-lxc.sh, then stages both.
+# Pre-commit hook: syntax checks + auto-increment version numbers.
+
+set -euo pipefail
 
 LINUX_VER_FILE="linux/VERSION"
 INSTALLER="webui/install-lxc.sh"
 AGENT="proxmox/proxmox-agent.sh"
+
+# ── Syntax checks ─────────────────────────────────────────────────────────────
+
+fail=0
+
+# Python: compile-check any staged .py files
+staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+for f in $staged_py; do
+    if ! python3 -m py_compile "$f" 2>/tmp/pyc_err; then
+        echo "[pre-commit] ✗ Python syntax error in $f:"
+        cat /tmp/pyc_err
+        fail=1
+    fi
+done
+
+# Bash: check staged .sh files
+staged_sh=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
+for f in $staged_sh; do
+    if ! bash -n "$f" 2>/tmp/sh_err; then
+        echo "[pre-commit] ✗ Bash syntax error in $f:"
+        cat /tmp/sh_err
+        fail=1
+    fi
+done
+
+# JavaScript: brace/paren balance in staged .js files
+staged_js=$(git diff --cached --name-only --diff-filter=ACM | grep '\.js$' || true)
+for f in $staged_js; do
+    python3 - "$f" <<'PY'
+import sys, re
+path = sys.argv[1]
+src  = open(path, encoding='utf-8', errors='replace').read()
+# Strip string literals and comments (rough but catches most cases)
+src = re.sub(r'//[^\n]*', '', src)
+src = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)
+src = re.sub(r'"(?:[^"\\]|\\.)*"', '""', src)
+src = re.sub(r"'(?:[^'\\]|\\.)*'", "''", src)
+src = re.sub(r'`(?:[^`\\]|\\.)*`', '``', src)
+ob, cb = src.count('{'), src.count('}')
+op, cp = src.count('('), src.count(')')
+errors = []
+if ob != cb: errors.append(f'braces: {ob} open vs {cb} close (delta {ob-cb:+d})')
+if op != cp: errors.append(f'parens: {op} open vs {cp} close (delta {op-cp:+d})')
+if errors:
+    print(f"[pre-commit] ✗ JS balance error in {path}: {'; '.join(errors)}")
+    sys.exit(1)
+PY
+    if [[ $? -ne 0 ]]; then fail=1; fi
+done
+
+if [[ $fail -ne 0 ]]; then
+    echo "[pre-commit] Commit blocked due to syntax errors above. Fix and re-stage."
+    exit 1
+fi
+
+echo "[pre-commit] Syntax checks passed ✓"
+
+# ── Version bump ──────────────────────────────────────────────────────────────
 
 current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
 if [[ -z "$current" ]]; then
@@ -13,18 +71,11 @@ if [[ -z "$current" ]]; then
     exit 0
 fi
 
-# Increment by 0.01 using awk (handles floats cleanly)
 new=$(awk -v v="$current" 'BEGIN { printf "%.2f", v + 0.01 }')
-
 echo "[pre-commit] Bumping version $current → $new"
 
-# Update linux/VERSION
 echo "$new" > "$LINUX_VER_FILE"
-
-# Update VERSION="x.xx" in install-lxc.sh
 sed -i.bak "s/^VERSION=\"[^\"]*\"/VERSION=\"$new\"/" "$INSTALLER" && rm -f "${INSTALLER}.bak"
-
-# Update AGENT_VERSION="x.xx" in proxmox-agent.sh
 sed -i.bak "s/^AGENT_VERSION=\"[^\"]*\"/AGENT_VERSION=\"$new\"/" "$AGENT" && rm -f "${AGENT}.bak"
 
 git add "$LINUX_VER_FILE" "$INSTALLER" "$AGENT"
