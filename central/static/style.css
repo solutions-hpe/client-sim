@@ -1,0 +1,347 @@
+/*
+ * Client-Sim Central — Hewlett Packard Enterprise Theme
+ */
+
+:root {
+  color-scheme: light;
+  font-family: "MetricHPE", "Metric HPE", Arial, Helvetica, sans-serif;
+
+  --hpe-green: #01A982;
+  --hpe-green-dark: #00896F;
+  --hpe-green-light: #D6F5EE;
+  --hpe-navy: #263040;
+  --hpe-navy-dark: #1F2531;
+  --hpe-navy-mid: #344457;
+
+  --hpe-red: #FC5A5A;
+  --hpe-red-bg: #FDEAEA;
+  --hpe-orange: #FF8D6D;
+  --hpe-orange-bg: #FFF0EB;
+  --hpe-yellow: #FFC61A;
+
+  --bg: #F5F5F5;
+  --panel: #FFFFFF;
+  --border: #CCCCCC;
+  --text: #444444;
+  --muted: #767676;
+  --grey: #9BA7B2;
+}
+
+@font-face {
+  font-family: "MetricHPE";
+  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MetricHPE";
+  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MetricHPE";
+  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MetricHPE";
+  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+.hidden { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a { color: var(--hpe-green); text-decoration: none; }
+a:hover { color: var(--hpe-green-dark); text-decoration: underline; }
+
+.topbar {
+  background: var(--hpe-navy);
+  color: #fff;
+  padding: 0 24px;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  border-bottom: 3px solid var(--hpe-green);
+}
+
+.topbar-content {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hpe-logo-mark {
+  height: 22px;
+  width: auto;
+  color: #ffffff;
+  display: block;
+}
+
+.brand-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--hpe-navy-mid);
+}
+
+.page {
+  padding: 20px 24px 32px;
+}
+
+.tab-nav {
+  display: flex;
+  gap: 0;
+  background: var(--panel);
+  border-bottom: 2px solid var(--border);
+  padding: 0 24px;
+  overflow-x: auto;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: 12px 20px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--hpe-green);
+  border-bottom-color: var(--hpe-green);
+}
+
+.btn {
+  border: 2px solid transparent;
+  border-radius: 3px;
+  padding: 7px 16px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s;
+  line-height: 1.4;
+}
+
+.btn-primary {
+  background: var(--hpe-green);
+  border-color: var(--hpe-green);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--hpe-green-dark);
+  border-color: var(--hpe-green-dark);
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--hpe-green);
+  color: var(--hpe-green);
+}
+
+.btn-secondary:hover { background: var(--hpe-green-light); }
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--hpe-red);
+  color: var(--hpe-red);
+}
+
+.btn-danger:hover { background: var(--hpe-red-bg); }
+.btn-small { padding: 4px 10px; font-size: 0.78rem; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+.card-header { padding: 24px 24px 0; }
+.card-header-inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-title { font-size: 1.05rem; font-weight: 500; color: var(--hpe-navy); }
+.card-body { padding: 16px 24px 24px; }
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.panel-header h2 { margin: 0 0 4px; color: var(--hpe-navy); }
+.muted { color: var(--muted); margin: 0; }
+
+.table-wrap { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.data-table td { padding: 12px 16px; border-bottom: 1px solid #ebebeb; vertical-align: top; }
+
+.two-column {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.stack { display: grid; gap: 16px; }
+.form-card { align-self: start; }
+.form-grid { display: grid; gap: 14px; }
+.form-grid label { display: grid; gap: 6px; font-weight: 500; color: var(--hpe-navy); }
+.form-grid input, .form-grid select, .form-grid textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+.form-grid textarea { resize: vertical; }
+.checkbox-row { grid-template-columns: auto 1fr; align-items: center; }
+.full-width { grid-column: 1 / -1; }
+
+.sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.site-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+  padding: 18px;
+}
+
+.site-card-summary { border-top: 4px solid var(--hpe-green); }
+.site-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.site-card h3 { margin: 0; font-size: 1rem; color: var(--hpe-navy); }
+.site-card p { margin: 6px 0 0; }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-approved { background: var(--hpe-green-light); color: var(--hpe-green-dark); }
+.status-pending { background: #fff6d9; color: #8a6a00; }
+.status-revoked { background: var(--hpe-red-bg); color: #b33838; }
+
+.empty-card { padding: 24px; color: var(--muted); }
+.actions-cell { display: flex; flex-wrap: wrap; gap: 8px; }
+.workspace-card p { margin: 6px 0; }
+
+.login-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 37, 49, 0.58);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 200;
+}
+
+.login-dialog {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+  padding: 24px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 { margin: 0; color: var(--hpe-navy); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.icon-button { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); }
+
+.toast-container {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  gap: 10px;
+  z-index: 300;
+}
+
+.toast {
+  min-width: 240px;
+  max-width: 360px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.toast-info { background: var(--hpe-navy); }
+.toast-success { background: var(--hpe-green-dark); }
+.toast-error { background: #b33838; }
+.toast-fade { opacity: 0; transition: opacity 0.25s ease; }
+
+@media (max-width: 900px) {
+  .two-column { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .topbar, .tab-nav, .page { padding-left: 16px; padding-right: 16px; }
+  .topbar-content, .panel-header { flex-direction: column; align-items: flex-start; }
+}
