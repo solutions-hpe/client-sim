@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.51"
+AGENT_VERSION="1.52"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -265,6 +265,36 @@ load_state_file() {
         STATE_MISSING_BY_BUS["$bus_path"]="$missing_since"
         STATE_VMID_TO_IMAGE["$vmid"]="${image_num:-1}"
     done < "$STATE_FILE"
+    prune_stale_state_vmids
+}
+
+prune_stale_state_vmids() {
+    local qm_vmids vmid bus_path stale_count=0
+    local -A existing_vmids=()
+
+    if ! qm_vmids=$(qm list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ { print $1 }'); then
+        log "WARNING: qm list failed; skipping stale VM state cleanup"
+        return
+    fi
+
+    while IFS= read -r vmid; do
+        [[ -n "$vmid" ]] && existing_vmids["$vmid"]=1
+    done <<< "$qm_vmids"
+
+    for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
+        [[ -n "${existing_vmids[$vmid]:-}" ]] && continue
+        bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
+        unset 'STATE_VMID_TO_BUS[$vmid]'
+        unset 'STATE_VMID_TO_IMAGE[$vmid]'
+        if [[ -n "$bus_path" ]]; then
+            unset 'STATE_BUS_TO_VMID[$bus_path]'
+            unset 'STATE_MISSING_BY_BUS[$bus_path]'
+        fi
+        ((stale_count++))
+        log "Removed stale VM state for VM $vmid${bus_path:+ (bus $bus_path)}"
+    done
+
+    (( stale_count > 0 )) && save_state_file
 }
 
 save_state_file() {

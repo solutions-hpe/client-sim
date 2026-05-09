@@ -2376,7 +2376,7 @@ async def check_for_update() -> None:
 
 
 async def _run_update_all() -> None:
-    """Fan out update_agent to all approved hosts, wait for ACKs, then self-update the WebUI."""
+    """Queue the shared Proxmox update command, wait for its ACK, then self-update the WebUI."""
     global update_all_state
 
     approved = list(approved_proxmox_agents.keys())
@@ -2384,8 +2384,8 @@ async def _run_update_all() -> None:
 
     try:
         async with state_lock:
-            for hostname in approved:
-                cmd = _make_command(hostname, "update_agent")
+            if approved:
+                cmd = _make_command("proxmox", "update_agent")
                 commands.append(cmd)
                 if len(commands) > COMMAND_MAX:
                     del commands[:len(commands) - COMMAND_MAX]
@@ -2393,8 +2393,8 @@ async def _run_update_all() -> None:
 
         update_all_state.update({
             "running": True,
-            "phase": "agents",
-            "total_agents": len(approved),
+            "phase": "agents" if agent_cmd_ids else "webui",
+            "total_agents": len(agent_cmd_ids),
             "completed_agents": 0,
             "failed_agents": 0,
             "agent_cmds": agent_cmd_ids,
@@ -3725,15 +3725,16 @@ async def api_version() -> dict[str, Any]:
 
 @app.post("/api/update-all")
 async def api_update_all() -> dict[str, Any]:
-    """Queue agent updates for all approved Proxmox hosts, then self-update the WebUI."""
+    """Queue the shared Proxmox update command, then self-update the WebUI."""
     if update_all_state["running"]:
         raise HTTPException(status_code=409, detail="Update All already in progress")
     if update_state["update_in_progress"]:
         raise HTTPException(status_code=409, detail="WebUI update already in progress")
+    has_approved_agents = bool(approved_proxmox_agents)
     update_all_state.update({
         "running": True,
-        "phase": "agents",
-        "total_agents": 0,
+        "phase": "agents" if has_approved_agents else "webui",
+        "total_agents": 1 if has_approved_agents else 0,
         "completed_agents": 0,
         "failed_agents": 0,
         "agent_cmds": [],

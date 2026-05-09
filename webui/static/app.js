@@ -4941,10 +4941,11 @@ document.getElementById('setup-clear-cache-btn')?.addEventListener('click', asyn
 });
 
 // ── VM category inner tab nav ──────────────────────────────────────────────────
-document.querySelectorAll('.vm-cat-tab').forEach((btn) => {
+const vmCatTabs = Array.from(document.querySelectorAll('.vm-cat-tab'));
+vmCatTabs.forEach((btn) => {
   btn.addEventListener('click', () => {
     activeVmCat = btn.dataset.cat;
-    document.querySelectorAll('.vm-cat-tab').forEach((b) => b.classList.toggle('active', b === btn));
+    vmCatTabs.forEach((button) => button.classList.toggle('active', button.dataset.cat === activeVmCat));
     ['sim', 'other', 'templates'].forEach((cat) => {
       document.getElementById(`vm-cat-panel-${cat}`)?.classList.toggle('hidden', cat !== activeVmCat);
     });

@@ -1360,16 +1360,15 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .server-bulk-bar .btn-danger:hover { background:#dc2626; }
 
 /* VM category inner tabs */
-.vm-cat-tab-nav { display:flex; gap:4px; flex-wrap:wrap; }
-.vm-cat-tab {
-  background:transparent; border:1px solid var(--border); border-radius:6px;
-  padding:6px 14px; font-size:0.85rem; cursor:pointer; color:var(--muted);
-  transition:background 0.15s, color 0.15s;
-  display:flex; align-items:center; gap:6px;
+.vm-cat-tab-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
-.vm-cat-tab:hover { background:var(--hover); color:var(--text); }
-.vm-cat-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-.vm-cat-tab.active .badge { background:rgba(255,255,255,0.25); color:#fff; }
+.vm-cat-tab {}
+.vm-cat-tab.active {}
 .sim-client-indicator .ind-label { color: var(--muted); }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0; }
 #usb-provision-card label,
