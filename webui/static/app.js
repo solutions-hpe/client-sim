@@ -80,7 +80,9 @@ let currentSettings = {
   vm_silent_timeout: '24',
   reclone_schedule_enabled: 'off',
   reclone_schedule_cron: 'sunday 02:00',
-  reclone_concurrency: '1'
+  reclone_concurrency: '1',
+  l1_vlan_start: '100',
+  l1_vlan_end: '199'
 };
 let configData = {};
 let configLoaded = false;
@@ -470,6 +472,9 @@ const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-en
 const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
 const recloneScheduleTimeInput = document.getElementById('reclone-schedule-time');
 const recloneConcurrencyInput = document.getElementById('reclone-concurrency');
+const l1VlanStartInput = document.getElementById('l1-vlan-start');
+const l1VlanEndInput = document.getElementById('l1-vlan-end');
+const l1VlanMsg = document.getElementById('l1-vlan-message');
 const usbSettingsMsg = document.getElementById('usb-settings-message');
 const vmMaintenanceMsg = document.getElementById('vm-maintenance-message');
 const addVidPidBtn = document.getElementById('add-vidpid-btn');
@@ -585,7 +590,9 @@ function mergeSettings(next = {}) {
     vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
     reclone_schedule_enabled: next.reclone_schedule_enabled ?? currentSettings.reclone_schedule_enabled ?? 'off',
     reclone_schedule_cron: next.reclone_schedule_cron ?? currentSettings.reclone_schedule_cron ?? 'sunday 02:00',
-    reclone_concurrency: next.reclone_concurrency ?? currentSettings.reclone_concurrency ?? '1'
+    reclone_concurrency: next.reclone_concurrency ?? currentSettings.reclone_concurrency ?? '1',
+    l1_vlan_start: next.l1_vlan_start ?? currentSettings.l1_vlan_start ?? '100',
+    l1_vlan_end: next.l1_vlan_end ?? currentSettings.l1_vlan_end ?? '199'
   };
   currentSettings = merged;
   return merged;
@@ -767,7 +774,7 @@ function renderServerTab(data) {
     const networkTypes = new Set(['nfs', 'cifs', 'glusterfs', 'cephfs', 'rbd', 'iscsi', 'pbs']);
     storagePills.innerHTML = node.storage.map((s) => {
       const icon = networkTypes.has(s.type) ? '🌐' : '🗄️';
-      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${fmtSize(s.used)} / ${fmtSize(s.total)}</span>`;
+      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${fmtSizeKB(s.used)} / ${fmtSizeKB(s.total)}</span>`;
     }).join('');
   }
 
@@ -1041,6 +1048,8 @@ function applySettingsToUI(s) {
   const schedule = parseScheduleCron(settings.reclone_schedule_cron);
   if (recloneScheduleEnabledInput) recloneScheduleEnabledInput.checked = settings.reclone_schedule_enabled === 'on';
   if (recloneConcurrencyInput) recloneConcurrencyInput.value = settings.reclone_concurrency ?? '1';
+  if (l1VlanStartInput && !l1VlanStartInput.matches(':focus')) l1VlanStartInput.value = settings.l1_vlan_start ?? '100';
+  if (l1VlanEndInput && !l1VlanEndInput.matches(':focus')) l1VlanEndInput.value = settings.l1_vlan_end ?? '199';
   if (recloneScheduleDayInput && !recloneScheduleDayInput.matches(':focus')) recloneScheduleDayInput.value = schedule.day;
   if (recloneScheduleTimeInput && !recloneScheduleTimeInput.matches(':focus')) recloneScheduleTimeInput.value = schedule.time;
   renderUsbVidPidTable();
@@ -1680,6 +1689,8 @@ function collectUsbSettingsPayload() {
     reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
     reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
     reclone_concurrency: String(recloneConcurrencyInput?.value ?? '1'),
+    l1_vlan_start: String(l1VlanStartInput?.value ?? currentSettings.l1_vlan_start ?? '100'),
+    l1_vlan_end: String(l1VlanEndInput?.value ?? currentSettings.l1_vlan_end ?? '199'),
   };
 }
 
@@ -4565,6 +4576,11 @@ async function _autoSaveVmMaintenance(msgEl) {
 if (usbAutoProvisionInput) usbAutoProvisionInput.addEventListener('change', () => _autoSaveUsb(usbSettingsMsg));
 [usbMissingTimeoutInput, vmImage1TemplateIdInput, vmImage2TemplateIdInput, vmImage1PctInput].forEach((el) => {
   if (el) el.addEventListener('blur', () => _autoSaveUsb(usbSettingsMsg));
+});
+
+// Layer 1 VLAN — save on blur
+[l1VlanStartInput, l1VlanEndInput].forEach((el) => {
+  if (el) el.addEventListener('blur', () => _autoSaveUsb(l1VlanMsg));
 });
 
 // VM Maintenance — checkboxes/selects: save on change; number/time inputs: save on blur.

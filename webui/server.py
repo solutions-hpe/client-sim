@@ -314,6 +314,8 @@ settings: dict[str, Any] = {
     "reclone_schedule_enabled": _normalize_relay_enabled(_persisted.get("reclone_schedule_enabled", "off")),
     "reclone_schedule_cron": _persisted.get("reclone_schedule_cron", "sunday 02:00"),
     "reclone_concurrency": str(_persisted.get("reclone_concurrency", "1")),
+    "l1_vlan_start": str(_persisted.get("l1_vlan_start", "100")),
+    "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
 }
 
 # Initialise in-memory token from persisted values so a restart
@@ -1552,6 +1554,8 @@ class SettingsUpdate(BaseModel):
     reclone_schedule_enabled: str | None = None
     reclone_schedule_cron: str | None = None
     reclone_concurrency: str | None = None
+    l1_vlan_start: str | None = None
+    l1_vlan_end: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -1727,6 +1731,8 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
+        "l1_vlan_start": max(1, min(4094, int(str(settings.get("l1_vlan_start", "100")).strip() or "100"))),
+        "l1_vlan_end": max(1, min(4094, int(str(settings.get("l1_vlan_end", "199")).strip() or "199"))),
     }
 
 
@@ -2694,6 +2700,8 @@ async def api_settings_get() -> dict[str, Any]:
         "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
         "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
         "reclone_concurrency": settings.get("reclone_concurrency", "1"),
+        "l1_vlan_start": settings.get("l1_vlan_start", "100"),
+        "l1_vlan_end": settings.get("l1_vlan_end", "199"),
         "notifications": {
             k: v for k, v in settings.get("notifications", {}).items()
             if k not in ("smtp_password", "teams_webhook_url")  # never expose secrets
@@ -2850,6 +2858,12 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.reclone_concurrency is not None:
         settings["reclone_concurrency"] = str(max(1, int(update.reclone_concurrency.strip() or "1")))
+
+    if update.l1_vlan_start is not None:
+        settings["l1_vlan_start"] = str(max(1, min(4094, int(update.l1_vlan_start.strip() or "100"))))
+
+    if update.l1_vlan_end is not None:
+        settings["l1_vlan_end"] = str(max(1, min(4094, int(update.l1_vlan_end.strip() or "199"))))
 
     _save_settings()
 

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.75"
+AGENT_VERSION="1.76"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -35,6 +35,8 @@ IMAGE1_TEMPLATE_ID=100
 IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
 RECLONE_CONCURRENCY=1
+L1_VLAN_START=100
+L1_VLAN_END=199
 UNKNOWN_USB_JSON="[]"
 USB_STATE_JSON="[]"
 PRESENT_USB_JSON="[]"
@@ -199,7 +201,7 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
@@ -207,6 +209,8 @@ print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     max(0, min(100, int(data.get("image1_pct", 50) or 50))),
     str(data.get("sim_phy", "wireless")).strip().lower() or "wireless",
     max(1, int(data.get("reclone_concurrency", 1) or 1)),
+    max(1, min(4094, int(data.get("l1_vlan_start", 100) or 100))),
+    max(1, min(4094, int(data.get("l1_vlan_end", 199) or 199))),
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -234,8 +238,10 @@ PY
     IMAGE1_PCT=50
     SIM_PHY="wireless"
     RECLONE_CONCURRENCY=1
+    L1_VLAN_START=100
+    L1_VLAN_END=199
 
-    while IFS=$'\t' read -r kind a b c d e f g; do
+    while IFS=$'\t' read -r kind a b c d e f g h i; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -246,6 +252,8 @@ PY
                 IMAGE1_PCT="${e:-50}"
                 SIM_PHY="${f:-wireless}"
                 RECLONE_CONCURRENCY="${g:-1}"
+                L1_VLAN_START="${h:-100}"
+                L1_VLAN_END="${i:-199}"
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"
@@ -441,6 +449,37 @@ clone_vm_for_usb() {
 
     timeout 30 qm set "$vmid" --onboot 1 --startup "order=2,up=60" 2>/dev/null || true
     timeout 30 qm set "$vmid" -usb0 "host=$bus_path" 2>/dev/null || true
+
+    # L1 VLAN NIC: check if simulation.conf has l1=yes for this VM's bucket
+    # Bucket is determined by (vmid % 100) // 10 (matches startup.sh site_based_num=2 logic)
+    _check_l1_vlan() {
+        local bucket_digit=$(( (vmid % 100) / 10 ))
+        local sim_conf
+        sim_conf=$(curl_api GET "/api/config" "" 2>/dev/null || true)
+        [[ -z "$sim_conf" ]] && return
+        local l1_val
+        l1_val=$(python3 - "$sim_conf" "$bucket_digit" <<'PY' 2>/dev/null || true
+import sys, configparser
+text, bucket_idx = sys.argv[1], sys.argv[2]
+p = configparser.ConfigParser()
+p.read_string(text)
+section = f"s{bucket_idx}"
+print(p.get(section, "l1", fallback="no").strip().lower())
+PY
+)
+        if [[ "$l1_val" == "yes" ]]; then
+            local slot_index=$(( vmid - start_vmid ))
+            local vlan_id=$(( L1_VLAN_START + slot_index ))
+            if (( vlan_id >= L1_VLAN_START && vlan_id <= L1_VLAN_END )); then
+                log "Attaching L1 VLAN NIC on vmbr254 tag=$vlan_id to VM $vmid"
+                timeout 30 qm set "$vmid" --net1 "virtio,bridge=vmbr254,tag=${vlan_id}" 2>/dev/null || \
+                    log "WARNING: Failed to set net1 VLAN for VM $vmid"
+            else
+                log "WARNING: Computed VLAN $vlan_id out of range [$L1_VLAN_START-$L1_VLAN_END] for VM $vmid — skipping L1 NIC"
+            fi
+        fi
+    }
+    _check_l1_vlan
 
     # Start
     if ! timeout 60 qm start "$vmid" 2>/dev/null; then
@@ -823,7 +862,7 @@ collect_telemetry() {
     if command -v pvesm &>/dev/null; then
         storage_json=$(pvesm status 2>/dev/null | awk 'NR>1 {
             printf "{\"name\":\"%s\",\"type\":\"%s\",\"used\":%s,\"total\":%s},",
-            $1,$2,$6,$4
+            $1,$2,$5,$4
         }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
     fi
 

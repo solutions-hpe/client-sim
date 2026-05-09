@@ -112,7 +112,7 @@
       <!-- Fleet Reclone — always visible regardless of VM category tab -->
       <div id="reclone-status-panel" class="setup-card setup-section-gap">
         <div class="setup-card-header">
-          <h2>Fleet Reclone <span id="reclone-status-badge" class="badge badge-grey">Idle</span></h2>
+          <span id="reclone-status-badge" class="badge badge-grey">Idle</span>
           <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
         </div>
         <div id="reclone-progress-wrap" class="hidden">
@@ -898,6 +898,31 @@
 
           <div id="usb-settings-message" class="settings-message hidden" role="alert"></div>
 
+        </div>
+      </div>
+
+      <!-- Layer 1 VLAN Range card -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Layer 1 VLAN Range</h2>
+          <p>When a bucket has <code>l1=yes</code>, the provisioned VM gets a second NIC on <strong>vmbr254</strong> tagged with a VLAN from this range. VLAN ID is assigned sequentially starting from the Start value.</p>
+        </div>
+        <div class="setup-form">
+          <div class="settings-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="l1-vlan-start">VLAN Start</label>
+                <input id="l1-vlan-start" class="form-input" type="number" value="100" min="1" max="4094"
+                       style="width:120px;" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="l1-vlan-end">VLAN End</label>
+                <input id="l1-vlan-end" class="form-input" type="number" value="199" min="1" max="4094"
+                       style="width:120px;" spellcheck="false">
+              </div>
+            </div>
+          </div>
+          <div id="l1-vlan-message" class="settings-message hidden" role="alert"></div>
         </div>
       </div>
 
