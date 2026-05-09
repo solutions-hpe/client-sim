@@ -1606,6 +1606,17 @@ def _parse_ts(value: Any) -> float | None:
 
 
 def _proxmox_usb_config_payload() -> dict[str, Any]:
+    # Read sim_phy from the repo's simulation.conf so the agent knows which
+    # USB device type (wired/wireless) to provision and assign.
+    sim_phy = "wireless"
+    try:
+        sim_conf = REPO_DIR / "configs" / "simulation.conf"
+        if sim_conf.exists():
+            parser = configparser.ConfigParser()
+            parser.read_string(sim_conf.read_text(encoding="utf-8"))
+            sim_phy = parser.get("simulation", "sim_phy", fallback="wireless").strip().lower() or "wireless"
+    except Exception:
+        pass
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
@@ -1614,6 +1625,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "image1_pct": max(0, min(100, int(str(settings.get("vm_image_1_pct", "50")).strip() or "50"))),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
+        "sim_phy": sim_phy,
     }
 
 
@@ -3822,6 +3834,12 @@ async def api_scripts_get(platform: str, filename: str) -> FileResponse:
 
 @app.post("/api/status")
 async def api_status(status: ClientStatus) -> dict[str, Any]:
+    # Ignore the Proxmox template VM — it uses the default hostname before
+    # being cloned and renamed.  Registering it would pollute the dashboard.
+    _IGNORED_HOSTNAMES = {"sim-rpi-0000"}
+    if status.hostname in _IGNORED_HOSTNAMES:
+        return {"status": "ignored", "reason": "template hostname"}
+
     now = utcnow()
     async with state_lock:
         existing = clients.get(status.hostname, {})

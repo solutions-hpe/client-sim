@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.38"
+AGENT_VERSION="1.39"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -190,12 +190,13 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
     int(data.get("image2_template_id", 200) or 200),
     max(0, min(100, int(data.get("image1_pct", 50) or 50))),
+    str(data.get("sim_phy", "wireless")).strip().lower() or "wireless",
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -221,8 +222,9 @@ PY
     IMAGE1_TEMPLATE_ID=100
     IMAGE2_TEMPLATE_ID=200
     IMAGE1_PCT=50
+    SIM_PHY="wireless"
 
-    while IFS=$'\t' read -r kind a b c d e; do
+    while IFS=$'\t' read -r kind a b c d e f; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -231,6 +233,7 @@ PY
                 IMAGE1_TEMPLATE_ID="$c"
                 IMAGE2_TEMPLATE_ID="$d"
                 IMAGE1_PCT="${e:-50}"
+                SIM_PHY="${f:-wireless}"
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"
@@ -504,17 +507,25 @@ reclone_vm_instance() {
 
     vidpid="${USB_VIDPID_BY_BUS[$bus_path]:-}"
     product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
+    # sim_phy is always derived from the certified USB device table so the correct
+    # wired/wireless type is applied regardless of what simulation.conf says globally.
     local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
+    # Guard: if the assigned USB device type no longer matches sim_phy, skip reclone.
+    # This prevents accidentally recloning a wired VM when sim_phy=wireless.
+    if [[ "$device_type" != "$SIM_PHY" ]]; then
+        log "WARNING: VM $vmid USB $bus_path ($vidpid) type=$device_type does not match sim_phy=$SIM_PHY — skipping reclone"
+        return 1
+    fi
+    # Save image number BEFORE destroy_vm — destroy_vm unsets STATE_VMID_TO_IMAGE[$vmid].
+    local saved_image="${STATE_VMID_TO_IMAGE[$vmid]:-1}"
 
     destroy_vm "$vmid"
-    # NOTE: destroy_vm() unsets STATE_VMID_TO_IMAGE[$vmid], so we must save the
-    # image number BEFORE calling it.
-    clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "${_saved_image}" "$device_type"
+    clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"
     STATE_BUS_TO_VMID["$bus_path"]="$vmid"
     STATE_VMID_TO_BUS["$vmid"]="$bus_path"
     STATE_MISSING_BY_BUS["$bus_path"]=""
     save_state_file
-    log "Recloned VM $vmid for USB $bus_path ($vidpid)"
+    log "Recloned VM $vmid for USB $bus_path ($vidpid) type=$device_type image=$saved_image"
 }
 
 usb_provision_loop() {
@@ -527,6 +538,13 @@ usb_provision_loop() {
     for bus_path in "${!PRESENT_BUSES[@]}"; do
         if [[ -z "${STATE_BUS_TO_VMID[$bus_path]:-}" ]]; then
             vidpid="${PRESENT_BUSES[$bus_path]}"
+            local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
+            # Only provision USB devices whose hardware type matches sim_phy.
+            # VID:PID type is fixed system-wide (wired adapter is always wired, etc.).
+            if [[ "$device_type" != "$SIM_PHY" ]]; then
+                log "Skipping USB $bus_path ($vidpid) — type=$device_type, sim_phy=$SIM_PHY"
+                continue
+            fi
             product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
             provision_vm "$bus_path" "$vidpid" "$product_name" || true
             # Send telemetry after each provision so UI stays current during bulk spin-up
