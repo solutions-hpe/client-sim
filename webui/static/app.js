@@ -567,7 +567,15 @@ function renderServerTab(data) {
   );
   if (!tbody) return;
 
-  const templates = vms.filter((v) => v.is_template === true || v.is_template === 'true' || v.type === 'template-1' || v.type === 'template-2');
+  const configuredTemplateIds = new Set([
+    String(currentSettings.vm_image_1_template_id || '100'),
+    String(currentSettings.vm_image_2_template_id || '200'),
+  ]);
+  const templates = vms.filter((v) =>
+    v.is_template === true || v.is_template === 'true' ||
+    v.type === 'template-1' || v.type === 'template-2' ||
+    configuredTemplateIds.has(String(v.vmid))
+  );
   const regularVms = vms.filter((v) => !templates.includes(v));
 
   // Render templates section
