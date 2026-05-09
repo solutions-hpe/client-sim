@@ -1711,10 +1711,10 @@ async function triggerRecloneAll() {
     recloneNowBtn.textContent = '⟳ Starting…';
   }
   try {
-    await requestJson('/api/proxmox/reclone-all', { method: 'POST' });
-    showNotification('Fleet reclone started.', 'info');
+    const result = await requestJson('/api/proxmox/reclone-all', { method: 'POST' });
+    showNotification(`Fleet reclone started for ${result.vm_count} VM(s).`, 'info');
   } catch (error) {
-    showNotification(`Error: ${error.message}`, 'error');
+    showNotification(`Reclone error: ${error.message}`, 'error');
   } finally {
     if (recloneNowBtn) {
       recloneNowBtn.disabled = false;
@@ -1729,6 +1729,7 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
 
   const state = latestRecloneState || {};
   const status = state.status || 'idle';
+  const isCloning = status === 'running' && state.current_vm;
   const badgeClass = status === 'running'
     ? 'badge-blue'
     : status === 'completed'
@@ -1737,7 +1738,13 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
         ? 'badge-red'
         : 'badge-grey';
   recloneStatusBadge.className = `badge ${badgeClass}`;
-  recloneStatusBadge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+  if (isCloning) {
+    recloneStatusBadge.textContent = `Cloning VM ${state.current_vm}`;
+  } else if (status === 'idle') {
+    recloneStatusBadge.textContent = 'Stopped';
+  } else {
+    recloneStatusBadge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+  }
 
   const total = Number(state.total || 0);
   const done = Number(state.completed || 0) + Number(state.failed || 0);
@@ -1779,14 +1786,19 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   recloneProgressLabel.textContent = total ? `${done} / ${total} VMs (${pct}%)` : '';
 
   const iconMap = { completed: '✅', failed: '❌', in_progress: '⏳', queued: '🕐' };
-  recloneVmLog.innerHTML = (state.log || []).slice().reverse().map((entry) => `
-    <div class="log-entry">
-      <span>${iconMap[entry.status] || '•'}</span>
-      <span>${entry.name || `VM ${entry.vmid}`}</span>
-      <span class="muted">${entry.status}</span>
-      <span class="muted">${formatUiDate(entry.timestamp)}</span>
-    </div>
-  `).join('');
+  const logEntries = (state.log || []).slice().reverse();
+  if (logEntries.length === 0 && status !== 'idle') {
+    recloneVmLog.innerHTML = `<div class="muted" style="padding:8px 0;font-size:13px;">No VMs processed yet.</div>`;
+  } else {
+    recloneVmLog.innerHTML = logEntries.map((entry) => `
+      <div class="log-entry">
+        <span>${iconMap[entry.status] || '•'}</span>
+        <span>${entry.name || `VM ${entry.vmid}`}</span>
+        <span class="muted">${entry.status}</span>
+        <span class="muted">${formatUiDate(entry.timestamp)}</span>
+      </div>
+    `).join('');
+  }
 
   if (state.last_run) {
     const typeLabel = state.last_run.type ? ` · ${state.last_run.type}` : '';

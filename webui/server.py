@@ -1751,6 +1751,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             "log": [],
             "started_at": iso_utcnow(),
         })
+        logger.info("Rolling reclone (%s): %d eligible VMs: %s", trigger_type, len(vms), [v.get("vmid") for v in vms])
         await _broadcast_reclone_state()
         await _broadcast_proxmox_state()
 
@@ -1788,6 +1789,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                         break
                     await asyncio.sleep(2)
                 else:
+                    logger.warning("Rolling reclone: VM %s (%s) timed out waiting for ACK", vmid, name)
                     _update_reclone_log(vmid, name, "failed")
                     reclone_state["failed"] += 1
                     await _broadcast_reclone_state()
@@ -2706,8 +2708,19 @@ async def get_proxmox_usb_config() -> dict[str, Any]:
 async def api_proxmox_reclone_all() -> dict[str, Any]:
     if reclone_state.get("status") == "running":
         raise HTTPException(status_code=409, detail="A reclone run is already in progress")
+    eligible = [
+        vm for vm in proxmox_state.get("vms", [])
+        if vm.get("vmid") is not None
+        and int(vm.get("vmid", 0)) > 9000
+        and not vm.get("is_template")
+    ]
+    if not eligible:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No eligible VMs found to reclone (proxmox_state has {len(proxmox_state.get('vms', []))} VMs total)"
+        )
     asyncio.create_task(_run_rolling_reclone("manual"))
-    return {"status": "started"}
+    return {"status": "started", "vm_count": len(eligible)}
 
 
 @app.get("/api/proxmox/reclone-status")
