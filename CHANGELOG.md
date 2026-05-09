@@ -42,7 +42,7 @@ This project uses a distributed versioning system where:
 
 ## WebUI Dashboard
 
-**Component**: `webui/install-lxc.sh` / FastAPI dashboard
+**Component**: `webui-spoke/install-lxc.sh` / FastAPI dashboard
 **Current Version**: 0.38
 **Release Window**: Post-March 19, 2026
 

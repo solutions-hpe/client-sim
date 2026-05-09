@@ -257,10 +257,10 @@ Assign a **static IP** or DHCP reservation so clients always reach the same addr
 pct enter <CTID>
 
 # Inside the container — one-liner install (defaults: branch=main, port=8000)
-curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui-spoke/install-lxc.sh | sudo bash
 
 # One-liner with custom branch and port
-curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui/install-lxc.sh \
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui-spoke/install-lxc.sh \
   | sudo bash -s -- --branch lrb --port 9000
 ```
 
@@ -269,7 +269,7 @@ curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui
 ```bash
 git clone https://github.com/solutions-hpe/client-sim.git
 cd client-sim
-sudo bash webui/install-lxc.sh
+sudo bash webui-spoke/install-lxc.sh
 ```
 
 **Common flags (can be combined):**
@@ -283,13 +283,13 @@ sudo bash webui/install-lxc.sh
 
 ```bash
 # Custom branch and port
-sudo bash webui/install-lxc.sh --branch lrb --port 9000
+sudo bash webui-spoke/install-lxc.sh --branch lrb --port 9000
 
 # Re-run to update an existing installation (safe, preserves .env and settings)
-sudo bash webui/install-lxc.sh
+sudo bash webui-spoke/install-lxc.sh
 
 # Force a full reinstall on a specific branch
-sudo bash webui/install-lxc.sh --reinstall --branch main
+sudo bash webui-spoke/install-lxc.sh --reinstall --branch main
 ```
 
 You can also override via environment variables before running (flags take priority):
@@ -297,7 +297,7 @@ You can also override via environment variables before running (flags take prior
 ```bash
 export REPO_BRANCH=main
 export PORT=9000
-sudo bash webui/install-lxc.sh
+sudo bash webui-spoke/install-lxc.sh
 ```
 
 #### 3. What the installer does
@@ -308,7 +308,7 @@ sudo bash webui/install-lxc.sh
 | 2 | Installs `python3`, `pip`, `venv`, `git`, `curl` |
 | 3 | Creates a locked-down `dashboard` service user |
 | 4 | Clones the client-sim repo to `/opt/client-sim-repo` |
-| 5 | Copies the `webui/` application to `/opt/client-sim-dashboard` |
+| 5 | Copies the `webui-spoke/` application to `/opt/client-sim-dashboard` |
 | 6 | Creates a Python virtual environment and installs dependencies |
 | 7 | Writes `/opt/client-sim-dashboard/.env` with runtime settings |
 | 8 | Installs and enables a `systemd` service (`client-sim-dashboard`) |
@@ -337,7 +337,7 @@ Install log: `/var/log/client-sim-dashboard-install.log`
 ### Option 2 — Docker / Docker Compose
 
 ```bash
-cd webui
+cd webui-spoke
 docker compose up --build
 ```
 
@@ -356,7 +356,7 @@ docker compose logs -f
 ### Option 3 — Python (bare / development)
 
 ```bash
-cd webui
+cd webui-spoke
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -1112,7 +1112,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for history.
 
 ### Versioning
 
-`linux/VERSION` and the `VERSION=` line in `webui/install-lxc.sh` share a single version number, auto-incremented by 0.01 on every commit via a pre-commit hook.
+`linux/VERSION` and the `VERSION=` line in `webui-spoke/install-lxc.sh` share a single version number, auto-incremented by 0.01 on every commit via a pre-commit hook.
 
 After cloning, activate the hook once:
 ```bash
