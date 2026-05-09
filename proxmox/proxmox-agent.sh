@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.47"
+AGENT_VERSION="1.48"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -731,33 +731,46 @@ collect_telemetry() {
 
     vms_json="[]"
     if command -v qm &>/dev/null; then
-        # Use pvesh to get template flag directly from Proxmox API (most reliable)
-        # Falls back to scanning config files if pvesh fails
-        local tmpl_ids=""
         if command -v pvesh &>/dev/null; then
-            tmpl_ids=$(pvesh get /nodes/$(hostname)/qemu --output-format json 2>/dev/null \
+            # pvesh returns: cpu (0.0-1.0 fraction), mem (bytes), maxmem (bytes)
+            # Normalise: cpu → percent, mem/maxmem → MB so the WebUI receives
+            # consistent units regardless of Proxmox version.
+            vms_json=$(pvesh get /nodes/$(hostname)/qemu --output-format json 2>/dev/null \
                 | python3 -c "
-import json,sys
-data=json.load(sys.stdin)
-print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
-" 2>/dev/null || true)
+import json, sys
+data = json.load(sys.stdin)
+out = []
+for v in data:
+    out.append({
+        'vmid':        v.get('vmid'),
+        'name':        v.get('name', ''),
+        'status':      v.get('status', 'unknown'),
+        'cpu':         round(float(v.get('cpu') or 0) * 100, 1),
+        'mem':         round(int(v.get('mem') or 0) / 1024 / 1024),
+        'maxmem':      round(int(v.get('maxmem') or 0) / 1024 / 1024),
+        'is_template': bool(v.get('template', 0)),
+    })
+print(json.dumps(out))
+" 2>/dev/null || echo "[]")
         fi
-        # Fallback: scan config files for 'template: 1'
-        if [[ -z "$tmpl_ids" ]]; then
+
+        # Fallback: qm list (no CPU stats; maxmem unavailable — uses configured MEM)
+        if [[ "$vms_json" == "[]" ]]; then
+            local tmpl_ids=""
             for conf in /etc/pve/qemu-server/*.conf; do
                 [[ -f "$conf" ]] || continue
                 grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
             done
             tmpl_ids="${tmpl_ids%,}"
+            vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
+                n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
+            }
+            NR>1 {
+                is_tmpl = ($1 in tmpl_set) ? "true" : "false"
+                printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":%s,\"maxmem\":%s,\"is_template\":%s},",
+                $1,$2,$3,$4,$4,is_tmpl
+            }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
         fi
-        vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
-            n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
-        }
-        NR>1 {
-            is_tmpl = ($1 in tmpl_set) ? "true" : "false"
-            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"mem\":%s,\"maxmem\":%s,\"is_template\":%s},",
-            $1,$2,$3,$4,$5,is_tmpl
-        }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
     fi
 
     cat <<JSON

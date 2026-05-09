@@ -864,7 +864,7 @@ function renderServerTab(data) {
       <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
       <td>${vm.vmid}</td>
       <td>${escHtml(vm.name || '—')}${recoveryBadge}</td>
-      <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
+      <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—'}</td>
       <td>${memUsedGB}/${memTotalGB} GB</td>
       <td>${actionBtns}</td>
     `;
