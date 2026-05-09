@@ -593,9 +593,7 @@ function renderServerTab(data) {
   ]);
   const templates = vms.filter((v) =>
     v.is_template === true || v.is_template === 'true' ||
-    v.type === 'template-1' || v.type === 'template-2' ||
-    configuredTemplateIds.has(String(v.vmid)) ||
-    String(v.name || '').toLowerCase().startsWith('tpl-')
+    configuredTemplateIds.has(String(v.vmid))
   );
   const regularVms = vms.filter((v) => !templates.includes(v));
 

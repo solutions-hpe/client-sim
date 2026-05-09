@@ -2572,11 +2572,18 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
         client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
 
     enriched_vms: list[dict[str, Any]] = []
+    configured_template_ids: set[str] = {
+        str(settings.get("vm_image_1_template_id", "100")).strip(),
+        str(settings.get("vm_image_2_template_id", "200")).strip(),
+    } - {""}
     for vm in body.get("vms", []):
         enriched = dict(vm)
         client_last_seen = client_seen.get(str(enriched.get("name", "")))
         if isinstance(client_last_seen, datetime):
             enriched["last_seen"] = client_last_seen.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Mark as template if agent flagged it OR if vmid matches a configured template ID
+        if enriched.get("is_template") or str(enriched.get("vmid", "")).strip() in configured_template_ids:
+            enriched["is_template"] = True
         enriched_vms.append(enriched)
 
     # Filter unknown_usb against currently certified and ignored vidpids so the device
