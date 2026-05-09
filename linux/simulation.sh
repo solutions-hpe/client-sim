@@ -181,7 +181,6 @@ rn_iperf_port=$((5201 + RANDOM % 10))
 rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
 rn_offline_time=$((1 + RANDOM % 14400))
-rn_sim_load=$((1 + RANDOM % 99))
 #Global Variable Export Disable
 set +a
 hostname=$HOSTNAME
@@ -443,6 +442,21 @@ run_simulation() {
  fi
 }
 #------------------------------------------------------------
+# should_run_sim: returns true if this simulation should launch
+# given the current sim_load percentage (0-100).
+# WHY: proportional loading — at 75% each sim independently has
+# a 75% chance of launching each iteration, so roughly 3/4 of
+# enabled simulations run at any given time. At 100% all always
+# run; at 0% none run.
+#------------------------------------------------------------
+should_run_sim() {
+  local load="${sim_load:-100}"
+  [ "$load" -ge 100 ] && return 0
+  [ "$load" -le 0 ]   && return 1
+  local rn=$(( RANDOM % 100 ))
+  [ "$load" -gt "$rn" ]
+}
+#------------------------------------------------------------
 # Initial WiFi connection attempt before entering the main loop
 #------------------------------------------------------------
 if ! connect_wifi; then
@@ -502,18 +516,9 @@ else
   dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
 fi
 #------------------------------------------------------------
-#Begin Setting up simulation load
-#------------------------------------------------------------
-if [ "${sim_load:-100}" -lt "${rn_sim_load:-0}" ]; then
-  echo Simulation load under threshold | tee -a "$debug"
-  echo Skipping Simulations but staying associated | tee -a "$debug"
-  if [ "$ssidpw_fail" != "on" ] && [[ -n ${wladapter} ]]; then
-    manage_connection up 180
-  fi
-  sleep 5
-fi
-#------------------------------------------------------------
-#End Setting up simulation load
+# Simulation load is enforced per-launcher below via should_run_sim().
+# At 100% all enabled sims run every iteration; at 75% each has a 75%
+# chance; at 0% none run (client stays associated but simulates nothing).
 #------------------------------------------------------------
 #------------------------------------------------------------
 # Main simulation loop — 100 iterations then exec-restarts for fresh config.
@@ -618,32 +623,32 @@ if [ "$kill_switch" == "off" ] && [ "$gkill_switch" == "off" ]; then
    # www_traffic is toggled off after launch then re-enabled every 10
    # iterations to recycle Firefox (prevents memory leak in long sessions).
    #------------------------------------------------------------
-   if [ "$www_traffic" == "on" ]; then
+   if [ "$www_traffic" == "on" ] && should_run_sim; then
     if ! pgrep -f "www_traffic.sh" >/dev/null; then
      run_simulation "www_traffic.sh"
      echo "Running WWW Traffic Simulation" | tee -a "$debug" "$log"
      www_traffic="off"
     fi
    fi
-   if [ "$ping_test" == "on" ]; then
+   if [ "$ping_test" == "on" ] && should_run_sim; then
     if ! pgrep -f "ping_test.sh" >/dev/null; then
      run_simulation "ping_test.sh"
      echo "Running Ping Test Simulation" | tee -a "$debug" "$log"
     fi
    fi
-   if [ "$iperf" == "on" ]; then
+   if [ "$iperf" == "on" ] && should_run_sim; then
     if ! pgrep -f "iperf.sh" >/dev/null; then
      run_simulation "iperf.sh"
      echo "Running iPerf Simulation" | tee -a "$debug" "$log"
     fi
    fi
-   if [ "$download" == "on" ]; then
+   if [ "$download" == "on" ] && should_run_sim; then
     if ! pgrep -f "download.sh" >/dev/null; then
      run_simulation "download.sh"
      echo "Running Download Simulation" | tee -a "$debug" "$log"
     fi
    fi
-   if [ "$dns_fail" == "on" ]; then
+   if [ "$dns_fail" == "on" ] && should_run_sim; then
     if ! pgrep -f "dns_fail.sh" >/dev/null; then
      run_simulation "dns_fail.sh"
      echo "Running DNS Simulation" | tee -a "$debug" "$log"
