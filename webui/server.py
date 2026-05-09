@@ -3993,6 +3993,108 @@ async def api_health() -> dict[str, Any]:
     return await _api_health_payload()
 
 
+# ── System health & service control ───────────────────────────────────────────
+
+@app.get("/api/system/health")
+async def api_system_health(request: Request) -> dict[str, Any]:
+    """LXC host resource snapshot + service status + Proxmox install command."""
+    import shutil as _shutil
+
+    # Disk
+    try:
+        disk = _shutil.disk_usage(BASE_DIR)
+        disk_info = {"total": disk.total, "used": disk.used, "free": disk.free}
+    except Exception:
+        disk_info = {"total": 0, "used": 0, "free": 0}
+
+    # Memory via /proc/meminfo
+    mem: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                try:
+                    mem[k.strip()] = int(v.strip().split()[0])
+                except (ValueError, IndexError):
+                    pass
+    except Exception:
+        pass
+    mem_total = mem.get("MemTotal", 0)
+    mem_avail = mem.get("MemAvailable", 0)
+    mem_info = {"total_kb": mem_total, "available_kb": mem_avail,
+                "used_kb": mem_total - mem_avail}
+
+    # Load average
+    try:
+        load_parts = Path("/proc/loadavg").read_text(encoding="utf-8").split()
+        load = load_parts[:3]
+    except Exception:
+        load = ["?", "?", "?"]
+
+    # Uptime seconds
+    try:
+        uptime_secs = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+    except Exception:
+        uptime_secs = 0.0
+
+    # Service active state
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            "systemctl is-active client-sim-dashboard 2>/dev/null || echo inactive",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        svc_status = stdout.decode().strip()
+    except Exception:
+        svc_status = "unknown"
+
+    # Pre-built Proxmox agent install command
+    base = str(request.base_url).rstrip("/")
+    raw_base = REPO_URL.replace(".git", "").replace(
+        "github.com", "raw.githubusercontent.com"
+    )
+    branch = os.environ.get("REPO_BRANCH", "lrb")
+    install_cmd = (
+        f"bash <(curl -sSL {raw_base}/{branch}/proxmox/install-proxmox-agent.sh)"
+        f" --server {base}"
+    )
+
+    return {
+        "disk": disk_info,
+        "memory": mem_info,
+        "load": load,
+        "uptime_secs": uptime_secs,
+        "service_status": svc_status,
+        "proxmox_install_cmd": install_cmd,
+    }
+
+
+@app.post("/api/service/{action}")
+async def api_service_control(action: str) -> dict[str, Any]:
+    """Start, stop, or restart the client-sim-dashboard service."""
+    if action not in ("start", "stop", "restart"):
+        raise HTTPException(status_code=400, detail="action must be start, stop, or restart")
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            f"sudo -n systemctl {action} client-sim-dashboard",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        rc = proc.returncode or 0
+    except asyncio.TimeoutError:
+        return {"status": "timeout",
+                "message": f"systemctl {action} timed out — service may be restarting"}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+    if rc != 0:
+        return {"status": "error",
+                "message": stderr.decode().strip() or f"exit code {rc}"}
+    return {"status": "ok", "message": f"Service {action} sent"}
+
+
 # ── Cache-clear endpoints ──────────────────────────────────────────────────────
 
 @app.post("/api/server/clear-cache")

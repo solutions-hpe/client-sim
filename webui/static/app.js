@@ -4682,6 +4682,123 @@ if (testTeamsBtn) {
 
 // ── Clear Cache buttons ────────────────────────────────────────────────────────
 
+// ── Troubleshooting tab — system health, service control, WiFi fix ─────────────
+
+function fmtBytes(bytes) {
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+  return (bytes / 1e3).toFixed(0) + ' KB';
+}
+function fmtUptime(secs) {
+  const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600),
+        m = Math.floor((secs % 3600) / 60);
+  return [d && `${d}d`, h && `${h}h`, `${m}m`].filter(Boolean).join(' ');
+}
+
+async function loadSystemHealth() {
+  try {
+    const r = await fetch('/api/system/health');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    // Service status dot
+    const dot = document.getElementById('svc-status-dot');
+    const lbl = document.getElementById('svc-status-label');
+    if (dot && lbl) {
+      const active = d.service_status === 'active';
+      dot.style.background = active ? '#6fcf97' : '#eb5757';
+      lbl.textContent = d.service_status || '—';
+    }
+
+    // Uptime
+    const up = document.getElementById('syshealth-uptime');
+    if (up) up.textContent = d.uptime_secs ? fmtUptime(d.uptime_secs) : '—';
+
+    // Disk bar
+    if (d.disk && d.disk.total) {
+      const pct = Math.round(d.disk.used / d.disk.total * 100);
+      const bar = document.getElementById('syshealth-disk-bar');
+      const lbl2 = document.getElementById('syshealth-disk-label');
+      if (bar) { bar.style.width = pct + '%'; bar.style.background = pct > 85 ? '#eb5757' : '#6fcf97'; }
+      if (lbl2) lbl2.textContent = `${fmtBytes(d.disk.used)} / ${fmtBytes(d.disk.total)} (${pct}%)`;
+    }
+
+    // RAM bar
+    if (d.memory && d.memory.total_kb) {
+      const pct = Math.round(d.memory.used_kb / d.memory.total_kb * 100);
+      const bar = document.getElementById('syshealth-ram-bar');
+      const lbl3 = document.getElementById('syshealth-ram-label');
+      if (bar) { bar.style.width = pct + '%'; bar.style.background = pct > 85 ? '#eb5757' : '#56ccf2'; }
+      if (lbl3) lbl3.textContent = `${fmtBytes(d.memory.used_kb * 1024)} / ${fmtBytes(d.memory.total_kb * 1024)} (${pct}%)`;
+    }
+
+    // Load
+    const loadEl = document.getElementById('syshealth-load');
+    if (loadEl && d.load) loadEl.textContent = d.load.join('  /  ');
+
+    // Proxmox install command
+    const cmdEl = document.getElementById('proxmox-install-cmd');
+    if (cmdEl && d.proxmox_install_cmd) cmdEl.textContent = d.proxmox_install_cmd;
+  } catch (_) {}
+}
+
+// Load health when Troubleshooting tab is activated
+document.querySelectorAll('.setup-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.subtab === 'setup-troubleshoot') loadSystemHealth();
+  });
+});
+document.getElementById('syshealth-refresh-btn')?.addEventListener('click', loadSystemHealth);
+
+// Service control
+['restart', 'start', 'stop'].forEach((action) => {
+  document.getElementById(`svc-${action}-btn`)?.addEventListener('click', async () => {
+    const msg = document.getElementById('svc-control-msg');
+    if (action === 'stop' && !confirm(
+      'Stop the WebUI service?\n\nThis will take the dashboard offline. You will need to restart it from the Proxmox host console or via SSH.\n\nProceed?')) return;
+    try {
+      const r = await fetch(`/api/service/${action}`, { method: 'POST' });
+      const d = await r.json();
+      if (msg) {
+        msg.textContent = d.message || (r.ok ? 'Done' : 'Error');
+        msg.className = `settings-message ${r.ok && d.status === 'ok' ? '' : 'error'}`;
+        msg.classList.remove('hidden');
+        setTimeout(() => msg.classList.add('hidden'), 5000);
+      }
+      if (r.ok && (action === 'restart' || action === 'start')) {
+        setTimeout(() => loadSystemHealth(), 3000);
+      }
+    } catch (err) {
+      if (msg) { msg.textContent = `Error: ${err.message}`; msg.className = 'settings-message error'; msg.classList.remove('hidden'); }
+    }
+  });
+});
+
+// Copy proxmox install command
+document.getElementById('proxmox-install-copy-btn')?.addEventListener('click', () => {
+  const cmd = document.getElementById('proxmox-install-cmd')?.textContent || '';
+  if (!cmd) return;
+  navigator.clipboard.writeText(cmd).then(() => showToast('Command copied to clipboard', 'success'))
+    .catch(() => showToast('Copy failed — select and copy manually', 'error'));
+});
+
+// WiFi auth fix — dispatch update_now to all clients
+document.getElementById('wifi-fix-btn')?.addEventListener('click', async () => {
+  if (!confirm('Push WiFi Auth Fix to all clients?\n\nThis queues an Update Now command for every registered client. Each client will re-deploy the polkit rule and restart nm-applet.')) return;
+  try {
+    const r = await fetch('/api/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: 'all', action: 'update_now' }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    showToast(`WiFi fix queued for ${d.queued} client(s)`, 'success');
+  } catch (err) {
+    showToast(`Failed: ${err.message}`, 'error');
+  }
+});
+
 document.getElementById('server-clear-cache-btn')?.addEventListener('click', async () => {
   if (!confirm('Clear all server-side cache?\n\nThis resets Proxmox state, VM list, command history, and reclone logs. No restart is required.')) return;
   try {

@@ -1110,10 +1110,87 @@
       <div class="setup-card">
         <div class="setup-card-header">
           <h2>Troubleshooting</h2>
-          <p>Use these tools when something is corrupted, stuck, or behaving unexpectedly after a config change.</p>
+          <p>Operational tools — use when something is stuck, corrupted, or when setting up a new Proxmox server.</p>
         </div>
       </div>
 
+      <!-- System Health -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <h2>System Health</h2>
+          <button id="syshealth-refresh-btn" class="btn btn-secondary" style="font-size:12px;padding:4px 10px;">↺ Refresh</button>
+        </div>
+        <div id="syshealth-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;padding:4px 0 8px;">
+          <!-- Service Status -->
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Service</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span id="svc-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--muted);flex-shrink:0;"></span>
+              <span id="svc-status-label" style="font-size:13px;font-weight:600;">—</span>
+            </div>
+          </div>
+          <!-- Uptime -->
+          <div>
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Uptime</div>
+            <span id="syshealth-uptime" style="font-size:13px;font-weight:600;">—</span>
+          </div>
+          <!-- Disk -->
+          <div style="grid-column:1/-1;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Disk <span id="syshealth-disk-label" style="font-weight:400;text-transform:none;"></span></div>
+            <div style="background:rgba(255,255,255,.1);border-radius:4px;height:8px;overflow:hidden;">
+              <div id="syshealth-disk-bar" style="height:100%;background:#6fcf97;border-radius:4px;width:0%;transition:width .4s;"></div>
+            </div>
+          </div>
+          <!-- RAM -->
+          <div style="grid-column:1/-1;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">RAM <span id="syshealth-ram-label" style="font-weight:400;text-transform:none;"></span></div>
+            <div style="background:rgba(255,255,255,.1);border-radius:4px;height:8px;overflow:hidden;">
+              <div id="syshealth-ram-bar" style="height:100%;background:#56ccf2;border-radius:4px;width:0%;transition:width .4s;"></div>
+            </div>
+          </div>
+          <!-- Load -->
+          <div style="grid-column:1/-1;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Load Average</div>
+            <span id="syshealth-load" style="font-size:13px;font-weight:600;">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Service Control -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header"><h2>Service Control</h2></div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:8px;">
+          <button id="svc-restart-btn" class="btn btn-secondary">↺ Restart</button>
+          <button id="svc-start-btn" class="btn btn-secondary">▶ Start</button>
+          <button id="svc-stop-btn" class="btn btn-danger">⏹ Stop</button>
+          <span style="font-size:12px;color:var(--muted);">Stopping the service will take the WebUI offline until it is restarted from the Proxmox host console.</span>
+        </div>
+        <div id="svc-control-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+
+      <!-- Proxmox Agent Setup -->
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Proxmox Agent Setup</h2>
+          <p>Run this command on each Proxmox host to install the agent. The host will appear in the Server tab pending approval.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:4px;">
+          <code id="proxmox-install-cmd" style="flex:1;background:rgba(0,0,0,.35);border-radius:6px;padding:10px 12px;font-size:12px;word-break:break-all;color:#a8d8a8;display:block;white-space:pre-wrap;"></code>
+          <button id="proxmox-install-copy-btn" class="btn btn-secondary" style="flex-shrink:0;align-self:center;">Copy</button>
+        </div>
+        <div id="proxmox-install-msg" class="settings-message hidden" role="alert"></div>
+      </div>
+
+      <!-- WiFi Auth Fix -->
+      <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <div style="font-weight:600;font-size:13px;">📡 Push WiFi Auth Fix to All Clients</div>
+          <div style="font-size:12px;color:var(--muted);">Dispatches an <em>Update Now</em> command to every registered client. This re-deploys the polkit rule and kills nm-applet, fixing recurring WiFi authentication popups.</div>
+        </div>
+        <button id="wifi-fix-btn" class="btn btn-secondary" style="flex-shrink:0;">Push Fix</button>
+      </div>
+
+      <!-- Clear Cache -->
       <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div>
           <div style="font-weight:600;font-size:13px;">🗑 Clear All Cache &amp; Re-clone</div>
