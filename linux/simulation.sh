@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.03
+version=.04
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
 echo Simulation Script Version $version | tee "$debug"
@@ -395,7 +395,11 @@ connect_wifi() {
     return 1
   fi
   echo "Attempting to connect to $target_ssid" | tee -a "$debug"
-  if ! nmcli device wifi connect "$target_ssid" password "$ssidpw"; then
+  # --wait 120: extend association timeout beyond the 90s default.
+  # WHY: Slow APs or busy channels can take >90s to complete the 4-way
+  # handshake. A timeout causes NM to fall back to interactive auth and
+  # trigger graphical password popups.
+  if ! nmcli --wait 120 device wifi connect "$target_ssid" password "$ssidpw"; then
     report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
     return 1
   fi
