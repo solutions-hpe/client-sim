@@ -472,9 +472,7 @@ const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-en
 const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
 const recloneScheduleTimeInput = document.getElementById('reclone-schedule-time');
 const recloneConcurrencyInput = document.getElementById('reclone-concurrency');
-const saveUsbSettingsBtn = document.getElementById('save-usb-settings-btn');
 const usbSettingsMsg = document.getElementById('usb-settings-message');
-const saveVmMaintenanceBtn = document.getElementById('save-vm-maintenance-btn');
 const vmMaintenanceMsg = document.getElementById('vm-maintenance-message');
 const addVidPidBtn = document.getElementById('add-vidpid-btn');
 const usbSummaryPanel = document.getElementById('usb-summary-panel');
@@ -4304,50 +4302,53 @@ if (addIgnoredHostnameBtn) {
   });
 }
 
-if (saveUsbSettingsBtn) {
-  saveUsbSettingsBtn.addEventListener('click', async () => {
-    saveUsbSettingsBtn.disabled = true;
-    saveUsbSettingsBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(collectUsbSettingsPayload())
-      });
-      showInlineMessage(usbSettingsMsg, 'USB settings saved.', false);
-    } catch (error) {
-      showInlineMessage(usbSettingsMsg, `Error: ${error.message}`, true);
-    } finally {
-      saveUsbSettingsBtn.disabled = false;
-      saveUsbSettingsBtn.textContent = 'Save USB Settings';
-    }
-  });
+// ── Auto-save: USB settings & VM Maintenance ─────────────────────────────────
+// Checkboxes / selects → save immediately on change.
+// Text / number inputs → save on blur (when user clicks/tabs away).
+
+async function _autoSaveUsb(msgEl) {
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectUsbSettingsPayload()),
+    });
+    showInlineMessage(msgEl, 'Saved.', false);
+  } catch (err) {
+    showInlineMessage(msgEl, `Error: ${err.message}`, true);
+  }
 }
 
-if (saveVmMaintenanceBtn) {
-  saveVmMaintenanceBtn.addEventListener('click', async () => {
-    saveVmMaintenanceBtn.disabled = true;
-    saveVmMaintenanceBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vm_silent_timeout: String(vmSilentTimeoutInput?.value || '24'),
-          reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
-          reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
-          reclone_concurrency: String(recloneConcurrencyInput?.value ?? '1'),
-        })
-      });
-      showInlineMessage(vmMaintenanceMsg, 'VM maintenance settings saved.', false);
-    } catch (error) {
-      showInlineMessage(vmMaintenanceMsg, `Error: ${error.message}`, true);
-    } finally {
-      saveVmMaintenanceBtn.disabled = false;
-      saveVmMaintenanceBtn.textContent = 'Save VM Maintenance';
-    }
-  });
+async function _autoSaveVmMaintenance(msgEl) {
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vm_silent_timeout: String(vmSilentTimeoutInput?.value || '24'),
+        reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
+        reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
+        reclone_concurrency: String(recloneConcurrencyInput?.value ?? '1'),
+      }),
+    });
+    showInlineMessage(msgEl, 'Saved.', false);
+  } catch (err) {
+    showInlineMessage(msgEl, `Error: ${err.message}`, true);
+  }
 }
+
+// USB — change (checkbox) already handled via the existing usbAutoProvisionInput listener.
+// Number inputs: save on blur.
+[usbMissingTimeoutInput, vmImage1TemplateIdInput, vmImage2TemplateIdInput, vmImage1PctInput].forEach((el) => {
+  if (el) el.addEventListener('blur', () => _autoSaveUsb(usbSettingsMsg));
+});
+
+// VM Maintenance — checkboxes/selects: save on change; number/time inputs: save on blur.
+if (recloneScheduleEnabledInput) recloneScheduleEnabledInput.addEventListener('change', () => _autoSaveVmMaintenance(vmMaintenanceMsg));
+if (recloneScheduleDayInput)     recloneScheduleDayInput.addEventListener('change',  () => _autoSaveVmMaintenance(vmMaintenanceMsg));
+[vmSilentTimeoutInput, recloneScheduleTimeInput, recloneConcurrencyInput].forEach((el) => {
+  if (el) el.addEventListener('blur', () => _autoSaveVmMaintenance(vmMaintenanceMsg));
+});
 
 if (centralRefreshBtn) {
   centralRefreshBtn.addEventListener('click', async () => {

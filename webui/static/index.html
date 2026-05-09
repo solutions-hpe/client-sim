@@ -90,10 +90,8 @@
   <main id="tab-server" class="page tab-content hidden tab-panel" style="display:none;">
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-logs" role="tab">Agent Log</button>
-      <button class="setup-subtab server-subtab" data-subtab="setup-server-logs" role="tab">Logs</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
     </nav>
 
     <!-- Details sub-tab -->
@@ -125,6 +123,52 @@
           <div style="font-size:12px;color:var(--muted);">Resets Proxmox state, VM list, command history, and reclone logs. No restart required.</div>
         </div>
         <button id="server-clear-cache-btn" class="btn btn-danger" style="flex-shrink:0;">Clear Cache</button>
+      </div>
+
+      <!-- Combined Logs section -->
+      <div class="setup-card setup-section-gap">
+        <section class="toolbar">
+          <div class="toolbar-actions">
+            <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
+            <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
+            <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
+            <label class="logs-filter-label" id="logs-filter-label">
+              Filter:
+              <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
+            </label>
+            <label class="logs-lines-label" id="logs-lines-label">
+              Lines:
+              <select id="logs-lines-select">
+                <option value="100">100</option>
+                <option value="300" selected>300</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
+            </label>
+            <label class="logs-filter-label">
+              Source:
+              <select id="logs-source-select">
+                <option value="journal">Service journal</option>
+                <option value="install">Install log</option>
+                <option value="agent">Proxmox Agent</option>
+              </select>
+            </label>
+            <!-- Agent log controls — shown only when source=agent -->
+            <label class="logs-filter-label hidden" id="agent-log-filter-label">
+              Filter:
+              <input id="agent-log-filter" class="logs-filter-input" type="text" placeholder="Filter…" spellcheck="false" />
+            </label>
+          </div>
+          <div class="toolbar-actions">
+            <label class="logs-autoscroll-label">
+              <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
+            </label>
+            <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
+            <button id="agent-log-clear" class="btn btn-secondary hidden" type="button">Clear</button>
+          </div>
+        </section>
+        <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
+        <div id="agent-log-viewer" class="agent-log-viewer hidden"></div>
       </div>
     </div>
 
@@ -225,56 +269,6 @@
     </div>
 
     <!-- Agent Log sub-tab -->
-    <div id="server-logs" class="setup-subpanel hidden">
-      <div class="setup-card setup-section-gap">
-        <div class="setup-card-header" style="justify-content:space-between;align-items:center;">
-          <h2>Proxmox Agent Log</h2>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <input id="agent-log-filter" class="checks-filter-input" type="text" placeholder="Filter…" spellcheck="false" style="width:200px;" />
-            <button id="agent-log-clear" class="btn btn-secondary btn-small" type="button">Clear</button>
-          </div>
-        </div>
-        <div id="agent-log-viewer" class="agent-log-viewer"></div>
-      </div>
-    </div>
-
-    <!-- Logs sub-tab -->
-    <div id="setup-server-logs" class="setup-subpanel hidden">
-      <section class="toolbar">
-        <div class="toolbar-actions">
-          <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
-          <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
-          <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
-          <label class="logs-filter-label">
-            Filter:
-            <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
-          </label>
-          <label class="logs-lines-label">
-            Lines:
-            <select id="logs-lines-select">
-              <option value="100">100</option>
-              <option value="300" selected>300</option>
-              <option value="500">500</option>
-              <option value="1000">1000</option>
-            </select>
-          </label>
-          <label class="logs-filter-label">
-            Source:
-            <select id="logs-source-select">
-              <option value="journal">Service journal</option>
-              <option value="install">Install log</option>
-            </select>
-          </label>
-        </div>
-        <div class="toolbar-actions">
-          <label class="logs-autoscroll-label">
-            <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
-          </label>
-          <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
-        </div>
-      </section>
-      <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
-    </div>
   </main>
   <main id="tab-simulations" class="page tab-content">
     <nav class="setup-subnav" role="tablist">
@@ -798,9 +792,6 @@
             <div id="usb-ignored-list" class="badge-list"></div>
           </div>
 
-          <div class="form-actions">
-            <button id="save-usb-settings-btn" class="btn btn-primary" type="button">Save USB Settings</button>
-          </div>
           <div id="usb-settings-message" class="settings-message hidden" role="alert"></div>
 
         </div>
@@ -884,9 +875,6 @@
             </div>
           </div>
 
-          <div class="form-actions">
-            <button id="save-vm-maintenance-btn" class="btn btn-primary" type="button">Save VM Maintenance</button>
-          </div>
           <div id="vm-maintenance-message" class="settings-message hidden" role="alert"></div>
 
         </div>
