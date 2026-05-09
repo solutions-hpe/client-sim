@@ -348,6 +348,16 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   gap: 10px;
 }
 
+.config-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+}
+
+@media (max-width: 700px) {
+  .config-field-grid { grid-template-columns: 1fr; }
+}
+
 .toggle-item {
   display: flex;
   align-items: center;

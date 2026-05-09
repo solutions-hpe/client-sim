@@ -30,7 +30,7 @@ const IMPACT_LABELS = {
 const BUCKET_SECTION_RE = /^s\d+$/;
 const BOOL_VALUE_SET = new Set(['on', 'off', 'yes', 'no', 'true', 'false']);
 const PW_KEY_RE = /pw$|password|secret/i;
-const KNOWN_SECTION_LABELS = { simulation: 'Simulation', server: 'Server', address: 'Addresses' };
+const KNOWN_SECTION_LABELS = { simulation: 'Simulation', server: 'Server', address: 'IP Addresses' };
 function _fmtConfigKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
 function _fmtSection(s) { return KNOWN_SECTION_LABELS[s] || s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '); }
 function _isBoolVal(v) { return BOOL_VALUE_SET.has(String(v ?? '').toLowerCase().trim()); }
@@ -2904,6 +2904,9 @@ function _buildSectionCard(section, values, container) {
     (_isBoolVal(val) ? boolPairs : textPairs).push([key, val]);
   });
 
+  const fieldGrid = document.createElement('div');
+  fieldGrid.className = 'config-field-grid';
+
   textPairs.forEach(([key, val]) => {
     if (key === 'sim_load') {
       const simLoadOptions = ['100', '75', '50', '25', '0'];
@@ -2916,14 +2919,16 @@ function _buildSectionCard(section, values, container) {
       select.options[2].textContent = '50% — Half simulations';
       select.options[3].textContent = '25% — 1/4 simulations';
       select.options[4].textContent = '0% — No simulations (stay associated)';
-      form.appendChild(group);
+      fieldGrid.appendChild(group);
       return;
     }
     const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
     const lbl = group.querySelector('label');
     if (lbl) lbl.textContent = _fmtConfigKey(key);
-    form.appendChild(group);
+    fieldGrid.appendChild(group);
   });
+
+  if (textPairs.length) form.appendChild(fieldGrid);
 
   if (boolPairs.length) {
     const h3 = document.createElement('h3');
@@ -3037,6 +3042,9 @@ function renderBucketEditors() {
 
     const tracked = { ...values };
 
+    const fieldGrid = document.createElement('div');
+    fieldGrid.className = 'config-field-grid';
+
     // Text inputs (preserve file order, skip booleans and sim_phy)
     Object.entries(values).forEach(([key, val]) => {
       if (key === 'sim_phy' || _isBoolVal(val)) return;
@@ -3050,7 +3058,7 @@ function renderBucketEditors() {
         tracked[key] = input.value.trim();
         summary.textContent = buildBucketSummary(section, tracked);
       });
-      body.appendChild(group);
+      fieldGrid.appendChild(group);
     });
 
     // sim_phy select (if present)
@@ -3058,8 +3066,10 @@ function renderBucketEditors() {
       const { group } = buildConfigSelect(section, 'sim_phy', ['wireless', 'ethernet'], values.sim_phy || 'wireless');
       const lbl = group.querySelector('label');
       if (lbl) lbl.textContent = 'Sim Phy';
-      body.appendChild(group);
+      fieldGrid.appendChild(group);
     }
+
+    body.appendChild(fieldGrid);
 
     // Toggle flags
     const boolPairs = Object.entries(values).filter(([k, v]) => k !== 'sim_phy' && _isBoolVal(v));
