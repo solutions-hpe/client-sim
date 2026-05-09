@@ -779,13 +779,13 @@ function renderServerTab(data) {
     String(currentSettings.vm_image_2_template_id || '200'),
   ]);
 
-  // Categorise VMs: templates → sim clients (name starts with 'sim-') → other clients
+  // Categorise VMs: templates → sim clients (vmid > 90000) → other clients
   const templateVms = vms.filter((v) =>
     v.is_template === true || v.is_template === 'true' ||
     configuredTemplateIds.has(String(v.vmid))
   );
   const nonTemplateVms = vms.filter((v) => !templateVms.includes(v));
-  const simVms   = nonTemplateVms.filter((v) => (v.name || '').toLowerCase().startsWith('sim-'));
+  const simVms   = nonTemplateVms.filter((v) => Number(v.vmid) > 90000);
   const otherVms = nonTemplateVms.filter((v) => !simVms.includes(v));
 
   // Update count badges
