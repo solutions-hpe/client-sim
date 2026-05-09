@@ -295,6 +295,7 @@ settings: dict[str, Any] = {
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
     "reclone_schedule_enabled": _normalize_relay_enabled(_persisted.get("reclone_schedule_enabled", "off")),
     "reclone_schedule_cron": _persisted.get("reclone_schedule_cron", "sunday 02:00"),
+    "reclone_concurrency": str(_persisted.get("reclone_concurrency", "1")),
 }
 
 # Initialise in-memory token from persisted values so a restart
@@ -1468,6 +1469,7 @@ class SettingsUpdate(BaseModel):
     vm_silent_timeout: str | None = None
     reclone_schedule_enabled: str | None = None
     reclone_schedule_cron: str | None = None
+    reclone_concurrency: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -1626,6 +1628,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
+        "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
     }
 
 
@@ -1784,45 +1787,51 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
         await _broadcast_reclone_state()
         await _broadcast_proxmox_state()
 
-        try:
-            for vm in vms:
-                vmid = int(vm.get("vmid"))
-                name = vm.get("name") or f"VM {vmid}"
-                reclone_state["current_vm"] = vmid
-                _update_reclone_log(vmid, name, "queued")
-                await _broadcast_reclone_state()
-                await _broadcast_proxmox_state()
+        concurrency = max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1"))
 
-                cmd = await _queue_proxmox_command("reclone_vm", {"vmid": vmid}, command_type=trigger_type)
-                deadline = time.time() + 1800
-                last_status = "pending"
-                while time.time() < deadline:
-                    current = next((item for item in commands if item["id"] == cmd["id"]), None)
-                    if current is None:
-                        break
-                    status = current.get("status", "pending")
-                    if status != last_status and status == "delivered":
-                        _update_reclone_log(vmid, name, "in_progress")
-                        await _broadcast_reclone_state()
-                        await _broadcast_proxmox_state()
-                    last_status = status
-                    if status in {"completed", "failed", "expired"}:
-                        final_status = "completed" if status == "completed" else "failed"
-                        _update_reclone_log(vmid, name, final_status)
-                        if final_status == "completed":
-                            reclone_state["completed"] += 1
-                        else:
-                            reclone_state["failed"] += 1
-                        await _broadcast_reclone_state()
-                        await _broadcast_proxmox_state()
-                        break
-                    await asyncio.sleep(2)
-                else:
-                    logger.warning("Rolling reclone: VM %s (%s) timed out waiting for ACK", vmid, name)
-                    _update_reclone_log(vmid, name, "failed")
-                    reclone_state["failed"] += 1
+        async def _reclone_one(vm: dict) -> None:
+            vmid = int(vm.get("vmid"))
+            name = vm.get("name") or f"VM {vmid}"
+            _update_reclone_log(vmid, name, "queued")
+            await _broadcast_reclone_state()
+            await _broadcast_proxmox_state()
+
+            cmd = await _queue_proxmox_command("reclone_vm", {"vmid": vmid}, command_type=trigger_type)
+            deadline = time.time() + 1800
+            last_status = "pending"
+            while time.time() < deadline:
+                current = next((item for item in commands if item["id"] == cmd["id"]), None)
+                if current is None:
+                    break
+                status = current.get("status", "pending")
+                if status != last_status and status == "delivered":
+                    _update_reclone_log(vmid, name, "in_progress")
                     await _broadcast_reclone_state()
                     await _broadcast_proxmox_state()
+                last_status = status
+                if status in {"completed", "failed", "expired"}:
+                    final_status = "completed" if status == "completed" else "failed"
+                    _update_reclone_log(vmid, name, final_status)
+                    if final_status == "completed":
+                        reclone_state["completed"] += 1
+                    else:
+                        reclone_state["failed"] += 1
+                    await _broadcast_reclone_state()
+                    await _broadcast_proxmox_state()
+                    return
+                await asyncio.sleep(2)
+            logger.warning("Rolling reclone: VM %s (%s) timed out", vmid, name)
+            _update_reclone_log(vmid, name, "failed")
+            reclone_state["failed"] += 1
+            await _broadcast_reclone_state()
+            await _broadcast_proxmox_state()
+
+        try:
+            for i in range(0, len(vms), concurrency):
+                batch = vms[i:i + concurrency]
+                reclone_state["current_vm"] = int(batch[0].get("vmid")) if batch else None
+                await _broadcast_reclone_state()
+                await asyncio.gather(*(_reclone_one(vm) for vm in batch))
 
             reclone_state["status"] = "failed" if reclone_state["failed"] else "completed"
         except Exception as exc:
@@ -2502,6 +2511,7 @@ async def api_settings_get() -> dict[str, Any]:
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
         "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
         "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
+        "reclone_concurrency": settings.get("reclone_concurrency", "1"),
         "notifications": {
             k: v for k, v in settings.get("notifications", {}).items()
             if k not in ("smtp_password", "teams_webhook_url")  # never expose secrets
@@ -2652,6 +2662,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         if _parse_reclone_schedule(cron_value) is None:
             raise HTTPException(status_code=422, detail="reclone_schedule_cron must be in '<day> HH:MM' format")
         settings["reclone_schedule_cron"] = cron_value
+
+    if update.reclone_concurrency is not None:
+        settings["reclone_concurrency"] = str(max(1, int(update.reclone_concurrency.strip() or "1")))
 
     _save_settings()
 

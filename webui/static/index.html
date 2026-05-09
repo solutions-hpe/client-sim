@@ -49,7 +49,6 @@
     <button class="tab" role="tab" aria-selected="false" data-tab="dashboard">Clients</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="central">Central</button>
     <button class="tab tab-btn" id="tab-server-btn" role="tab" aria-selected="false" data-tab="server" style="display:none;">Server</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="logs">📋 Logs</button>
     <span class="tab-nav-sep" aria-hidden="true"></span>
     <button class="tab tab-nav-right" role="tab" aria-selected="false" data-tab="config">⚙ Config</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="setup">⚙ Setup</button>
@@ -93,7 +92,8 @@
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-logs" role="tab">Logs</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-logs" role="tab">Agent Log</button>
+      <button class="setup-subtab server-subtab" data-subtab="setup-server-logs" role="tab">Logs</button>
     </nav>
 
     <!-- Details sub-tab -->
@@ -224,7 +224,7 @@
       </div>
     </div>
 
-    <!-- Logs sub-tab -->
+    <!-- Agent Log sub-tab -->
     <div id="server-logs" class="setup-subpanel hidden">
       <div class="setup-card setup-section-gap">
         <div class="setup-card-header" style="justify-content:space-between;align-items:center;">
@@ -236,6 +236,44 @@
         </div>
         <div id="agent-log-viewer" class="agent-log-viewer"></div>
       </div>
+    </div>
+
+    <!-- Logs sub-tab -->
+    <div id="setup-server-logs" class="setup-subpanel hidden">
+      <section class="toolbar">
+        <div class="toolbar-actions">
+          <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
+          <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
+          <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
+          <label class="logs-filter-label">
+            Filter:
+            <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
+          </label>
+          <label class="logs-lines-label">
+            Lines:
+            <select id="logs-lines-select">
+              <option value="100">100</option>
+              <option value="300" selected>300</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+            </select>
+          </label>
+          <label class="logs-filter-label">
+            Source:
+            <select id="logs-source-select">
+              <option value="journal">Service journal</option>
+              <option value="install">Install log</option>
+            </select>
+          </label>
+        </div>
+        <div class="toolbar-actions">
+          <label class="logs-autoscroll-label">
+            <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
+          </label>
+          <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
+        </div>
+      </section>
+      <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
     </div>
   </main>
   <main id="tab-simulations" class="page tab-content">
@@ -812,6 +850,18 @@
             </div>
           </div>
 
+          <div class="settings-section">
+            <div class="settings-section-title">Parallel Provisioning</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="reclone-concurrency">Max parallel operations</label>
+                <input id="reclone-concurrency" class="form-input" type="number" value="1" min="1" max="20"
+                       placeholder="1">
+                <span class="form-hint">Number of VMs to reclone or provision simultaneously. 1 = sequential (safe). Increase for faster fleet operations.</span>
+              </div>
+            </div>
+          </div>
+
           <div class="form-actions">
             <button id="save-vm-maintenance-btn" class="btn btn-primary" type="button">Save VM Maintenance</button>
           </div>
@@ -1200,43 +1250,6 @@
       </div>
     </div>
   </main>
-  <main id="tab-logs" class="page tab-content hidden">
-    <section class="toolbar">
-      <div class="toolbar-actions">
-        <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
-        <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
-        <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
-        <label class="logs-filter-label">
-          Filter:
-          <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
-        </label>
-        <label class="logs-lines-label">
-          Lines:
-          <select id="logs-lines-select">
-            <option value="100">100</option>
-            <option value="300" selected>300</option>
-            <option value="500">500</option>
-            <option value="1000">1000</option>
-          </select>
-        </label>
-        <label class="logs-filter-label">
-          Source:
-          <select id="logs-source-select">
-            <option value="journal">Service journal</option>
-            <option value="install">Install log</option>
-          </select>
-        </label>
-      </div>
-      <div class="toolbar-actions">
-        <label class="logs-autoscroll-label">
-          <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
-        </label>
-        <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
-      </div>
-    </section>
-    <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
-  </main>
-
   <script src="/app.js" defer></script>
 
   <footer class="page-footer">

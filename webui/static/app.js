@@ -78,7 +78,8 @@ let currentSettings = {
   usb_ignored_vidpids: '[]',
   vm_silent_timeout: '24',
   reclone_schedule_enabled: 'off',
-  reclone_schedule_cron: 'sunday 02:00'
+  reclone_schedule_cron: 'sunday 02:00',
+  reclone_concurrency: '1'
 };
 let configData = {};
 let configLoaded = false;
@@ -157,7 +158,7 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb', 'server-logs'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-logs', 'setup-server-logs'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
@@ -165,6 +166,7 @@ function activateServerSubtab(subtabId = 'server-vms') {
     panel.classList.toggle('hidden', !isActive);
   });
   if (subtabId === 'server-logs') loadAgentLogs();
+  if (subtabId === 'setup-server-logs') loadServiceLogs();
 }
 
 // ── Agent Log Viewer ─────────────────────────────────────────────────────
@@ -465,6 +467,7 @@ const vmSilentTimeoutInput = document.getElementById('vm-silent-timeout');
 const recloneScheduleEnabledInput = document.getElementById('reclone-schedule-enabled');
 const recloneScheduleDayInput = document.getElementById('reclone-schedule-day');
 const recloneScheduleTimeInput = document.getElementById('reclone-schedule-time');
+const recloneConcurrencyInput = document.getElementById('reclone-concurrency');
 const saveUsbSettingsBtn = document.getElementById('save-usb-settings-btn');
 const usbSettingsMsg = document.getElementById('usb-settings-message');
 const saveVmMaintenanceBtn = document.getElementById('save-vm-maintenance-btn');
@@ -583,7 +586,8 @@ function mergeSettings(next = {}) {
     usb_ignored_vidpids: next.usb_ignored_vidpids ?? currentSettings.usb_ignored_vidpids ?? '[]',
     vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
     reclone_schedule_enabled: next.reclone_schedule_enabled ?? currentSettings.reclone_schedule_enabled ?? 'off',
-    reclone_schedule_cron: next.reclone_schedule_cron ?? currentSettings.reclone_schedule_cron ?? 'sunday 02:00'
+    reclone_schedule_cron: next.reclone_schedule_cron ?? currentSettings.reclone_schedule_cron ?? 'sunday 02:00',
+    reclone_concurrency: next.reclone_concurrency ?? currentSettings.reclone_concurrency ?? '1'
   };
   currentSettings = merged;
   return merged;
@@ -995,6 +999,7 @@ function applySettingsToUI(s) {
   if (vmSilentTimeoutInput && !vmSilentTimeoutInput.matches(':focus')) vmSilentTimeoutInput.value = settings.vm_silent_timeout ?? '24';
   const schedule = parseScheduleCron(settings.reclone_schedule_cron);
   if (recloneScheduleEnabledInput) recloneScheduleEnabledInput.checked = settings.reclone_schedule_enabled === 'on';
+  if (recloneConcurrencyInput) recloneConcurrencyInput.value = settings.reclone_concurrency ?? '1';
   if (recloneScheduleDayInput && !recloneScheduleDayInput.matches(':focus')) recloneScheduleDayInput.value = schedule.day;
   if (recloneScheduleTimeInput && !recloneScheduleTimeInput.matches(':focus')) recloneScheduleTimeInput.value = schedule.time;
   renderUsbVidPidTable();
@@ -1583,6 +1588,7 @@ function collectUsbSettingsPayload() {
     vm_silent_timeout: String(vmSilentTimeoutInput?.value || currentSettings.vm_silent_timeout || '24'),
     reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
     reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
+    reclone_concurrency: String(recloneConcurrencyInput?.value ?? '1'),
   };
 }
 
@@ -4263,6 +4269,7 @@ if (saveVmMaintenanceBtn) {
           vm_silent_timeout: String(vmSilentTimeoutInput?.value || '24'),
           reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
           reclone_schedule_cron: `${recloneScheduleDayInput?.value || 'sunday'} ${recloneScheduleTimeInput?.value || '02:00'}`,
+          reclone_concurrency: String(recloneConcurrencyInput?.value ?? '1'),
         })
       });
       showInlineMessage(vmMaintenanceMsg, 'VM maintenance settings saved.', false);
@@ -4898,6 +4905,8 @@ loadSimulations();
 })();
 
 // ── Log viewer ────────────────────────────────────────────────────────────────
+let loadServiceLogs = () => {};
+
 (function initLogViewer() {
   const output       = document.getElementById('logs-output');
   const tailBtn      = document.getElementById('logs-tail-btn');
@@ -4912,6 +4921,7 @@ loadSimulations();
   if (!output) return;
 
   let evtSource = null;
+  let historyLoaded = false;
   const MAX_LINES = 2000;
 
   function classify(text) {
@@ -4992,14 +5002,12 @@ loadSimulations();
     lines.forEach(appendLine);
   });
 
-  // Load history when tab is first opened
-  const logsTabBtn = document.querySelector('.tab[data-tab="logs"]');
-  let historyLoaded = false;
-  if (logsTabBtn) {
-    logsTabBtn.addEventListener('click', () => {
-      if (!historyLoaded) { historyLoaded = true; loadHistory(); }
-    });
-  }
+  loadServiceLogs = () => {
+    if (!historyLoaded) {
+      historyLoaded = true;
+      loadHistory();
+    }
+  };
 
   // Expose loadHistory so update handler can switch to install log after failure
   window._logsLoadHistory = loadHistory;

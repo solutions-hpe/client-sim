@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.40"
+AGENT_VERSION="1.41"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -28,6 +28,7 @@ MISSING_TIMEOUT=60
 IMAGE1_TEMPLATE_ID=100
 IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
+RECLONE_CONCURRENCY=1
 UNKNOWN_USB_JSON="[]"
 USB_STATE_JSON="[]"
 PRESENT_USB_JSON="[]"
@@ -43,6 +44,7 @@ declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
 declare -A STATE_VMID_TO_IMAGE
 declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS
+declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACKs
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 
@@ -190,13 +192,14 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
     int(data.get("image2_template_id", 200) or 200),
     max(0, min(100, int(data.get("image1_pct", 50) or 50))),
     str(data.get("sim_phy", "wireless")).strip().lower() or "wireless",
+    max(1, int(data.get("reclone_concurrency", 1) or 1)),
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -223,8 +226,9 @@ PY
     IMAGE2_TEMPLATE_ID=200
     IMAGE1_PCT=50
     SIM_PHY="wireless"
+    RECLONE_CONCURRENCY=1
 
-    while IFS=$'\t' read -r kind a b c d e f; do
+    while IFS=$'\t' read -r kind a b c d e f g; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -234,6 +238,7 @@ PY
                 IMAGE2_TEMPLATE_ID="$d"
                 IMAGE1_PCT="${e:-50}"
                 SIM_PHY="${f:-wireless}"
+                RECLONE_CONCURRENCY="${g:-1}"
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"
@@ -476,6 +481,27 @@ destroy_vm() {
     log "Destroyed VM $vmid"
 }
 
+# Destroy VM via qm only — does NOT update in-memory state or write the state file.
+# Used by parallel reclone jobs where state is managed by the parent process.
+_destroy_vm_qm_only() {
+    local vmid="$1"
+    timeout 60 qm stop "$vmid" 2>/dev/null || true
+    timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+}
+
+# Run one reclone in a background subshell. All needed values are passed as arguments
+# because bash associative arrays are NOT inherited by background subshells.
+# State file updates are handled by the parent after all jobs complete.
+_reclone_parallel_job() {
+    local vmid="$1" bus_path="$2" product_name="$3" saved_image="$4" device_type="$5"
+    _destroy_vm_qm_only "$vmid"
+    if clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"; then
+        log "Parallel reclone done: VM $vmid bus=$bus_path type=$device_type image=$saved_image"
+    else
+        return 1
+    fi
+}
+
 reclone_vm_instance() {
     local vmid="$1"
     local bus_path vidpid product_name
@@ -535,23 +561,92 @@ usb_provision_loop() {
     scan_usb_devices
     load_state_file
 
-    for bus_path in "${!PRESENT_BUSES[@]}"; do
-        if [[ -z "${STATE_BUS_TO_VMID[$bus_path]:-}" ]]; then
-            vidpid="${PRESENT_BUSES[$bus_path]}"
-            local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
-            # Only provision USB devices whose hardware type matches sim_phy.
-            # VID:PID type is fixed system-wide (wired adapter is always wired, etc.).
-            if [[ "$device_type" != "$SIM_PHY" ]]; then
-                log "Skipping USB $bus_path ($vidpid) — type=$device_type, sim_phy=$SIM_PHY"
-                continue
-            fi
-            product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
-            provision_vm "$bus_path" "$vidpid" "$product_name" || true
-            # Send telemetry after each provision so UI stays current during bulk spin-up
-            build_usb_state_json
-            curl_api POST /api/proxmox/telemetry "$(collect_telemetry)" >/dev/null 2>&1 || true
-        fi
+    # ── Parallel provision: new USB dongles not yet assigned a VM ─────────────
+    # Pre-assign VMIDs in the parent before forking so parallel subshells
+    # cannot race and pick the same slot. Associative arrays (STATE_*, CERTIFIED_TYPES)
+    # are NOT inherited by background subshells — capture all needed values here.
+    local -a _prov_buses=() _prov_vmids=() _prov_products=() _prov_images=() _prov_types=()
+    local _next_free_vmid="$start_vmid"
+    local _img1_count=0 _img2_count=0
+
+    for vmid in "${!STATE_VMID_TO_IMAGE[@]}"; do
+        [[ "${STATE_VMID_TO_IMAGE[$vmid]}" == "2" ]] && ((_img2_count++)) || ((_img1_count++))
     done
+
+    for bus_path in "${!PRESENT_BUSES[@]}"; do
+        [[ -n "${STATE_BUS_TO_VMID[$bus_path]:-}" ]] && continue
+        vidpid="${PRESENT_BUSES[$bus_path]}"
+        local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
+        if [[ "$_dtype" != "$SIM_PHY" ]]; then
+            log "Skipping USB $bus_path ($vidpid) — type=$_dtype, sim_phy=$SIM_PHY"
+            continue
+        fi
+        while (( _next_free_vmid <= end_vmid )); do
+            [[ -z "${STATE_VMID_TO_BUS[$_next_free_vmid]:-}" ]] && break
+            ((_next_free_vmid++))
+        done
+        if (( _next_free_vmid > end_vmid )); then
+            log "No free VM slots available — stopping provisioning"
+            break
+        fi
+        local _free="$_next_free_vmid"
+        ((_next_free_vmid++))
+
+        product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
+
+        local _total_vms=$(( _img1_count + _img2_count + 1 ))
+        local _target_img1=$(( (IMAGE1_PCT * _total_vms + 99) / 100 ))
+        local _img_num=1
+        [[ "$_img1_count" -ge "$_target_img1" ]] && _img_num=2
+        [[ "$_img_num" == "1" ]] && ((_img1_count++)) || ((_img2_count++))
+
+        STATE_VMID_TO_BUS["$_free"]="$bus_path"
+        STATE_BUS_TO_VMID["$bus_path"]="$_free"
+        STATE_VMID_TO_IMAGE["$_free"]="$_img_num"
+
+        _prov_buses+=("$bus_path")
+        _prov_vmids+=("$_free")
+        _prov_products+=("$product_name")
+        _prov_images+=("$_img_num")
+        _prov_types+=("$_dtype")
+    done
+
+    if [[ ${#_prov_buses[@]} -gt 0 ]]; then
+        local _active_pids=() _all_pids=()
+        for _i in "${!_prov_buses[@]}"; do
+            while [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]]; do
+                local _live_pids=()
+                for _p in "${_active_pids[@]}"; do
+                    kill -0 "$_p" 2>/dev/null && _live_pids+=("$_p")
+                done
+                _active_pids=("${_live_pids[@]}")
+                [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]] && sleep 3
+            done
+            (
+                if clone_vm_for_usb "${_prov_vmids[$_i]}" "${_prov_buses[$_i]}" \
+                    "${_prov_products[$_i]}" "${_prov_images[$_i]}" "${_prov_types[$_i]}"; then
+                    log "Provisioned VM ${_prov_vmids[$_i]} for USB ${_prov_buses[$_i]} type=${_prov_types[$_i]} image=${_prov_images[$_i]} (parallel)"
+                else
+                    exit 1
+                fi
+            ) &
+            _pid=$!
+            _active_pids+=("$_pid")
+            _all_pids+=("$_pid")
+        done
+        for _i in "${!_all_pids[@]}"; do
+            if ! wait "${_all_pids[$_i]}" 2>/dev/null; then
+                log "WARNING: A parallel provision job failed for VM ${_prov_vmids[$_i]}"
+                unset 'STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]'
+                unset 'STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]'
+                unset 'STATE_BUS_TO_VMID[${_prov_buses[$_i]}]'
+                unset 'STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]'
+            fi
+        done
+        save_state_file
+        build_usb_state_json
+        curl_api POST /api/proxmox/telemetry "$(collect_telemetry)" >/dev/null 2>&1 || true
+    fi
 
     now=$(date +%s)
     for bus_path in "${!STATE_BUS_TO_VMID[@]}"; do
@@ -782,21 +877,121 @@ for cmd in commands:
     print(f"{cid}\t{action}\t{vmid}\t{ctype}")
 PY
 )
+        _seq_ids=()
+        _seq_actions=()
+        _seq_vmids=()
+        _seq_types=()
+        _rc_ids=()
+        _rc_vmids=()
         while IFS=$'\t' read -r cmd_id action vmid cmd_type; do
             [[ -z "$cmd_id" || -z "$action" ]] && continue
-            log "Executing $action (vmid=${vmid:-})"
+            if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
+                _rc_ids+=("$cmd_id")
+                _rc_vmids+=("$vmid")
+            else
+                _seq_ids+=("$cmd_id")
+                _seq_actions+=("$action")
+                _seq_vmids+=("$vmid")
+                _seq_types+=("$cmd_type")
+            fi
+        done <<< "$parsed_commands"
+
+        for _si in "${!_seq_ids[@]}"; do
+            log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
             status="completed"
             message=""
-            if execute_vm_command "$action" "$vmid" "$cmd_type" 2>>"$AGENT_LOG"; then
-                message="$action completed"
+            if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" 2>>"$AGENT_LOG"; then
+                message="${_seq_actions[$_si]} completed"
             else
                 status="failed"
-                message="$action failed — check $AGENT_LOG"
+                message="${_seq_actions[$_si]} failed — check $AGENT_LOG"
             fi
+            curl_api POST /api/inbox/ack "{\"id\":\"${_seq_ids[$_si]}\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
+            log "ACK: ${_seq_ids[$_si]} status=$status"
+        done
 
-            curl_api POST /api/inbox/ack "{\"id\":\"$cmd_id\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
-            log "ACK: $cmd_id status=$status"
-        done <<< "$parsed_commands"
+        if [[ ${#_rc_vmids[@]} -gt 0 ]]; then
+            load_state_file
+            _rc_active_pids=()
+            _rc_pids=()
+            _rc_batch_ids=()
+            _rc_batch_vmids=()
+            _rc_batch_buses=()
+            _conc="${RECLONE_CONCURRENCY:-1}"
+
+            for _ri in "${!_rc_vmids[@]}"; do
+                _vmid="${_rc_vmids[$_ri]}"
+                _cmd_id="${_rc_ids[$_ri]}"
+                _bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
+                if [[ -z "$_bus" ]]; then
+                    _usb_line=$(qm config "$_vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ' || true)
+                    if [[ "$_usb_line" =~ host=([^,[:space:]]+) ]]; then
+                        _bus="${BASH_REMATCH[1]}"
+                        log "Recovered USB bus_path=$_bus for VM $_vmid from qm config"
+                        STATE_VMID_TO_BUS["$_vmid"]="$_bus"
+                        STATE_BUS_TO_VMID["$_bus"]="$_vmid"
+                    fi
+                fi
+                _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
+                _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
+                _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
+                _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
+
+                if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
+                    log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
+                    curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"USB device not present for VM $_vmid\"}" >/dev/null 2>&1
+                    continue
+                fi
+                if [[ "$_dtype" != "$SIM_PHY" ]]; then
+                    log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
+                    curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY\"}" >/dev/null 2>&1
+                    continue
+                fi
+
+                while [[ ${#_rc_active_pids[@]} -ge $_conc ]]; do
+                    _live=()
+                    for _p in "${_rc_active_pids[@]}"; do
+                        kill -0 "$_p" 2>/dev/null && _live+=("$_p")
+                    done
+                    _rc_active_pids=("${_live[@]}")
+                    [[ ${#_rc_active_pids[@]} -ge $_conc ]] && sleep 5
+                done
+
+                _RECLONE_CMD_IDS["$_vmid"]="$_cmd_id"
+                log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
+                (
+                    _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
+                ) &
+                _pid=$!
+                _rc_active_pids+=("$_pid")
+                _rc_pids+=("$_pid")
+                _rc_batch_ids+=("$_cmd_id")
+                _rc_batch_vmids+=("$_vmid")
+                _rc_batch_buses+=("$_bus")
+            done
+
+            for _rpi in "${!_rc_pids[@]}"; do
+                _rc_status="completed"
+                _rc_msg="reclone_vm completed"
+                if ! wait "${_rc_pids[$_rpi]}" 2>/dev/null; then
+                    _rc_status="failed"
+                    _rc_msg="reclone_vm failed — check $AGENT_LOG"
+                    unset 'STATE_VMID_TO_BUS[${_rc_batch_vmids[$_rpi]}]'
+                    unset 'STATE_VMID_TO_IMAGE[${_rc_batch_vmids[$_rpi]}]'
+                    unset 'STATE_BUS_TO_VMID[${_rc_batch_buses[$_rpi]}]'
+                    unset 'STATE_MISSING_BY_BUS[${_rc_batch_buses[$_rpi]}]'
+                fi
+                curl_api POST /api/inbox/ack "{\"id\":\"${_rc_batch_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
+                log "ACK: ${_rc_batch_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_rc_batch_vmids[$_rpi]})"
+                unset '_RECLONE_CMD_IDS[${_rc_batch_vmids[$_rpi]}]'
+            done
+
+            for _vmid in "${_rc_batch_vmids[@]}"; do
+                _b="${STATE_VMID_TO_BUS[$_vmid]:-}"
+                [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
+            done
+            save_state_file
+        fi
     fi
 
     sleep "$POLL_INTERVAL"
