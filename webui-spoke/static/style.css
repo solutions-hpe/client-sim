@@ -1343,6 +1343,23 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .server-stat-pill { background:#f3f4f6; border-radius:12px; padding:3px 10px; font-size:0.8rem; }
 .server-last-seen { margin-left:auto; font-size:0.8rem; color:var(--muted); }
 .server-bulk-bar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+
+/* Auto-provisioning status bar on VMs page */
+.autoprov-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  background: var(--card-bg, #f9fafb);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.autoprov-status-bar.is-active { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; }
+.autoprov-status-bar.is-idle   { background:#f3f4f6; border-color:#d1d5db; color:#6b7280; }
 .btn-warning { background:#f59e0b; color:#fff; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:0.85rem; }
 .btn-warning:hover { background:#d97706; }
 .server-bulk-bar .btn-danger { background:#ef4444; color:#fff; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:0.85rem; }

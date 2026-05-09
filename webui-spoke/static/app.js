@@ -1972,6 +1972,33 @@ function updateVmRecloneIcons() {
 }
 
 function renderAutoProvisionStatus() {
+  // ── VM page status bar ─────────────────────────────────────────────────────
+  const bar = document.getElementById('autoprov-status-bar');
+  if (bar) {
+    const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
+    const autoProv = currentSettings.usb_auto_provision === 'on';
+    const provisioning = usbState.filter((e) => e.prov_status === 'provisioning');
+    const queued = usbState.filter((e) => e.prov_status === 'missing');
+    bar.classList.remove('hidden', 'is-active', 'is-idle');
+    const iconEl = document.getElementById('autoprov-status-icon');
+    const textEl = document.getElementById('autoprov-status-text');
+    if (!autoProv) {
+      bar.classList.add('is-idle');
+      if (iconEl) iconEl.textContent = '⏹';
+      if (textEl) textEl.textContent = 'Auto-Provisioning: Not Running';
+    } else if (provisioning.length > 0) {
+      bar.classList.add('is-active');
+      const left = queued.length;
+      if (iconEl) iconEl.textContent = '⏳';
+      if (textEl) textEl.textContent = `Auto-Provisioning: ${provisioning.length} cloning${left > 0 ? ` · ${left} left to clone` : ''}`;
+    } else {
+      bar.classList.add('is-idle');
+      if (iconEl) iconEl.textContent = '✅';
+      if (textEl) textEl.textContent = 'Auto-Provisioning: All VMs active';
+    }
+  }
+
+  // ── Fleet Reclone tile detail log ──────────────────────────────────────────
   const section = document.getElementById('auto-prov-section');
   const logEl = document.getElementById('auto-prov-log');
   if (!section || !logEl) return;
