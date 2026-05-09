@@ -99,14 +99,16 @@
       <div class="setup-card setup-section-gap">
         <div class="setup-card-header" style="justify-content:space-between;align-items:center;">
           <h2 id="server-node-name">—</h2>
-          <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <span class="server-last-seen">Last seen: <span id="server-last-seen">—</span></span>
+            <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
+          </div>
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">
           <span class="server-stat-pill" title="CPU">⚡ CPU: <span id="server-cpu">—</span>%</span>
           <span class="server-stat-pill" title="RAM">🧠 RAM: <span id="server-ram">—</span></span>
           <span id="server-storage-pills"></span>
           <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
-          <span class="server-last-seen" style="margin-left:auto;">Last seen: <span id="server-last-seen">—</span></span>
         </div>
       </div>
 
