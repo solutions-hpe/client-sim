@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.80"
+AGENT_VERSION="0.81"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -532,6 +532,13 @@ print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
                 grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
             done
             tmpl_ids="${tmpl_ids%,}"
+        fi
+        # Name-based fallback: VMs whose name starts with 'tpl-' are templates
+        # (catches VMs not converted with 'qm template')
+        local name_tmpl_ids=""
+        name_tmpl_ids=$(qm list 2>/dev/null | awk 'NR>1 && $2 ~ /^tpl-/ {printf "%s,",$1}' | sed 's/,$//')
+        if [[ -n "$name_tmpl_ids" ]]; then
+            tmpl_ids="${tmpl_ids:+${tmpl_ids},}${name_tmpl_ids}"
         fi
         vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
             n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
