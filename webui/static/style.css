@@ -572,6 +572,9 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   border-bottom: 2px solid var(--border);
   padding: 0 24px;
 }
+.tab-nav-right {
+  margin-left: auto;
+}
 
 .tab {
   background: none;
