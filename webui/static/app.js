@@ -4303,6 +4303,8 @@ if (addIgnoredHostnameBtn) {
     }
   });
 }
+
+if (saveUsbSettingsBtn) {
   saveUsbSettingsBtn.addEventListener('click', async () => {
     saveUsbSettingsBtn.disabled = true;
     saveUsbSettingsBtn.textContent = 'Saving…';
