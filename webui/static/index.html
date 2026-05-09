@@ -108,29 +108,15 @@
             <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <button id="agent-approve-btn" class="btn btn-secondary" style="display:none;"></button>
             <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
             <span class="server-last-seen" style="font-size:11px;">Last seen: <span id="server-last-seen">—</span></span>
           </div>
         </div>
       </div>
 
-      <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
-        <div class="setup-card-header">
-          <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
-          <p>Approve agents below to allow telemetry from this Proxmox host.</p>
-        </div>
-        <table class="data-table" id="proxmox-pending-table">
-          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
-          <tbody id="proxmox-pending-tbody"></tbody>
-        </table>
-      </div>
-
-      <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
-        <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
-        <table class="data-table">
-          <thead><tr><th>Hostname</th><th>Agent Version</th><th></th></tr></thead>
-          <tbody id="proxmox-approved-tbody"></tbody>
-        </table>
+      <div id="proxmox-extra-pending" class="setup-card setup-section-gap hidden" style="padding:10px 16px;">
+        <span style="font-size:13px;font-weight:600;">⚠ Pending agents: </span><span id="proxmox-extra-pending-list" style="font-size:13px;"></span>
       </div>
     </div>
 

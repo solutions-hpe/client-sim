@@ -712,8 +712,10 @@ async function triggerUpdateAll() {
 function renderServerTab(data) {
   latestProxmoxData = data || latestProxmoxData;
   if (data?.reclone_state) latestRecloneState = data.reclone_state;
-  renderProxmoxPending(Array.isArray(latestProxmoxData.pending_proxmox) ? latestProxmoxData.pending_proxmox : []);
-  renderProxmoxApproved(Array.isArray(latestProxmoxData.approved_proxmox) ? latestProxmoxData.approved_proxmox : []);
+  renderProxmoxApproveState(
+    Array.isArray(latestProxmoxData.pending_proxmox) ? latestProxmoxData.pending_proxmox : [],
+    Array.isArray(latestProxmoxData.approved_proxmox) ? latestProxmoxData.approved_proxmox : []
+  );
 
   const tabBtn = document.getElementById('tab-server-btn');
   const tabPanel = document.getElementById('tab-server');
@@ -857,63 +859,70 @@ function renderServerTab(data) {
   });
 }
 
-function renderProxmoxPending(pending) {
-  const card = document.getElementById('proxmox-pending-card');
-  const badge = document.getElementById('proxmox-pending-badge');
-  const tbody = document.getElementById('proxmox-pending-tbody');
-  if (!card || !badge || !tbody) return;
+function renderProxmoxApproveState(pending, approved) {
+  const btn = document.getElementById('agent-approve-btn');
+  const extraCard = document.getElementById('proxmox-extra-pending');
+  const extraList = document.getElementById('proxmox-extra-pending-list');
+  if (!btn) return;
 
-  if (!pending.length) {
-    card.classList.add('hidden');
-    tbody.innerHTML = '';
-    badge.textContent = '0';
-    return;
+  const currentHostname = (document.getElementById('server-node-name') || {}).textContent || '';
+
+  // Determine if current tile host is pending or approved
+  const isPending = pending.some((a) => a.hostname === currentHostname);
+  const isApproved = approved.some((a) => a.hostname === currentHostname);
+
+  // Other pending agents (not the one shown in the tile)
+  const otherPending = pending.filter((a) => a.hostname !== currentHostname);
+
+  btn._approveHostname = null;
+
+  if (isPending) {
+    btn.textContent = '✓ Approve Agent';
+    btn.style.display = '';
+    btn._approveHostname = currentHostname;
+    btn._action = 'approve';
+  } else if (isApproved) {
+    btn.textContent = '✕ Revoke Agent';
+    btn.style.display = '';
+    btn._approveHostname = currentHostname;
+    btn._action = 'revoke';
+  } else if (pending.length > 0) {
+    // No connected agent yet — show Approve for the first pending
+    const first = pending[0];
+    btn.textContent = `✓ Approve ${escHtml(first.hostname)}`;
+    btn.style.display = '';
+    btn._approveHostname = first.hostname;
+    btn._action = 'approve';
+    otherPending.shift(); // already showing first one inline
+  } else {
+    btn.style.display = 'none';
   }
 
-  card.classList.remove('hidden');
-  badge.textContent = pending.length;
-  tbody.innerHTML = pending.map((agent) => {
-    const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
-    return `
-      <tr>
-        <td><strong>${escHtml(agent.hostname || '')}</strong></td>
-        <td>${escHtml(agent.ip || '')}</td>
-        <td>${agent.first_seen ? new Date(agent.first_seen * 1000).toLocaleString() : '—'}</td>
-        <td>${agent.last_seen ? new Date(agent.last_seen * 1000).toLocaleString() : '—'}</td>
-        <td class="text-end">
-          <button class="btn btn-sm btn-success me-1" onclick="approveProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Approve</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="rejectProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Reject</button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-function renderProxmoxApproved(approved) {
-  const card = document.getElementById('proxmox-approved-card');
-  const tbody = document.getElementById('proxmox-approved-tbody');
-  if (!card || !tbody) return;
-
-  if (!approved.length) {
-    card.classList.add('hidden');
-    tbody.innerHTML = '';
-    return;
+  if (!btn._bound) {
+    btn.addEventListener('click', async () => {
+      if (!btn._approveHostname) return;
+      if (btn._action === 'approve') {
+        await approveProxmoxAgent(btn._approveHostname);
+      } else {
+        await revokeProxmoxAgent(btn._approveHostname);
+      }
+    });
+    btn._bound = true;
   }
 
-  card.classList.remove('hidden');
-  tbody.innerHTML = approved.map((agent) => {
-    const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
-    const ver = agent.agent_version ? `v${escHtml(agent.agent_version)}` : '—';
-    return `
-      <tr>
-        <td><strong>${escHtml(agent.hostname || '')}</strong></td>
-        <td>${ver}</td>
-        <td class="text-end">
-          <button class="btn btn-sm btn-outline-danger" onclick="revokeProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Revoke</button>
-        </td>
-      </tr>
-    `;
-  }).join('');
+  // Show strip for any other pending agents
+  if (extraCard && extraList) {
+    if (otherPending.length) {
+      extraCard.classList.remove('hidden');
+      extraList.innerHTML = otherPending.map((a) => {
+        const enc = encodeURIComponent(String(a.hostname || ''));
+        return `<strong>${escHtml(a.hostname)}</strong> `
+          + `<button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="approveProxmoxAgent(decodeURIComponent('${enc}'))">Approve</button> `;
+      }).join(' &nbsp; ');
+    } else {
+      extraCard.classList.add('hidden');
+    }
+  }
 }
 
 async function approveProxmoxAgent(hostname) {
