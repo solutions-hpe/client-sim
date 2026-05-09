@@ -31,8 +31,8 @@ echo "$response" | python3 -c "
 import json, sys
 cmds = json.load(sys.stdin)
 for c in cmds:
-    print(c.get('id',''), c.get('action',''), json.dumps(c.get('args', {})))
-" 2>/dev/null | while IFS=' ' read -r cmd_id action args_json; do
+    print(c.get('id',''), c.get('action',''), json.dumps(c.get('args', {})), sep='\t')
+" 2>/dev/null | while IFS=$'\t' read -r cmd_id action args_json; do
   # Extract a simple 'value' arg if present (e.g. {"value":"off"})
   arg_value=$(echo "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null || true)
 

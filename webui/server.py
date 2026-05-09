@@ -3498,7 +3498,6 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
         except Exception:
             pass
 
-    settings = await _load_settings()
     central_site = settings.get("site_mappings", {}).get(wsite, "")
 
     # --- Build configured client list from client-setup.conf ---
@@ -3741,7 +3740,7 @@ async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any
             commands.append(ks_cmd)
             if len(commands) > COMMAND_MAX:
                 commands.pop(0)
-        await broadcast({"type": "commands_update", "commands": _commands_payload()})
+        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
 
     return {"status": "ok", "pushed": pushed}
 
@@ -3985,7 +3984,7 @@ async def api_init() -> dict[str, Any]:
         },
         "relay": _relay_status_payload(),
         "installer_version": INSTALLER_VERSION,
-        "kill_switch": str(settings.get("global_kill_switch", "off")),
+        "kill_switch": gkill_switch_state["value"],
     }
 
 

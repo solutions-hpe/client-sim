@@ -100,6 +100,14 @@ allow_offline=$(get_value 'simulation' 'allow_offline')
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
 #------------------------------------------------------------
+# Device identity — must be computed here (not inherited from startup.sh)
+# because simulation.sh is exec-restarted standalone after every 100-iteration cycle
+#------------------------------------------------------------
+username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
+site_based_num=$(get_value 'simulation' 'site_based_num')
+simulation_id=s
+simulation_id+=$(echo "$HOSTNAME" | rev | cut -c "1-${site_based_num}" | rev | cut -c 1-1)
+#------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
 wsite=$(get_value $simulation_id 'wsite')
