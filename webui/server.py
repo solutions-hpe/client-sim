@@ -1459,6 +1459,7 @@ proxmox_state: dict[str, Any] = {
     "unknown_usb": [],
     "usb_state": [],
     "present_usb": [],
+    "missing_timeout_mins": 60,
     "agent_version": None,
     "pve_version": None,
 }
@@ -3041,6 +3042,7 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["vms"] = enriched_vms
     proxmox_state["usb_state"] = body.get("usb_state", [])
     proxmox_state["present_usb"] = body.get("present_usb", [])
+    proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
 

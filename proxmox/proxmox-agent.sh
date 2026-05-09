@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.74"
+AGENT_VERSION="1.75"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -29,6 +29,8 @@ trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
+PROV_DIR=/tmp/client-sim-prov
+mkdir -p "$PROV_DIR"
 IMAGE1_TEMPLATE_ID=100
 IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
@@ -136,13 +138,14 @@ for raw in sys.argv[2:]:
         bus_path, vidpid, name = (parts + ["", "", ""])[:3]
         items.append({"bus_path": bus_path, "vidpid": vidpid, "name": name})
     else:
-        vmid, bus_path, missing_since, name, vidpid = (parts + ["", "", "", "", ""])[:5]
+        vmid, bus_path, missing_since, name, vidpid, prov_status = (parts + ["", "", "", "", "", ""])[:6]
         items.append({
             "vmid": int(vmid) if vmid else None,
             "bus_path": bus_path,
             "missing_since": int(missing_since) if missing_since else None,
             "name": name,
             "vidpid": vidpid,
+            "prov_status": prov_status or "active",
         })
 print(json.dumps(items))
 PY
@@ -347,7 +350,8 @@ scan_usb_devices() {
 
 build_usb_state_json() {
     USB_STATE_LINES=()
-    local vmid bus_path missing_since name vidpid
+    local vmid bus_path missing_since name vidpid prov_status _now_ts
+    _now_ts=$(date +%s)
     for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
         bus_path="${STATE_VMID_TO_BUS[$vmid]}"
         missing_since="${STATE_MISSING_BY_BUS[$bus_path]:-}"
@@ -360,7 +364,19 @@ build_usb_state_json() {
             vidpid="${STATE_VIDPID_BY_BUS[$bus_path]:-}"
         fi
         name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
-        USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}")
+        # Determine provisioning status for UI display
+        if [[ -f "${PROV_DIR}/${vmid}" ]]; then
+            prov_status="provisioning"
+        elif [[ -n "$missing_since" ]]; then
+            if (( _now_ts - missing_since > MISSING_TIMEOUT * 60 )); then
+                prov_status="tearing_down"
+            else
+                prov_status="missing"
+            fi
+        else
+            prov_status="active"
+        fi
+        USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}"$'\t'"${prov_status}")
     done
     if (( ${#UNKNOWN_USB_LINES[@]} )); then
         UNKNOWN_USB_JSON=$(json_from_records unknown "${UNKNOWN_USB_LINES[@]}")
@@ -403,6 +419,7 @@ clone_vm_for_usb() {
     # Helper: destroy this VM and free its slot so the next loop retries
     _teardown() {
         local reason="$1"
+        rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
         timeout 60 qm stop "$vmid" 2>/dev/null || true
         timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
@@ -412,6 +429,9 @@ clone_vm_for_usb() {
         unset 'STATE_MISSING_BY_BUS[$bus_path]'
         save_state_file
     }
+
+    # Mark this VMID as actively provisioning so the UI can show "Spinning up"
+    echo "$(date +%s)" > "${PROV_DIR}/${vmid}"
 
     # Clone
     if ! timeout 180 qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
@@ -475,6 +495,7 @@ clone_vm_for_usb() {
         || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
 
     timeout 30 qm guest exec "$vmid" --timeout 10 -- reboot >/dev/null 2>&1 || true
+    rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
@@ -894,6 +915,7 @@ print(json.dumps(out))
   },
   "agent_version": "${AGENT_VERSION}",
   "pve_version": "${pve_version}",
+  "missing_timeout_mins": ${MISSING_TIMEOUT},
   "vms": ${vms_json:-[]},
   "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),

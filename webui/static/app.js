@@ -773,6 +773,7 @@ function renderServerTab(data) {
 
   renderUsbSummary(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
+  renderAutoProvisionStatus();
 
   const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
   const autoRecoveryPending = new Set(
@@ -1055,6 +1056,7 @@ function applySettingsToUI(s) {
   renderChecksList(); // Refresh sim tab whenever settings change (monitored checks may have changed)
   renderUsbSummary(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
+  renderAutoProvisionStatus();
   if (centralSiteDetailOpen) {
     renderSiteClients(centralSiteDetailOpen);
     renderSiteChecks(centralSiteDetailOpen, centralStatusData[centralSiteDetailOpen] || {});
@@ -1956,6 +1958,59 @@ function updateVmRecloneIcons() {
       if (row.dataset.status) cell.textContent = row.dataset.status;
     }
   });
+}
+
+function renderAutoProvisionStatus() {
+  const section = document.getElementById('auto-prov-section');
+  const logEl = document.getElementById('auto-prov-log');
+  if (!section || !logEl) return;
+
+  const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
+  const autoProv = currentSettings.usb_auto_provision === 'on';
+  const missingTimeoutMins = parseInt(latestProxmoxData.missing_timeout_mins, 10) || 60;
+
+  // Only show entries that are not "active" (i.e. provisioning/missing/tearing_down)
+  const active = usbState.filter((e) => e.prov_status && e.prov_status !== 'active');
+
+  if (!autoProv && active.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+
+  if (active.length === 0) {
+    logEl.innerHTML = `<div class="muted" style="padding:8px 0;font-size:13px;">No active provisioning jobs.</div>`;
+    return;
+  }
+
+  const now = Date.now() / 1000;
+  const iconMap = { provisioning: '⏳', missing: '⚠️', tearing_down: '🗑️' };
+  const labelMap = { provisioning: 'Spinning up', missing: 'USB missing', tearing_down: 'Tearing down' };
+
+  logEl.innerHTML = active.map((e) => {
+    const icon = iconMap[e.prov_status] || '•';
+    const label = labelMap[e.prov_status] || e.prov_status;
+    const name = e.name || `USB ${e.bus_path || ''}`;
+    let detail = '';
+    if (e.prov_status === 'missing' && e.missing_since) {
+      const elapsedMins = Math.round((now - e.missing_since) / 60);
+      const remainMins = Math.max(0, missingTimeoutMins - elapsedMins);
+      detail = `<span class="muted">${elapsedMins}m elapsed · tears down in ~${remainMins}m</span>`;
+    } else if (e.prov_status === 'tearing_down') {
+      detail = `<span class="muted">Destroying VM…</span>`;
+    } else if (e.prov_status === 'provisioning') {
+      detail = `<span class="muted">Cloning &amp; configuring…</span>`;
+    }
+    return `
+      <div class="log-entry">
+        <span>${icon}</span>
+        <span>VM ${e.vmid ?? '—'}</span>
+        <span class="muted">${name}</span>
+        <span>${label}</span>
+        ${detail}
+      </div>`;
+  }).join('');
 }
 
 function formatCentralDate(value) {
