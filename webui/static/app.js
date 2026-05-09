@@ -102,7 +102,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
-    if (tab.dataset.tab === 'server') { activateServerSubtab('server-node'); loadProxmoxApproved().catch(() => {}); }
+    if (tab.dataset.tab === 'server') { activateServerSubtab('server-vms'); loadProxmoxApproved().catch(() => {}); }
     if (tab.dataset.tab === 'central') { activateCentralSubtab('central-sites-panel'); }
     if (tab.dataset.tab === 'simulations') { activateSimTopTab('simtop-checks'); }
     resetTabDrilldowns(tab.dataset.tab);
@@ -153,7 +153,7 @@ function activateConfigSubtab(subtabId = 'config-general') {
   });
 }
 
-function activateServerSubtab(subtabId = 'server-node') {
+function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
