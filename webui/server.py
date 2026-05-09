@@ -26,6 +26,7 @@ except ImportError:
     _HTTPX_AVAILABLE = False
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -1399,6 +1400,17 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
+
+# Prevent browser caching on all responses
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+app.add_middleware(NoCacheMiddleware)
 clients: dict[str, dict[str, Any]] = _load_client_history()
 
 # ── Command inbox ──────────────────────────────────────────────────────────────

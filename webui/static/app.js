@@ -5027,6 +5027,50 @@ loadSimulations();
   } catch (_) { /* silent — WS will provide live state */ }
 })();
 
+// ── Auto-refresh ──────────────────────────────────────────────────────────────
+let _refreshTimer = null;
+
+async function refreshAll() {
+  try {
+    const init = await requestJson('/api/init');
+    if (init.proxmox) {
+      if (init.proxmox.webui_vmid != null) webuiVmid = init.proxmox.webui_vmid;
+      if (init.proxmox.connected || (init.proxmox.vms || []).length || (init.proxmox.usb_state || []).length || (init.proxmox.unknown_usb || []).length || (init.proxmox.pending_proxmox || []).length || (init.proxmox.approved_proxmox || []).length) {
+        renderServerTab(init.proxmox);
+      }
+    }
+    if (init.reclone) renderRecloneStatus(init.reclone);
+    if (init.update_all) handleUpdateAllProgress(init.update_all);
+    if (init.central) {
+      centralTokenValid = Boolean(init.central.token_valid);
+      setCentralApiStatus(centralTokenValid, init.central.token_state);
+      handleCentralUpdate(init.central.status || {}, Date.now() / 1000, init.central.wireless_clients || {}, init.central.hardware_alerts || [], init.central.client_count_status || {});
+    }
+    if (init.relay) setRelayStatus(init.relay);
+    if (init.kill_switch !== undefined) applyGkillSwitch(init.kill_switch);
+    if (init.local_kill_switch !== undefined) {
+      simDisabledState.local = init.local_kill_switch === 'on';
+      renderSimDisabledBanner();
+    }
+  } catch (_) { /* silent */ }
+}
+
+function applyRefreshInterval(seconds) {
+  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+  if (seconds > 0) _refreshTimer = setInterval(refreshAll, seconds * 1000);
+  localStorage.setItem('refreshInterval', String(seconds));
+}
+
+const refreshSelect = document.getElementById('refresh-interval-select');
+if (refreshSelect) {
+  const saved = localStorage.getItem('refreshInterval');
+  if (saved) {
+    const opt = refreshSelect.querySelector(`option[value="${saved}"]`);
+    if (opt) { opt.selected = true; applyRefreshInterval(Number(saved)); }
+  }
+  refreshSelect.addEventListener('change', () => applyRefreshInterval(Number(refreshSelect.value)));
+}
+
 // ── Log viewer ────────────────────────────────────────────────────────────────
 let loadServiceLogs = () => {};
 
