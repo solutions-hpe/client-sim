@@ -13,6 +13,7 @@ SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-10}"
+INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
 USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
@@ -25,7 +26,7 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     exit 1
 fi
 echo $$ > "$PIDFILE"
-trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; true' EXIT
+trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; [[ -n "${INBOX_PID:-}" ]] && kill "$INBOX_PID" 2>/dev/null; true' EXIT
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
@@ -1056,9 +1057,9 @@ log "Background telemetry sender started (PID $TELEMETRY_PID, interval ${TELEMET
 post_telemetry || true
 
 # ── Inbox command processor ────────────────────────────────────────────────────
-# Extracted as a function so it can be called at the TOP of the main loop
-# (before USB provisioning work) to keep command latency low. Previously the
-# inbox check lived after usb_provision_loop which could block for minutes.
+# Runs in its own background loop every INBOX_INTERVAL seconds, fully decoupled
+# from the main USB provisioning loop. Reclone wait+ACK is itself backgrounded
+# so process_inbox always returns immediately — never blocked by clone operations.
 process_inbox() {
     local response
     response=$(curl_api GET "/api/inbox?hostname=$h" "" 2>/dev/null || echo "[]")
@@ -1168,32 +1169,44 @@ PY
             _rc_batch_buses+=("$_bus")
         done
 
-        for _rpi in "${!_rc_pids[@]}"; do
-            local _rc_status="completed" _rc_msg="reclone_vm completed"
-            if ! wait "${_rc_pids[$_rpi]}" 2>/dev/null; then
-                _rc_status="failed"
-                _rc_msg="reclone_vm failed — check $AGENT_LOG"
-                unset 'STATE_VMID_TO_BUS[${_rc_batch_vmids[$_rpi]}]'
-                unset 'STATE_VMID_TO_IMAGE[${_rc_batch_vmids[$_rpi]}]'
-                unset 'STATE_BUS_TO_VMID[${_rc_batch_buses[$_rpi]}]'
-                unset 'STATE_MISSING_BY_BUS[${_rc_batch_buses[$_rpi]}]'
-            fi
-            curl_api POST /api/inbox/ack "{\"id\":\"${_rc_batch_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
-            log "ACK: ${_rc_batch_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_rc_batch_vmids[$_rpi]})"
-            unset '_RECLONE_CMD_IDS[${_rc_batch_vmids[$_rpi]}]'
-        done
-
-        for _vmid in "${_rc_batch_vmids[@]}"; do
-            local _b="${STATE_VMID_TO_BUS[$_vmid]:-}"
-            [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
-        done
-        save_state_file
+        # Wait for reclone jobs and ACK results in a background subshell so
+        # process_inbox returns immediately — never blocked by multi-minute clones.
+        local _snap_pids=("${_rc_pids[@]}")
+        local _snap_ids=("${_rc_batch_ids[@]}")
+        local _snap_vmids=("${_rc_batch_vmids[@]}")
+        local _snap_buses=("${_rc_batch_buses[@]}")
+        (
+            for _rpi in "${!_snap_pids[@]}"; do
+                local _rc_status="completed" _rc_msg="reclone_vm completed"
+                if ! wait "${_snap_pids[$_rpi]}" 2>/dev/null; then
+                    _rc_status="failed"
+                    _rc_msg="reclone_vm failed — check $AGENT_LOG"
+                fi
+                curl_api POST /api/inbox/ack "{\"id\":\"${_snap_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
+                log "ACK: ${_snap_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_snap_vmids[$_rpi]})"
+            done
+            # Reload state, clear missing flags for completed reclones, persist
+            load_state_file
+            for _vmid in "${_snap_vmids[@]}"; do
+                local _b="${STATE_VMID_TO_BUS[$_vmid]:-}"
+                [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
+            done
+            save_state_file
+        ) &
     fi
 }
 
-while true; do
-    process_inbox || true
+# Launch inbox as an independent background loop
+(
+    while true; do
+        process_inbox || true
+        sleep "$INBOX_INTERVAL"
+    done
+) &
+INBOX_PID=$!
+log "Background inbox poller started (PID $INBOX_PID, interval ${INBOX_INTERVAL}s)"
 
+while true; do
     refresh_usb_config || true
     if [[ "$AUTO_PROVISION" == "on" ]]; then
         usb_provision_loop || log "WARNING: USB auto-provisioning loop failed"
