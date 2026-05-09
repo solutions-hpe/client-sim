@@ -394,6 +394,19 @@ _git_lock = asyncio.Lock()
 _client_count_baseline: dict[str, Any] = {}
 try:
     _client_count_baseline = json.loads(CLIENT_COUNT_BASELINE_FILE.read_text(encoding="utf-8"))
+    # Seed in-memory samples from the persisted baseline so _client_count_payload()
+    # can surface the saved average immediately on startup — before enough live samples
+    # have been collected to compute a fresh average.  We create CLIENT_COUNT_MIN_SAMPLES
+    # synthetic entries spaced 60 s apart in the recent past.  They stay in the
+    # CLIENT_COUNT_WINDOW (3600 s) for ~55 min, then age out naturally as real data
+    # accumulates and replaces them.
+    _seed_now = time.time()
+    for _wsite, _saved in _client_count_baseline.items():
+        _avg_val = round(_saved["hourly_avg"])
+        _client_count_samples[_wsite] = [
+            (_seed_now - (CLIENT_COUNT_MIN_SAMPLES - i) * 60, _avg_val)
+            for i in range(CLIENT_COUNT_MIN_SAMPLES)
+        ]
 except Exception:
     pass
 
@@ -1118,6 +1131,20 @@ def _save_client_count_baseline() -> None:
             logger.warning("Could not save client count baseline: %s", exc)
 
 
+async def hourly_baseline_saver() -> None:
+    """Background task: recalculate and persist the client count baseline every hour.
+
+    This replaces any stale baseline file with a fresh average computed from the
+    last 60 minutes of live samples.  Running independently of the Central poll
+    loop means the file is always at most ~1 hour old regardless of poll frequency.
+    """
+    await asyncio.sleep(3600)   # wait one full hour before first write
+    while True:
+        _save_client_count_baseline()
+        logger.info("Client count baseline recalculated and persisted (hourly task).")
+        await asyncio.sleep(3600)
+
+
 def _client_count_payload() -> dict[str, Any]:
     """Per-site client count status based on 60-min rolling average.
     Falls back to persisted baseline when live samples are insufficient
@@ -1344,6 +1371,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
     background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
     background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
+    background_tasks["baseline_saver"] = asyncio.create_task(hourly_baseline_saver())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
