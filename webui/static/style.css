@@ -573,6 +573,14 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   padding: 0 24px;
 }
 .tab-nav-right {
+  margin-left: 0;
+}
+.tab-nav-sep {
+  display: block;
+  width: 1px;
+  background: var(--border);
+  margin: 6px 8px;
+  flex-shrink: 0;
   margin-left: auto;
 }
 
