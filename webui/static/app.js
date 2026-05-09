@@ -100,7 +100,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
-    if (tab.dataset.tab === 'server') loadProxmoxApproved().catch(() => {});
+    if (tab.dataset.tab === 'server') { activateServerSubtab('server-vms'); loadProxmoxApproved().catch(() => {}); }
     resetTabDrilldowns(tab.dataset.tab);
   });
 });
@@ -140,6 +140,19 @@ function activateConfigSubtab(subtabId = 'config-general') {
   });
   document.querySelectorAll('.config-subpanel').forEach((panel) => {
     const isActive = panel.id === subtabId;
+    panel.classList.toggle('active', isActive);
+    panel.classList.toggle('hidden', !isActive);
+  });
+}
+
+function activateServerSubtab(subtabId = 'server-vms') {
+  document.querySelectorAll('.server-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.subtab === subtabId);
+  });
+  ['server-vms', 'server-usb', 'server-agents'].forEach((id) => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const isActive = id === subtabId;
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
@@ -245,8 +258,8 @@ const centralTabButton = document.querySelector('.tab[data-tab="central"]');
 const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
-const setupSubtabButtons = document.querySelectorAll('.setup-subtab');
-const setupSubpanels = document.querySelectorAll('.setup-subpanel');
+const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab)');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-agents)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-grid');
 const centralEmpty = document.getElementById('central-empty');
@@ -3668,6 +3681,10 @@ if (configTabButton) {
 
 document.querySelectorAll('.config-subtab').forEach((btn) => {
   btn.addEventListener('click', () => activateConfigSubtab(btn.dataset.subtab));
+});
+
+document.querySelectorAll('.server-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => activateServerSubtab(btn.dataset.subtab));
 });
 
 if (setupSubtabButtons.length) {

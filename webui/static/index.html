@@ -97,113 +97,130 @@
       <button id="agent-update-btn" class="btn btn-secondary" style="margin-left:auto;" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
     </div>
 
-    <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
-      <div class="setup-card-header">
-        <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
-        <p>Approve agents below to allow telemetry from this Proxmox host.</p>
+    <nav class="setup-subnav" role="tablist">
+      <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-agents" role="tab">Agents</button>
+    </nav>
+
+    <!-- VMs sub-tab -->
+    <div id="server-vms" class="setup-subpanel">
+      <div class="server-bulk-bar">
+        <label><input type="checkbox" id="server-select-all"> Select All</label>
+        <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>
+        <button class="btn btn-secondary" id="server-bulk-stop">■ Stop</button>
+        <button class="btn btn-warning" id="server-bulk-reclone">↺ Reclone</button>
+        <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
       </div>
-      <table class="data-table" id="proxmox-pending-table">
-        <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
-        <tbody id="proxmox-pending-tbody"></tbody>
-      </table>
-    </div>
 
-    <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
-      <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
-      <table class="data-table">
-        <thead><tr><th>Hostname</th><th>Agent Version</th><th></th></tr></thead>
-        <tbody id="proxmox-approved-tbody"></tbody>
-      </table>
-    </div>
-
-    <div class="server-bulk-bar">
-      <label><input type="checkbox" id="server-select-all"> Select All</label>
-      <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>
-      <button class="btn btn-secondary" id="server-bulk-stop">■ Stop</button>
-      <button class="btn btn-warning" id="server-bulk-reclone">↺ Reclone</button>
-      <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
-    </div>
-
-    <div id="reclone-status-panel" class="setup-card setup-section-gap">
-      <div class="setup-card-header">
-        <h2>Fleet Reclone <span id="reclone-status-badge" class="badge badge-grey">Idle</span></h2>
-        <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
-      </div>
-      <div id="reclone-progress-wrap" class="hidden">
-        <div class="reclone-meta">
-          <span id="reclone-type-label" class="badge badge-grey"></span>
-          <span id="reclone-current-vm" class="muted"></span>
-          <span id="reclone-eta" class="muted"></span>
+      <div id="reclone-status-panel" class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Fleet Reclone <span id="reclone-status-badge" class="badge badge-grey">Idle</span></h2>
+          <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
         </div>
-        <div class="progress-bar-wrap"><div id="reclone-progress-bar" class="progress-bar"></div></div>
-        <div id="reclone-progress-label"></div>
-        <div id="reclone-vm-log" class="reclone-log"></div>
-      </div>
-      <div id="reclone-last-run" class="reclone-last-run"></div>
-      <div id="reclone-auto-recovery-section" class="hidden" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
-        <div class="reclone-section-title">↺ Auto-Recovery Log</div>
-        <div id="reclone-auto-recovery-log" class="reclone-log"></div>
-      </div>
-    </div>
-
-    <div id="usb-summary-panel" class="setup-card setup-section-gap hidden">
-      <div class="setup-card-header">
-        <h2>USB Devices</h2>
-      </div>
-      <table class="data-table" id="usb-summary-table">
-        <thead>
-          <tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Count</th></tr>
-        </thead>
-        <tbody id="usb-summary-tbody"></tbody>
-      </table>
-      <div id="unknown-usb-section" class="hidden" style="margin-top:16px;">
-        <div class="setup-card-header" style="padding:0 0 8px;">
-          <h3>⚠️ Uncertified Devices Detected</h3>
-          <p>These USB devices are connected but not in the certified list. Add or ignore them below.</p>
+        <div id="reclone-progress-wrap" class="hidden">
+          <div class="reclone-meta">
+            <span id="reclone-type-label" class="badge badge-grey"></span>
+            <span id="reclone-current-vm" class="muted"></span>
+            <span id="reclone-eta" class="muted"></span>
+          </div>
+          <div class="progress-bar-wrap"><div id="reclone-progress-bar" class="progress-bar"></div></div>
+          <div id="reclone-progress-label"></div>
+          <div id="reclone-vm-log" class="reclone-log"></div>
         </div>
-        <table class="data-table" id="unknown-usb-table">
-          <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
-          <tbody id="unknown-usb-tbody"></tbody>
+        <div id="reclone-last-run" class="reclone-last-run"></div>
+        <div id="reclone-auto-recovery-section" class="hidden" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+          <div class="reclone-section-title">↺ Auto-Recovery Log</div>
+          <div id="reclone-auto-recovery-log" class="reclone-log"></div>
+        </div>
+      </div>
+
+      <!-- VM Templates -->
+      <div id="server-template-section" class="setup-card setup-section-gap hidden">
+        <div class="setup-card-header">
+          <h2>VM Templates</h2>
+          <p>These are Proxmox template VMs used as clone sources. They cannot be started or modified from here.</p>
+        </div>
+        <table class="data-table" id="server-template-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>VM ID</th>
+              <th>Name</th>
+              <th>RAM</th>
+            </tr>
+          </thead>
+          <tbody id="server-template-tbody"></tbody>
         </table>
       </div>
-    </div>
 
-    <!-- VM Templates (read-only — managed by Proxmox, cloned by auto-provisioning) -->
-    <div id="server-template-section" class="setup-card setup-section-gap hidden">
-      <div class="setup-card-header">
-        <h2>VM Templates</h2>
-        <p>These are Proxmox template VMs used as clone sources. They cannot be started or modified from here.</p>
+      <!-- Active VMs -->
+      <div class="setup-card setup-section-gap">
+        <table class="data-table" id="server-vm-table">
+          <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="server-th-check" disabled></th>
+              <th>Status</th>
+              <th>VM ID</th>
+              <th>Name</th>
+              <th>CPU %</th>
+              <th>RAM</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="server-vm-tbody"></tbody>
+        </table>
+        <div id="server-empty" style="text-align:center;color:var(--muted);padding:32px;">
+          Waiting for Proxmox agent to check in…
+        </div>
       </div>
-      <table class="data-table" id="server-template-table">
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>VM ID</th>
-            <th>Name</th>
-            <th>RAM</th>
-          </tr>
-        </thead>
-        <tbody id="server-template-tbody"></tbody>
-      </table>
     </div>
 
-    <!-- Active VMs -->
-    <table class="data-table setup-section-gap" id="server-vm-table">
-      <thead>
-        <tr>
-          <th style="width:36px;"><input type="checkbox" id="server-th-check" disabled></th>
-          <th>Status</th>
-          <th>VM ID</th>
-          <th>Name</th>
-          <th>CPU %</th>
-          <th>RAM</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="server-vm-tbody"></tbody>
-    </table>
-    <div id="server-empty" style="text-align:center;color:var(--muted);padding:32px;">
-      Waiting for Proxmox agent to check in…
+    <!-- USB sub-tab -->
+    <div id="server-usb" class="setup-subpanel hidden">
+      <div id="usb-summary-panel" class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>USB Devices</h2>
+        </div>
+        <table class="data-table" id="usb-summary-table">
+          <thead>
+            <tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Count</th></tr>
+          </thead>
+          <tbody id="usb-summary-tbody"></tbody>
+        </table>
+        <div id="unknown-usb-section" class="hidden" style="margin-top:16px;">
+          <div class="setup-card-header" style="padding:0 0 8px;">
+            <h3>⚠️ Uncertified Devices Detected</h3>
+            <p>These USB devices are connected but not in the certified list. Add or ignore them below.</p>
+          </div>
+          <table class="data-table" id="unknown-usb-table">
+            <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
+            <tbody id="unknown-usb-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agents sub-tab -->
+    <div id="server-agents" class="setup-subpanel hidden">
+      <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
+        <div class="setup-card-header">
+          <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
+          <p>Approve agents below to allow telemetry from this Proxmox host.</p>
+        </div>
+        <table class="data-table" id="proxmox-pending-table">
+          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
+          <tbody id="proxmox-pending-tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
+        <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
+        <table class="data-table">
+          <thead><tr><th>Hostname</th><th>Agent Version</th><th></th></tr></thead>
+          <tbody id="proxmox-approved-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
