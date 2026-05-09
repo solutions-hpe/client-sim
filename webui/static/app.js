@@ -2807,6 +2807,20 @@ function _buildSectionCard(section, values, container) {
   });
 
   textPairs.forEach(([key, val]) => {
+    if (key === 'sim_load') {
+      const simLoadOptions = ['100', '75', '50', '25', '0'];
+      const { group, select } = buildConfigSelect(section, key, simLoadOptions, String(val));
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = 'Sim Load %';
+      // Replace option text with descriptive labels
+      select.options[0].textContent = '100% — Full load (all simulations)';
+      select.options[1].textContent = '75% — 3/4 simulations';
+      select.options[2].textContent = '50% — Half simulations';
+      select.options[3].textContent = '25% — 1/4 simulations';
+      select.options[4].textContent = '0% — No simulations (stay associated)';
+      form.appendChild(group);
+      return;
+    }
     const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
     const lbl = group.querySelector('label');
     if (lbl) lbl.textContent = _fmtConfigKey(key);
