@@ -1326,7 +1326,7 @@ async def _send_teams_notifications(webhook_url: str, transitions: list[dict]) -
                             "version": "1.4",
                             "body": [
                                 {"type": "TextBlock", "size": "Medium", "weight": "Bolder",
-                                 "text": f"🔴 Client-Sim Alert: {t['name']}"},
+                                 "text": f"🔴 Client Simulator Alert: {t['name']}"},
                                 {"type": "TextBlock", "text": t["detail"], "wrap": True},
                             ],
                         },
@@ -1351,7 +1351,7 @@ def _send_email_notifications(notif: dict, transitions: list[dict]) -> None:
     if not to_addrs:
         return
 
-    body_lines = ["Client-Sim Dashboard Alert\n"]
+    body_lines = ["Client Simulator Alert\n"]
     for t in transitions:
         body_lines.append(f"• {t['detail']}")
     body = "\n".join(body_lines)
@@ -1359,7 +1359,7 @@ def _send_email_notifications(notif: dict, transitions: list[dict]) -> None:
     msg = MIMEMultipart()
     msg["From"] = notif.get("smtp_from", "client-sim@localhost")
     msg["To"] = ", ".join(to_addrs)
-    msg["Subject"] = f"[Client-Sim] {len(transitions)} check(s) turned RED"
+    msg["Subject"] = f"[Client Simulator] {len(transitions)} check(s) turned RED"
     msg.attach(MIMEText(body, "plain"))
 
     try:
@@ -1398,7 +1398,7 @@ async def central_poller() -> None:
 async def lifespan(app: FastAPI):  # noqa: ARG001
     global central_history
     logger.info("=" * 60)
-    logger.info("Client-Sim Dashboard  v%s  starting up", INSTALLER_VERSION)
+    logger.info("Client Simulator  v%s  starting up", INSTALLER_VERSION)
     logger.info("=" * 60)
     central_history = await asyncio.to_thread(_load_history)
     background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
@@ -1423,7 +1423,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
             await task
 
 
-app = FastAPI(title="Client-Sim Dashboard", lifespan=lifespan)
+app = FastAPI(title="Client Simulator", lifespan=lifespan)
 
 # Prevent browser caching on all responses
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -2318,7 +2318,7 @@ def _push_to_github(files_changed: list[str], commit_message: str) -> bool:
     try:
         _git("config", "user.name")
     except RuntimeError:
-        _git("config", "user.name", "Client-Sim Dashboard")
+        _git("config", "user.name", "Client Simulator")
     try:
         _git("config", "user.email")
     except RuntimeError:
