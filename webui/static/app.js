@@ -100,7 +100,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
-    if (tab.dataset.tab === 'server') { activateServerSubtab('server-vms'); loadProxmoxApproved().catch(() => {}); }
+    if (tab.dataset.tab === 'server') { activateServerSubtab('server-node'); loadProxmoxApproved().catch(() => {}); }
     resetTabDrilldowns(tab.dataset.tab);
   });
 });
@@ -145,11 +145,11 @@ function activateConfigSubtab(subtabId = 'config-general') {
   });
 }
 
-function activateServerSubtab(subtabId = 'server-vms') {
+function activateServerSubtab(subtabId = 'server-node') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-vms', 'server-usb', 'server-agents'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-agents'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
