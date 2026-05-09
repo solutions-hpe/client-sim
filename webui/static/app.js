@@ -707,9 +707,11 @@ function renderProxmoxApproved(approved) {
   card.classList.remove('hidden');
   tbody.innerHTML = approved.map((agent) => {
     const encodedHostname = encodeURIComponent(String(agent.hostname || ''));
+    const ver = agent.agent_version ? `v${escHtml(agent.agent_version)}` : '—';
     return `
       <tr>
         <td><strong>${escHtml(agent.hostname || '')}</strong></td>
+        <td>${ver}</td>
         <td class="text-end">
           <button class="btn btn-sm btn-outline-danger" onclick="revokeProxmoxAgent(decodeURIComponent('${encodedHostname}'))">Revoke</button>
         </td>

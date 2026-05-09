@@ -1541,7 +1541,8 @@ def _pending_proxmox_payload() -> list[dict[str, Any]]:
 
 
 def _approved_proxmox_payload() -> list[dict[str, Any]]:
-    return [{"hostname": hostname} for hostname in approved_proxmox_agents]
+    ver = proxmox_state.get("agent_version")
+    return [{"hostname": hostname, "agent_version": ver} for hostname in approved_proxmox_agents]
 
 
 def _client_os_counts() -> dict[str, int]:
