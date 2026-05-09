@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.83"
+AGENT_VERSION="0.84"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -372,19 +372,21 @@ clone_vm_for_usb() {
     done
     if [[ "$hostname_set" -eq 1 ]]; then
         log "Set hostname to $full_name on VM $vmid"
-    else
-        log "WARNING: Could not set hostname on VM $vmid (guest agent unavailable)"
-    fi
-
-    if [[ "$guest_ready" -eq 1 || "$hostname_set" -eq 1 ]]; then
         # Write the USB device physical-layer type so startup.sh uses the right sim_phy
         qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
             && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
             || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
         qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
+        log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
+    else
+        log "ERROR: Could not set hostname on VM $vmid — tearing down so USB $bus_path can be retried"
+        # Add to state before destroying so destroy_vm can clear it properly
+        STATE_VMID_TO_BUS["$vmid"]="$bus_path"
+        STATE_BUS_TO_VMID["$bus_path"]="$vmid"
+        STATE_VMID_TO_IMAGE["$vmid"]="${image_num:-1}"
+        destroy_vm "$vmid"
+        return 1
     fi
-
-    log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
 provision_vm() {
