@@ -384,6 +384,10 @@ CLIENT_COUNT_DROP_PCT = 25.0  # percent drop that triggers alert
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
+# Serialise all git operations (fetch, reset, add, commit, push) on REPO_DIR.
+# Running two git commands concurrently on the same repo creates .git/index.lock
+# conflicts that cause the sync background task to hang indefinitely.
+_git_lock = asyncio.Lock()
 
 # Load persisted client count baseline so the UI has a reference point
 # immediately after a restart instead of showing NO_DATA for an hour.
@@ -2229,7 +2233,8 @@ def sync_repo_once() -> None:
 async def sync_repo() -> None:
     while True:
         try:
-            await asyncio.to_thread(sync_repo_once)
+            async with _git_lock:
+                await asyncio.to_thread(sync_repo_once)
             repo_state["synced"] = True
             repo_state["error"] = None
             repo_state["last_sync"] = time.time()
@@ -3651,7 +3656,8 @@ async def api_self_update() -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="Update already in progress")
     # Sync from GitHub first so version check reflects the latest repo state
     try:
-        await asyncio.to_thread(sync_repo_once)
+        async with _git_lock:
+            await asyncio.to_thread(sync_repo_once)
         repo_state["synced"] = True
         repo_state["error"] = None
         repo_state["last_sync"] = time.time()
@@ -3717,11 +3723,12 @@ async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any
 
     pushed = False
     try:
-        pushed = await asyncio.to_thread(
-            _push_to_github,
-            ["configs/simulation.conf"],
-            f"WebUI: update [{section}] settings",
-        )
+        async with _git_lock:
+            pushed = await asyncio.to_thread(
+                _push_to_github,
+                ["configs/simulation.conf"],
+                f"WebUI: update [{section}] settings",
+            )
     except ValueError:
         pushed = False
 
@@ -3753,11 +3760,12 @@ async def api_config_overrides_save(update: OverridesSaveRequest) -> dict[str, A
 
     pushed = False
     try:
-        pushed = await asyncio.to_thread(
-            _push_to_github,
-            ["configs/user-overrides.conf"],
-            f"WebUI: update overrides for {username}",
-        )
+        async with _git_lock:
+            pushed = await asyncio.to_thread(
+                _push_to_github,
+                ["configs/user-overrides.conf"],
+                f"WebUI: update overrides for {username}",
+            )
     except ValueError:
         pushed = False
 
