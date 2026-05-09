@@ -313,55 +313,120 @@
 
   <!-- ── Central tab ── -->
   <main id="tab-central" class="page tab-content hidden">
-    <div id="central-overview">
-      <section class="central-toolbar">
-        <div>
-          <h2>Aruba Central</h2>
-          <div id="central-last-synced" class="central-last-synced">Last synced: —</div>
+    <nav class="setup-subnav" role="tablist">
+      <button class="setup-subtab central-subtab active" data-subtab="central-sites-panel" role="tab">Sites</button>
+      <button class="setup-subtab central-subtab" data-subtab="central-alerts-panel" role="tab">Alerts</button>
+      <button class="setup-subtab central-subtab" data-subtab="central-clients-panel" role="tab">Clients</button>
+      <button class="setup-subtab central-subtab" data-subtab="central-history-panel" role="tab">History</button>
+    </nav>
+
+    <!-- Sites sub-tab -->
+    <div id="central-sites-panel" class="setup-subpanel">
+      <div id="central-overview">
+        <section class="central-toolbar">
+          <div>
+            <div id="central-last-synced" class="central-last-synced">Last synced: —</div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="central-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
+            <div id="central-token-status" class="central-token-status">
+              <span id="central-token-dot" class="status-dot offline"></span>
+              <span id="central-token-text">Token status unknown</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="setup-card">
+          <table class="data-table" id="central-sites-table">
+            <thead>
+              <tr>
+                <th>Workspace Site</th>
+                <th>Central Site</th>
+                <th>✓ OK</th>
+                <th>✗ Errors</th>
+                <th>? Pending</th>
+                <th>Clients</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="central-sites-tbody"></tbody>
+          </table>
+          <div id="central-empty" class="central-empty hidden">No Aruba Central site mappings configured yet.</div>
         </div>
-        <div class="toolbar-actions">
-          <button id="central-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
-          <div id="central-token-status" class="central-token-status">
-            <span id="central-token-dot" class="status-dot offline"></span>
-            <span id="central-token-text">Token status unknown</span>
+      </div>
+
+      <div id="central-site-detail" class="central-detail-panel hidden">
+        <div class="central-detail-header">
+          <button id="central-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+          <div>
+            <h2 id="central-detail-title">Site Detail</h2>
+            <p id="central-detail-sub" class="central-detail-sub">—</p>
           </div>
         </div>
-      </section>
 
-      <div id="central-sites-grid" class="central-sites-grid"></div>
-      <div id="central-empty" class="central-empty hidden">No Aruba Central site mappings configured yet.</div>
+        <div class="central-detail-grid">
+          <section class="central-panel-card">
+            <h3>Clients at Site</h3>
+            <div id="central-site-clients" class="client-mini-list"></div>
+          </section>
+
+          <section class="central-panel-card">
+            <h3>Check Status</h3>
+            <div id="central-site-checks" class="check-status-list"></div>
+          </section>
+        </div>
+
+        <section class="history-section">
+          <h3>Active Alerts from Central <span id="central-site-alerts-count" class="badge-count"></span></h3>
+          <div id="central-site-alerts"></div>
+        </section>
+
+        <section class="history-section">
+          <h3>Last 24 Hours</h3>
+          <div id="central-site-history"></div>
+        </section>
+      </div>
     </div>
 
-    <div id="central-site-detail" class="central-detail-panel hidden">
-      <div class="central-detail-header">
-        <button id="central-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
-        <div>
-          <h2 id="central-detail-title">Site Detail</h2>
-          <p id="central-detail-sub" class="central-detail-sub">—</p>
+    <!-- Alerts sub-tab -->
+    <div id="central-alerts-panel" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Active Alerts <span id="central-all-alerts-count" class="badge-count"></span></h2>
         </div>
+        <div id="central-all-alerts-body"><p class="form-hint">Select this tab to load alerts across all sites.</p></div>
       </div>
+    </div>
 
-      <div class="central-detail-grid">
-        <section class="central-panel-card">
-          <h3>Clients at Site</h3>
-          <div id="central-site-clients" class="client-mini-list"></div>
-        </section>
-
-        <section class="central-panel-card">
-          <h3>Check Status</h3>
-          <div id="central-site-checks" class="check-status-list"></div>
-        </section>
+    <!-- Clients sub-tab -->
+    <div id="central-clients-panel" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Wireless Clients by Site</h2>
+        </div>
+        <table class="data-table" id="central-clients-table">
+          <thead>
+            <tr>
+              <th>Workspace Site</th>
+              <th>Central Site</th>
+              <th>Wireless Clients</th>
+              <th>Sim Clients Connected</th>
+            </tr>
+          </thead>
+          <tbody id="central-clients-tbody"></tbody>
+        </table>
+        <div id="central-clients-empty" class="central-empty hidden">No client data available.</div>
       </div>
+    </div>
 
-      <section class="history-section">
-        <h3>Active Alerts from Central <span id="central-site-alerts-count" class="badge-count"></span></h3>
-        <div id="central-site-alerts"></div>
-      </section>
-
-      <section class="history-section">
-        <h3>Last 24 Hours</h3>
-        <div id="central-site-history"></div>
-      </section>
+    <!-- History sub-tab -->
+    <div id="central-history-panel" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Alert History — All Sites (Last 24h)</h2>
+        </div>
+        <div id="central-all-history-body"><p class="form-hint">Select this tab to load history across all sites.</p></div>
+      </div>
     </div>
 
   </main>

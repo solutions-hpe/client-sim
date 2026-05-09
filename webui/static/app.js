@@ -101,6 +101,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
     if (tab.dataset.tab === 'server') { activateServerSubtab('server-node'); loadProxmoxApproved().catch(() => {}); }
+    if (tab.dataset.tab === 'central') { activateCentralSubtab('central-sites-panel'); }
     resetTabDrilldowns(tab.dataset.tab);
   });
 });
@@ -158,7 +159,29 @@ function activateServerSubtab(subtabId = 'server-node') {
   });
 }
 
-// ── Simulations sub-tabs ──────────────────────────────────────────
+// ── Central sub-tabs ──────────────────────────────────────────
+const centralSubPanels = ['central-sites-panel', 'central-alerts-panel', 'central-clients-panel', 'central-history-panel'];
+
+function activateCentralSubtab(subtabId = 'central-sites-panel') {
+  document.querySelectorAll('.central-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.subtab === subtabId);
+  });
+  centralSubPanels.forEach((id) => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    panel.classList.toggle('active', id === subtabId);
+    panel.classList.toggle('hidden', id !== subtabId);
+  });
+  if (subtabId === 'central-alerts-panel') renderCentralAllAlerts();
+  if (subtabId === 'central-clients-panel') renderCentralClients();
+  if (subtabId === 'central-history-panel') renderCentralAllHistory();
+}
+
+document.querySelectorAll('.central-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => activateCentralSubtab(btn.dataset.subtab));
+});
+
+
 let activeSimTab = 'failing';
 
 function activateSimSubtab(tabId) {
@@ -283,10 +306,10 @@ const centralTabButton = document.querySelector('.tab[data-tab="central"]');
 const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
-const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab)');
+const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab)');
 const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-agents)');
 const centralOverview = document.getElementById('central-overview');
-const centralSitesGrid = document.getElementById('central-sites-grid');
+const centralSitesGrid = document.getElementById('central-sites-table');
 const centralEmpty = document.getElementById('central-empty');
 const centralRefreshBtn = document.getElementById('central-refresh-btn');
 const centralLastSynced = document.getElementById('central-last-synced');
@@ -1861,9 +1884,11 @@ function renderAvailableChecks() {
 }
 
 function renderCentralOverview() {
-  if (!centralOverview || !centralSitesGrid || !centralEmpty) return;
+  const tbody = document.getElementById('central-sites-tbody');
+  const centralEmpty = document.getElementById('central-empty');
+  if (!centralOverview || !tbody || !centralEmpty) return;
   updateCentralToolbar();
-  centralSitesGrid.textContent = '';
+  tbody.textContent = '';
 
   const mappings = currentSettings.site_mappings || {};
   const entries = Object.entries(mappings);
@@ -1877,43 +1902,128 @@ function renderCentralOverview() {
   const monitoredChecks = currentSettings.monitored_checks || [];
 
   entries.forEach(([wsite, centralSite]) => {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'central-site-card';
-    card.addEventListener('click', () => openSiteDetail(wsite));
-
-    const title = document.createElement('p');
-    title.className = 'central-site-card-title';
-    title.textContent = wsite;
-
-    const subtitle = document.createElement('p');
-    subtitle.className = 'central-site-card-sub';
-    subtitle.textContent = `→ ${centralSite || 'Unmapped Central site'}`;
-
-    const checks = document.createElement('div');
-    checks.className = 'central-site-card-checks';
-
     const siteChecks = centralStatusData[wsite] || {};
-    const okCount = monitoredChecks.filter((check) => siteChecks[check.id]?.status === 'OK').length;
-    const errorCount = monitoredChecks.filter((check) => siteChecks[check.id]?.status === 'ERROR').length;
+    const okCount = monitoredChecks.filter((c) => siteChecks[c.id]?.status === 'OK').length;
+    const errorCount = monitoredChecks.filter((c) => siteChecks[c.id]?.status === 'ERROR').length;
     const unknownCount = Math.max(monitoredChecks.length - okCount - errorCount, 0);
+    const wirelessCount = centralWirelessClients[wsite] ?? '—';
+    const simCount = [...(clients instanceof Map ? clients.values() : Object.values(clients || {}))]
+      .filter((cl) => (cl.config?.wsite || cl.effective_config?.wsite || '') === wsite).length;
 
-    if (!monitoredChecks.length) {
-      checks.appendChild(buildCheckBadge('No checks selected', 'check-badge-unknown'));
-    } else {
-      checks.appendChild(buildCheckBadge(`OK ${okCount}`, 'check-badge-ok'));
-      checks.appendChild(buildCheckBadge(`ERROR ${errorCount}`, 'check-badge-error'));
-      checks.appendChild(buildCheckBadge(
-        !Object.keys(siteChecks).length ? 'Not yet polled' : `Pending ${unknownCount}`,
-        'check-badge-unknown'
-      ));
-    }
-
-    card.appendChild(title);
-    card.appendChild(subtitle);
-    card.appendChild(checks);
-    centralSitesGrid.appendChild(card);
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.title = `Open ${wsite} detail`;
+    tr.innerHTML = `
+      <td><strong>${escHtml(wsite)}</strong></td>
+      <td>${escHtml(centralSite || '—')}</td>
+      <td style="color:var(--hpe-green-dark);">${monitoredChecks.length ? okCount : '—'}</td>
+      <td style="color:${errorCount ? '#c0392b' : 'inherit'};">${monitoredChecks.length ? errorCount : '—'}</td>
+      <td style="color:var(--muted);">${monitoredChecks.length ? unknownCount : '—'}</td>
+      <td>${wirelessCount}</td>
+      <td><button class="btn btn-small btn-secondary" data-wsite="${escHtml(wsite)}">View →</button></td>
+    `;
+    tr.querySelector('button').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSiteDetail(wsite);
+    });
+    tr.addEventListener('click', () => openSiteDetail(wsite));
+    tbody.appendChild(tr);
   });
+}
+
+async function renderCentralAllAlerts() {
+  const body = document.getElementById('central-all-alerts-body');
+  const countBadge = document.getElementById('central-all-alerts-count');
+  if (!body) return;
+  body.textContent = 'Loading alerts…';
+  const mappings = currentSettings.site_mappings || {};
+  const entries = Object.entries(mappings);
+  if (!entries.length) { body.innerHTML = '<p class="form-hint">No sites configured.</p>'; return; }
+
+  const allAlerts = [];
+  await Promise.all(entries.map(async ([wsite, centralSite]) => {
+    try {
+      const site = centralSite || wsite;
+      const data = await requestJson(`/api/central/site-alerts?site=${encodeURIComponent(site)}`);
+      (data.alerts || []).forEach((a) => allAlerts.push({ ...a, wsite }));
+    } catch (_) { /* skip */ }
+  }));
+
+  body.textContent = '';
+  if (countBadge) countBadge.textContent = allAlerts.length ? `(${allAlerts.length})` : '';
+  if (!allAlerts.length) { body.innerHTML = '<p class="form-hint">No active alerts across any site.</p>'; return; }
+
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  table.innerHTML = `<thead><tr><th>Site</th><th>Time</th><th>Type</th><th>Severity</th><th>State</th><th>Device</th><th>Message</th></tr></thead>`;
+  const tbody = document.createElement('tbody');
+  allAlerts.sort((a, b) => (b.ts || 0) - (a.ts || 0)).forEach((alert) => {
+    const tr = document.createElement('tr');
+    [alert.wsite, formatCentralDate(alert.ts), alert.name || alert.type || '—',
+      alert.severity || '—', alert.state || '—', alert.device || '—', alert.message || '—'
+    ].forEach((val, i) => {
+      const td = document.createElement('td');
+      td.textContent = val;
+      if (i === 3 && (val === 'CRITICAL' || val === 'MAJOR')) td.style.color = '#c0392b';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  body.appendChild(table);
+}
+
+function renderCentralClients() {
+  const tbody = document.getElementById('central-clients-tbody');
+  const empty = document.getElementById('central-clients-empty');
+  if (!tbody) return;
+  tbody.textContent = '';
+  const mappings = currentSettings.site_mappings || {};
+  const entries = Object.entries(mappings);
+  if (!entries.length) { if (empty) { empty.classList.remove('hidden'); empty.textContent = 'No sites configured.'; } return; }
+  if (empty) empty.classList.add('hidden');
+
+  entries.forEach(([wsite, centralSite]) => {
+    const wirelessCount = centralWirelessClients[wsite] ?? '—';
+    const simCount = [...(clients instanceof Map ? clients.values() : Object.values(clients || {}))]
+      .filter((cl) => (cl.config?.wsite || cl.effective_config?.wsite || '') === wsite).length;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${escHtml(wsite)}</td><td>${escHtml(centralSite || '—')}</td><td>${wirelessCount}</td><td>${simCount}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function renderCentralAllHistory() {
+  const body = document.getElementById('central-all-history-body');
+  if (!body) return;
+  body.textContent = 'Loading history…';
+  const mappings = currentSettings.site_mappings || {};
+  const entries = Object.entries(mappings);
+  if (!entries.length) { body.innerHTML = '<p class="form-hint">No sites configured.</p>'; return; }
+
+  const allRecords = [];
+  await Promise.all(entries.map(async ([wsite]) => {
+    try {
+      const data = await requestJson(`/api/central/history?site=${encodeURIComponent(wsite)}&hours=24`);
+      (data.records || []).forEach((r) => allRecords.push({ ...r, wsite }));
+    } catch (_) { /* skip */ }
+  }));
+
+  body.textContent = '';
+  if (!allRecords.length) { body.innerHTML = '<p class="form-hint">No history in the last 24 hours.</p>'; return; }
+
+  const table = document.createElement('table');
+  table.className = 'data-table';
+  table.innerHTML = `<thead><tr><th>Site</th><th>Time</th><th>Check</th><th>Status</th><th>Count</th></tr></thead>`;
+  const tbody = document.createElement('tbody');
+  allRecords.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 200).forEach((r) => {
+    const tr = document.createElement('tr');
+    [r.wsite, formatCentralDate(r.ts), r.check_name || r.check_id || '—', r.status || '—', String(r.count ?? '—')]
+      .forEach((val) => { const td = document.createElement('td'); td.textContent = val; tr.appendChild(td); });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  body.appendChild(table);
 }
 
 async function loadSiteHistory(wsite) {
