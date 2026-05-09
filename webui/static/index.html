@@ -101,6 +101,7 @@
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-commands" role="tab">Command Queue</button>
       <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
     </nav>
 
@@ -331,6 +332,59 @@
             <tbody id="unknown-usb-tbody"></tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Command Queue sub-tab -->
+    <div id="server-commands" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap" id="commands-card">
+        <div class="setup-card-header">
+          <h2>📨 Command Queue</h2>
+        </div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
+          <div class="form-group" style="min-width:160px;">
+            <label>Target</label>
+            <select id="cmd-target">
+              <option value="all">— All Clients —</option>
+              <option value="proxmox">Proxmox Host</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:160px;">
+            <label>Action</label>
+            <select id="cmd-action">
+              <optgroup label="Client Actions">
+                <option value="restart_sim">Restart Simulation</option>
+                <option value="reboot">Reboot Device</option>
+                <option value="update_now">Force Update</option>
+                <option value="kill_switch">Kill Switch</option>
+              </optgroup>
+              <optgroup label="Proxmox Actions">
+                <option value="reclone_vms">Reclone VMs</option>
+                <option value="snapshot_vms">Snapshot VMs</option>
+                <option value="start_vms">Start VMs</option>
+                <option value="stop_vms">Stop VMs</option>
+              </optgroup>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="cmd-send-btn" type="button">Send Command</button>
+          <button class="btn btn-secondary" id="cmd-clear-btn" type="button" style="margin-left:auto;">Clear History</button>
+        </div>
+        <div id="cmd-msg" class="form-msg" style="margin-bottom:6px;"></div>
+        <table class="data-table" id="cmd-table">
+          <thead>
+            <tr>
+              <th>Target</th>
+              <th>Action</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Age</th>
+              <th>Message</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="cmd-tbody"></tbody>
+        </table>
+        <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
       </div>
     </div>
 
@@ -587,7 +641,6 @@
   <main id="tab-setup" class="page tab-content hidden">
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab" data-subtab="setup-github" role="tab">GitHub</button>
-      <button class="setup-subtab" data-subtab="setup-simulation" role="tab">Simulation</button>
       <button class="setup-subtab" data-subtab="setup-proxmox" role="tab">Proxmox</button>
       <button class="setup-subtab" data-subtab="setup-relay" role="tab">Relay</button>
       <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
@@ -712,62 +765,6 @@
     </div>
 
         <div id="setup-simulation" class="setup-subpanel hidden">
-      <div class="setup-card">
-        <div class="setup-card-header">
-          <h2>Simulation Configuration</h2>
-          <p>Edit <strong>simulation.conf</strong> — all sections and keys are shown automatically.
-             Use the <strong>⚙ Config</strong> tab to edit settings and bucket profiles.</p>
-        </div>
-      </div>
-
-      <div class="setup-card setup-section-gap" id="commands-card">
-        <div class="setup-card-header">
-          <h2>📨 Command Inbox</h2>
-        </div>
-        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
-          <div class="form-group" style="min-width:160px;">
-            <label>Target</label>
-            <select id="cmd-target">
-              <option value="all">— All Clients —</option>
-              <option value="proxmox">Proxmox Host</option>
-            </select>
-          </div>
-          <div class="form-group" style="min-width:160px;">
-            <label>Action</label>
-            <select id="cmd-action">
-              <optgroup label="Client Actions">
-                <option value="restart_sim">Restart Simulation</option>
-                <option value="reboot">Reboot Device</option>
-                <option value="update_now">Force Update</option>
-                <option value="kill_switch">Kill Switch</option>
-              </optgroup>
-              <optgroup label="Proxmox Actions">
-                <option value="reclone_vms">Reclone VMs</option>
-                <option value="snapshot_vms">Snapshot VMs</option>
-                <option value="start_vms">Start VMs</option>
-                <option value="stop_vms">Stop VMs</option>
-              </optgroup>
-            </select>
-          </div>
-          <button class="btn btn-primary" id="cmd-send-btn" type="button">Send Command</button>
-          <button class="btn btn-secondary" id="cmd-clear-btn" type="button" style="margin-left:auto;">Clear History</button>
-        </div>
-        <div id="cmd-msg" class="form-msg" style="margin-bottom:6px;"></div>
-        <table class="data-table" id="cmd-table">
-          <thead>
-            <tr>
-              <th>Target</th>
-              <th>Action</th>
-              <th>Status</th>
-              <th>Age</th>
-              <th>Message</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="cmd-tbody"></tbody>
-        </table>
-        <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
-      </div>
     </div>
 
     <div id="setup-proxmox" class="setup-subpanel hidden">

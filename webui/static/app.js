@@ -161,7 +161,7 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-commands'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
@@ -398,7 +398,7 @@ const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab):not(.simtop-subtab)');
-const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-node)');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-node):not(#server-commands)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-table');
 const centralEmpty = document.getElementById('central-empty');
@@ -3155,6 +3155,55 @@ function updateCmdTargetDropdown(clientList = [...clients.values()]) {
   });
 }
 
+// ── Command description helpers ───────────────────────────────────────────
+function vmNameFromId(vmid) {
+  if (!vmid) return null;
+  const vms = (latestProxmoxData && latestProxmoxData.vms) || [];
+  const found = vms.find((v) => String(v.vmid) === String(vmid));
+  return found ? found.name : null;
+}
+
+const CMD_ACTION_LABELS = {
+  restart_sim:          'Restarting simulation',
+  reboot:               'Rebooting device',
+  update_now:           'Forcing update',
+  kill_switch:          'Kill switch',
+  reclone_vms:          'Recloning all VMs',
+  snapshot_vms:         'Snapshotting all VMs',
+  start_vms:            'Starting all VMs',
+  stop_vms:             'Stopping all VMs',
+  reclone_vm:           'Recloning VM',
+  delete_vm:            'Deleting VM',
+  start_vm:             'Starting VM',
+  stop_vm:              'Stopping VM',
+  reboot_vm:            'Rebooting VM',
+  snapshot_vm:          'Snapshotting VM',
+  provision_unassigned: 'Provisioning unassigned dongles',
+  update_agent:         'Updating Proxmox agent',
+};
+
+function cmdDescription(cmd) {
+  const base = CMD_ACTION_LABELS[cmd.action] || cmd.action.replace(/_/g, ' ');
+  const vmid = cmd.args && cmd.args.vmid;
+  if (vmid) {
+    const name = vmNameFromId(vmid);
+    return name ? `${base}: ${name}` : `${base}: VM ${vmid}`;
+  }
+  return base;
+}
+
+function cmdTargetLabel(cmd) {
+  const target = cmd.target || '—';
+  const vmid = cmd.args && cmd.args.vmid;
+  if (vmid) {
+    const name = vmNameFromId(vmid);
+    return name || `VM ${vmid}`;
+  }
+  if (target === 'all') return 'All Clients';
+  if (target === 'proxmox') return 'Proxmox Host';
+  return target;
+}
+
 function renderCommandTable(cmds) {
   if (!cmdTbody || !cmdEmpty) return;
   cmdTbody.innerHTML = '';
@@ -3169,7 +3218,7 @@ function renderCommandTable(cmds) {
     const tr = document.createElement('tr');
 
     const targetTd = document.createElement('td');
-    targetTd.textContent = cmd.target;
+    targetTd.textContent = cmdTargetLabel(cmd);
     tr.appendChild(targetTd);
 
     const actionTd = document.createElement('td');
@@ -3177,6 +3226,10 @@ function renderCommandTable(cmds) {
     code.textContent = cmd.action;
     actionTd.appendChild(code);
     tr.appendChild(actionTd);
+
+    const descTd = document.createElement('td');
+    descTd.textContent = cmdDescription(cmd);
+    tr.appendChild(descTd);
 
     const statusTd = document.createElement('td');
     const badge = document.createElement('span');
