@@ -513,13 +513,25 @@ collect_telemetry() {
 
     vms_json="[]"
     if command -v qm &>/dev/null; then
-        # Detect Proxmox-native templates by checking each VM's config for "template: 1"
+        # Use pvesh to get template flag directly from Proxmox API (most reliable)
+        # Falls back to scanning config files if pvesh fails
         local tmpl_ids=""
-        for conf in /etc/pve/qemu-server/*.conf; do
-            [[ -f "$conf" ]] || continue
-            grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
-        done
-        tmpl_ids="${tmpl_ids%,}"
+        if command -v pvesh &>/dev/null; then
+            tmpl_ids=$(pvesh get /nodes/$(hostname)/qemu --output-format json 2>/dev/null \
+                | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
+" 2>/dev/null || true)
+        fi
+        # Fallback: scan config files for 'template: 1'
+        if [[ -z "$tmpl_ids" ]]; then
+            for conf in /etc/pve/qemu-server/*.conf; do
+                [[ -f "$conf" ]] || continue
+                grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
+            done
+            tmpl_ids="${tmpl_ids%,}"
+        fi
         vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
             n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
         }
