@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.59"
+AGENT_VERSION="1.60"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -47,7 +47,7 @@ end_vmid=$((start_vmid + 23))
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
 declare -A STATE_VMID_TO_IMAGE
-declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS
+declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS STATE_VIDPID_BY_BUS
 declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACKs
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
@@ -261,13 +261,15 @@ load_state_file() {
     STATE_VMID_TO_BUS=()
     STATE_MISSING_BY_BUS=()
     STATE_VMID_TO_IMAGE=()
-    local vmid bus_path missing_since image_num
-    while IFS=$'\t' read -r vmid bus_path missing_since image_num; do
+    STATE_VIDPID_BY_BUS=()
+    local vmid bus_path missing_since image_num vidpid
+    while IFS=$'\t' read -r vmid bus_path missing_since image_num vidpid; do
         [[ -z "$vmid" || -z "$bus_path" ]] && continue
         STATE_BUS_TO_VMID["$bus_path"]="$vmid"
         STATE_VMID_TO_BUS["$vmid"]="$bus_path"
         STATE_MISSING_BY_BUS["$bus_path"]="$missing_since"
         STATE_VMID_TO_IMAGE["$vmid"]="${image_num:-1}"
+        [[ -n "$vidpid" ]] && STATE_VIDPID_BY_BUS["$bus_path"]="$vidpid"
     done < "$STATE_FILE"
     prune_stale_state_vmids
 }
@@ -306,7 +308,7 @@ save_state_file() {
     {
         for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
             local_bus="${STATE_VMID_TO_BUS[$vmid]}"
-            printf '%s\t%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}" "${STATE_VMID_TO_IMAGE[$vmid]:-1}"
+            printf '%s\t%s\t%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}" "${STATE_VMID_TO_IMAGE[$vmid]:-1}" "${STATE_VIDPID_BY_BUS[$local_bus]:-}"
         done | sort -n
     } > "$STATE_FILE"
 }
@@ -349,7 +351,14 @@ build_usb_state_json() {
     for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
         bus_path="${STATE_VMID_TO_BUS[$vmid]}"
         missing_since="${STATE_MISSING_BY_BUS[$bus_path]:-}"
-        vidpid="${USB_VIDPID_BY_BUS[$bus_path]:-}"
+        # Use live-scanned vidpid if device is present; update stored value so it
+        # persists in the state file even after the dongle goes physically missing.
+        if [[ -n "${USB_VIDPID_BY_BUS[$bus_path]:-}" ]]; then
+            vidpid="${USB_VIDPID_BY_BUS[$bus_path]}"
+            STATE_VIDPID_BY_BUS["$bus_path"]="$vidpid"
+        else
+            vidpid="${STATE_VIDPID_BY_BUS[$bus_path]:-}"
+        fi
         name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
         USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}")
     done
