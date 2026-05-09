@@ -3994,6 +3994,98 @@ async def api_health() -> dict[str, Any]:
     return await _api_health_payload()
 
 
+# ── Cache-clear endpoints ──────────────────────────────────────────────────────
+
+@app.post("/api/server/clear-cache")
+async def api_server_clear_cache() -> dict[str, Any]:
+    """Reset all server-side in-memory state (Proxmox, reclone, commands, update-all).
+    Does not restart the service — the UI will receive fresh empty state via WS broadcast."""
+    async with state_lock:
+        proxmox_state.update({
+            "connected": False, "last_seen": None, "node": {}, "vms": [],
+            "unknown_usb": [], "usb_state": [], "present_usb": [],
+            "agent_version": None, "pve_version": None,
+        })
+        proxmox_log_buffer.clear()
+        pending_proxmox_agents.clear()
+        commands.clear()
+        reclone_state.update({
+            "status": "idle", "type": None, "total": 0, "completed": 0,
+            "failed": 0, "current_vm": None, "log": [], "auto_recovery_log": [],
+            "last_run": None, "started_at": None,
+        })
+        update_all_state.update({
+            "running": False, "phase": "idle", "total_agents": 0,
+            "completed_agents": 0, "failed_agents": 0, "agent_cmds": [],
+            "started_at": None, "error": None,
+        })
+
+    await broadcast({"type": "proxmox_update", **_proxmox_status_payload()})
+    await _broadcast_reclone_state()
+    await broadcast({"type": "update_all_progress", **update_all_state})
+    await broadcast({"type": "commands_update", "commands": []})
+    logger.info("Server cache cleared by user request")
+    return {"status": "ok", "message": "Server cache cleared"}
+
+
+@app.post("/api/setup/clear-cache")
+async def api_setup_clear_cache() -> dict[str, Any]:
+    """Wipe all cached files, re-clone the repo, clear in-memory client/central state,
+    then restart the WebUI service so it starts completely fresh."""
+    import shutil
+
+    # 1. Delete cached data files
+    for path in [CLIENT_HISTORY_FILE, STATE_CACHE_FILE, HISTORY_FILE,
+                 CLIENT_COUNT_BASELINE_FILE]:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # 2. Clear in-memory state
+    async with state_lock:
+        clients.clear()
+    async with history_lock:
+        central_history.clear()
+    central_wireless_clients.clear()
+
+    # 3. Remove any stale git lock and wipe + re-clone the repo
+    async with _git_lock:
+        lock_file = REPO_DIR / ".git" / "index.lock"
+        lock_file.unlink(missing_ok=True)
+        try:
+            shutil.rmtree(REPO_DIR, ignore_errors=True)
+        except Exception as exc:
+            logger.warning("clear-cache: could not remove REPO_DIR: %s", exc)
+        try:
+            await asyncio.to_thread(sync_repo_once)
+            repo_state["synced"] = True
+            repo_state["error"] = None
+            repo_state["last_sync"] = time.time()
+        except Exception as exc:
+            logger.warning("clear-cache: re-clone failed: %s", exc)
+            repo_state["error"] = str(exc)
+
+    logger.info("Setup cache cleared by user request — restarting service")
+    await broadcast({"type": "notification", "level": "info",
+                     "message": "Cache cleared — service restarting in 2 seconds…"})
+
+    # 4. Restart the service after a short delay so the response can be sent
+    async def _delayed_restart() -> None:
+        await asyncio.sleep(2)
+        try:
+            await asyncio.create_subprocess_shell(
+                "sudo -n systemctl restart client-sim-dashboard",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            logger.error("clear-cache: restart failed: %s", exc)
+
+    asyncio.create_task(_delayed_restart())
+    return {"status": "ok", "message": "Cache cleared — service restarting"}
+
+
 @app.get("/api/kill-switch", response_class=PlainTextResponse)
 async def api_kill_switch() -> str:
     """Return the current global kill switch value ('on' or 'off').

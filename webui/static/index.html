@@ -118,6 +118,14 @@
       <div id="proxmox-extra-pending" class="setup-card setup-section-gap hidden" style="padding:10px 16px;">
         <span style="font-size:13px;font-weight:600;">⚠ Pending agents: </span><span id="proxmox-extra-pending-list" style="font-size:13px;"></span>
       </div>
+
+      <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <div style="font-weight:600;font-size:13px;">🗑 Clear Server Cache</div>
+          <div style="font-size:12px;color:var(--muted);">Resets Proxmox state, VM list, command history, and reclone logs. No restart required.</div>
+        </div>
+        <button id="server-clear-cache-btn" class="btn btn-danger" style="flex-shrink:0;">Clear Cache</button>
+      </div>
     </div>
 
     <!-- VMs sub-tab -->
@@ -480,12 +488,13 @@
   <!-- ── Setup tab ── -->
   <main id="tab-setup" class="page tab-content hidden">
     <nav class="setup-subnav" role="tablist">
-      <button class="setup-subtab active" data-subtab="setup-github" role="tab">GitHub</button>
+      <button class="setup-subtab" data-subtab="setup-github" role="tab">GitHub</button>
       <button class="setup-subtab" data-subtab="setup-simulation" role="tab">Simulation</button>
       <button class="setup-subtab" data-subtab="setup-proxmox" role="tab">Proxmox</button>
       <button class="setup-subtab" data-subtab="setup-relay" role="tab">Relay</button>
       <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
       <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
+      <button class="setup-subtab" data-subtab="setup-troubleshoot" role="tab">Troubleshooting</button>
     </nav>
 
     <div id="setup-github" class="setup-subpanel active">
@@ -604,7 +613,7 @@
           </div>
     </div>
 
-    <div id="setup-simulation" class="setup-subpanel hidden">
+        <div id="setup-simulation" class="setup-subpanel hidden">
       <div class="setup-card">
         <div class="setup-card-header">
           <h2>Simulation Configuration</h2>
@@ -1095,9 +1104,25 @@
             </div>
           </div>
     </div>
-  </main>
 
-  <!-- ── Logs tab ── -->
+    <!-- ── Troubleshooting sub-tab ── -->
+    <div id="setup-troubleshoot" class="setup-subpanel hidden">
+      <div class="setup-card">
+        <div class="setup-card-header">
+          <h2>Troubleshooting</h2>
+          <p>Use these tools when something is corrupted, stuck, or behaving unexpectedly after a config change.</p>
+        </div>
+      </div>
+
+      <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <div style="font-weight:600;font-size:13px;">🗑 Clear All Cache &amp; Re-clone</div>
+          <div style="font-size:12px;color:var(--muted);">Removes git lock files, wipes and re-clones the repo from GitHub, clears all cached state files (client history, central history, state cache). <strong>The service will restart automatically.</strong></div>
+        </div>
+        <button id="setup-clear-cache-btn" class="btn btn-danger" style="flex-shrink:0;">Clear Cache</button>
+      </div>
+    </div>
+  </main>
   <main id="tab-logs" class="page tab-content hidden">
     <section class="toolbar">
       <div class="toolbar-actions">

@@ -4679,6 +4679,34 @@ if (testTeamsBtn) {
     }
   });
 }
+
+// ── Clear Cache buttons ────────────────────────────────────────────────────────
+
+document.getElementById('server-clear-cache-btn')?.addEventListener('click', async () => {
+  if (!confirm('Clear all server-side cache?\n\nThis resets Proxmox state, VM list, command history, and reclone logs. No restart is required.')) return;
+  try {
+    const r = await fetch('/api/server/clear-cache', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Server cache cleared.', 'success');
+  } catch (err) {
+    showToast(`Failed: ${err.message}`, 'error');
+  }
+});
+
+document.getElementById('setup-clear-cache-btn')?.addEventListener('click', async () => {
+  if (!confirm('Clear all cache and re-clone?\n\nThis will:\n• Remove git lock files\n• Wipe and re-clone the repo from GitHub\n• Delete client history, state cache, and central history files\n• Restart the WebUI service\n\nThe page will reload automatically once the service is back up.')) return;
+  try {
+    const r = await fetch('/api/setup/clear-cache', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Cache cleared — restarting service, reloading in 10s…', 'info');
+    setTimeout(() => location.reload(), 10000);
+  } catch (err) {
+    // Service may have restarted before responding
+    showToast('Cache cleared — service restarting, reloading in 10s…', 'info');
+    setTimeout(() => location.reload(), 10000);
+  }
+});
+
 document.getElementById('server-select-all')?.addEventListener('change', (e) => {
   document.querySelectorAll('.vm-check').forEach((cb) => { cb.checked = e.target.checked; });
   const thCheck = document.getElementById('server-th-check');
