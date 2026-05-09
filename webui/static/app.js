@@ -3012,6 +3012,16 @@ function handleMessage(message) {
   }
 
   if (message.type === 'commands_update') {
+    // Surface failures as toasts so the user knows something went wrong
+    const prev = new Map((window._lastCommands || []).map((c) => [c.id, c.status]));
+    (message.commands || []).forEach((c) => {
+      if (c.status === 'failed' && prev.get(c.id) !== 'failed') {
+        const label = c.action ? c.action.replace(/_/g, ' ') : 'command';
+        const vmNote = c.args?.vmid ? ` (VM ${c.args.vmid})` : '';
+        showToast(`⚠ ${label}${vmNote} failed — check Proxmox agent log`, 'error');
+      }
+    });
+    window._lastCommands = message.commands || [];
     renderCommandTable(message.commands);
     return;
   }
