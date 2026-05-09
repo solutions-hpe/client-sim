@@ -90,7 +90,6 @@ def _decrypt_secret(value: str) -> str:
 
 def _encrypt_settings(raw: dict) -> dict:
     """Return a deep copy of settings with sensitive fields encrypted for disk storage."""
-    import copy
     out = copy.deepcopy(raw)
     for key in _SENSITIVE_TOP_KEYS:
         if out.get(key):
@@ -113,7 +112,6 @@ def _encrypt_settings(raw: dict) -> dict:
 
 def _decrypt_settings(raw: dict) -> dict:
     """Return a deep copy of settings with sensitive fields decrypted into memory."""
-    import copy
     out = copy.deepcopy(raw)
     for key in _SENSITIVE_TOP_KEYS:
         if out.get(key):
