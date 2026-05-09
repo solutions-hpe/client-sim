@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import configparser
 import contextlib
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -180,6 +182,17 @@ def _save_settings() -> None:
 # ── State snapshot cache (JSON file, no DB) ──────────────────────────────────
 _state_cache_last_save: float = 0.0
 STATE_CACHE_MIN_INTERVAL = 10.0  # max one write per 10 s
+
+# WS delta: skip proxmox broadcast when payload hasn't changed
+_last_proxmox_hash: str = ""
+
+# INI cache: avoid re-parsing simulation.conf + client-setup.conf on every request
+_sim_conf_cache: dict[str, Any] = {
+    "sim_mtime": -1.0,
+    "client_mtime": -1.0,
+    "simulations": {},
+    "site_based_num": 2,
+}
 
 
 def _save_state_cache(force: bool = False) -> None:
@@ -1640,8 +1653,14 @@ def _proxmox_status_payload() -> dict[str, Any]:
 
 
 async def _broadcast_proxmox_state() -> None:
+    global _last_proxmox_hash
     _save_state_cache()
-    await broadcast({"type": "proxmox_update", **_proxmox_status_payload()})
+    payload = _proxmox_status_payload()
+    h = hashlib.md5(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    if h == _last_proxmox_hash:
+        return
+    _last_proxmox_hash = h
+    await broadcast({"type": "proxmox_update", **payload})
 
 
 async def _broadcast_reclone_state() -> None:
@@ -3237,77 +3256,90 @@ async def api_simulations() -> dict[str, Any]:
     for VMID→username mappings. Matches configured clients against live heartbeats
     and looks up Central alert status per simulation wsite + central_check.
     """
-    import configparser  # already available; re-import is safe inside function
-
     sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
     client_conf_path = REPO_DIR / "proxmox" / "client-setup.conf"
 
-    simulations: dict[str, dict[str, Any]] = {}
-    site_based_num = 2
+    sim_mtime = sim_conf_path.stat().st_mtime if sim_conf_path.exists() else -1.0
+    client_mtime = client_conf_path.stat().st_mtime if client_conf_path.exists() else -1.0
 
-    # ── Parse simulation.conf ─────────────────────────────────────
-    if sim_conf_path.exists():
-        try:
-            parser = configparser.ConfigParser()
-            parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
-            site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
+    if (sim_mtime == _sim_conf_cache["sim_mtime"] and
+            client_mtime == _sim_conf_cache["client_mtime"]):
+        simulations: dict[str, dict[str, Any]] = copy.deepcopy(_sim_conf_cache["simulations"])
+        site_based_num: int = _sim_conf_cache["site_based_num"]
+    else:
+        simulations = {}
+        site_based_num = 2
 
-            _SIM_TEST_KEYS = [
-                "dns_fail", "assoc_fail", "dhcp_fail", "port_flap",
-                "iperf", "www_traffic", "download", "ping_test",
-            ]
-            sim_section_re = re.compile(r"^s\d$")
-            for section in parser.sections():
-                if not sim_section_re.match(section):
-                    continue
-                simulations[section] = {
-                    "id": section,
-                    "wsite": parser.get(section, "wsite", fallback=""),
-                    "central_check": parser.get(section, "central_check", fallback="").strip(),
-                    "tests": {
-                        k: parser.get(section, k, fallback="off").strip().lower() == "on"
-                        for k in _SIM_TEST_KEYS
-                    },
-                    "configured_clients": [],
-                    "active_client_count": 0,
-                    "central_pass_fail": None,  # None = not configured
-                }
-        except Exception as exc:
-            logger.warning("api_simulations: could not parse simulation.conf: %s", exc)
+        # ── Parse simulation.conf ─────────────────────────────────────
+        if sim_conf_path.exists():
+            try:
+                parser = configparser.ConfigParser()
+                parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
+                site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
 
-    # ── Parse client-setup.conf — build VMID→hostname mapping ────
-    if client_conf_path.exists():
-        try:
-            client_parser = configparser.ConfigParser()
-            client_parser.read_string(client_conf_path.read_text(encoding="utf-8"))
+                _SIM_TEST_KEYS = [
+                    "dns_fail", "assoc_fail", "dhcp_fail", "port_flap",
+                    "iperf", "www_traffic", "download", "ping_test",
+                ]
+                sim_section_re = re.compile(r"^s\d$")
+                for section in parser.sections():
+                    if not sim_section_re.match(section):
+                        continue
+                    simulations[section] = {
+                        "id": section,
+                        "wsite": parser.get(section, "wsite", fallback=""),
+                        "central_check": parser.get(section, "central_check", fallback="").strip(),
+                        "tests": {
+                            k: parser.get(section, k, fallback="off").strip().lower() == "on"
+                            for k in _SIM_TEST_KEYS
+                        },
+                        "configured_clients": [],
+                        "active_client_count": 0,
+                        "central_pass_fail": None,
+                    }
+            except Exception as exc:
+                logger.warning("api_simulations: could not parse simulation.conf: %s", exc)
 
-            vmid_section_re = re.compile(r"^c(\d+)$")
-            for section in client_parser.sections():
-                m = vmid_section_re.match(section)
-                if not m:
-                    continue
-                vmid_str = m.group(1)
-                vmid = int(vmid_str)
-                vm_name = client_parser.get(section, "vm_name", fallback="").strip()
-                if not vm_name:
-                    continue
+        # ── Parse client-setup.conf — build VMID→hostname mapping ────
+        if client_conf_path.exists():
+            try:
+                client_parser = configparser.ConfigParser()
+                client_parser.read_string(client_conf_path.read_text(encoding="utf-8"))
 
-                # Extract the Nth-from-last digit (same math as startup.sh)
-                digit_idx = -(site_based_num)
-                digit = vmid_str[digit_idx] if len(vmid_str) >= site_based_num else vmid_str[-1]
-                sim_id = f"s{digit}"
+                vmid_section_re = re.compile(r"^c(\d+)$")
+                for section in client_parser.sections():
+                    m = vmid_section_re.match(section)
+                    if not m:
+                        continue
+                    vmid_str = m.group(1)
+                    vmid = int(vmid_str)
+                    vm_name = client_parser.get(section, "vm_name", fallback="").strip()
+                    if not vm_name:
+                        continue
 
-                if sim_id in simulations:
-                    simulations[sim_id]["configured_clients"].append({
-                        "hostname": f"{vm_name}-{vmid}",
-                        "vmid": vmid,
-                        "username": vm_name,
-                        "reporting": False,
-                        "online": False,
-                        "last_seen": None,
-                    })
-        except Exception as exc:
-            logger.warning("api_simulations: could not parse client-setup.conf: %s", exc)
+                    # Extract the Nth-from-last digit (same math as startup.sh)
+                    digit_idx = -(site_based_num)
+                    digit = vmid_str[digit_idx] if len(vmid_str) >= site_based_num else vmid_str[-1]
+                    sim_id = f"s{digit}"
+
+                    if sim_id in simulations:
+                        simulations[sim_id]["configured_clients"].append({
+                            "hostname": f"{vm_name}-{vmid}",
+                            "vmid": vmid,
+                            "username": vm_name,
+                            "reporting": False,
+                            "online": False,
+                            "last_seen": None,
+                        })
+            except Exception as exc:
+                logger.warning("api_simulations: could not parse client-setup.conf: %s", exc)
+
+        _sim_conf_cache.update({
+            "sim_mtime": sim_mtime,
+            "client_mtime": client_mtime,
+            "simulations": copy.deepcopy(simulations),
+            "site_based_num": site_based_num,
+        })
 
     # ── Match active clients + compute Central PASS/FAIL ─────────
     async with state_lock:
