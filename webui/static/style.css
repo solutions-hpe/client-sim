@@ -696,8 +696,10 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
-  padding: 6px 32px;
+  background: none;
   border-bottom: 1px solid var(--border);
+  border-right: none;
+  padding: 6px 32px;
 }
 
 .data-table td {
