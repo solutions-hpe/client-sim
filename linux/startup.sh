@@ -119,6 +119,14 @@ fi
 #------------------------------------------------------------
 #Scheduling Reboot
 #------------------------------------------------------------
+reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
+# Guard: an empty, zero, or non-numeric reboot_schedule would produce
+# "shutdown -r +0" which reboots immediately — often mid update.sh.
+# Default to 300 minutes (5 hours) if the value is missing or too small.
+if [[ -z "$reboot_schedule" || ! "$reboot_schedule" =~ ^[0-9]+$ || "$reboot_schedule" -lt 60 ]]; then
+    echo "WARNING: reboot_schedule='$reboot_schedule' is missing or too small — defaulting to 300 minutes" | tee -a "$debug"
+    reboot_schedule=300
+fi
 rn=$(($reboot_schedule + RANDOM % 600))
 echo Scheduling reboot in $rn minutes | tee -a "$debug"
 shutdown -r +$rn

@@ -48,13 +48,23 @@ for c in cmds:
       message="Simulation restarted"
       ;;
     reboot)
-      message="Rebooting"
-      curl -sS --max-time 5 -X POST "$server_url/api/inbox/ack" \
-        -H "Content-Type: application/json" \
-        -d "{\"id\":\"$cmd_id\",\"status\":\"completed\",\"message\":\"Rebooting now\"}" \
-        >/dev/null 2>&1
-      sudo reboot
-      exit 0
+      # Early-boot guard: if simulation.sh isn't running yet we are still in the
+      # startup phase (called from update.sh before simulation starts). Executing a
+      # reboot here would cause a boot loop if a stale command slipped through.
+      # Once simulation.sh is running it is safe to honour a reboot command.
+      if ! pgrep -f '[/]simulation.sh' >/dev/null 2>&1; then
+        echo "Early-boot guard: skipping reboot command — simulation not yet running" | tee -a "$debug"
+        status="completed"
+        message="Skipped — early-boot protection (simulation not running)"
+      else
+        message="Rebooting"
+        curl -sS --max-time 5 -X POST "$server_url/api/inbox/ack" \
+          -H "Content-Type: application/json" \
+          -d "{\"id\":\"$cmd_id\",\"status\":\"completed\",\"message\":\"Rebooting now\"}" \
+          >/dev/null 2>&1
+        sudo reboot
+        exit 0
+      fi
       ;;
     update_now)
       bash /usr/local/scripts/update.sh

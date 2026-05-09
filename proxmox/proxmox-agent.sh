@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.73"
+AGENT_VERSION="1.74"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -541,6 +541,10 @@ _destroy_vm_qm_only() {
 # State file updates are handled by the parent after all jobs complete.
 _reclone_parallel_job() {
     local vmid="$1" bus_path="$2" product_name="$3" saved_image="$4" device_type="$5"
+    local _vm_name
+    _vm_name=$(get_vm_name "$vmid")
+    # Expire stale client inbox commands before destroying so the new VM doesn't inherit them
+    curl_api DELETE "/api/commands/pending?target=${_vm_name}-${vmid}" "" >/dev/null 2>&1 || true
     _destroy_vm_qm_only "$vmid"
     if clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"; then
         log "Parallel reclone done: VM $vmid bus=$bus_path type=$device_type image=$saved_image"
@@ -591,6 +595,15 @@ reclone_vm_instance() {
     fi
     # Save image number BEFORE destroy_vm — destroy_vm unsets STATE_VMID_TO_IMAGE[$vmid].
     local saved_image="${STATE_VMID_TO_IMAGE[$vmid]:-1}"
+
+    # Expire any pending client inbox commands for this VM's hostname BEFORE destroying
+    # it. Without this, commands (e.g. reboot) that the old VM never ACK'd remain as
+    # "pending" and will be delivered to the replacement VM with the same hostname,
+    # causing it to reboot immediately after calling home.
+    local _client_hostname
+    _client_hostname="${vm_name}-${vmid}"
+    curl_api DELETE "/api/commands/pending?target=${_client_hostname}" "" >/dev/null 2>&1 || true
+    log "Expired pending client commands for ${_client_hostname} before reclone"
 
     destroy_vm "$vmid"
     clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"

@@ -4557,6 +4557,28 @@ async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.delete("/api/commands/pending")
+async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
+    """Expire all pending commands for a given target hostname.
+
+    Called by the Proxmox agent just before destroying a VM so that the
+    replacement VM with the same hostname does not inherit stale commands
+    (e.g. a reboot command that was never ACK'd by the old VM).
+    """
+    count = 0
+    now = time.time()
+    async with state_lock:
+        for cmd in commands:
+            if cmd["target"] == target and cmd["status"] == "pending":
+                cmd["status"] = "expired"
+                cmd["updated_at"] = now
+                count += 1
+    if count:
+        logger.info("Expired %d pending command(s) for target %s before VM destroy", count, target)
+        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return {"expired": count}
+
+
 @app.delete("/api/commands/{cmd_id}")
 async def delete_command(cmd_id: str) -> dict[str, bool]:
     """Remove a command from history."""
