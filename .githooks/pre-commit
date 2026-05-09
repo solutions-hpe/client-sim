@@ -120,6 +120,15 @@ fi
 echo "[pre-commit] Syntax checks passed ✓"
 
 # ── Version bump ──────────────────────────────────────────────────────────────
+# Skip the bump if every staged change is a .conf file — conf changes are
+# propagated to clients independently via the API diff check in update.sh,
+# so they don't need a VERSION increment.
+
+staged_non_conf=$(git diff --cached --name-only --diff-filter=ACM | grep -v '\.conf$' || true)
+if [[ -z "$staged_non_conf" ]]; then
+    echo "[pre-commit] Only .conf files staged — skipping version bump"
+    exit 0
+fi
 
 current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
 if [[ -z "$current" ]]; then
