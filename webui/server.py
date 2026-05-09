@@ -2211,14 +2211,22 @@ def _update_ini_section(filepath: Path, section: str, updates: dict[str, str]) -
     filepath.write_text(output, encoding="utf-8")
 
 
-def _git(*args: str, cwd: Path | None = None) -> str:
-    """Run a git command, raise RuntimeError on failure."""
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd or REPO_DIR,
-        capture_output=True,
-        text=True,
-    )
+def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
+    """Run a git command, raise RuntimeError on failure.
+
+    timeout (default 120 s) prevents git clone/fetch from hanging indefinitely
+    when the network is slow or GitHub is temporarily unresponsive.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd or REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"git {' '.join(args)} timed out after {timeout}s")
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
@@ -2231,7 +2239,7 @@ def sync_repo_once() -> None:
     if not REPO_DIR.exists() or not any(REPO_DIR.iterdir()):
         logger.info("Cloning %s (%s) into %s", REPO_URL, branch, REPO_DIR)
         _git("clone", "--branch", branch, "--single-branch", REPO_URL, str(REPO_DIR),
-             cwd=REPO_DIR.parent)
+             cwd=REPO_DIR.parent, timeout=300)
         return
 
     if not (REPO_DIR / ".git").exists():
