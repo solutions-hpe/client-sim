@@ -1576,6 +1576,8 @@ function renderIgnoredHostnamesList() {
     ignoredHostnamesList.appendChild(badge);
   });
 }
+
+async function loadUsbConfig() {
   const data = await requestJson('/api/proxmox/usb-config');
   currentSettings.usb_vidpids = serializeJsonList(data.vidpids || []);
   currentSettings.usb_ignored_vidpids = serializeJsonList(data.ignored_vidpids || []);
