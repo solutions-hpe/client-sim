@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.82"
+AGENT_VERSION="0.83"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -356,15 +356,32 @@ clone_vm_for_usb() {
         sleep 2
     done
 
-    if [[ "$guest_ready" -eq 1 ]]; then
-        qm guest exec "$vmid" -- hostnamectl set-hostname "$full_name" >/dev/null 2>&1 || true
+    if [[ "$guest_ready" -eq 0 ]]; then
+        log "WARNING: Guest agent not ready for VM $vmid — will still attempt hostname set"
+    fi
+
+    # Always attempt hostname change (matches original clone.sh behaviour).
+    # Retry a few times in case the agent became ready just after the ping loop.
+    local hostname_set=0
+    for _ in $(seq 1 6); do
+        if qm guest exec "$vmid" -- hostnamectl set-hostname "$full_name" >/dev/null 2>&1; then
+            hostname_set=1
+            break
+        fi
+        sleep 5
+    done
+    if [[ "$hostname_set" -eq 1 ]]; then
+        log "Set hostname to $full_name on VM $vmid"
+    else
+        log "WARNING: Could not set hostname on VM $vmid (guest agent unavailable)"
+    fi
+
+    if [[ "$guest_ready" -eq 1 || "$hostname_set" -eq 1 ]]; then
         # Write the USB device physical-layer type so startup.sh uses the right sim_phy
         qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
             && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
             || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
         qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
-    else
-        log "WARNING: Guest agent not ready for VM $vmid"
     fi
 
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
