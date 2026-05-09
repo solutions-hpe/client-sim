@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.91"
+AGENT_VERSION="0.92"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -384,10 +384,19 @@ clone_vm_for_usb() {
         log "WARNING: Guest agent not ready after 120s for VM $vmid — attempting hostname set anyway"
     fi
 
-    # Set hostname — retry up to 6× with 5s gaps
+    # Set hostname — write /etc/hostname directly (survives reboot regardless of
+    # cloud-init) AND call hostnamectl for the running session. Also suppress
+    # cloud-init from resetting it on next boot.
     local hostname_set=0
     for _ in $(seq 1 6); do
-        if qm guest exec "$vmid" -- hostnamectl set-hostname "$full_name" >/dev/null 2>&1; then
+        if qm guest exec "$vmid" -- bash -c "
+            echo '${full_name}' > /etc/hostname &&
+            hostname '${full_name}' &&
+            hostnamectl set-hostname '${full_name}' 2>/dev/null || true &&
+            sed -i 's/^127\.0\.1\.1.*/127.0.1.1\t${full_name}/' /etc/hosts &&
+            mkdir -p /etc/cloud/cloud.cfg.d &&
+            echo 'preserve_hostname: true' > /etc/cloud/cloud.cfg.d/99_preserve_hostname.cfg
+        " >/dev/null 2>&1; then
             hostname_set=1
             break
         fi
@@ -470,8 +479,19 @@ reclone_vm_instance() {
 
     bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
     if [[ -z "$bus_path" ]]; then
-        log "WARNING: No tracked USB mapping found for VM $vmid"
-        return 1
+        # Fallback: recover bus_path from qm config (handles VMs created outside the agent)
+        local usb_line
+        usb_line=$(qm config "$vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ')
+        if [[ "$usb_line" =~ host=([^,[:space:]]+) ]]; then
+            bus_path="${BASH_REMATCH[1]}"
+            log "Recovered USB bus_path=$bus_path for VM $vmid from qm config"
+            STATE_VMID_TO_BUS[$vmid]="$bus_path"
+            STATE_BUS_TO_VMID[$bus_path]="$vmid"
+            save_state_file
+        else
+            log "WARNING: No USB mapping found for VM $vmid (state file and qm config both empty)"
+            return 1
+        fi
     fi
     if [[ ! -d "/sys/bus/usb/devices/$bus_path" ]]; then
         log "WARNING: USB device $bus_path is not present; cannot reclone VM $vmid"
