@@ -53,6 +53,8 @@ let centralStatusData = {};
 let centralWirelessClients = {};   // wsite → client count from Central API
 let hwAlertsData    = [];   // latest hardware_alerts array from WS
 let clientCountData = {};   // wsite → { site_name, current, hourly_avg, drop_pct, status, ts }
+let _hwRowsCache    = [];   // cached hw check rows for renderHwPanel
+let _ccRowsCache    = [];   // cached cc check rows for renderCcPanel
 let availableChecks = { alerts: [], insights: [] };
 let currentSettings = {
   repo_url: '',
@@ -102,6 +104,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     if (tab.dataset.tab === 'setup') activateSetupSubtab('setup-github');
     if (tab.dataset.tab === 'server') { activateServerSubtab('server-node'); loadProxmoxApproved().catch(() => {}); }
     if (tab.dataset.tab === 'central') { activateCentralSubtab('central-sites-panel'); }
+    if (tab.dataset.tab === 'simulations') { activateSimTopTab('simtop-checks'); }
     resetTabDrilldowns(tab.dataset.tab);
   });
 });
@@ -119,8 +122,12 @@ function resetTabDrilldowns(tabName) {
     if (simClientsPanel) simClientsPanel.classList.add('hidden');
     // HW alert detail
     if (hwDetailPanel) hwDetailPanel.classList.add('hidden');
+    const hwOverview = document.getElementById('hw-overview');
+    if (hwOverview) hwOverview.classList.remove('hidden');
     // Client count detail
     if (ccDetailPanel) ccDetailPanel.classList.add('hidden');
+    const ccOverview = document.getElementById('cc-overview');
+    if (ccOverview) ccOverview.classList.remove('hidden');
   }
 }
 
@@ -306,7 +313,7 @@ const centralTabButton = document.querySelector('.tab[data-tab="central"]');
 const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
-const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab)');
+const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab):not(.simtop-subtab)');
 const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-agents)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-table');
@@ -3094,6 +3101,27 @@ function connectWebSocket() {
   });
 }
 
+// ── Simulations top-level tabs ──────────────────────────────────────────
+const simTopPanels = ['simtop-checks', 'simtop-hardware', 'simtop-clients'];
+
+function activateSimTopTab(tabId = 'simtop-checks') {
+  document.querySelectorAll('.simtop-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.simtop === tabId);
+  });
+  simTopPanels.forEach((id) => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    panel.classList.toggle('active', id === tabId);
+    panel.classList.toggle('hidden', id !== tabId);
+  });
+  if (tabId === 'simtop-hardware') renderHwPanel();
+  if (tabId === 'simtop-clients') renderCcPanel();
+}
+
+document.querySelectorAll('.simtop-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => activateSimTopTab(btn.dataset.simtop));
+});
+
 // ── Simulations tab ───────────────────────────────────────────────
 const simChecksList   = document.getElementById('sim-checks-list');
 const simEmpty        = document.getElementById('sim-checks-empty');
@@ -3305,8 +3333,7 @@ function renderChecksList() {
     });
   }
   hwRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
-
-  const ccRows = [];
+  _hwRowsCache = hwRows;
   for (const [wsite, info] of Object.entries(clientCountData)) {
     const degraded = info.status === 'DEGRADED';
     const noData = info.status === 'NO_DATA';
@@ -3330,8 +3357,7 @@ function renderChecksList() {
     });
   }
   ccRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
-
-  const totalChecks = simRows.length + hwRows.length + ccRows.length;
+  _ccRowsCache = ccRows;
 
   // ── Monitored Central checks (alerts / insights from Settings) ────────────
   const monRows = [];
@@ -3372,10 +3398,18 @@ function renderChecksList() {
   }
   monRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 
-  // Assign each row to a tab and update tab count badges
-  const allRowsFlat = [...simRows, ...hwRows, ...ccRows, ...monRows];
+  // Tab count badges reflect only Checks-tab rows (SIM + MON)
+  const allRowsFlat = [...simRows, ...monRows];
   let failCount = 0, funcCount = 0, warnCount = 0;
   for (const item of allRowsFlat) {
+    item.effectiveTab = getEffectiveTabForItem(item);
+    if (item.effectiveTab === 'failing') failCount++;
+    else if (item.effectiveTab === 'functional') funcCount++;
+    else warnCount++;
+  }
+  // Also include hw/cc in totals for the badge display
+  const allHwCc = [...hwRows, ...ccRows];
+  for (const item of allHwCc) {
     item.effectiveTab = getEffectiveTabForItem(item);
     if (item.effectiveTab === 'failing') failCount++;
     else if (item.effectiveTab === 'functional') funcCount++;
@@ -3389,8 +3423,7 @@ function renderChecksList() {
   if (elWarn) elWarn.textContent = warnCount;
 
   const tabTotal = activeSimTab === 'failing' ? failCount : activeSimTab === 'functional' ? funcCount : warnCount;
-  const totalChecksAll = simRows.length + hwRows.length + ccRows.length + monRows.length;
-  if (countBadge) countBadge.textContent = `${tabTotal} of ${totalChecksAll} check${totalChecksAll !== 1 ? 's' : ''}`;
+  const totalChecksAll = simRows.length + hwRows.length + ccRows.length + monRows.length;  if (countBadge) countBadge.textContent = `${tabTotal} of ${totalChecksAll} check${totalChecksAll !== 1 ? 's' : ''}`;
 
   if (!totalChecksAll) {
     if (emptyEl) emptyEl.classList.remove('hidden');
@@ -3454,9 +3487,13 @@ function renderChecksList() {
   }
 
   appendSection('Simulation Checks', simRows);
-  appendSection('Hardware Alerts', hwRows);
-  appendSection('Client Count Monitoring', ccRows);
   appendSection('Monitored Central Checks', monRows);
+
+  // HW and CC rows live in their own top-level tabs — trigger re-render if visible
+  const hwPanel = document.getElementById('simtop-hardware');
+  if (hwPanel && !hwPanel.classList.contains('hidden')) renderHwPanel();
+  const ccPanel = document.getElementById('simtop-clients');
+  if (ccPanel && !ccPanel.classList.contains('hidden')) renderCcPanel();
 
   const visibleCount = list.querySelectorAll('.check-row').length;
   if (!visibleCount && emptyEl) {
@@ -3642,10 +3679,73 @@ function closeSimDetail() {
   if (simOverview) simOverview.classList.remove('hidden');
 }
 
+// ── Hardware panel renderer ───────────────────────────────────────────────
+function renderHwPanel() {
+  const container = document.getElementById('hw-checks-list');
+  if (!container) return;
+  container.textContent = '';
+  const rows = _hwRowsCache;
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'central-empty';
+    empty.textContent = 'No hardware alerts configured.';
+    container.appendChild(empty);
+    return;
+  }
+  for (const item of rows) {
+    const row = document.createElement('div');
+    row.className = 'check-row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.innerHTML = `
+      <span class="check-dot ${item.dotCls}"></span>
+      <span class="check-label">${item.label}</span>
+      <span class="check-badge ${item.badgeCls}">${item.badge}</span>
+      <span class="check-detail">${item.detail}</span>
+      <span class="check-ts">${item.ts ? new Date(item.ts * 1000).toLocaleTimeString() : ''}</span>
+    `;
+    row.addEventListener('click', item.onClick);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') item.onClick(); });
+    container.appendChild(row);
+  }
+}
+
+// ── Client Count panel renderer ───────────────────────────────────────────
+function renderCcPanel() {
+  const container = document.getElementById('cc-checks-list');
+  if (!container) return;
+  container.textContent = '';
+  const rows = _ccRowsCache;
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'central-empty';
+    empty.textContent = 'No client count data yet.';
+    container.appendChild(empty);
+    return;
+  }
+  for (const item of rows) {
+    const row = document.createElement('div');
+    row.className = 'check-row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.innerHTML = `
+      <span class="check-dot ${item.dotCls}"></span>
+      <span class="check-label">${item.label}</span>
+      <span class="check-badge ${item.badgeCls}">${item.badge}</span>
+      <span class="check-detail">${item.detail}</span>
+      <span class="check-ts">${item.ts ? new Date(item.ts * 1000).toLocaleTimeString() : ''}</span>
+    `;
+    row.addEventListener('click', item.onClick);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') item.onClick(); });
+    container.appendChild(row);
+  }
+}
+
 function openHwDetail(checkId) {
   const hw = hwAlertsData.find((item) => item.id === checkId);
-  if (!hw || !hwDetailPanel || !simOverview) return;
-  simOverview.classList.add('hidden');
+  if (!hw || !hwDetailPanel) return;
+  const hwOverview = document.getElementById('hw-overview');
+  if (hwOverview) hwOverview.classList.add('hidden');
   hwDetailPanel.classList.remove('hidden');
 
   if (hwDetailTitle) hwDetailTitle.textContent = hw.name || hw.id;
@@ -3701,13 +3801,15 @@ function openHwDetail(checkId) {
 
 function closeHwDetail() {
   if (hwDetailPanel) hwDetailPanel.classList.add('hidden');
-  if (simOverview) simOverview.classList.remove('hidden');
+  const hwOverview = document.getElementById('hw-overview');
+  if (hwOverview) hwOverview.classList.remove('hidden');
 }
 
 function openCcDetail(wsite) {
   const info = clientCountData[wsite];
-  if (!info || !ccDetailPanel || !simOverview) return;
-  simOverview.classList.add('hidden');
+  if (!info || !ccDetailPanel) return;
+  const ccOverview = document.getElementById('cc-overview');
+  if (ccOverview) ccOverview.classList.add('hidden');
   ccDetailPanel.classList.remove('hidden');
 
   if (ccDetailTitle) ccDetailTitle.textContent = info.site_name || wsite;
@@ -3740,7 +3842,8 @@ function openCcDetail(wsite) {
 
 function closeCcDetail() {
   if (ccDetailPanel) ccDetailPanel.classList.add('hidden');
-  if (simOverview) simOverview.classList.remove('hidden');
+  const ccOverview = document.getElementById('cc-overview');
+  if (ccOverview) ccOverview.classList.remove('hidden');
 }
 
 async function loadSimulations() {

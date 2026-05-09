@@ -232,82 +232,98 @@
 
   <!-- ── Simulations tab ── -->
   <main id="tab-simulations" class="page tab-content">
-    <div id="sim-overview">
-      <section class="central-toolbar">
-        <div>
-          <h2>Simulations</h2>
-          <div id="sim-last-refreshed" class="central-last-synced">Last refreshed: —</div>
+    <nav class="setup-subnav" role="tablist">
+      <button class="setup-subtab simtop-subtab active" data-simtop="simtop-checks" role="tab">Checks</button>
+      <button class="setup-subtab simtop-subtab" data-simtop="simtop-hardware" role="tab">Hardware</button>
+      <button class="setup-subtab simtop-subtab" data-simtop="simtop-clients" role="tab">Client Count</button>
+    </nav>
+
+    <!-- Checks sub-panel -->
+    <div id="simtop-checks" class="setup-subpanel">
+      <div id="sim-overview">
+        <section class="central-toolbar">
+          <div>
+            <div id="sim-last-refreshed" class="central-last-synced">Last refreshed: —</div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="sim-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
+          </div>
+        </section>
+        <nav class="setup-subnav" role="tablist">
+          <button class="setup-subtab sim-subtab active" data-simtab="failing" role="tab">🔴 Failing <span id="sim-tab-failing-count" class="badge-count">0</span></button>
+          <button class="setup-subtab sim-subtab" data-simtab="warning" role="tab">⚠ Warning <span id="sim-tab-warning-count" class="badge-count">0</span></button>
+          <button class="setup-subtab sim-subtab" data-simtab="functional" role="tab">🟢 Functional <span id="sim-tab-functional-count" class="badge-count">0</span></button>
+        </nav>
+        <div class="checks-toolbar">
+          <input id="checks-filter" class="checks-filter-input" type="text" placeholder="Filter checks…" spellcheck="false" />
+          <span id="checks-count" class="checks-count-badge">0 checks</span>
         </div>
-        <div class="toolbar-actions">
-          <button id="sim-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
+        <div id="sim-checks-list" class="sim-checks-list">
+          <div id="sim-checks-empty" class="central-empty hidden">No checks configured — sync simulation.conf and configure hardware alerts.</div>
         </div>
-      </section>
-      <nav class="setup-subnav" role="tablist">
-        <button class="setup-subtab sim-subtab active" data-simtab="failing" role="tab">🔴 Failing <span id="sim-tab-failing-count" class="badge-count">0</span></button>
-        <button class="setup-subtab sim-subtab" data-simtab="warning" role="tab">⚠ Warning <span id="sim-tab-warning-count" class="badge-count">0</span></button>
-        <button class="setup-subtab sim-subtab" data-simtab="functional" role="tab">🟢 Functional <span id="sim-tab-functional-count" class="badge-count">0</span></button>
-      </nav>
-      <div class="checks-toolbar">
-        <input id="checks-filter" class="checks-filter-input" type="text" placeholder="Filter checks…" spellcheck="false" />
-        <span id="checks-count" class="checks-count-badge">0 checks</span>
       </div>
-      <div id="sim-checks-list" class="sim-checks-list">
-        <div id="sim-checks-empty" class="central-empty hidden">No checks configured — sync simulation.conf and configure hardware alerts.</div>
+
+      <div id="sim-detail" class="central-detail-panel hidden">
+        <div class="central-detail-header">
+          <button id="sim-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+          <div>
+            <h2 id="sim-detail-title">Simulation Detail</h2>
+            <p id="sim-detail-sub" class="central-detail-sub">—</p>
+          </div>
+          <div id="sim-detail-badge" class="sim-status-badge sim-unknown">—</div>
+        </div>
+        <div id="sim-site-list" class="sim-site-list"></div>
+      </div>
+
+      <div id="sim-clients-panel" class="central-detail-panel hidden">
+        <div class="central-detail-header">
+          <button id="sim-clients-back" class="btn btn-secondary btn-small" type="button">← Sites</button>
+          <div>
+            <h2 id="sim-clients-title">Clients</h2>
+            <p id="sim-clients-sub" class="central-detail-sub">—</p>
+          </div>
+          <div id="sim-clients-central-badge" class="sim-status-badge sim-unknown hidden"></div>
+        </div>
+        <div id="sim-clients-list" class="sim-clients-list">
+          <div class="sim-clients-loading">Loading…</div>
+        </div>
       </div>
     </div>
 
-    <!-- Drill-down panel (hidden until a card is clicked) -->
-    <div id="sim-detail" class="central-detail-panel hidden">
-      <div class="central-detail-header">
-        <button id="sim-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
-        <div>
-          <h2 id="sim-detail-title">Simulation Detail</h2>
-          <p id="sim-detail-sub" class="central-detail-sub">—</p>
-        </div>
-        <div id="sim-detail-badge" class="sim-status-badge sim-unknown">—</div>
+    <!-- Hardware sub-panel -->
+    <div id="simtop-hardware" class="setup-subpanel hidden">
+      <div id="hw-overview">
+        <div id="hw-checks-list" class="sim-checks-list"></div>
       </div>
-      <div id="sim-site-list" class="sim-site-list"></div>
-    </div>
-
-    <!-- Client list panel (hidden until a site tile is clicked) -->
-    <div id="sim-clients-panel" class="central-detail-panel hidden">
-      <div class="central-detail-header">
-        <button id="sim-clients-back" class="btn btn-secondary btn-small" type="button">← Sites</button>
-        <div>
-          <h2 id="sim-clients-title">Clients</h2>
-          <p id="sim-clients-sub" class="central-detail-sub">—</p>
+      <div id="hw-detail" class="central-detail-panel hidden">
+        <div class="central-detail-header">
+          <button id="hw-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+          <div>
+            <h2 id="hw-detail-title">Hardware Alert</h2>
+            <p id="hw-detail-sub" class="central-detail-sub">—</p>
+          </div>
+          <div id="hw-detail-badge" class="sim-status-badge sim-unknown">—</div>
         </div>
-        <div id="sim-clients-central-badge" class="sim-status-badge sim-unknown hidden"></div>
-      </div>
-      <div id="sim-clients-list" class="sim-clients-list">
-        <div class="sim-clients-loading">Loading…</div>
+        <div id="hw-site-list" class="sim-site-list"></div>
       </div>
     </div>
 
-    <!-- Hardware alert drill-down panel -->
-    <div id="hw-detail" class="central-detail-panel hidden">
-      <div class="central-detail-header">
-        <button id="hw-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
-        <div>
-          <h2 id="hw-detail-title">Hardware Alert</h2>
-          <p id="hw-detail-sub" class="central-detail-sub">—</p>
-        </div>
-        <div id="hw-detail-badge" class="sim-status-badge sim-unknown">—</div>
+    <!-- Client Count sub-panel -->
+    <div id="simtop-clients" class="setup-subpanel hidden">
+      <div id="cc-overview">
+        <div id="cc-checks-list" class="sim-checks-list"></div>
       </div>
-      <div id="hw-site-list" class="sim-site-list"></div>
-    </div>
-
-    <!-- Client count drill-down panel -->
-    <div id="cc-detail" class="central-detail-panel hidden">
-      <div class="central-detail-header">
-        <button id="cc-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
-        <div>
-          <h2 id="cc-detail-title">Client Count Monitor</h2>
-          <p id="cc-detail-sub" class="central-detail-sub">—</p>
+      <div id="cc-detail" class="central-detail-panel hidden">
+        <div class="central-detail-header">
+          <button id="cc-detail-back" class="btn btn-secondary btn-small" type="button">← Back</button>
+          <div>
+            <h2 id="cc-detail-title">Client Count Monitor</h2>
+            <p id="cc-detail-sub" class="central-detail-sub">—</p>
+          </div>
+          <div id="cc-detail-badge" class="sim-status-badge sim-unknown">—</div>
         </div>
-        <div id="cc-detail-badge" class="sim-status-badge sim-unknown">—</div>
+        <div id="cc-site-detail" class="sim-site-list"></div>
       </div>
-      <div id="cc-site-detail" class="sim-site-list"></div>
     </div>
   </main>
 
