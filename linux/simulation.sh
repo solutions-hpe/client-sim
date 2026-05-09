@@ -527,7 +527,7 @@ fi
 # call stack stays flat — see comment at the bottom.
 #------------------------------------------------------------
 echo "Kill Switch is $kill_switch (global: $gkill_switch)" | tee -a "$debug"
-if [ "$kill_switch" == "off" ] && [ "$gkill_switch" == "off" ]; then
+if [ "$kill_switch" != "on" ] && [ "$gkill_switch" != "on" ]; then
  for z in {1..100}; do
   #----------------------------------------------------------
   # Per-iteration gateway check — used by report_error() and to decide
