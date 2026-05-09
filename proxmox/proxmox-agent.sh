@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.01"
+AGENT_VERSION="1.02"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -681,22 +681,29 @@ execute_vm_command() {
             local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
             local tmp_file
             tmp_file=$(mktemp)
-            log "Checking for agent update from GitHub..."
+            log "Checking for agent update from GitHub (current: v${AGENT_VERSION})..."
             if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
                 rm -f "$tmp_file"
                 log "ERROR: Failed to download agent update"
                 return 1
             fi
-            local current_hash new_hash
+            # Validate downloaded script is valid bash before replacing
+            if ! bash -n "$tmp_file" 2>/dev/null; then
+                rm -f "$tmp_file"
+                log "ERROR: Downloaded agent script failed syntax check — aborting update"
+                return 1
+            fi
+            local current_hash new_hash new_version
             current_hash=$(sha256sum "$agent_script" 2>/dev/null | awk '{print $1}')
             new_hash=$(sha256sum "$tmp_file" | awk '{print $1}')
+            new_version=$(grep '^AGENT_VERSION=' "$tmp_file" | cut -d'"' -f2)
             if [[ "$current_hash" == "$new_hash" ]]; then
                 rm -f "$tmp_file"
-                log "Agent is already up to date"
+                log "Agent is already up to date (v${AGENT_VERSION})"
             else
                 chmod +x "$tmp_file"
                 mv "$tmp_file" "$agent_script"
-                log "Agent updated successfully — restarting in 5s..."
+                log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 5s..."
                 ( sleep 5 && systemctl restart client-sim-proxmox-agent ) &
             fi
             ;;
