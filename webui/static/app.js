@@ -1032,13 +1032,6 @@ function setCentralApiStatus(valid, tokenState) {
 function updateClientCount() {
   clientCount.textContent = `${clients.size} client${clients.size === 1 ? '' : 's'}`;
   if (emptyRow) emptyRow.style.display = clients.size > 0 ? 'none' : '';
-
-  const onlineCount = [...clients.values()].filter(c => c.online).length;
-  const offlineCount = clients.size - onlineCount;
-  const onlineEl = document.getElementById('clients-online-count');
-  const offlineEl = document.getElementById('clients-offline-count');
-  if (onlineEl) onlineEl.textContent = onlineCount;
-  if (offlineEl) offlineEl.textContent = offlineCount;
 }
 
 function createCell(className = '') {
