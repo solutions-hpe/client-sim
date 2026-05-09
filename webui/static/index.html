@@ -235,6 +235,11 @@
           <button id="sim-refresh-btn" class="btn btn-secondary btn-small" type="button">Refresh Now</button>
         </div>
       </section>
+      <nav class="setup-subnav" role="tablist">
+        <button class="setup-subtab sim-subtab active" data-simtab="failing" role="tab">🔴 Failing <span id="sim-tab-failing-count" class="badge-count">0</span></button>
+        <button class="setup-subtab sim-subtab" data-simtab="warning" role="tab">⚠ Warning <span id="sim-tab-warning-count" class="badge-count">0</span></button>
+        <button class="setup-subtab sim-subtab" data-simtab="functional" role="tab">🟢 Functional <span id="sim-tab-functional-count" class="badge-count">0</span></button>
+      </nav>
       <div class="checks-toolbar">
         <input id="checks-filter" class="checks-filter-input" type="text" placeholder="Filter checks…" spellcheck="false" />
         <span id="checks-count" class="checks-count-badge">0 checks</span>

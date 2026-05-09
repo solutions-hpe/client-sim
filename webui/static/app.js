@@ -158,6 +158,31 @@ function activateServerSubtab(subtabId = 'server-vms') {
   });
 }
 
+// ── Simulations sub-tabs ──────────────────────────────────────────
+let activeSimTab = 'failing';
+
+function activateSimSubtab(tabId) {
+  activeSimTab = tabId;
+  document.querySelectorAll('.sim-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.simtab === tabId);
+  });
+  renderChecksList();
+}
+
+/** Classify a check row into failing / functional / warning based on status + staleness */
+function getEffectiveTabForItem(item) {
+  const now = Date.now() / 1000;
+  let cls = item.dotCls;
+  if (item.ts) {
+    const ageMin = (now - item.ts) / 60;
+    if (ageMin > 60) cls = 'dot-err';       // stale >1 h → fail
+    else if (ageMin > 15) cls = 'dot-warn'; // stale 15–60 m → warning
+  }
+  if (cls === 'dot-err') return 'failing';
+  if (cls === 'dot-ok') return 'functional';
+  return 'warning'; // dot-warn, dot-unknown
+}
+
 // ── Repo sync status ──────────────────────────────────────────────
 let lastKnownSyncTime = null;   // preserve across "Syncing…" broadcasts that omit last_sync
 
@@ -258,7 +283,7 @@ const centralTabButton = document.querySelector('.tab[data-tab="central"]');
 const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
-const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab)');
+const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab)');
 const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-agents)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-grid');
@@ -3238,8 +3263,25 @@ function renderChecksList() {
   }
   monRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 
+  // Assign each row to a tab and update tab count badges
+  const allRowsFlat = [...simRows, ...hwRows, ...ccRows, ...monRows];
+  let failCount = 0, funcCount = 0, warnCount = 0;
+  for (const item of allRowsFlat) {
+    item.effectiveTab = getEffectiveTabForItem(item);
+    if (item.effectiveTab === 'failing') failCount++;
+    else if (item.effectiveTab === 'functional') funcCount++;
+    else warnCount++;
+  }
+  const elFail = document.getElementById('sim-tab-failing-count');
+  const elFunc = document.getElementById('sim-tab-functional-count');
+  const elWarn = document.getElementById('sim-tab-warning-count');
+  if (elFail) elFail.textContent = failCount;
+  if (elFunc) elFunc.textContent = funcCount;
+  if (elWarn) elWarn.textContent = warnCount;
+
+  const tabTotal = activeSimTab === 'failing' ? failCount : activeSimTab === 'functional' ? funcCount : warnCount;
   const totalChecksAll = simRows.length + hwRows.length + ccRows.length + monRows.length;
-  if (countBadge) countBadge.textContent = `${totalChecksAll} check${totalChecksAll !== 1 ? 's' : ''}`;
+  if (countBadge) countBadge.textContent = `${tabTotal} of ${totalChecksAll} check${totalChecksAll !== 1 ? 's' : ''}`;
 
   if (!totalChecksAll) {
     if (emptyEl) emptyEl.classList.remove('hidden');
@@ -3247,6 +3289,9 @@ function renderChecksList() {
   }
 
   function makeRow(item) {
+    // Filter by active sub-tab
+    if (item.effectiveTab !== activeSimTab) return null;
+
     const matchesFilter = !filterText
       || item.label.toLowerCase().includes(filterText)
       || item.detail.toLowerCase().includes(filterText);
@@ -3306,7 +3351,10 @@ function renderChecksList() {
 
   const visibleCount = list.querySelectorAll('.check-row').length;
   if (!visibleCount && emptyEl) {
-    emptyEl.textContent = 'No checks match the current filter.';
+    const tabLabel = activeSimTab === 'failing' ? 'failing' : activeSimTab === 'functional' ? 'functional' : 'warning';
+    emptyEl.textContent = filterText
+      ? `No ${tabLabel} checks match the current filter.`
+      : `No ${tabLabel} checks.`;
     emptyEl.classList.remove('hidden');
   }
 }
@@ -3686,6 +3734,10 @@ document.querySelectorAll('.config-subtab').forEach((btn) => {
 
 document.querySelectorAll('.server-subtab').forEach((btn) => {
   btn.addEventListener('click', () => activateServerSubtab(btn.dataset.subtab));
+});
+
+document.querySelectorAll('.sim-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => activateSimSubtab(btn.dataset.simtab));
 });
 
 if (setupSubtabButtons.length) {
