@@ -565,10 +565,12 @@ function renderServerTab(data) {
 
   const storagePills = document.getElementById('server-storage-pills');
   if (storagePills && Array.isArray(node.storage)) {
+    const networkTypes = new Set(['nfs', 'cifs', 'glusterfs', 'cephfs', 'rbd', 'iscsi', 'pbs']);
     storagePills.innerHTML = node.storage.map((s) => {
       const usedGB = ((Number(s.used) || 0) / 1024 / 1024 / 1024).toFixed(0);
       const totalGB = ((Number(s.total) || 0) / 1024 / 1024 / 1024).toFixed(0);
-      return `<span class="server-stat-pill" title="${s.name}">💿 ${s.name}: ${usedGB}/${totalGB}GB</span>`;
+      const icon = networkTypes.has(s.type) ? '🌐' : '🗄️';
+      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${usedGB}/${totalGB}GB</span>`;
     }).join('');
   }
 
