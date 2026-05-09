@@ -4,11 +4,11 @@ log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
 
 # Instance guard — prevent multiple concurrent startups from racing.
-# The lock is a directory (atomic mkdir). On boot any leftover lock is
-# stale (the previous session is gone), so we remove it first.
-# A stale lock would cause startup.sh to exit 0 → systemctl reboot loop.
-_LOCK_FILE="/usr/local/scripts/.startup.lock"
-rmdir "$_LOCK_FILE" 2>/dev/null || true   # clear any stale lock from last session
+# Lock lives in /run/ (tmpfs) which is cleared on every boot, so stale
+# locks from the previous session are physically impossible. This is safer
+# than a persistent-path lock + rmdir approach: even if exec bash replaces
+# this process (voiding the EXIT trap), the lock vanishes on the next reboot.
+_LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
     echo "$(date): startup.sh already running (lock held), exiting" >> "$debug"
     exit 0
@@ -120,8 +120,8 @@ fi
 #Scheduling Reboot
 #------------------------------------------------------------
 rn=$(($reboot_schedule + RANDOM % 600))
-echo Scheduling reboot $rn minutes | tee -a "$debug"
-shutdown -r $rn
+echo Scheduling reboot in $rn minutes | tee -a "$debug"
+shutdown -r +$rn
 #Making sure eth0 and wlan0 are online
 echo Bringing up all interfaces online | tee -a "$debug"
 #------------------------------------------------------------
