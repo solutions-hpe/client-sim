@@ -639,28 +639,6 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .config-subpanel.hidden { display: none; }
 
 /* ── Setup card ─────────────────────────────────────────────────── */
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 1px 6px rgba(0,0,0,0.08);
-  max-width: 680px;
-}
-
-.card-header {
-  padding: 28px 32px 0;
-}
-
-.card-title {
-  display: inline-block;
-  font-size: 1.1rem;
-  font-weight: 500;
-  color: var(--hpe-navy);
-}
-
-.card-body {
-  padding: 0 32px 28px;
-}
 
 .data-table {
   width: 100%;
