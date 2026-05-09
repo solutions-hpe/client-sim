@@ -4286,7 +4286,10 @@ async def poll_inbox(hostname: str) -> list[dict[str, Any]]:
         raise HTTPException(status_code=422, detail="hostname is required")
     pending = [
         c for c in commands
-        if c["status"] == "pending" and (c["target"] == hostname or c["target"] == "proxmox")
+        if c["status"] == "pending" and (
+            c["target"] == hostname or
+            (c["target"] == "proxmox" and hostname in approved_proxmox_agents)
+        )
     ]
     now = time.time()
     for cmd in pending:

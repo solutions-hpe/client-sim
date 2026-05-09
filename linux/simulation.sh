@@ -180,7 +180,6 @@ rn=$((1 + RANDOM % 60))
 rn_iperf_port=$((5201 + RANDOM % 10))
 rn_iperf_time=$((1 + RANDOM % 300))
 rn_ping_size=$((1 + RANDOM % 65000))
-rn_offline_time=$((1 + RANDOM % 14400))
 #Global Variable Export Disable
 set +a
 hostname=$HOSTNAME
@@ -699,7 +698,9 @@ if [ "$allow_offline" == "on" ]; then
   # network visibility tools. Going offline makes them look like real
   # user devices that leave the office or sleep. Duration is
   # rn_offline_time (random 1-14400 seconds = up to 4 hours).
+  # Re-rolled here each exec-restart for true variance.
   #------------------------------------------------------------
+  rn_offline_time=$((1 + RANDOM % 14400))
   echo "Bringing all interfaces down (allow_offline mode)" | tee -a "$debug"
   if [[ -n "${wladapter}" ]]; then sudo ip link set dev "$wladapter" down; fi
   ea_down

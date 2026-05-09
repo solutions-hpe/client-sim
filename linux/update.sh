@@ -67,7 +67,9 @@ copy_local_files() {
     fi
     # update.sh copied last — avoids bash re-read errors if this script is running
     [[ -f "$src_dir/update.sh" ]] && sudo cp "$src_dir/update.sh" /usr/local/scripts/update.sh
-    sudo chmod -R 777 /usr/local/scripts
+    sudo chmod 755 /usr/local/scripts
+    sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
+    sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
 }
 
 #------------------------------------------------------------
@@ -229,7 +231,9 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                 API_CACHE="/usr/local/scripts/.api-cache"
                 sudo mkdir -p "$API_CACHE"
                 sudo cp -r "$tmp_web"/. "$API_CACHE/"
-                sudo chmod -R 777 "$API_CACHE"
+                sudo chmod 755 "$API_CACHE"
+                sudo find "$API_CACHE" -type f -name "*.sh" -exec chmod 755 {} +
+                sudo find "$API_CACHE" -type f ! -name "*.sh" -exec chmod 644 {} +
                 echo "API cache updated at $API_CACHE" | tee -a "$debug"
                 # Also copy API files into the local git repo clone so that the
                 # GitHub fallback tier finds the latest version already in place
@@ -378,7 +382,9 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
 
             # update.sh copied last
             [[ -f "linux/update.sh" ]] && sudo cp linux/update.sh /usr/local/scripts/update.sh
-            sudo chmod -R 777 /usr/local/scripts
+            sudo chmod 755 /usr/local/scripts
+            sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
+            sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
             echo "GitHub sync succeeded" | tee -a "$debug" "$log"
             source_found=true
         fi
