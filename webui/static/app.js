@@ -826,8 +826,19 @@ function renderServerTab(data) {
     { action: 'delete_vm', label: '✕', title: 'Delete' },
   ];
 
+  // Build set of VMIDs actively being recloned so we can show yellow icon
+  const recloningVmids = new Set();
+  if ((latestRecloneState?.status === 'running')) {
+    if (latestRecloneState.current_vm != null) recloningVmids.add(Number(latestRecloneState.current_vm));
+    (latestRecloneState.log || []).forEach((e) => {
+      if (e.status === 'queued' || e.status === 'in_progress') recloningVmids.add(Number(e.vmid));
+    });
+  }
+
   regularVms.forEach((vm) => {
-    const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
+    const isRecloning = recloningVmids.has(Number(vm.vmid));
+    const statusDot = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
+    const statusLabel = isRecloning ? 'recloning…' : (vm.status || 'unknown');
     const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
     const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
     const actionBtns = VM_ACTIONS.map((a) =>
@@ -838,9 +849,10 @@ function renderServerTab(data) {
       : '';
 
     const tr = document.createElement('tr');
+    tr.dataset.vmid = vm.vmid;
     tr.innerHTML = `
       <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
-      <td>${statusDot} ${vm.status || 'unknown'}</td>
+      <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
       <td>${vm.vmid}</td>
       <td>${escHtml(vm.name || '—')}${recoveryBadge}</td>
       <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) : '—'}%</td>
@@ -1822,6 +1834,36 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
       </div>
     `).join('');
   }
+
+  updateVmRecloneIcons();
+}
+
+// Patch VM status icons in the server tab without a full re-render.
+// Called whenever reclone state changes (reclone_update WS message).
+function updateVmRecloneIcons() {
+  const state = latestRecloneState || {};
+  const tbody = document.getElementById('server-vm-tbody');
+  if (!tbody) return;
+
+  const recloningVmids = new Set();
+  if (state.status === 'running') {
+    if (state.current_vm != null) recloningVmids.add(Number(state.current_vm));
+    (state.log || []).forEach((e) => {
+      if (e.status === 'queued' || e.status === 'in_progress') recloningVmids.add(Number(e.vmid));
+    });
+  }
+
+  tbody.querySelectorAll('tr[data-vmid]').forEach((row) => {
+    const vmid = Number(row.dataset.vmid);
+    const cell = row.querySelector('.vm-status-cell');
+    if (!cell) return;
+    if (recloningVmids.has(vmid)) {
+      cell.textContent = '🟡 recloning…';
+    } else {
+      // Restore from data-status if available, else leave as-is
+      if (row.dataset.status) cell.textContent = row.dataset.status;
+    }
+  });
 }
 
 function formatCentralDate(value) {
