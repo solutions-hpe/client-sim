@@ -3434,6 +3434,7 @@ function renderChecksList() {
   }
   hwRows.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
   _hwRowsCache = hwRows;
+  const ccRows = [];
   for (const [wsite, info] of Object.entries(clientCountData)) {
     const degraded = info.status === 'DEGRADED';
     const noData = info.status === 'NO_DATA';

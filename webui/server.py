@@ -536,7 +536,11 @@ def _central_token_state() -> dict[str, str]:
         err = central_auth_error or "Authentication not yet attempted"
         return {"state": "auth_failed", "detail": err}
     if time.time() >= central_token.get("expires_at", 0):
-        return {"state": "token_expired", "detail": "Token has expired — will refresh on next poll"}
+        if central_auth_error:
+            return {"state": "auth_failed", "detail": central_auth_error}
+        if _can_refresh():
+            return {"state": "token_expired", "detail": "Token has expired — will refresh on next poll"}
+        return {"state": "token_expired", "detail": "Token has expired — re-enter a valid token in Setup tab"}
     return {"state": "connected", "detail": "Token valid"}
 
 
@@ -724,6 +728,7 @@ def _central_headers() -> dict[str, str]:
 
 async def central_token_manager() -> None:
     """Background task: keep token valid. Runs every 5 minutes."""
+    global central_auth_error
     async with httpx.AsyncClient() as client:
         while True:
             try:
@@ -740,6 +745,10 @@ async def central_token_manager() -> None:
                         ok, msg = await _refresh_central_token(client)
                         if not ok:
                             logger.warning("Central token refresh failed: %s", msg)
+                            central_auth_error = f"Token refresh failed: {msg}"
+                            central_token["access_token"] = None  # force re-fetch next cycle
+                        else:
+                            central_auth_error = None
                         await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()})
             except asyncio.CancelledError:
                 raise
@@ -1307,6 +1316,7 @@ proxmox_state: dict[str, Any] = {
     "usb_state": [],
     "present_usb": [],
     "agent_version": None,
+    "pve_version": None,
 }
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
@@ -2624,6 +2634,7 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["usb_state"] = body.get("usb_state", [])
     proxmox_state["present_usb"] = body.get("present_usb", [])
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
+    proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
 
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]

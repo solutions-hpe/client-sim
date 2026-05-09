@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.02"
+AGENT_VERSION="1.03"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -606,6 +606,11 @@ collect_telemetry() {
         }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
     fi
 
+    local pve_version=""
+    if command -v pveversion &>/dev/null; then
+        pve_version=$(pveversion 2>/dev/null | awk -F'/' 'NR==1{print $2}' || true)
+    fi
+
     vms_json="[]"
     if command -v qm &>/dev/null; then
         # Use pvesh to get template flag directly from Proxmox API (most reliable)
@@ -647,6 +652,7 @@ print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
     "storage": ${storage_json:-[]}
   },
   "agent_version": "${AGENT_VERSION}",
+  "pve_version": "${pve_version}",
   "vms": ${vms_json:-[]},
   "unknown_usb": ${UNKNOWN_USB_JSON:-[]},
   "usb_state": ${USB_STATE_JSON:-[]},
