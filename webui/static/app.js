@@ -382,7 +382,6 @@ function setRepoStatus(synced, error, lastSync, repoVersion) {
 const branchInput = document.getElementById('branch-input');
 const githubTokenInput = document.getElementById('github-token-input');
 const githubTokenStatus = document.getElementById('github-token-status');
-const saveBtn = document.getElementById('save-settings');
 const syncNowBtn = document.getElementById('sync-now-btn');
 const syncNowMsg = document.getElementById('sync-now-message');
 const settingsMsg = document.getElementById('settings-message');
@@ -432,12 +431,10 @@ const relayEnabledSelect = document.getElementById('relay-enabled-select');
 const relayIslandIdInput = document.getElementById('relay-island-id-input');
 const relayServerUrlInput = document.getElementById('relay-server-url-input');
 const relayApiKeyInput = document.getElementById('relay-api-key-input');
-const saveRelayBtn = document.getElementById('save-relay-btn');
 const relayMsg = document.getElementById('relay-message');
 
 // Notifications + sync interval
 const syncIntervalInput  = document.getElementById('sync-interval-input');
-const saveSyncIntervalBtn = document.getElementById('save-sync-interval-btn');
 const syncIntervalMsg    = document.getElementById('sync-interval-msg');
 const emailEnabledToggle = document.getElementById('email-enabled-toggle');
 const smtpHost           = document.getElementById('smtp-host');
@@ -446,12 +443,10 @@ const smtpUser           = document.getElementById('smtp-user');
 const smtpPassword       = document.getElementById('smtp-password');
 const smtpFrom           = document.getElementById('smtp-from');
 const smtpTo             = document.getElementById('smtp-to');
-const saveEmailBtn       = document.getElementById('save-email-btn');
 const testEmailBtn       = document.getElementById('test-email-btn');
 const emailNotifMsg      = document.getElementById('email-notif-msg');
 const teamsEnabledToggle = document.getElementById('teams-enabled-toggle');
 const teamsWebhookUrl    = document.getElementById('teams-webhook-url');
-const saveTeamsBtn       = document.getElementById('save-teams-btn');
 const testTeamsBtn       = document.getElementById('test-teams-btn');
 const teamsNotifMsg      = document.getElementById('teams-notif-msg');
 const usbAutoProvisionInput = document.getElementById('usb-auto-provision');
@@ -534,17 +529,14 @@ document.querySelectorAll('#central-api-version-control button').forEach((btn) =
 });
 const siteMappingsBody = document.getElementById('site-mappings-body');
 const addMappingBtn = document.getElementById('add-mapping-btn');
-const saveMappingsBtn = document.getElementById('save-mappings-btn');
 const centralMappingsMsg = document.getElementById('central-mappings-msg');
 const loadSitesBtn = document.getElementById('load-sites-btn');
 const sitesLoadStatus = document.getElementById('sites-load-status');
 const selectedChecksPreview = document.getElementById('selected-checks-preview');
 const loadChecksBtn = document.getElementById('central-load-checks-btn');
-const saveChecksBtn = document.getElementById('save-checks-btn');
 const availableChecksContainer = document.getElementById('available-checks-container');
 const centralChecksMsg = document.getElementById('central-checks-msg');
 const hwLoadAlertsBtn = document.getElementById('hw-load-alerts-btn');
-const hwSaveBtn = document.getElementById('hw-save-btn');
 const hwChecksContainer = document.getElementById('hw-checks-container');
 const hwChecksMsg = document.getElementById('hw-checks-msg');
 const hwChecksPreview = document.getElementById('hw-checks-preview');
@@ -1092,33 +1084,41 @@ function showSettingsMessage(text, isError) {
   }, 5000);
 }
 
-saveBtn.addEventListener('click', async () => {
-  const branch = branchInput.value.trim();
-  if (!branch) {
-    showSettingsMessage('Branch name cannot be empty.', true);
-    return;
-  }
-  const payload = { repo_branch: branch, ...collectUsbSettingsPayload() };
-  const githubToken = githubTokenInput?.value.trim() || '';
-  if (githubToken) payload.github_token = githubToken;
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving…';
-  try {
-    const data = await requestJson('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    showSettingsMessage(`Settings saved for branch "${data.settings.repo_branch}" — sync started.`, false);
-    applySettingsToUI(data.settings);
-    if (githubTokenInput) githubTokenInput.value = '';
-  } catch (err) {
-    showSettingsMessage(`Error: ${err.message}`, true);
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Save & Sync';
-  }
-});
+if (branchInput) {
+  branchInput.addEventListener('blur', async () => {
+    const branch = branchInput.value.trim();
+    if (!branch) return;
+    try {
+      const data = await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_branch: branch })
+      });
+      showSettingsMessage(`Branch set to "${data.settings.repo_branch}".`, false);
+      applySettingsToUI(data.settings);
+    } catch (err) {
+      showSettingsMessage(`Error: ${err.message}`, true);
+    }
+  });
+}
+
+if (githubTokenInput) {
+  githubTokenInput.addEventListener('blur', async () => {
+    const token = githubTokenInput.value.trim();
+    if (!token) return;
+    try {
+      await requestJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ github_token: token })
+      });
+      showSettingsMessage('GitHub token saved.', false);
+      githubTokenInput.value = '';
+    } catch (err) {
+      showSettingsMessage(`Error: ${err.message}`, true);
+    }
+  });
+}
 
 syncNowBtn.addEventListener('click', async () => {
   syncNowBtn.disabled = true;
@@ -2083,7 +2083,10 @@ function addMappingRow(wsite = '', centralSite = '') {
   removeBtn.type = 'button';
   removeBtn.className = 'btn btn-danger btn-small';
   removeBtn.textContent = 'Remove';
-  removeBtn.addEventListener('click', () => row.remove());
+  removeBtn.addEventListener('click', () => {
+    row.remove();
+    _autoSaveSiteMappings();
+  });
   removeCell.appendChild(removeBtn);
 
   row.appendChild(wsiteCell);
@@ -4342,36 +4345,33 @@ if (setupTabButton) {
   });
 }
 
-if (saveRelayBtn) {
-  saveRelayBtn.addEventListener('click', async () => {
-    const originalLabel = saveRelayBtn.textContent;
-    const payload = {
-      relay_enabled: relayEnabledSelect?.value || 'off',
-      relay_server_url: relayServerUrlInput?.value?.trim() || '',
-      relay_island_id: relayIslandIdInput?.value?.trim() || ''
-    };
-    const apiKey = relayApiKeyInput?.value?.trim();
-    if (apiKey) payload.relay_api_key = apiKey;
-    saveRelayBtn.disabled = true;
-    saveRelayBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      showInlineMessage(relayMsg, 'Relay settings saved.', false);
-      if (relayApiKeyInput) relayApiKeyInput.value = '';
-      await loadSettings();
-      await requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
-    } catch (error) {
-      showInlineMessage(relayMsg, `Error: ${error.message}`, true);
-    } finally {
-      saveRelayBtn.disabled = false;
-      saveRelayBtn.textContent = originalLabel;
-    }
-  });
+async function _autoSaveRelay() {
+  const payload = {
+    relay_enabled: relayEnabledSelect?.value || 'off',
+    relay_server_url: relayServerUrlInput?.value?.trim() || '',
+    relay_island_id: relayIslandIdInput?.value?.trim() || '',
+  };
+  const apiKey = relayApiKeyInput?.value?.trim();
+  if (apiKey) payload.relay_api_key = apiKey;
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    showInlineMessage(relayMsg, 'Relay settings saved.', false);
+    if (apiKey && relayApiKeyInput) relayApiKeyInput.value = '';
+    await loadSettings();
+    await requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
+  } catch (error) {
+    showInlineMessage(relayMsg, `Error: ${error.message}`, true);
+  }
 }
+
+if (relayEnabledSelect) relayEnabledSelect.addEventListener('change', _autoSaveRelay);
+[relayServerUrlInput, relayIslandIdInput, relayApiKeyInput].forEach((el) => {
+  if (el) el.addEventListener('blur', _autoSaveRelay);
+});
 
 if (addVidPidBtn) {
   addVidPidBtn.addEventListener('click', addVidPid);
@@ -4438,8 +4438,8 @@ async function _autoSaveVmMaintenance(msgEl) {
   }
 }
 
-// USB — change (checkbox) already handled via the existing usbAutoProvisionInput listener.
-// Number inputs: save on blur.
+// USB — save checkbox changes immediately; number inputs on blur.
+if (usbAutoProvisionInput) usbAutoProvisionInput.addEventListener('change', () => _autoSaveUsb(usbSettingsMsg));
 [usbMissingTimeoutInput, vmImage1TemplateIdInput, vmImage2TemplateIdInput, vmImage1PctInput].forEach((el) => {
   if (el) el.addEventListener('blur', () => _autoSaveUsb(usbSettingsMsg));
 });
@@ -4540,35 +4540,31 @@ if (addMappingBtn) {
   addMappingBtn.addEventListener('click', () => addMappingRow());
 }
 
-if (saveMappingsBtn) {
-  saveMappingsBtn.addEventListener('click', async () => {
-    const rows = siteMappingsBody ? [...siteMappingsBody.querySelectorAll('tr')] : [];
-    const siteMappings = {};
-    rows.forEach((row) => {
-      const cells = row.querySelectorAll('td');
-      const wsite = cells[0]?.querySelector('.mapping-val')?.value?.trim() || '';
-      const centralSite = cells[1]?.querySelector('.mapping-val')?.value?.trim() || '';
-      if (wsite && centralSite) siteMappings[wsite] = centralSite;
-    });
-    const originalLabel = saveMappingsBtn.textContent;
-    saveMappingsBtn.disabled = true;
-    saveMappingsBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_mappings: siteMappings })
-      });
-      applySettingsToUI({ site_mappings: siteMappings });
-      showInlineMessage(centralMappingsMsg, 'Site mappings saved.', false);
-      renderCentralOverview();
-    } catch (error) {
-      showInlineMessage(centralMappingsMsg, `Error: ${error.message}`, true, 7000);
-    } finally {
-      saveMappingsBtn.disabled = false;
-      saveMappingsBtn.textContent = originalLabel;
-    }
+async function _autoSaveSiteMappings() {
+  const rows = siteMappingsBody ? [...siteMappingsBody.querySelectorAll('tr')] : [];
+  const siteMappings = {};
+  rows.forEach((row) => {
+    const cells = row.querySelectorAll('td');
+    const wsite = cells[0]?.querySelector('.mapping-val')?.value?.trim() || '';
+    const centralSite = cells[1]?.querySelector('.mapping-val')?.value?.trim() || '';
+    if (wsite && centralSite) siteMappings[wsite] = centralSite;
   });
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_mappings: siteMappings })
+    });
+    applySettingsToUI({ site_mappings: siteMappings });
+    showInlineMessage(centralMappingsMsg, 'Site mappings saved.', false, 2000);
+    renderCentralOverview();
+  } catch (error) {
+    showInlineMessage(centralMappingsMsg, `Error: ${error.message}`, true, 7000);
+  }
+}
+
+if (siteMappingsBody) {
+  siteMappingsBody.addEventListener('change', _autoSaveSiteMappings);
 }
 
 if (loadChecksBtn) {
@@ -4600,39 +4596,33 @@ if (loadChecksBtn) {
   });
 }
 
-if (saveChecksBtn) {
-  saveChecksBtn.addEventListener('click', async () => {
-    const allInputs = availableChecksContainer
-      ? [...availableChecksContainer.querySelectorAll('input[type="checkbox"]')]
-      : [];
-    const checkedInputs = allInputs.filter((input) => input.checked);
-    const monitoredChecks = allInputs.length
-      ? checkedInputs.map((input) => ({
-          type: input.dataset.type,
-          id: input.dataset.id,
-          name: input.dataset.name || input.dataset.id
-        }))
-      : (currentSettings.monitored_checks || []);
-    const originalLabel = saveChecksBtn.textContent;
-    saveChecksBtn.disabled = true;
-    saveChecksBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ monitored_checks: monitoredChecks })
-      });
-      applySettingsToUI({ monitored_checks: monitoredChecks });
-      if ((availableChecks.alerts.length || availableChecks.insights.length) && availableChecksContainer) {
-        renderAvailableChecks();
-      }
-      showInlineMessage(centralChecksMsg, 'Monitored checks saved.', false);
-    } catch (error) {
-      showInlineMessage(centralChecksMsg, `Error: ${error.message}`, true, 7000);
-    } finally {
-      saveChecksBtn.disabled = false;
-      saveChecksBtn.textContent = originalLabel;
-    }
+async function _autoSaveMonitoredChecks() {
+  const allInputs = availableChecksContainer
+    ? [...availableChecksContainer.querySelectorAll('input[type="checkbox"]')]
+    : [];
+  const monitoredChecks = allInputs.length
+    ? allInputs.filter((cb) => cb.checked).map((cb) => ({
+        type: cb.dataset.type,
+        id: cb.dataset.id,
+        name: cb.dataset.name || cb.dataset.id
+      }))
+    : (currentSettings.monitored_checks || []);
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monitored_checks: monitoredChecks })
+    });
+    applySettingsToUI({ monitored_checks: monitoredChecks });
+    showInlineMessage(centralChecksMsg, 'Saved.', false, 1500);
+  } catch (error) {
+    showInlineMessage(centralChecksMsg, `Error: ${error.message}`, true, 7000);
+  }
+}
+
+if (availableChecksContainer) {
+  availableChecksContainer.addEventListener('change', (e) => {
+    if (e.target?.type === 'checkbox') _autoSaveMonitoredChecks();
   });
 }
 
@@ -4701,61 +4691,55 @@ if (hwLoadAlertsBtn) {
   });
 }
 
-if (hwSaveBtn) {
-  hwSaveBtn.addEventListener('click', async () => {
-    const allInputs = hwChecksContainer
-      ? [...hwChecksContainer.querySelectorAll('input[type="checkbox"]')]
-      : [];
-    const hardwareChecks = allInputs.length
-      ? allInputs.filter((cb) => cb.checked).map((cb) => ({
-          id: cb.dataset.id,
-          name: cb.dataset.name || cb.dataset.id,
-          device_type: cb.dataset.deviceType || ''
-        }))
-      : (currentSettings.hardware_checks || []);
-    hwSaveBtn.disabled = true;
-    hwSaveBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hardware_checks: hardwareChecks })
-      });
-      currentSettings.hardware_checks = hardwareChecks;
-      renderHwChecksPreview();
-      if (availableAlertTypes.length) renderHwChecksList();
-      showInlineMessage(hwChecksMsg, 'Hardware checks saved.', false);
-    } catch (err) {
-      showInlineMessage(hwChecksMsg, `Error: ${err.message}`, true, 7000);
-    } finally {
-      hwSaveBtn.disabled = false;
-      hwSaveBtn.textContent = 'Save Hardware Checks';
-    }
+async function _autoSaveHwChecks() {
+  const allInputs = hwChecksContainer
+    ? [...hwChecksContainer.querySelectorAll('input[type="checkbox"]')]
+    : [];
+  const hardwareChecks = allInputs.length
+    ? allInputs.filter((cb) => cb.checked).map((cb) => ({
+        id: cb.dataset.id,
+        name: cb.dataset.name || cb.dataset.id,
+        device_type: cb.dataset.deviceType || ''
+      }))
+    : (currentSettings.hardware_checks || []);
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hardware_checks: hardwareChecks })
+    });
+    currentSettings.hardware_checks = hardwareChecks;
+    renderHwChecksPreview();
+    if (availableAlertTypes.length) renderHwChecksList();
+    showInlineMessage(hwChecksMsg, 'Saved.', false, 1500);
+  } catch (err) {
+    showInlineMessage(hwChecksMsg, `Error: ${err.message}`, true, 7000);
+  }
+}
+
+if (hwChecksContainer) {
+  hwChecksContainer.addEventListener('change', (e) => {
+    if (e.target?.type === 'checkbox') _autoSaveHwChecks();
   });
 }
 
 // ── Sync interval ──────────────────────────────────────────────────────────
-if (saveSyncIntervalBtn) {
-  saveSyncIntervalBtn.addEventListener('click', async () => {
-    const val = parseInt(syncIntervalInput?.value, 10);
+if (syncIntervalInput) {
+  syncIntervalInput.addEventListener('blur', async () => {
+    const val = parseInt(syncIntervalInput.value, 10);
     if (!val || val < 60 || val > 86400) {
       showInlineMessage(syncIntervalMsg, 'Enter a value between 60 and 86400 seconds.', true);
       return;
     }
-    saveSyncIntervalBtn.disabled = true;
-    saveSyncIntervalBtn.textContent = 'Saving…';
     try {
       await requestJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo_sync_interval: val })
       });
-      showInlineMessage(syncIntervalMsg, `Sync interval set to ${val}s. Takes effect on next cycle.`, false);
+      showInlineMessage(syncIntervalMsg, `Sync interval set to ${val}s.`, false);
     } catch (err) {
       showInlineMessage(syncIntervalMsg, `Error: ${err.message}`, true);
-    } finally {
-      saveSyncIntervalBtn.disabled = false;
-      saveSyncIntervalBtn.textContent = 'Save';
     }
   });
 }
@@ -4773,28 +4757,25 @@ function collectEmailPayload() {
   };
 }
 
-if (saveEmailBtn) {
-  saveEmailBtn.addEventListener('click', async () => {
-    const payload = collectEmailPayload();
-    // Don't send blank password (keep existing)
-    if (!payload.smtp_password) delete payload.smtp_password;
-    saveEmailBtn.disabled = true;
-    saveEmailBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notifications: payload })
-      });
-      showInlineMessage(emailNotifMsg, 'Email settings saved.', false);
-    } catch (err) {
-      showInlineMessage(emailNotifMsg, `Error: ${err.message}`, true);
-    } finally {
-      saveEmailBtn.disabled = false;
-      saveEmailBtn.textContent = 'Save';
-    }
-  });
+async function _autoSaveEmail() {
+  const payload = collectEmailPayload();
+  if (!payload.smtp_password) delete payload.smtp_password;
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifications: payload })
+    });
+    showInlineMessage(emailNotifMsg, 'Saved.', false, 1500);
+  } catch (err) {
+    showInlineMessage(emailNotifMsg, `Error: ${err.message}`, true);
+  }
 }
+
+if (emailEnabledToggle) emailEnabledToggle.addEventListener('change', _autoSaveEmail);
+[smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, smtpTo].forEach((el) => {
+  if (el) el.addEventListener('blur', _autoSaveEmail);
+});
 
 if (testEmailBtn) {
   testEmailBtn.addEventListener('click', async () => {
@@ -4818,29 +4799,25 @@ if (testEmailBtn) {
 }
 
 // ── Teams webhook ──────────────────────────────────────────────────────────
-if (saveTeamsBtn) {
-  saveTeamsBtn.addEventListener('click', async () => {
-    const payload = {
-      teams_enabled:     teamsEnabledToggle?.checked ?? false,
-      teams_webhook_url: teamsWebhookUrl?.value.trim() || '',
-    };
-    saveTeamsBtn.disabled = true;
-    saveTeamsBtn.textContent = 'Saving…';
-    try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notifications: payload })
-      });
-      showInlineMessage(teamsNotifMsg, 'Teams settings saved.', false);
-    } catch (err) {
-      showInlineMessage(teamsNotifMsg, `Error: ${err.message}`, true);
-    } finally {
-      saveTeamsBtn.disabled = false;
-      saveTeamsBtn.textContent = 'Save';
-    }
-  });
+async function _autoSaveTeams() {
+  const payload = {
+    teams_enabled:     teamsEnabledToggle?.checked ?? false,
+    teams_webhook_url: teamsWebhookUrl?.value.trim() || '',
+  };
+  try {
+    await requestJson('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifications: payload })
+    });
+    showInlineMessage(teamsNotifMsg, 'Saved.', false, 1500);
+  } catch (err) {
+    showInlineMessage(teamsNotifMsg, `Error: ${err.message}`, true);
+  }
 }
+
+if (teamsEnabledToggle) teamsEnabledToggle.addEventListener('change', _autoSaveTeams);
+if (teamsWebhookUrl) teamsWebhookUrl.addEventListener('blur', _autoSaveTeams);
 
 if (testTeamsBtn) {
   testTeamsBtn.addEventListener('click', async () => {

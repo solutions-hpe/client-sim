@@ -639,6 +639,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 
 .data-table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
 }
 
@@ -658,6 +659,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .data-table td {
   padding: 10px 32px;
   border-bottom: 1px solid var(--border);
+  word-break: break-word;
 }
 
 .vm-row-template td {
@@ -765,7 +767,9 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .form-actions { padding-top: 4px; }
 .form-row { display:flex; gap:16px; flex-wrap:wrap; }
 .form-row .form-group { flex:1; }
-.settings-section { border:1px solid var(--border); border-radius:6px; padding:16px; background:#fafafa; }
+.settings-section { border:1px solid var(--border); border-radius:6px; padding:16px; background:#fafafa; overflow-x:auto; }
+.table-scroll { width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden; }
+.table-scroll .data-table { margin:0; width:max-content; min-width:100%; }
 .settings-section input,
 .settings-section select { border:1px solid var(--border); border-radius:3px; padding:9px 12px; font-family:inherit; font-size:0.9rem; color:var(--text); background:#fff; width:100%; }
 .settings-section input:focus,

@@ -327,10 +327,12 @@
             <h3>⚠️ Uncertified Devices Detected</h3>
             <p>These USB devices are connected but not in the certified list. Add or ignore them below.</p>
           </div>
-          <table class="data-table" id="unknown-usb-table">
-            <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
-            <tbody id="unknown-usb-tbody"></tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="data-table" id="unknown-usb-table">
+              <thead><tr><th>Device</th><th>VID:PID</th><th>Actions</th></tr></thead>
+              <tbody id="unknown-usb-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -370,20 +372,22 @@
           <button class="btn btn-secondary" id="cmd-clear-btn" type="button" style="margin-left:auto;">Clear History</button>
         </div>
         <div id="cmd-msg" class="form-msg" style="margin-bottom:6px;"></div>
-        <table class="data-table" id="cmd-table">
-          <thead>
-            <tr>
-              <th>Target</th>
-              <th>Action</th>
-              <th>Description</th>
-              <th>Status</th>
-              <th>Age</th>
-              <th>Message</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="cmd-tbody"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="data-table" id="cmd-table">
+            <thead>
+              <tr>
+                <th>Target</th>
+                <th>Action</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Age</th>
+                <th>Message</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="cmd-tbody"></tbody>
+          </table>
+        </div>
         <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
       </div>
     </div>
@@ -678,10 +682,7 @@
                 <span class="form-hint" id="github-token-status"></span>
               </div>
 
-              <div class="form-actions">
-                <button id="save-settings" class="btn btn-primary" type="button">Save &amp; Sync</button>
-                <button id="sync-now-btn" class="btn btn-secondary" type="button">⬇ Sync from GitHub Now</button>
-              </div>
+              <button id="sync-now-btn" class="btn btn-secondary" type="button">⬇ Sync from GitHub Now</button>
 
               <div id="sync-now-message" class="settings-message hidden" role="alert"></div>
 
@@ -724,9 +725,6 @@
                 <label class="form-label" for="sync-interval-input">Sync interval (seconds)</label>
                 <input id="sync-interval-input" class="form-input" type="number" min="60" max="86400" placeholder="300" style="width:120px;" />
                 <span class="form-hint" style="margin-left:.5rem;">Min 60 · Max 86400 (24 hr)</span>
-              </div>
-              <div class="form-actions">
-                <button id="save-sync-interval-btn" class="btn btn-primary" type="button">Save</button>
               </div>
               <div id="sync-interval-msg" class="settings-message hidden" role="alert"></div>
             </div>
@@ -797,6 +795,18 @@
 
           <!-- VM templates -->
           <div class="settings-section">
+            <div class="settings-section-title">Parallel Provisioning</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="reclone-concurrency">Max parallel operations</label>
+                <input id="reclone-concurrency" class="form-input" type="number" value="1" min="1" max="20"
+                       placeholder="1">
+                <span class="form-hint">Number of VMs to reclone or provision simultaneously. 1 = sequential (safe). Increase for faster fleet operations.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
             <div class="settings-section-title">VM Templates</div>
             <div class="form-row">
               <div class="form-group">
@@ -818,12 +828,14 @@
           <!-- Certified devices table -->
           <div class="settings-section">
             <div class="settings-section-title">Certified Devices</div>
-            <table class="data-table" id="usb-vidpid-table">
-              <thead>
-                <tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr>
-              </thead>
-              <tbody id="usb-vidpid-tbody"></tbody>
-            </table>
+            <div class="table-scroll">
+              <table class="data-table" id="usb-vidpid-table">
+                <thead>
+                  <tr><th>VID:PID</th><th>Type</th><th>Label</th><th></th></tr>
+                </thead>
+                <tbody id="usb-vidpid-tbody"></tbody>
+              </table>
+            </div>
             <div class="form-row" style="margin-top:8px;align-items:flex-end;">
               <div class="form-group" style="flex:1;">
                 <label class="form-label" for="new-vidpid">VID:PID</label>
@@ -924,18 +936,6 @@
             </div>
           </div>
 
-          <div class="settings-section">
-            <div class="settings-section-title">Parallel Provisioning</div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label" for="reclone-concurrency">Max parallel operations</label>
-                <input id="reclone-concurrency" class="form-input" type="number" value="1" min="1" max="20"
-                       placeholder="1">
-                <span class="form-hint">Number of VMs to reclone or provision simultaneously. 1 = sequential (safe). Increase for faster fleet operations.</span>
-              </div>
-            </div>
-          </div>
-
           <div id="vm-maintenance-message" class="settings-message hidden" role="alert"></div>
 
         </div>
@@ -977,9 +977,6 @@
                 </div>
               </div>
 
-              <div class="form-actions">
-                <button id="save-relay-btn" class="btn btn-primary" type="button">Save Relay Settings</button>
-              </div>
               <div id="relay-message" class="settings-message hidden" role="alert"></div>
 
               <div class="setup-status-grid" style="margin-top: 1rem;">
@@ -1080,7 +1077,7 @@
               </div>
 
               <div class="form-actions">
-                <button id="central-test-btn" class="btn btn-primary" type="button">Save &amp; Test Connection</button>
+                <button id="central-test-btn" class="btn btn-primary" type="button">Test Connection</button>
               </div>
 
               <div id="central-test-msg" class="settings-message hidden" role="alert"></div>
@@ -1112,7 +1109,6 @@
 
               <div class="form-actions">
                 <button id="add-mapping-btn" class="btn btn-secondary" type="button">+ Add Row</button>
-                <button id="save-mappings-btn" class="btn btn-primary" type="button">Save Mappings</button>
               </div>
 
               <div id="central-mappings-msg" class="settings-message hidden" role="alert"></div>
@@ -1129,7 +1125,6 @@
               <div id="selected-checks-preview" class="form-hint">No checks selected yet.</div>
               <div class="form-actions">
                 <button id="central-load-checks-btn" class="btn btn-secondary" type="button">Load Available Checks</button>
-                <button id="save-checks-btn" class="btn btn-primary" type="button">Save Monitored Checks</button>
               </div>
 
               <div id="available-checks-container"></div>
@@ -1146,7 +1141,6 @@
               <div id="hw-checks-preview" class="form-hint">No hardware checks selected yet.</div>
               <div class="form-actions">
                 <button id="hw-load-alerts-btn" class="btn btn-secondary" type="button">Load Available Alert Types</button>
-                <button id="hw-save-btn" class="btn btn-primary" type="button">Save Hardware Checks</button>
               </div>
               <div id="hw-checks-container"></div>
               <div id="hw-checks-msg" class="settings-message hidden" role="alert"></div>
@@ -1192,10 +1186,7 @@
                 <label class="form-label" for="smtp-to">To (comma-separated)</label>
                 <input id="smtp-to" class="form-input" type="text" placeholder="ops@example.com, noc@example.com" />
               </div>
-              <div class="form-actions">
-                <button id="save-email-btn" class="btn btn-primary" type="button">Save</button>
-                <button id="test-email-btn" class="btn btn-secondary" type="button">Send Test</button>
-              </div>
+              <button id="test-email-btn" class="btn btn-secondary" type="button">Send Test</button>
               <div id="email-notif-msg" class="settings-message hidden" role="alert"></div>
             </div>
           </div>
@@ -1217,10 +1208,7 @@
                 <label class="form-label" for="teams-webhook-url">Webhook URL</label>
                 <input id="teams-webhook-url" class="form-input" type="url" placeholder="https://outlook.office.com/webhook/..." />
               </div>
-              <div class="form-actions">
-                <button id="save-teams-btn" class="btn btn-primary" type="button">Save</button>
-                <button id="test-teams-btn" class="btn btn-secondary" type="button">Send Test</button>
-              </div>
+              <button id="test-teams-btn" class="btn btn-secondary" type="button">Send Test</button>
               <div id="teams-notif-msg" class="settings-message hidden" role="alert"></div>
             </div>
           </div>
