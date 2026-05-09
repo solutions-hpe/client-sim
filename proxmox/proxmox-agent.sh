@@ -5,15 +5,19 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.57"
+AGENT_VERSION="1.58"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-60}"
+TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-10}"
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
+USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
+USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
+USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -21,7 +25,7 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     exit 1
 fi
 echo $$ > "$PIDFILE"
-trap 'rm -f "$PIDFILE"' EXIT
+trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; true' EXIT
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
@@ -371,6 +375,10 @@ build_usb_state_json() {
     else
         PRESENT_USB_JSON="[]"
     fi
+    # Persist to cache files so the background telemetry sender can read them
+    echo "$USB_STATE_JSON"  > "$USB_STATE_CACHE"
+    echo "$PRESENT_USB_JSON" > "$USB_PRESENT_CACHE"
+    echo "$UNKNOWN_USB_JSON" > "$USB_UNKNOWN_CACHE"
 }
 
 clone_vm_for_usb() {
@@ -843,9 +851,9 @@ print(json.dumps(out))
   "agent_version": "${AGENT_VERSION}",
   "pve_version": "${pve_version}",
   "vms": ${vms_json:-[]},
-  "unknown_usb": ${UNKNOWN_USB_JSON:-[]},
-  "usb_state": ${USB_STATE_JSON:-[]},
-  "present_usb": ${PRESENT_USB_JSON:-[]},
+  "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
+  "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
+  "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
   "log_lines": $(collect_log_lines)
 }
 JSON
@@ -915,6 +923,27 @@ fi
 ensure_state_file
 refresh_usb_telemetry_only || true
 
+# Helper: collect and POST telemetry immediately
+post_telemetry() {
+    local telem
+    telem=$(collect_telemetry 2>/dev/null) || return 0
+    curl_api POST /api/proxmox/telemetry "$telem" >/dev/null 2>&1 || true
+}
+
+# Background real-time telemetry sender (every TELEMETRY_INTERVAL seconds)
+# Runs as a subprocess — reads node/VM stats fresh and USB state from cache files
+(
+    while true; do
+        sleep "$TELEMETRY_INTERVAL"
+        telem=$(collect_telemetry 2>/dev/null) || continue
+        curl_api POST /api/proxmox/telemetry "$telem" >/dev/null 2>&1 || true
+    done
+) &
+TELEMETRY_PID=$!
+log "Background telemetry sender started (PID $TELEMETRY_PID, interval ${TELEMETRY_INTERVAL}s)"
+
+post_telemetry || true
+
 while true; do
     refresh_usb_config || true
     if [[ "$AUTO_PROVISION" == "on" ]]; then
@@ -923,10 +952,8 @@ while true; do
         refresh_usb_telemetry_only || true
     fi
 
-    telemetry=$(collect_telemetry)
-    curl_api POST /api/proxmox/telemetry "$telemetry" >/dev/null 2>&1 \
-        && log "Telemetry sent" \
-        || log "WARNING: telemetry POST failed"
+    # Post telemetry after USB scan (has fresh USB state in this process)
+    post_telemetry
 
     response=$(curl_api GET "/api/inbox?hostname=$h" "" 2>/dev/null || echo "[]")
     if [[ -n "$response" && "$response" != "[]" ]]; then
@@ -979,6 +1006,7 @@ PY
             fi
             curl_api POST /api/inbox/ack "{\"id\":\"${_seq_ids[$_si]}\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
             log "ACK: ${_seq_ids[$_si]} status=$status"
+            post_telemetry  # reflect VM state change immediately
         done
 
         if [[ ${#_rc_vmids[@]} -gt 0 ]]; then
