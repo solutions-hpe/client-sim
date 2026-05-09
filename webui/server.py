@@ -1640,7 +1640,12 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             return
 
         vms = sorted(
-            [dict(vm) for vm in proxmox_state.get("vms", []) if vm.get("vmid") is not None],
+            [
+                dict(vm) for vm in proxmox_state.get("vms", [])
+                if vm.get("vmid") is not None
+                and int(vm.get("vmid", 0)) > 9000        # only automation-provisioned VMs
+                and not vm.get("is_template")             # skip templates
+            ],
             key=lambda vm: int(vm.get("vmid", 0)),
         )
         reclone_state.update({
@@ -1723,6 +1728,8 @@ async def auto_recovery_check() -> None:
         for vm in list(proxmox_state.get("vms", [])):
             vmid = vm.get("vmid")
             if vmid is None:
+                continue
+            if int(vmid) <= 9000 or vm.get("is_template"):
                 continue
             last_seen = _parse_ts(vm.get("last_seen"))
             if last_seen is None or (now - last_seen) <= timeout_hours * 3600:
