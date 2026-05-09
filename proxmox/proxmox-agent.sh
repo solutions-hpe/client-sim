@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.56"
+AGENT_VERSION="1.57"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -760,17 +760,26 @@ collect_telemetry() {
     fi
 
     vms_json="[]"
-    if command -v qm &>/dev/null; then
-        if command -v pvesh &>/dev/null; then
-            # pvesh returns: cpu (0.0-1.0 fraction), mem (bytes), maxmem (bytes)
-            # Normalise: cpu → percent, mem/maxmem → MB so the WebUI receives
-            # consistent units regardless of Proxmox version.
-            vms_json=$(pvesh get /nodes/$(hostname)/qemu --output-format json 2>/dev/null \
-                | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
+    if command -v pvesh &>/dev/null; then
+        # pvesh returns: cpu (0.0-1.0 fraction), mem (bytes), maxmem (bytes)
+        # Normalise: cpu → percent, mem/maxmem → MB. Merge QEMU VMs + LXC containers.
+        vms_json=$(python3 -c "
+import json, subprocess, sys
+
+def fetch(path):
+    try:
+        r = subprocess.run(['pvesh','get',path,'--output-format','json'],
+                           capture_output=True, text=True, timeout=15)
+        return json.loads(r.stdout) if r.returncode == 0 else []
+    except Exception:
+        return []
+
+node = subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip()
+qemu = fetch(f'/nodes/{node}/qemu')
+lxc  = fetch(f'/nodes/{node}/lxc')
+
 out = []
-for v in data:
+for v in qemu:
     out.append({
         'vmid':        v.get('vmid'),
         'name':        v.get('name', ''),
@@ -779,28 +788,47 @@ for v in data:
         'mem':         round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':      round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template': bool(v.get('template', 0)),
+        'type':        'qemu',
+    })
+for v in lxc:
+    out.append({
+        'vmid':        v.get('vmid'),
+        'name':        v.get('name', ''),
+        'status':      v.get('status', 'unknown'),
+        'cpu':         round(float(v.get('cpu') or 0) * 100, 1),
+        'mem':         round(int(v.get('mem') or 0) / 1024 / 1024),
+        'maxmem':      round(int(v.get('maxmem') or 0) / 1024 / 1024),
+        'is_template': False,
+        'type':        'lxc',
     })
 print(json.dumps(out))
 " 2>/dev/null || echo "[]")
-        fi
+    fi
 
-        # Fallback: qm list (no CPU stats; maxmem unavailable — uses configured MEM)
-        if [[ "$vms_json" == "[]" ]]; then
-            local tmpl_ids=""
-            for conf in /etc/pve/qemu-server/*.conf; do
-                [[ -f "$conf" ]] || continue
-                grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
-            done
-            tmpl_ids="${tmpl_ids%,}"
-            vms_json=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
-                n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
-            }
-            NR>1 {
-                is_tmpl = ($1 in tmpl_set) ? "true" : "false"
-                printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":%s,\"maxmem\":%s,\"is_template\":%s},",
-                $1,$2,$3,$4,$4,is_tmpl
-            }' | sed 's/,$//' | awk 'BEGIN{print "["}{print}END{print "]"}' | tr -d '\n')
-        fi
+    # Fallback: qm list + pct list (no CPU stats; maxmem unavailable)
+    if [[ "$vms_json" == "[]" ]] && command -v qm &>/dev/null; then
+        local tmpl_ids=""
+        for conf in /etc/pve/qemu-server/*.conf; do
+            [[ -f "$conf" ]] || continue
+            grep -q "^template: 1" "$conf" && tmpl_ids+="$(basename "$conf" .conf),"
+        done
+        tmpl_ids="${tmpl_ids%,}"
+        local qemu_part lxc_part
+        qemu_part=$(qm list 2>/dev/null | awk -v tmpls="$tmpl_ids" 'BEGIN {
+            n=split(tmpls, t, ","); for(i=1;i<=n;i++) tmpl_set[t[i]]=1
+        }
+        NR>1 {
+            is_tmpl = ($1 in tmpl_set) ? "true" : "false"
+            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":%s,\"maxmem\":%s,\"is_template\":%s,\"type\":\"qemu\"},",
+            $1,$2,$3,$4,$4,is_tmpl
+        }')
+        lxc_part=$(pct list 2>/dev/null | awk 'NR>1 {
+            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":0,\"maxmem\":0,\"is_template\":false,\"type\":\"lxc\"},",
+            $1,$3,$2
+        }')
+        local combined="${qemu_part}${lxc_part}"
+        combined="${combined%,}"
+        vms_json="[${combined}]"
     fi
 
     cat <<JSON

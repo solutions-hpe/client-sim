@@ -202,6 +202,7 @@
       <div class="vm-cat-tab-nav setup-section-gap">
         <button class="vm-cat-tab setup-subtab active" data-cat="sim">Simulation Clients <span class="badge-count" id="vm-count-sim">0</span></button>
         <button class="vm-cat-tab setup-subtab" data-cat="other">Other Clients <span class="badge-count" id="vm-count-other">0</span></button>
+        <button class="vm-cat-tab setup-subtab" data-cat="containers">Containers <span class="badge-count" id="vm-count-containers">0</span></button>
         <button class="vm-cat-tab setup-subtab" data-cat="templates">Templates <span class="badge-count" id="vm-count-tpl">0</span></button>
       </div>
 
@@ -253,6 +254,27 @@
         </table>
         <div id="server-empty-other" style="text-align:center;color:var(--muted);padding:32px;">
           No other VMs found.
+        </div>
+      </div>
+
+      <!-- Containers panel -->
+      <div id="vm-cat-panel-containers" class="setup-card hidden">
+        <table class="data-table" id="server-vm-table-containers">
+          <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="server-th-check-containers" disabled></th>
+              <th>Status</th>
+              <th>CT ID</th>
+              <th>Name</th>
+              <th>CPU %</th>
+              <th>RAM</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="server-vm-tbody-containers"></tbody>
+        </table>
+        <div id="server-empty-containers" style="text-align:center;color:var(--muted);padding:32px;">
+          No containers found.
         </div>
       </div>
 

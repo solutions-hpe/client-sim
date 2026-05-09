@@ -90,7 +90,7 @@ let centralStatusInitialized = false;
 let latestProxmoxData = { vms: [], usb_state: [], unknown_usb: [], reclone_state: null };
 let latestRecloneState = null;
 let usbCountdownTimer = null;
-let activeVmCat = 'sim';   // 'sim' | 'other' | 'templates'
+let activeVmCat = 'sim';   // 'sim' | 'other' | 'containers' | 'templates'
 let webuiVmid = null;      // VMID of the LXC container running this service (protected from delete)
 
 // ── Tab navigation ────────────────────────────────────────────────
@@ -779,22 +779,26 @@ function renderServerTab(data) {
     String(currentSettings.vm_image_2_template_id || '200'),
   ]);
 
-  // Categorise VMs: templates → sim clients (vmid > 90000) → other clients
+  // Categorise VMs: templates → sim clients (vmid > 90000, qemu) → containers (lxc) → other clients
   const templateVms = vms.filter((v) =>
     v.is_template === true || v.is_template === 'true' ||
     configuredTemplateIds.has(String(v.vmid))
   );
   const nonTemplateVms = vms.filter((v) => !templateVms.includes(v));
-  const simVms   = nonTemplateVms.filter((v) => Number(v.vmid) > 90000);
-  const otherVms = nonTemplateVms.filter((v) => !simVms.includes(v));
+  const containerVms = nonTemplateVms.filter((v) => v.type === 'lxc');
+  const qemuVms      = nonTemplateVms.filter((v) => v.type !== 'lxc');
+  const simVms       = qemuVms.filter((v) => Number(v.vmid) > 90000);
+  const otherVms     = qemuVms.filter((v) => !simVms.includes(v));
 
   // Update count badges
   const countSim = document.getElementById('vm-count-sim');
   const countOther = document.getElementById('vm-count-other');
+  const countContainers = document.getElementById('vm-count-containers');
   const countTpl = document.getElementById('vm-count-tpl');
-  if (countSim)   countSim.textContent   = simVms.length;
-  if (countOther) countOther.textContent = otherVms.length;
-  if (countTpl)   countTpl.textContent   = templateVms.length;
+  if (countSim)        countSim.textContent        = simVms.length;
+  if (countOther)      countOther.textContent      = otherVms.length;
+  if (countContainers) countContainers.textContent = containerVms.length;
+  if (countTpl)        countTpl.textContent        = templateVms.length;
 
   // Render templates (read-only)
   const templateTbody = document.getElementById('server-template-tbody');
@@ -899,6 +903,7 @@ function renderServerTab(data) {
 
   _renderVmGroup('sim', simVms);
   _renderVmGroup('other', otherVms);
+  _renderVmGroup('containers', containerVms);
 
   // Reset select-all
   const selectAll = document.getElementById('server-select-all');
@@ -4944,7 +4949,7 @@ vmCatTabs.forEach((btn) => {
   btn.addEventListener('click', () => {
     activeVmCat = btn.dataset.cat;
     vmCatTabs.forEach((button) => button.classList.toggle('active', button.dataset.cat === activeVmCat));
-    ['sim', 'other', 'templates'].forEach((cat) => {
+    ['sim', 'other', 'containers', 'templates'].forEach((cat) => {
       document.getElementById(`vm-cat-panel-${cat}`)?.classList.toggle('hidden', cat !== activeVmCat);
     });
     // Bulk bar hidden for templates (read-only)
