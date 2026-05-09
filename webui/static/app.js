@@ -633,7 +633,6 @@ function renderServerTab(data) {
         const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
         const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
         return `<tr class="vm-row-template">
-          <td>${statusDot} ${vm.status || 'unknown'}</td>
           <td>${vm.vmid}</td>
           <td>${escHtml(vm.name || '—')}</td>
           <td>${memUsedGB}/${memTotalGB} GB</td>
