@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.84"
+AGENT_VERSION="0.85"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
@@ -343,11 +343,35 @@ clone_vm_for_usb() {
     vm_name=$(get_vm_name "$vmid")
     local full_name="${vm_name}-${vmid}"
 
-    qm clone "$template_id" "$vmid" --name "$full_name"
-    qm set "$vmid" --onboot 1 --startup "order=2,up=60"
-    qm set "$vmid" -usb0 "host=$bus_path"
-    qm start "$vmid"
+    # Helper: destroy this VM and free its slot so the next loop retries
+    _teardown() {
+        local reason="$1"
+        log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
+        qm stop "$vmid" 2>/dev/null || true
+        qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        unset 'STATE_VMID_TO_BUS[$vmid]'
+        unset 'STATE_VMID_TO_IMAGE[$vmid]'
+        unset 'STATE_BUS_TO_VMID[$bus_path]'
+        unset 'STATE_MISSING_BY_BUS[$bus_path]'
+        save_state_file
+    }
 
+    # Clone
+    if ! qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
+        _teardown "qm clone failed (template $template_id missing or VMID $vmid conflict)"
+        return 1
+    fi
+
+    qm set "$vmid" --onboot 1 --startup "order=2,up=60" 2>/dev/null || true
+    qm set "$vmid" -usb0 "host=$bus_path" 2>/dev/null || true
+
+    # Start
+    if ! qm start "$vmid" 2>/dev/null; then
+        _teardown "qm start failed"
+        return 1
+    fi
+
+    # Wait for guest agent
     for _ in $(seq 1 60); do
         if qm guest ping "$vmid" >/dev/null 2>&1; then
             guest_ready=1
@@ -357,11 +381,10 @@ clone_vm_for_usb() {
     done
 
     if [[ "$guest_ready" -eq 0 ]]; then
-        log "WARNING: Guest agent not ready for VM $vmid — will still attempt hostname set"
+        log "WARNING: Guest agent not ready after 120s for VM $vmid — attempting hostname set anyway"
     fi
 
-    # Always attempt hostname change (matches original clone.sh behaviour).
-    # Retry a few times in case the agent became ready just after the ping loop.
+    # Set hostname — retry up to 6× with 5s gaps
     local hostname_set=0
     for _ in $(seq 1 6); do
         if qm guest exec "$vmid" -- hostnamectl set-hostname "$full_name" >/dev/null 2>&1; then
@@ -370,23 +393,21 @@ clone_vm_for_usb() {
         fi
         sleep 5
     done
-    if [[ "$hostname_set" -eq 1 ]]; then
-        log "Set hostname to $full_name on VM $vmid"
-        # Write the USB device physical-layer type so startup.sh uses the right sim_phy
-        qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
-            && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
-            || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
-        qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
-        log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
-    else
-        log "ERROR: Could not set hostname on VM $vmid — tearing down so USB $bus_path can be retried"
-        # Add to state before destroying so destroy_vm can clear it properly
-        STATE_VMID_TO_BUS["$vmid"]="$bus_path"
-        STATE_BUS_TO_VMID["$bus_path"]="$vmid"
-        STATE_VMID_TO_IMAGE["$vmid"]="${image_num:-1}"
-        destroy_vm "$vmid"
+
+    if [[ "$hostname_set" -eq 0 ]]; then
+        _teardown "guest agent unreachable — hostname never set"
         return 1
     fi
+
+    log "Set hostname to $full_name on VM $vmid"
+
+    # Write USB device type for startup.sh
+    qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
+        && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
+        || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
+
+    qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
+    log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
 provision_vm() {
