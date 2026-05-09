@@ -157,12 +157,73 @@ function activateServerSubtab(subtabId = 'server-node') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-logs'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
+  });
+  if (subtabId === 'server-logs') loadAgentLogs();
+}
+
+// ── Agent Log Viewer ─────────────────────────────────────────────────────
+const agentLogViewer = document.getElementById('agent-log-viewer');
+const agentLogFilter = document.getElementById('agent-log-filter');
+const agentLogClear  = document.getElementById('agent-log-clear');
+let agentLogLines = [];   // full buffer
+let agentLogAutoScroll = true;
+
+function classifyLogLine(line) {
+  const t = line.toLowerCase();
+  if (/error|failed|fail|exception|critical/.test(t)) return 'log-err';
+  if (/warning|warn/.test(t)) return 'log-warn';
+  if (/completed|success|recloned|approved|started/.test(t)) return 'log-ok';
+  return '';
+}
+
+function renderAgentLog() {
+  if (!agentLogViewer) return;
+  const filter = agentLogFilter ? agentLogFilter.value.toLowerCase() : '';
+  const filtered = filter ? agentLogLines.filter((l) => l.toLowerCase().includes(filter)) : agentLogLines;
+  agentLogViewer.textContent = '';
+  for (const line of filtered) {
+    const el = document.createElement('div');
+    el.className = `agent-log-line ${classifyLogLine(line)}`;
+    el.textContent = line;
+    agentLogViewer.appendChild(el);
+  }
+  if (agentLogAutoScroll) agentLogViewer.scrollTop = agentLogViewer.scrollHeight;
+}
+
+async function loadAgentLogs() {
+  try {
+    const data = await requestJson('/api/proxmox/logs');
+    agentLogLines = data.lines || [];
+    renderAgentLog();
+  } catch (_) { /* ignore */ }
+}
+
+function appendAgentLogLines(lines) {
+  agentLogLines.push(...lines);
+  if (agentLogLines.length > 500) agentLogLines.splice(0, agentLogLines.length - 500);
+  // Only re-render if Logs tab is visible
+  const panel = document.getElementById('server-logs');
+  if (panel && !panel.classList.contains('hidden')) renderAgentLog();
+}
+
+if (agentLogFilter) agentLogFilter.addEventListener('input', renderAgentLog);
+if (agentLogViewer) {
+  agentLogViewer.addEventListener('scroll', () => {
+    const atBottom = agentLogViewer.scrollHeight - agentLogViewer.scrollTop - agentLogViewer.clientHeight < 40;
+    agentLogAutoScroll = atBottom;
+  });
+}
+if (agentLogClear) {
+  agentLogClear.addEventListener('click', async () => {
+    await fetch('/api/proxmox/logs/clear', { method: 'POST' }).catch(() => {});
+    agentLogLines = [];
+    renderAgentLog();
   });
 }
 
@@ -3007,6 +3068,15 @@ function handleMessage(message) {
     if (message.token_state) {
       const ts = message.token_state;
       setCentralApiStatus(ts.state === 'connected', ts);
+    }
+    return;
+  }
+
+  if (message.type === 'proxmox_log_update') {
+    if (message.cleared) {
+      agentLogLines = [];
+    } else if (message.lines && message.lines.length) {
+      appendAgentLogLines(message.lines);
     }
     return;
   }

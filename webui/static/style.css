@@ -1389,3 +1389,22 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .usb-missing-item { font-size:0.82rem; color:var(--muted); }
 .usb-actions { display:flex; gap:8px; flex-wrap:wrap; }
 #reclone-last-run, #reclone-progress-label { font-size:0.85rem; color:var(--muted); }
+
+/* ── Agent Log Viewer ─────────────────────────────────── */
+.agent-log-viewer {
+  background: #0d1117;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  max-height: 520px;
+  overflow-y: auto;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.agent-log-line { padding: 1px 0; }
+.agent-log-line.log-err  { color: #ff7b72; }
+.agent-log-line.log-warn { color: #e3b341; }
+.agent-log-line.log-ok   { color: #3fb950; }

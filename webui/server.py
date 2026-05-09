@@ -1308,6 +1308,9 @@ proxmox_state: dict[str, Any] = {
     "present_usb": [],
     "agent_version": None,
 }
+# Ring buffer: last 500 agent log lines
+proxmox_log_buffer: list[str] = []
+PROXMOX_LOG_MAX = 500
 # Pending/approved Proxmox agent registry
 pending_proxmox_agents: dict[str, dict[str, Any]] = {}
 approved_proxmox_agents: dict[str, str] = dict(settings.get("proxmox_approved_agents", {}))
@@ -2621,7 +2624,30 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["usb_state"] = body.get("usb_state", [])
     proxmox_state["present_usb"] = body.get("present_usb", [])
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
+
+    # Append new log lines to ring buffer and broadcast if any arrived
+    new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
+    if new_lines:
+        proxmox_log_buffer.extend(new_lines)
+        if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
+            del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+        await broadcast({"type": "proxmox_log_update", "lines": new_lines})
+
     await _broadcast_proxmox_state()
+    return {"ok": True}
+
+
+@app.get("/api/proxmox/logs")
+async def get_proxmox_logs() -> dict[str, Any]:
+    """Return the in-memory agent log ring buffer."""
+    return {"lines": proxmox_log_buffer}
+
+
+@app.post("/api/proxmox/logs/clear")
+async def clear_proxmox_logs() -> dict[str, bool]:
+    """Clear the in-memory agent log buffer."""
+    proxmox_log_buffer.clear()
+    await broadcast({"type": "proxmox_log_update", "lines": [], "cleared": True})
     return {"ok": True}
 
 

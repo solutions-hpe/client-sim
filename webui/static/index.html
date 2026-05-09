@@ -91,6 +91,7 @@
       <button class="setup-subtab server-subtab active" data-subtab="server-node" role="tab">Details</button>
       <button class="setup-subtab server-subtab" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-logs" role="tab">Logs</button>
     </nav>
 
     <!-- Details sub-tab -->
@@ -224,9 +225,21 @@
         </div>
       </div>
     </div>
-  </main>
 
-  <!-- ── Simulations tab ── -->
+    <!-- Logs sub-tab -->
+    <div id="server-logs" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header" style="justify-content:space-between;align-items:center;">
+          <h2>Proxmox Agent Log</h2>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="agent-log-filter" class="checks-filter-input" type="text" placeholder="Filter…" spellcheck="false" style="width:200px;" />
+            <button id="agent-log-clear" class="btn btn-secondary btn-small" type="button">Clear</button>
+          </div>
+        </div>
+        <div id="agent-log-viewer" class="agent-log-viewer"></div>
+      </div>
+    </div>
+  </main>
   <main id="tab-simulations" class="page tab-content">
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab simtop-subtab active" data-simtop="simtop-checks" role="tab">Checks</button>

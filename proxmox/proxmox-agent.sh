@@ -5,8 +5,9 @@
 
 set -euo pipefail
 
-AGENT_VERSION="0.98"
+AGENT_VERSION="0.99"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
+AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
@@ -557,6 +558,28 @@ refresh_usb_telemetry_only() {
     build_usb_state_json
 }
 
+collect_log_lines() {
+    # Read new log lines since last send, return as JSON array of strings.
+    # Tracks byte offset so we never resend lines.
+    local offset=0 current_size new_lines json_lines
+    [[ -f "$AGENT_LOG_OFFSET_FILE" ]] && offset=$(<"$AGENT_LOG_OFFSET_FILE")
+    current_size=$(wc -c < "$AGENT_LOG" 2>/dev/null || echo 0)
+    # If log was rotated (shrunk), reset offset
+    if (( current_size < offset )); then offset=0; fi
+    if (( current_size <= offset )); then echo "[]"; return; fi
+
+    new_lines=$(dd if="$AGENT_LOG" bs=1 skip="$offset" count=$(( current_size - offset )) 2>/dev/null || true)
+    echo "$current_size" > "$AGENT_LOG_OFFSET_FILE"
+
+    # Convert to JSON array — escape quotes/backslashes, one element per line
+    json_lines=$(echo "$new_lines" | grep -v '^$' | python3 -c "
+import sys, json
+lines = [l.rstrip() for l in sys.stdin if l.strip()]
+print(json.dumps(lines))
+" 2>/dev/null || echo "[]")
+    echo "${json_lines:-[]}"
+}
+
 collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json
     cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
@@ -616,7 +639,8 @@ print(','.join(str(v['vmid']) for v in data if v.get('template',0)==1))
   "vms": ${vms_json:-[]},
   "unknown_usb": ${UNKNOWN_USB_JSON:-[]},
   "usb_state": ${USB_STATE_JSON:-[]},
-  "present_usb": ${PRESENT_USB_JSON:-[]}
+  "present_usb": ${PRESENT_USB_JSON:-[]},
+  "log_lines": $(collect_log_lines)
 }
 JSON
 }
@@ -669,6 +693,7 @@ execute_vm_command() {
     esac
 }
 
+mkdir -p /var/lib/client-sim
 log "Proxmox agent starting. Server: $SERVER_URL"
 log "Host block $host_id → VM range $start_vmid-$end_vmid"
 if [[ -z "$API_KEY" ]]; then
