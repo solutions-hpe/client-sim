@@ -90,6 +90,8 @@ let centralStatusInitialized = false;
 let latestProxmoxData = { vms: [], usb_state: [], unknown_usb: [], reclone_state: null };
 let latestRecloneState = null;
 let usbCountdownTimer = null;
+let activeVmCat = 'sim';   // 'sim' | 'other' | 'templates'
+let webuiVmid = null;      // VMID of the LXC container running this service (protected from delete)
 
 // ── Tab navigation ────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -769,113 +771,140 @@ function renderServerTab(data) {
   renderUsbSummary(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
 
-  const templateSection = document.getElementById('server-template-section');
-  const templateTbody = document.getElementById('server-template-tbody');
-  const tbody = document.getElementById('server-vm-tbody');
-  const empty = document.getElementById('server-empty');
-  const selectAll = document.getElementById('server-select-all');
-  const thCheck = document.getElementById('server-th-check');
   const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
   const autoRecoveryPending = new Set(
     Array.isArray(latestProxmoxData.auto_recovery_pending) ? latestProxmoxData.auto_recovery_pending : []
   );
-  if (!tbody) return;
 
   const configuredTemplateIds = new Set([
     String(currentSettings.vm_image_1_template_id || '100'),
     String(currentSettings.vm_image_2_template_id || '200'),
   ]);
-  const templates = vms.filter((v) =>
+
+  // Categorise VMs: templates → sim clients (name starts with 'sim-') → other clients
+  const templateVms = vms.filter((v) =>
     v.is_template === true || v.is_template === 'true' ||
     configuredTemplateIds.has(String(v.vmid))
   );
-  const regularVms = vms.filter((v) => !templates.includes(v));
+  const nonTemplateVms = vms.filter((v) => !templateVms.includes(v));
+  const simVms   = nonTemplateVms.filter((v) => (v.name || '').toLowerCase().startsWith('sim-'));
+  const otherVms = nonTemplateVms.filter((v) => !simVms.includes(v));
 
-  // Render templates section
-  if (templateSection && templateTbody) {
-    if (templates.length > 0) {
-      templateSection.classList.remove('hidden');
-      templateTbody.innerHTML = templates.map((vm) => {
-        const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
-        const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
-        const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
-        return `<tr class="vm-row-template">
-          <td>${vm.vmid}</td>
-          <td>${escHtml(vm.name || '—')}</td>
-          <td>${memUsedGB}/${memTotalGB} GB</td>
-        </tr>`;
-      }).join('');
-    } else {
-      templateSection.classList.add('hidden');
-      templateTbody.innerHTML = '';
-    }
+  // Update count badges
+  const countSim = document.getElementById('vm-count-sim');
+  const countOther = document.getElementById('vm-count-other');
+  const countTpl = document.getElementById('vm-count-tpl');
+  if (countSim)   countSim.textContent   = simVms.length;
+  if (countOther) countOther.textContent = otherVms.length;
+  if (countTpl)   countTpl.textContent   = templateVms.length;
+
+  // Render templates (read-only)
+  const templateTbody = document.getElementById('server-template-tbody');
+  const emptyTpl = document.getElementById('server-empty-tpl');
+  if (templateTbody) {
+    templateTbody.innerHTML = templateVms.map((vm) => {
+      const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
+      const memUsedGB  = vm.mem    ? (Number(vm.mem)    / 1024).toFixed(1) : '—';
+      const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+      const cpu = vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—';
+      return `<tr class="vm-row-template">
+        <td>${vm.vmid}</td>
+        <td>${escHtml(vm.name || '—')}</td>
+        <td>${cpu}</td>
+        <td>${memUsedGB}/${memTotalGB} GB</td>
+        <td>${statusDot} ${vm.status || 'unknown'}</td>
+      </tr>`;
+    }).join('');
+    if (emptyTpl) emptyTpl.style.display = templateVms.length ? 'none' : '';
   }
 
-  tbody.innerHTML = '';
-  if (selectAll) selectAll.checked = false;
-  if (thCheck) {
-    thCheck.disabled = regularVms.length === 0;
-    thCheck.checked = false;
-  }
-
-  if (regularVms.length === 0) {
-    if (empty) empty.style.display = '';
-    return;
-  }
-  if (empty) empty.style.display = 'none';
-
+  // Helper: render one category of regular VMs into a tbody
   const VM_ACTIONS = [
-    { action: 'start_vm', label: '▶', title: 'Start' },
-    { action: 'stop_vm', label: '■', title: 'Stop' },
-    { action: 'reboot_vm', label: '↺', title: 'Reboot' },
+    { action: 'start_vm',    label: '▶',  title: 'Start'    },
+    { action: 'stop_vm',     label: '■',  title: 'Stop'     },
+    { action: 'reboot_vm',   label: '↺',  title: 'Reboot'   },
     { action: 'snapshot_vm', label: '📷', title: 'Snapshot' },
-    { action: 'reclone_vm', label: '⎘', title: 'Reclone' },
-    { action: 'delete_vm', label: '✕', title: 'Delete' },
+    { action: 'reclone_vm',  label: '⎘',  title: 'Reclone'  },
+    { action: 'delete_vm',   label: '✕',  title: 'Delete'   },
   ];
 
-  // Build set of VMIDs actively being recloned so we can show yellow icon
   const recloningVmids = new Set();
-  if ((latestRecloneState?.status === 'running')) {
+  if (latestRecloneState?.status === 'running') {
     if (latestRecloneState.current_vm != null) recloningVmids.add(Number(latestRecloneState.current_vm));
     (latestRecloneState.log || []).forEach((e) => {
       if (e.status === 'queued' || e.status === 'in_progress') recloningVmids.add(Number(e.vmid));
     });
   }
 
-  regularVms.forEach((vm) => {
-    const isRecloning = recloningVmids.has(Number(vm.vmid));
-    const statusDot = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
-    const statusLabel = isRecloning ? 'recloning…' : (vm.status || 'unknown');
-    const memUsedGB = vm.mem ? (Number(vm.mem) / 1024).toFixed(1) : '—';
-    const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
-    const actionBtns = VM_ACTIONS.map((a) =>
-      `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}" title="${a.title}">${a.label}</button>`
-    ).join(' ');
-    const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
-      ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
-      : '';
+  function _renderVmGroup(catKey, vmList) {
+    const tbody  = document.getElementById(`server-vm-tbody-${catKey}`);
+    const empty  = document.getElementById(`server-empty-${catKey}`);
+    const thChk  = document.getElementById(`server-th-check-${catKey}`);
+    if (!tbody) return;
 
-    const tr = document.createElement('tr');
-    tr.dataset.vmid = vm.vmid;
-    tr.innerHTML = `
-      <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"></td>
-      <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
-      <td>${vm.vmid}</td>
-      <td>${escHtml(vm.name || '—')}${recoveryBadge}</td>
-      <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—'}</td>
-      <td>${memUsedGB}/${memTotalGB} GB</td>
-      <td>${actionBtns}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+    tbody.innerHTML = '';
+    if (thChk) { thChk.disabled = vmList.length === 0; thChk.checked = false; }
+    if (empty) empty.style.display = vmList.length ? 'none' : '';
+    if (!vmList.length) return;
 
-  tbody.querySelectorAll('.vm-action-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      sendProxmoxCommand(btn.dataset.action, btn.dataset.vmid)
-        .then(() => showNotification(`${btn.title} command sent for VM ${btn.dataset.vmid}`, 'info'))
-        .catch((err) => showNotification(`Error: ${err.message}`, 'error'));
+    vmList.forEach((vm) => {
+      const isRecloning  = recloningVmids.has(Number(vm.vmid));
+      const isWebui      = webuiVmid != null && Number(vm.vmid) === webuiVmid;
+      const statusDot    = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
+      const statusLabel  = isRecloning ? 'recloning…' : (vm.status || 'unknown');
+      const memUsedGB    = vm.mem    ? (Number(vm.mem)    / 1024).toFixed(1) : '—';
+      const memTotalGB   = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+      const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
+        ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
+        : '';
+      const webuiBadge = isWebui
+        ? ' <span class="badge badge-grey" title="This is the container running the dashboard — cannot be deleted">🔒 webui</span>'
+        : '';
+
+      const actionBtns = VM_ACTIONS.map((a) => {
+        const disabled = (a.action === 'delete_vm' && isWebui) ? ' disabled title="Cannot delete the container running this service"' : ` title="${a.title}"`;
+        return `<button class="btn-icon vm-action-btn" data-action="${a.action}" data-vmid="${vm.vmid}"${disabled}>${a.label}</button>`;
+      }).join(' ');
+
+      const tr = document.createElement('tr');
+      tr.dataset.vmid = vm.vmid;
+      tr.innerHTML = `
+        <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"${isWebui ? ' disabled' : ''}></td>
+        <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
+        <td>${vm.vmid}</td>
+        <td>${escHtml(vm.name || '—')}${recoveryBadge}${webuiBadge}</td>
+        <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—'}</td>
+        <td>${memUsedGB}/${memTotalGB} GB</td>
+        <td>${actionBtns}</td>
+      `;
+      tbody.appendChild(tr);
     });
-  });
+
+    tbody.querySelectorAll('.vm-action-btn:not([disabled])').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        sendProxmoxCommand(btn.dataset.action, btn.dataset.vmid)
+          .then(() => showNotification(`${btn.title} command sent for VM ${btn.dataset.vmid}`, 'info'))
+          .catch((err) => showNotification(`Error: ${err.message}`, 'error'));
+      });
+    });
+
+    // Per-category th-check handler
+    if (thChk && !thChk._vmBound) {
+      thChk._vmBound = true;
+      thChk.addEventListener('change', (e) => {
+        tbody.querySelectorAll('.vm-check:not([disabled])').forEach((cb) => { cb.checked = e.target.checked; });
+        const sa = document.getElementById('server-select-all');
+        if (sa) sa.checked = e.target.checked;
+      });
+    }
+  }
+
+  _renderVmGroup('sim', simVms);
+  _renderVmGroup('other', otherVms);
+
+  // Reset select-all
+  const selectAll = document.getElementById('server-select-all');
+  if (selectAll) selectAll.checked = false;
 }
 
 function renderProxmoxApproveState(pending, approved) {
@@ -3223,6 +3252,7 @@ function handleMessage(message) {
   }
 
   if (message.type === 'proxmox_update') {
+    if (message.webui_vmid != null) webuiVmid = message.webui_vmid;
     if (message.pending_proxmox !== undefined) renderProxmoxPending(message.pending_proxmox || []);
     if (message.approved_proxmox !== undefined) renderProxmoxApproved(message.approved_proxmox || []);
     renderServerTab(message);
@@ -4910,19 +4940,37 @@ document.getElementById('setup-clear-cache-btn')?.addEventListener('click', asyn
   }
 });
 
+// ── VM category inner tab nav ──────────────────────────────────────────────────
+document.querySelectorAll('.vm-cat-tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    activeVmCat = btn.dataset.cat;
+    document.querySelectorAll('.vm-cat-tab').forEach((b) => b.classList.toggle('active', b === btn));
+    ['sim', 'other', 'templates'].forEach((cat) => {
+      document.getElementById(`vm-cat-panel-${cat}`)?.classList.toggle('hidden', cat !== activeVmCat);
+    });
+    // Bulk bar hidden for templates (read-only)
+    const bulkBar = document.getElementById('vm-bulk-bar');
+    if (bulkBar) bulkBar.classList.toggle('hidden', activeVmCat === 'templates');
+    // Reset select-all
+    const sa = document.getElementById('server-select-all');
+    if (sa) sa.checked = false;
+  });
+});
+
 document.getElementById('server-select-all')?.addEventListener('change', (e) => {
-  document.querySelectorAll('.vm-check').forEach((cb) => { cb.checked = e.target.checked; });
-  const thCheck = document.getElementById('server-th-check');
+  // Only select checkboxes within the active category panel
+  const panel = document.getElementById(`vm-cat-panel-${activeVmCat}`);
+  if (panel) panel.querySelectorAll('.vm-check:not([disabled])').forEach((cb) => { cb.checked = e.target.checked; });
+  const thCheck = document.getElementById(`server-th-check-${activeVmCat}`);
   if (thCheck) thCheck.checked = e.target.checked;
 });
-document.getElementById('server-th-check')?.addEventListener('change', (e) => {
-  document.querySelectorAll('.vm-check').forEach((cb) => { cb.checked = e.target.checked; });
-  const selectAll = document.getElementById('server-select-all');
-  if (selectAll) selectAll.checked = e.target.checked;
-});
+
 ['start', 'stop', 'reclone', 'delete'].forEach((op) => {
   document.getElementById(`server-bulk-${op}`)?.addEventListener('click', () => {
-    const vmids = [...document.querySelectorAll('.vm-check:checked')].map((cb) => cb.dataset.vmid);
+    if (activeVmCat === 'templates') return; // no bulk ops on templates
+    const panel = document.getElementById(`vm-cat-panel-${activeVmCat}`);
+    if (!panel) return;
+    const vmids = [...panel.querySelectorAll('.vm-check:checked')].map((cb) => cb.dataset.vmid);
     if (!vmids.length) return;
     const action = op === 'reclone' ? 'reclone_vm' : op === 'delete' ? 'delete_vm' : `${op}_vm`;
     vmids.forEach((vmid) => sendProxmoxCommand(action, vmid));
@@ -4945,8 +4993,11 @@ loadSimulations();
   try {
     const init = await requestJson('/api/init');
     // Proxmox
-    if (init.proxmox && (init.proxmox.connected || (init.proxmox.vms || []).length || (init.proxmox.usb_state || []).length || (init.proxmox.unknown_usb || []).length || (init.proxmox.pending_proxmox || []).length || (init.proxmox.approved_proxmox || []).length)) {
-      renderServerTab(init.proxmox);
+    if (init.proxmox) {
+      if (init.proxmox.webui_vmid != null) webuiVmid = init.proxmox.webui_vmid;
+      if (init.proxmox.connected || (init.proxmox.vms || []).length || (init.proxmox.usb_state || []).length || (init.proxmox.unknown_usb || []).length || (init.proxmox.pending_proxmox || []).length || (init.proxmox.approved_proxmox || []).length) {
+        renderServerTab(init.proxmox);
+      }
     }
     // Reclone
     if (init.reclone) renderRecloneStatus(init.reclone);

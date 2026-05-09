@@ -174,14 +174,8 @@
 
     <!-- VMs sub-tab -->
     <div id="server-vms" class="setup-subpanel">
-      <div class="server-bulk-bar">
-        <label><input type="checkbox" id="server-select-all"> Select All</label>
-        <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>
-        <button class="btn btn-secondary" id="server-bulk-stop">■ Stop</button>
-        <button class="btn btn-warning" id="server-bulk-reclone">↺ Reclone</button>
-        <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
-      </div>
 
+      <!-- Fleet Reclone — always visible regardless of VM category tab -->
       <div id="reclone-status-panel" class="setup-card setup-section-gap">
         <div class="setup-card-header">
           <h2>Fleet Reclone <span id="reclone-status-badge" class="badge badge-grey">Idle</span></h2>
@@ -204,29 +198,28 @@
         </div>
       </div>
 
-      <!-- VM Templates -->
-      <div id="server-template-section" class="setup-card setup-section-gap hidden">
-        <div class="setup-card-header">
-          <h2>VM Templates</h2>
-        </div>
-        <table class="data-table" id="server-template-table">
-          <thead>
-            <tr>
-              <th>VM ID</th>
-              <th>Name</th>
-              <th>RAM</th>
-            </tr>
-          </thead>
-          <tbody id="server-template-tbody"></tbody>
-        </table>
+      <!-- VM category inner tab nav -->
+      <div class="vm-cat-tab-nav setup-section-gap">
+        <button class="vm-cat-tab active" data-cat="sim">Simulation Clients <span class="badge badge-grey" id="vm-count-sim">0</span></button>
+        <button class="vm-cat-tab" data-cat="other">Other Clients <span class="badge badge-grey" id="vm-count-other">0</span></button>
+        <button class="vm-cat-tab" data-cat="templates">Templates <span class="badge badge-grey" id="vm-count-tpl">0</span></button>
       </div>
 
-      <!-- Active VMs -->
-      <div class="setup-card setup-section-gap">
-        <table class="data-table" id="server-vm-table">
+      <!-- Bulk action bar — hidden when Templates tab is active -->
+      <div class="server-bulk-bar" id="vm-bulk-bar">
+        <label><input type="checkbox" id="server-select-all"> Select All</label>
+        <button class="btn btn-secondary" id="server-bulk-start">▶ Start</button>
+        <button class="btn btn-secondary" id="server-bulk-stop">■ Stop</button>
+        <button class="btn btn-warning" id="server-bulk-reclone">↺ Reclone</button>
+        <button class="btn btn-danger" id="server-bulk-delete">✕ Delete</button>
+      </div>
+
+      <!-- Simulation Clients panel -->
+      <div id="vm-cat-panel-sim" class="setup-card">
+        <table class="data-table" id="server-vm-table-sim">
           <thead>
             <tr>
-              <th style="width:36px;"><input type="checkbox" id="server-th-check" disabled></th>
+              <th style="width:36px;"><input type="checkbox" id="server-th-check-sim" disabled></th>
               <th>Status</th>
               <th>VM ID</th>
               <th>Name</th>
@@ -235,12 +228,53 @@
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="server-vm-tbody"></tbody>
+          <tbody id="server-vm-tbody-sim"></tbody>
         </table>
-        <div id="server-empty" style="text-align:center;color:var(--muted);padding:32px;">
+        <div id="server-empty-sim" style="text-align:center;color:var(--muted);padding:32px;">
           Waiting for Proxmox agent to check in…
         </div>
       </div>
+
+      <!-- Other Clients panel -->
+      <div id="vm-cat-panel-other" class="setup-card hidden">
+        <table class="data-table" id="server-vm-table-other">
+          <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="server-th-check-other" disabled></th>
+              <th>Status</th>
+              <th>VM ID</th>
+              <th>Name</th>
+              <th>CPU %</th>
+              <th>RAM</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="server-vm-tbody-other"></tbody>
+        </table>
+        <div id="server-empty-other" style="text-align:center;color:var(--muted);padding:32px;">
+          No other VMs found.
+        </div>
+      </div>
+
+      <!-- Templates panel (read-only, no checkboxes) -->
+      <div id="vm-cat-panel-templates" class="setup-card hidden">
+        <table class="data-table" id="server-template-table">
+          <thead>
+            <tr>
+              <th>VM ID</th>
+              <th>Name</th>
+              <th>CPU %</th>
+              <th>RAM</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="server-template-tbody"></tbody>
+        </table>
+        <div id="server-empty-tpl" style="text-align:center;color:var(--muted);padding:32px;">
+          No templates detected.
+        </div>
+      </div>
+
     </div>
 
     <!-- USB sub-tab -->

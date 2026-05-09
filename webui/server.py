@@ -47,6 +47,22 @@ CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
 
+
+def _detect_own_vmid() -> int | None:
+    """Detect this process's Proxmox container/VM ID from /proc/self/cgroup.
+    Returns the integer VMID if running inside a Proxmox LXC container, else None."""
+    try:
+        cgroup = Path("/proc/self/cgroup").read_text(encoding="utf-8")
+        m = re.search(r'/(?:lxc|qemu)/(\d+)', cgroup)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return None
+
+
+WEBUI_VMID: int | None = _detect_own_vmid()
+
 # ── Credential encryption ─────────────────────────────────────────────────────
 # Fernet symmetric encryption for sensitive fields in settings.json.
 # Key is generated once at install time and stored in .secret_key (chmod 600).
@@ -1711,6 +1727,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "reclone_state": dict(reclone_state),
         "client_os_counts": _client_os_counts(),
         "auto_recovery_pending": _auto_recovery_pending_vmids(),
+        "webui_vmid": WEBUI_VMID,
     }
 
 
@@ -4313,6 +4330,14 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         args = {}
     if not isinstance(args, dict):
         raise HTTPException(status_code=422, detail="args must be an object")
+
+    # Prevent deletion of the LXC container that hosts this service.
+    if action == "delete_vm" and WEBUI_VMID is not None:
+        try:
+            if int(args.get("vmid", -1)) == WEBUI_VMID:
+                raise HTTPException(status_code=403, detail="Cannot delete the container running this service")
+        except (TypeError, ValueError):
+            pass
 
     new_cmds: list[dict[str, Any]] = []
 
