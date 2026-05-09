@@ -88,13 +88,12 @@
 
   <main id="tab-server" class="page tab-content hidden tab-panel" style="display:none;">
     <nav class="setup-subnav" role="tablist">
-      <button class="setup-subtab server-subtab active" data-subtab="server-node" role="tab">Node</button>
+      <button class="setup-subtab server-subtab active" data-subtab="server-node" role="tab">Details</button>
       <button class="setup-subtab server-subtab" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-agents" role="tab">Agents</button>
     </nav>
 
-    <!-- Node sub-tab -->
+    <!-- Details sub-tab -->
     <div id="server-node" class="setup-subpanel">
       <div class="setup-card setup-section-gap">
         <div class="setup-card-header" style="justify-content:space-between;align-items:center;">
@@ -108,6 +107,25 @@
           <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
           <span class="server-last-seen" style="margin-left:auto;">Last seen: <span id="server-last-seen">—</span></span>
         </div>
+      </div>
+
+      <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
+        <div class="setup-card-header">
+          <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
+          <p>Approve agents below to allow telemetry from this Proxmox host.</p>
+        </div>
+        <table class="data-table" id="proxmox-pending-table">
+          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
+          <tbody id="proxmox-pending-tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
+        <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
+        <table class="data-table">
+          <thead><tr><th>Hostname</th><th>Agent Version</th><th></th></tr></thead>
+          <tbody id="proxmox-approved-tbody"></tbody>
+        </table>
       </div>
     </div>
 
@@ -204,28 +222,6 @@
             <tbody id="unknown-usb-tbody"></tbody>
           </table>
         </div>
-      </div>
-    </div>
-
-    <!-- Agents sub-tab -->
-    <div id="server-agents" class="setup-subpanel hidden">
-      <div id="proxmox-pending-card" class="setup-card setup-section-gap hidden">
-        <div class="setup-card-header">
-          <h2>Pending Proxmox Agents <span id="proxmox-pending-badge" class="badge badge-yellow">0</span></h2>
-          <p>Approve agents below to allow telemetry from this Proxmox host.</p>
-        </div>
-        <table class="data-table" id="proxmox-pending-table">
-          <thead><tr><th>Hostname</th><th>IP</th><th>First Seen</th><th>Last Seen</th><th></th></tr></thead>
-          <tbody id="proxmox-pending-tbody"></tbody>
-        </table>
-      </div>
-
-      <div id="proxmox-approved-card" class="setup-card setup-section-gap hidden">
-        <div class="setup-card-header"><h2>Approved Proxmox Agents</h2></div>
-        <table class="data-table">
-          <thead><tr><th>Hostname</th><th>Agent Version</th><th></th></tr></thead>
-          <tbody id="proxmox-approved-tbody"></tbody>
-        </table>
       </div>
     </div>
   </main>
