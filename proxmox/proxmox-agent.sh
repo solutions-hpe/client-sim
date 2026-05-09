@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.70"
+AGENT_VERSION="1.71"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -813,7 +813,7 @@ def fetch(path):
     except Exception:
         return []
 
-node = subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip()
+node = subprocess.run(['hostname', '-s'], capture_output=True, text=True).stdout.strip()
 qemu = fetch(f'/nodes/{node}/qemu')
 lxc  = fetch(f'/nodes/{node}/lxc')
 
@@ -858,8 +858,8 @@ print(json.dumps(out))
         }
         NR>1 {
             is_tmpl = ($1 in tmpl_set) ? "true" : "false"
-            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":%s,\"maxmem\":%s,\"is_template\":%s,\"type\":\"qemu\"},",
-            $1,$2,$3,$4,$4,is_tmpl
+            printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":0,\"maxmem\":%s,\"is_template\":%s,\"type\":\"qemu\"},",
+            $1,$2,$3,$4,is_tmpl
         }')
         lxc_part=$(pct list 2>/dev/null | awk 'NR>1 {
             printf "{\"vmid\":%s,\"name\":\"%s\",\"status\":\"%s\",\"cpu\":null,\"mem\":0,\"maxmem\":0,\"is_template\":false,\"type\":\"lxc\"},",
