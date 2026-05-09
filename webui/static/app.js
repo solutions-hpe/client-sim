@@ -161,13 +161,16 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb', 'server-commands'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-commands', 'server-services'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
+  if (subtabId === 'server-services') {
+    renderServiceStatus().catch(() => {});
+  }
 }
 
 // ── Agent Log Viewer ─────────────────────────────────────────────────────
@@ -397,7 +400,7 @@ const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab):not(.simtop-subtab)');
-const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-node):not(#server-commands)');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-node):not(#server-commands):not(#server-services)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-table');
 const centralEmpty = document.getElementById('central-empty');
@@ -3308,7 +3311,62 @@ if (cmdClearBtn) {
 
 requestJson('/api/commands').then(renderCommandTable).catch(() => {});
 
+async function renderServiceStatus() {
+  const tbody = document.getElementById('services-tbody');
+  if (!tbody) return;
+  try {
+    const data = await requestJson('/api/services/status');
+    const tasks = data.tasks || {};
+    const names = data.task_names || Object.keys(tasks);
+
+    const LABELS = {
+      sync_repo: 'Repo Sync',
+      heartbeat: 'Heartbeat Check',
+      central_token: 'Aruba Central Token',
+      central_poller: 'Aruba Central Poller',
+      update_checker: 'Update Checker',
+      relay: 'Relay Loop',
+      client_history_saver: 'Client History Save',
+      command_expiry: 'Command Expiry',
+      auto_recovery: 'Auto Recovery',
+      schedule_check: 'Schedule Check',
+      gkill_switch: 'Global Kill Switch',
+      baseline_saver: 'Baseline Saver',
+    };
+
+    const rows = names.map((name) => {
+      const t = tasks[name] || {};
+      const status = t.status || 'pending';
+      const dot = status === 'ok' ? '🟢' : status === 'error' ? '🔴' : status === 'warning' ? '🟡' : '⚪';
+      const lastRun = t.last_run ? new Date(t.last_run).toLocaleTimeString() : '—';
+      const runCount = t.run_count ?? '—';
+      const consec = t.consecutive_errors || 0;
+      const errorText = String(t.last_error_msg || '');
+      const errMsg = errorText
+        ? `<span title="${escHtml(errorText)}" style="color:var(--hpe-red);cursor:help">${escHtml(errorText.substring(0, 60))}${errorText.length > 60 ? '…' : ''}</span>`
+        : '—';
+      const label = LABELS[name] || name;
+      return `<tr>
+        <td>${label}</td>
+        <td>${dot} ${status}</td>
+        <td>${lastRun}</td>
+        <td>${runCount}</td>
+        <td>${consec > 0 ? `<span style="color:var(--hpe-red)">${consec}</span>` : '0'}</td>
+        <td>${errMsg}</td>
+      </tr>`;
+    });
+
+    tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="6" class="empty-msg">No service data yet</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">Failed to load: ${escHtml(e.message || String(e))}</td></tr>`;
+  }
+}
+
 function handleMessage(message) {
+  if (document.getElementById('server-services')?.classList.contains('active')) {
+    renderServiceStatus().catch(() => {});
+  }
+
   if (message.type === 'full_state') {
     (message.clients || []).forEach((client) => upsertClient(client));
     updateCmdTargetDropdown(message.clients || []);

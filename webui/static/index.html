@@ -102,86 +102,9 @@
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
       <button class="setup-subtab server-subtab" data-subtab="server-commands" role="tab">Command Queue</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-services" role="tab">Services</button>
       <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
     </nav>
-
-    <!-- Details sub-tab -->
-    <div id="server-node" class="setup-subpanel">
-      <div class="setup-card setup-section-gap">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-          <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;">
-            <h2 id="server-node-name" style="margin:0;">—</h2>
-            <span class="server-stat-pill" title="CPU">⚡ CPU: <span id="server-cpu">—</span>%</span>
-            <span class="server-stat-pill" title="RAM">🧠 RAM: <span id="server-ram">—</span></span>
-            <span id="server-storage-pills"></span>
-            <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:stretch;gap:4px;flex-shrink:0;min-width:130px;">
-            <button id="agent-approve-btn" class="btn btn-secondary" style="display:none;"></button>
-            <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
-            <span class="server-last-seen" style="font-size:11px;">Last seen: <span id="server-last-seen">—</span></span>
-          </div>
-        </div>
-      </div>
-
-      <div id="proxmox-extra-pending" class="setup-card setup-section-gap hidden" style="padding:10px 16px;">
-        <span style="font-size:13px;font-weight:600;">⚠ Pending agents: </span><span id="proxmox-extra-pending-list" style="font-size:13px;"></span>
-      </div>
-
-      <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div>
-          <div style="font-weight:600;font-size:13px;">🗑 Clear Server Cache</div>
-          <div style="font-size:12px;color:var(--muted);">Resets Proxmox state, VM list, command history, and reclone logs. No restart required.</div>
-        </div>
-        <button id="server-clear-cache-btn" class="btn btn-danger" style="flex-shrink:0;">Clear Cache</button>
-      </div>
-
-      <!-- Combined Logs section -->
-      <div class="setup-card setup-section-gap">
-        <section class="toolbar">
-          <div class="toolbar-actions">
-            <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
-            <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
-            <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
-            <label class="logs-filter-label" id="logs-filter-label">
-              Filter:
-              <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
-            </label>
-            <label class="logs-lines-label" id="logs-lines-label">
-              Lines:
-              <select id="logs-lines-select">
-                <option value="100">100</option>
-                <option value="300" selected>300</option>
-                <option value="500">500</option>
-                <option value="1000">1000</option>
-              </select>
-            </label>
-            <label class="logs-filter-label">
-              Source:
-              <select id="logs-source-select">
-                <option value="journal">Service journal</option>
-                <option value="install">Install log</option>
-                <option value="agent">Proxmox Agent</option>
-              </select>
-            </label>
-            <!-- Agent log controls — shown only when source=agent -->
-            <label class="logs-filter-label hidden" id="agent-log-filter-label">
-              Filter:
-              <input id="agent-log-filter" class="logs-filter-input" type="text" placeholder="Filter…" spellcheck="false" />
-            </label>
-          </div>
-          <div class="toolbar-actions">
-            <label class="logs-autoscroll-label">
-              <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
-            </label>
-            <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
-            <button id="agent-log-clear" class="btn btn-secondary hidden" type="button">Clear</button>
-          </div>
-        </section>
-        <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
-        <div id="agent-log-viewer" class="agent-log-viewer hidden"></div>
-      </div>
-    </div>
 
     <!-- VMs sub-tab -->
     <div id="server-vms" class="setup-subpanel">
@@ -389,6 +312,108 @@
           </table>
         </div>
         <div id="cmd-empty" style="text-align:center;color:var(--muted);padding:16px;display:none;">No commands yet</div>
+      </div>
+    </div>
+
+    <!-- Services sub-tab -->
+    <div id="server-services" class="setup-subpanel hidden">
+      <div class="tile">
+        <h3>Background Services</h3>
+        <div class="tile-scroll">
+          <table id="services-table" class="data-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Status</th>
+                <th>Last Run</th>
+                <th>Run Count</th>
+                <th>Errors</th>
+                <th>Last Error</th>
+              </tr>
+            </thead>
+            <tbody id="services-tbody">
+              <tr><td colspan="6" class="empty-msg">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Details sub-tab -->
+    <div id="server-node" class="setup-subpanel">
+      <div class="setup-card setup-section-gap">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;">
+            <h2 id="server-node-name" style="margin:0;">—</h2>
+            <span class="server-stat-pill" title="CPU">⚡ CPU: <span id="server-cpu">—</span>%</span>
+            <span class="server-stat-pill" title="RAM">🧠 RAM: <span id="server-ram">—</span></span>
+            <span id="server-storage-pills"></span>
+            <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:stretch;gap:4px;flex-shrink:0;min-width:130px;">
+            <button id="agent-approve-btn" class="btn btn-secondary" style="display:none;"></button>
+            <button id="agent-update-btn" class="btn btn-secondary" title="Pull latest agent script from GitHub and restart">⬆ Update Agent</button>
+            <span class="server-last-seen" style="font-size:11px;">Last seen: <span id="server-last-seen">—</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="proxmox-extra-pending" class="setup-card setup-section-gap hidden" style="padding:10px 16px;">
+        <span style="font-size:13px;font-weight:600;">⚠ Pending agents: </span><span id="proxmox-extra-pending-list" style="font-size:13px;"></span>
+      </div>
+
+      <div class="setup-card setup-section-gap" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div>
+          <div style="font-weight:600;font-size:13px;">🗑 Clear Server Cache</div>
+          <div style="font-size:12px;color:var(--muted);">Resets Proxmox state, VM list, command history, and reclone logs. No restart required.</div>
+        </div>
+        <button id="server-clear-cache-btn" class="btn btn-danger" style="flex-shrink:0;">Clear Cache</button>
+      </div>
+
+      <!-- Combined Logs section -->
+      <div class="setup-card setup-section-gap">
+        <section class="toolbar">
+          <div class="toolbar-actions">
+            <button id="logs-tail-btn" class="btn btn-primary" type="button">▶ Start Tail</button>
+            <button id="logs-stop-btn" class="btn btn-secondary hidden" type="button">⏹ Stop</button>
+            <button id="logs-refresh-btn" class="btn btn-secondary" type="button">↺ Reload History</button>
+            <label class="logs-filter-label" id="logs-filter-label">
+              Filter:
+              <input id="logs-filter" class="logs-filter-input" type="text" placeholder="e.g. wireless clients" spellcheck="false" />
+            </label>
+            <label class="logs-lines-label" id="logs-lines-label">
+              Lines:
+              <select id="logs-lines-select">
+                <option value="100">100</option>
+                <option value="300" selected>300</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
+            </label>
+            <label class="logs-filter-label">
+              Source:
+              <select id="logs-source-select">
+                <option value="journal">Service journal</option>
+                <option value="install">Install log</option>
+                <option value="agent">Proxmox Agent</option>
+              </select>
+            </label>
+            <!-- Agent log controls — shown only when source=agent -->
+            <label class="logs-filter-label hidden" id="agent-log-filter-label">
+              Filter:
+              <input id="agent-log-filter" class="logs-filter-input" type="text" placeholder="Filter…" spellcheck="false" />
+            </label>
+          </div>
+          <div class="toolbar-actions">
+            <label class="logs-autoscroll-label">
+              <input id="logs-autoscroll" type="checkbox" checked /> Auto-scroll
+            </label>
+            <button id="logs-clear-btn" class="btn btn-secondary" type="button">🗑 Clear</button>
+            <button id="agent-log-clear" class="btn btn-secondary hidden" type="button">Clear</button>
+          </div>
+        </section>
+        <div id="logs-output" class="logs-output" role="log" aria-live="polite" aria-label="Service logs"></div>
+        <div id="agent-log-viewer" class="agent-log-viewer hidden"></div>
       </div>
     </div>
 

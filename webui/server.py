@@ -587,9 +587,18 @@ def _save_client_history() -> None:
 
 async def client_history_saver() -> None:
     """Background task: flush clients to disk every CLIENT_SAVE_INTERVAL seconds."""
+    await asyncio.sleep(CLIENT_SAVE_INTERVAL)
     while True:
+        try:
+            await asyncio.to_thread(_save_client_history)
+            _update_service_health("client_history_saver", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("client_history_saver", ok=False, error=str(exc))
+            logger.exception("Client history saver error: %s", exc)
         await asyncio.sleep(CLIENT_SAVE_INTERVAL)
-        await asyncio.to_thread(_save_client_history)
+
 
 
 def _central_cfg() -> dict[str, str]:
@@ -845,9 +854,11 @@ async def central_token_manager() -> None:
                         else:
                             central_auth_error = None
                         await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()})
+                _update_service_health("central_token", ok=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                _update_service_health("central_token", ok=False, error=str(exc))
                 logger.exception("Central token manager error: %s", exc)
             await asyncio.sleep(300)
 
@@ -1157,9 +1168,18 @@ async def hourly_baseline_saver() -> None:
     """
     await asyncio.sleep(3600)   # wait one full hour before first write
     while True:
-        _save_client_count_baseline()
-        logger.info("Client count baseline recalculated and persisted (hourly task).")
+        try:
+            _save_client_count_baseline()
+            logger.info("Client count baseline recalculated and persisted (hourly task).")
+            _update_service_health("baseline_saver", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("baseline_saver", ok=False, error=str(exc))
+            logger.exception("Hourly baseline saver error: %s", exc)
         await asyncio.sleep(3600)
+
+
 
 
 def _client_count_payload() -> dict[str, Any]:
@@ -1363,9 +1383,11 @@ async def central_poller() -> None:
         while True:
             try:
                 await _poll_central_once(client)
+                _update_service_health("central_poller", ok=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                _update_service_health("central_poller", ok=False, error=str(exc))
                 logger.exception("Central poll error: %s", exc)
             await asyncio.sleep(CENTRAL_POLL_INTERVAL)
 
@@ -1377,7 +1399,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     logger.info("Client-Sim Dashboard  v%s  starting up", INSTALLER_VERSION)
     logger.info("=" * 60)
     central_history = await asyncio.to_thread(_load_history)
-    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+    background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
     background_tasks["central_poller"] = asyncio.create_task(central_poller())
@@ -1470,6 +1492,7 @@ update_all_state: dict[str, Any] = {
 }
 relay_sites: dict[str, dict[str, Any]] = {}
 background_tasks: dict[str, asyncio.Task[Any]] = {}
+service_health: dict[str, dict[str, Any]] = {}
 reclone_run_lock = asyncio.Lock()
 last_schedule_trigger: str | None = None
 
@@ -1546,6 +1569,22 @@ def utcnow() -> datetime:
 
 def iso_utcnow() -> str:
     return utcnow().isoformat().replace("+00:00", "Z")
+
+
+def _update_service_health(name: str, *, ok: bool, error: str | None = None) -> None:
+    now = iso_utcnow()
+    entry = service_health.setdefault(name, {"run_count": 0, "consecutive_errors": 0})
+    entry["last_run"] = now
+    entry["run_count"] = entry.get("run_count", 0) + 1
+    if ok:
+        entry["last_success"] = now
+        entry["last_error_msg"] = None
+        entry["consecutive_errors"] = 0
+        entry["status"] = "ok"
+    else:
+        entry["last_error_msg"] = error or "unknown error"
+        entry["consecutive_errors"] = entry.get("consecutive_errors", 0) + 1
+        entry["status"] = "error" if entry["consecutive_errors"] >= 3 else "warning"
 
 
 def compute_online(last_seen: datetime) -> bool:
@@ -1931,68 +1970,82 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
 
 
 async def auto_recovery_check() -> None:
+    await asyncio.sleep(1800)
     while True:
-        await asyncio.sleep(1800)
-        timeout_hours = _setting_int("vm_silent_timeout", 24, 1)
-        now = time.time()
-        triggered: list[int] = []
-        for vm in list(proxmox_state.get("vms", [])):
-            vmid = vm.get("vmid")
-            if vmid is None:
-                continue
-            if int(vmid) <= 9000 or vm.get("is_template"):
-                continue
-            last_seen = _parse_ts(vm.get("last_seen"))
-            if last_seen is None or (now - last_seen) <= timeout_hours * 3600:
-                continue
-            vmid_int = int(vmid)
-            if _has_pending_reclone(vmid_int):
-                continue
-            await _queue_proxmox_command("reclone_vm", {"vmid": vmid_int}, command_type="auto-recovery")
-            triggered.append(vmid_int)
-        if triggered:
-            vmid_list = ", ".join(str(v) for v in triggered)
-            for vmid_int in triggered:
-                name = next(
-                    (vm.get("name") or f"VM {vmid_int}" for vm in proxmox_state.get("vms", []) if int(vm.get("vmid", -1)) == vmid_int),
-                    f"VM {vmid_int}",
-                )
-                reclone_state["auto_recovery_log"].append({
-                    "vmid": vmid_int,
-                    "name": name,
-                    "status": "queued",
-                    "timestamp": iso_utcnow(),
+        try:
+            timeout_hours = _setting_int("vm_silent_timeout", 24, 1)
+            now = time.time()
+            triggered: list[int] = []
+            for vm in list(proxmox_state.get("vms", [])):
+                vmid = vm.get("vmid")
+                if vmid is None:
+                    continue
+                if int(vmid) <= 9000 or vm.get("is_template"):
+                    continue
+                last_seen = _parse_ts(vm.get("last_seen"))
+                if last_seen is None or (now - last_seen) <= timeout_hours * 3600:
+                    continue
+                vmid_int = int(vmid)
+                if _has_pending_reclone(vmid_int):
+                    continue
+                await _queue_proxmox_command("reclone_vm", {"vmid": vmid_int}, command_type="auto-recovery")
+                triggered.append(vmid_int)
+            if triggered:
+                vmid_list = ", ".join(str(v) for v in triggered)
+                for vmid_int in triggered:
+                    name = next(
+                        (vm.get("name") or f"VM {vmid_int}" for vm in proxmox_state.get("vms", []) if int(vm.get("vmid", -1)) == vmid_int),
+                        f"VM {vmid_int}",
+                    )
+                    reclone_state["auto_recovery_log"].append({
+                        "vmid": vmid_int,
+                        "name": name,
+                        "status": "queued",
+                        "timestamp": iso_utcnow(),
+                    })
+                reclone_state["auto_recovery_log"] = reclone_state["auto_recovery_log"][-50:]
+                await broadcast({
+                    "type": "notification",
+                    "level": "warning",
+                    "message": f"Auto-recovery: queued reclone for {len(triggered)} silent VM(s) — {vmid_list}",
                 })
-            reclone_state["auto_recovery_log"] = reclone_state["auto_recovery_log"][-50:]
-            await broadcast({
-                "type": "notification",
-                "level": "warning",
-                "message": f"Auto-recovery: queued reclone for {len(triggered)} silent VM(s) — {vmid_list}",
-            })
-            await _broadcast_proxmox_state()
+                await _broadcast_proxmox_state()
+            _update_service_health("auto_recovery", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("auto_recovery", ok=False, error=str(exc))
+            logger.exception("Auto recovery check error: %s", exc)
+        await asyncio.sleep(1800)
+
+
 
 
 async def schedule_check() -> None:
     global last_schedule_trigger
     day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    await asyncio.sleep(60)
     while True:
+        try:
+            if _normalize_toggle(settings.get("reclone_schedule_enabled", "off")) == "on" and reclone_state.get("status") != "running":
+                parsed = _parse_reclone_schedule(settings.get("reclone_schedule_cron", "sunday 02:00"))
+                if parsed:
+                    day, hour, minute = parsed
+                    now = datetime.now()
+                    if day_names[now.weekday()] == day and now.hour == hour and now.minute == minute:
+                        trigger_key = now.strftime("%Y-%m-%d %H:%M")
+                        if last_schedule_trigger != trigger_key:
+                            last_schedule_trigger = trigger_key
+                            asyncio.create_task(_run_rolling_reclone("scheduled"))
+            _update_service_health("schedule_check", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("schedule_check", ok=False, error=str(exc))
+            logger.exception("Schedule check error: %s", exc)
         await asyncio.sleep(60)
-        if _normalize_toggle(settings.get("reclone_schedule_enabled", "off")) != "on":
-            continue
-        if reclone_state.get("status") == "running":
-            continue
-        parsed = _parse_reclone_schedule(settings.get("reclone_schedule_cron", "sunday 02:00"))
-        if not parsed:
-            continue
-        day, hour, minute = parsed
-        now = datetime.now()
-        if day_names[now.weekday()] != day or now.hour != hour or now.minute != minute:
-            continue
-        trigger_key = now.strftime("%Y-%m-%d %H:%M")
-        if last_schedule_trigger == trigger_key:
-            continue
-        last_schedule_trigger = trigger_key
-        asyncio.create_task(_run_rolling_reclone("scheduled"))
+
+
 
 
 async def gkill_switch_poller() -> None:
@@ -2013,27 +2066,43 @@ async def gkill_switch_poller() -> None:
                 if value != prev:
                     logger.warning("Global kill switch changed: %s → %s", prev, value)
                     await broadcast({"type": "gkill_switch_update", "value": value})
+                _update_service_health("gkill_switch", ok=True)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 gkill_switch_state["error"] = str(exc)
+                _update_service_health("gkill_switch", ok=False, error=str(exc))
                 logger.warning("gkill_switch fetch failed: %s", exc)
             await asyncio.sleep(300)
 
 
+
+
 async def expire_commands() -> None:
     """Mark pending/delivered commands as expired after 15 minutes and broadcast."""
+    await asyncio.sleep(30)
     while True:
+        try:
+            now = time.time()
+            changed = False
+            for cmd in commands:
+                if cmd["status"] in ("pending", "delivered") and (now - cmd["created_at"]) > COMMAND_EXPIRE_SECS:
+                    cmd["status"] = "expired"
+                    cmd["updated_at"] = now
+                    changed = True
+                    logger.info("Command %s (%s → %s) expired", cmd["id"], cmd["target"], cmd["action"])
+            if changed:
+                await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+                await broadcast({"type": "notification", "level": "warning", "message": "One or more commands expired without being delivered."})
+            _update_service_health("command_expiry", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("command_expiry", ok=False, error=str(exc))
+            logger.exception("Command expiry error: %s", exc)
         await asyncio.sleep(30)
-        now = time.time()
-        changed = False
-        for cmd in commands:
-            if cmd["status"] in ("pending", "delivered") and (now - cmd["created_at"]) > COMMAND_EXPIRE_SECS:
-                cmd["status"] = "expired"
-                cmd["updated_at"] = now
-                changed = True
-                logger.info("Command %s (%s → %s) expired", cmd["id"], cmd["target"], cmd["action"])
-        if changed:
-            await broadcast({"type": "commands_update", "commands": _serialize_commands()})
-            await broadcast({"type": "notification", "level": "warning", "message": "One or more commands expired without being delivered."})
+
+
 
 
 async def broadcast(message: dict[str, Any]) -> None:
@@ -2124,8 +2193,17 @@ async def relay_sync_once() -> None:
 async def relay_loop() -> None:
     while True:
         interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
-        await relay_sync_once()
+        try:
+            await relay_sync_once()
+            _update_service_health("relay", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("relay", ok=False, error=str(exc))
+            logger.exception("Relay loop error: %s", exc)
         await asyncio.sleep(interval)
+
+
 
 
 def ensure_repo_ready() -> None:
@@ -2359,14 +2437,18 @@ async def sync_repo() -> None:
             repo_state["error"] = None
             repo_state["last_sync"] = time.time()
             repo_version = await asyncio.to_thread(_get_repo_version)
+            _update_service_health("sync_repo", ok=True)
             await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"], "repo_version": repo_version})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             repo_state["error"] = str(exc)
+            _update_service_health("sync_repo", ok=False, error=str(exc))
             logger.exception("Repository sync failed")
             await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc), "last_sync": repo_state["last_sync"]})
         await asyncio.sleep(settings.get("repo_sync_interval", SYNC_INTERVAL))
+
+
 
 
 def _get_repo_version() -> str | None:
@@ -2385,25 +2467,34 @@ def _get_repo_version() -> str | None:
 async def check_for_update() -> None:
     """Background task: check for a new installer version every 24 hours."""
     while True:
-        available = await asyncio.to_thread(_get_repo_version)
-        import datetime
-        update_state["available_version"] = available
-        update_state["last_checked"] = datetime.datetime.now().isoformat(timespec="seconds")
-        update_state["update_available"] = (
-            available is not None
-            and available != update_state["current_version"]
-        )
-        logger.info(
-            "Version check: installed=%s repo=%s update_available=%s",
-            update_state["current_version"],
-            available,
-            update_state["update_available"],
-        )
-        await broadcast({"type": "version_status", **update_state})
-        if update_state["update_available"]:
-            logger.info("New version %s available — triggering self-update", available)
-            await _run_self_update()
+        try:
+            available = await asyncio.to_thread(_get_repo_version)
+            import datetime
+            update_state["available_version"] = available
+            update_state["last_checked"] = datetime.datetime.now().isoformat(timespec="seconds")
+            update_state["update_available"] = (
+                available is not None
+                and available != update_state["current_version"]
+            )
+            logger.info(
+                "Version check: installed=%s repo=%s update_available=%s",
+                update_state["current_version"],
+                available,
+                update_state["update_available"],
+            )
+            _update_service_health("update_checker", ok=True)
+            await broadcast({"type": "version_status", **update_state})
+            if update_state["update_available"]:
+                logger.info("New version %s available — triggering self-update", available)
+                await _run_self_update()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("update_checker", ok=False, error=str(exc))
+            logger.exception("Update checker error: %s", exc)
         await asyncio.sleep(UPDATE_CHECK_INTERVAL)
+
+
 
 
 async def _run_update_all() -> None:
@@ -2548,17 +2639,28 @@ async def _run_self_update() -> None:
 
 
 async def heartbeat_check() -> None:
+    await asyncio.sleep(HEARTBEAT_INTERVAL)
     while True:
+        try:
+            changed = False
+            async with state_lock:
+                for client in clients.values():
+                    online = compute_online(client["last_seen"])
+                    if client.get("online") != online:
+                        client["online"] = online
+                        changed = True
+            if changed:
+                await broadcast_full_state()
+            _update_service_health("heartbeat", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("heartbeat", ok=False, error=str(exc))
+            logger.exception("Heartbeat check error: %s", exc)
         await asyncio.sleep(HEARTBEAT_INTERVAL)
-        changed = False
-        async with state_lock:
-            for client in clients.values():
-                online = compute_online(client["last_seen"])
-                if client.get("online") != online:
-                    client["online"] = online
-                    changed = True
-        if changed:
-            await broadcast_full_state()
+
+
+@app.get("/api/settings")
 
 
 @app.get("/api/settings")
@@ -2751,11 +2853,11 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     _save_settings()
 
     if changed_branch:
-        if "repo_sync" in background_tasks:
-            background_tasks["repo_sync"].cancel()
+        if "sync_repo" in background_tasks:
+            background_tasks["sync_repo"].cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await background_tasks["repo_sync"]
-        background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+                await background_tasks["sync_repo"]
+        background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
 
     # Re-filter unknown_usb immediately so subsequent proxmox_update broadcasts don't
     # restore devices the user just certified or ignored.
@@ -3734,13 +3836,13 @@ async def _api_health_payload() -> dict[str, Any]:
 @app.post("/api/sync-now")
 async def api_sync_now() -> dict[str, Any]:
     """Trigger an immediate GitHub sync outside the normal interval."""
-    if "repo_sync" in background_tasks:
-        background_tasks["repo_sync"].cancel()
+    if "sync_repo" in background_tasks:
+        background_tasks["sync_repo"].cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await background_tasks["repo_sync"]
+            await background_tasks["sync_repo"]
     repo_state["synced"] = False
     repo_state["error"] = None
-    background_tasks["repo_sync"] = asyncio.create_task(sync_repo())
+    background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
     await broadcast({"type": "repo_status", "synced": False, "error": None, "last_sync": repo_state["last_sync"]})
     return {"status": "ok", "message": "GitHub sync started"}
 
@@ -4138,6 +4240,14 @@ async def api_init() -> dict[str, Any]:
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     return await _api_health_payload()
+
+
+@app.get("/api/services/status")
+async def api_services_status() -> dict[str, Any]:
+    return {
+        "tasks": service_health,
+        "task_names": list(background_tasks.keys()),
+    }
 
 
 # ── System health & service control ───────────────────────────────────────────
