@@ -641,6 +641,18 @@ function formatRelativeTime(ts) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// Format a byte value into the most readable unit (MB / GB / TB)
+function fmtSize(bytes) {
+  const b = Number(bytes) || 0;
+  if (b >= 1024 ** 4) return (b / 1024 ** 4).toFixed(1) + ' TB';
+  if (b >= 1024 ** 3) return (b / 1024 ** 3).toFixed(1) + ' GB';
+  if (b >= 1024 ** 2) return (b / 1024 ** 2).toFixed(0) + ' MB';
+  return b + ' B';
+}
+
+// Format a KB value into the most readable unit
+function fmtSizeKB(kb) { return fmtSize(Number(kb) * 1024); }
+
 function sendProxmoxCommand(action, vmid) {
   const args = vmid ? { vmid: parseInt(vmid, 10) } : {};
   return fetch('/api/commands', {
@@ -743,9 +755,9 @@ function renderServerTab(data) {
 
   setEl('server-node-name', node.hostname || 'Proxmox');
   setEl('server-cpu', node.cpu_percent != null && !Number.isNaN(Number(node.cpu_percent)) ? Number(node.cpu_percent).toFixed(1) : '—');
-  const ramUsedGB = node.mem_used_kb ? (Number(node.mem_used_kb) / 1024 / 1024).toFixed(1) : '—';
-  const ramTotalGB = node.mem_total_kb ? (Number(node.mem_total_kb) / 1024 / 1024).toFixed(1) : '—';
-  setEl('server-ram', `${ramUsedGB}/${ramTotalGB} GB`);
+  const ramUsed  = node.mem_used_kb  ? fmtSizeKB(node.mem_used_kb)  : '—';
+  const ramTotal = node.mem_total_kb ? fmtSizeKB(node.mem_total_kb) : '—';
+  setEl('server-ram', `${ramUsed} / ${ramTotal}`);
   setEl('server-last-seen', formatRelativeTime(latestProxmoxData.last_seen));
 
   const agentVerPill = document.getElementById('server-agent-version-pill');
@@ -759,10 +771,8 @@ function renderServerTab(data) {
   if (storagePills && Array.isArray(node.storage)) {
     const networkTypes = new Set(['nfs', 'cifs', 'glusterfs', 'cephfs', 'rbd', 'iscsi', 'pbs']);
     storagePills.innerHTML = node.storage.map((s) => {
-      const usedGB = ((Number(s.used) || 0) / 1024 / 1024 / 1024).toFixed(0);
-      const totalGB = ((Number(s.total) || 0) / 1024 / 1024 / 1024).toFixed(0);
       const icon = networkTypes.has(s.type) ? '🌐' : '🗄️';
-      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${usedGB}/${totalGB}GB</span>`;
+      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${fmtSize(s.used)} / ${fmtSize(s.total)}</span>`;
     }).join('');
   }
 
@@ -806,14 +816,14 @@ function renderServerTab(data) {
   if (templateTbody) {
     templateTbody.innerHTML = templateVms.map((vm) => {
       const statusDot = vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫';
-      const memUsedGB  = vm.mem    ? (Number(vm.mem)    / 1024).toFixed(1) : '—';
-      const memTotalGB = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+      const memUsed  = vm.mem    ? fmtSize(Number(vm.mem)    * 1024 * 1024) : '—';
+      const memTotal = vm.maxmem ? fmtSize(Number(vm.maxmem) * 1024 * 1024) : '—';
       const cpu = vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—';
       return `<tr class="vm-row-template">
         <td>${vm.vmid}</td>
         <td>${escHtml(vm.name || '—')}</td>
         <td>${cpu}</td>
-        <td>${memUsedGB}/${memTotalGB} GB</td>
+        <td>${memUsed} / ${memTotal}</td>
         <td>${statusDot} ${vm.status || 'unknown'}</td>
       </tr>`;
     }).join('');
@@ -854,8 +864,8 @@ function renderServerTab(data) {
       const isWebui      = webuiVmid != null && Number(vm.vmid) === webuiVmid;
       const statusDot    = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
       const statusLabel  = isRecloning ? 'recloning…' : (vm.status || 'unknown');
-      const memUsedGB    = vm.mem    ? (Number(vm.mem)    / 1024).toFixed(1) : '—';
-      const memTotalGB   = vm.maxmem ? (Number(vm.maxmem) / 1024).toFixed(1) : '—';
+      const memUsed  = vm.mem    ? fmtSize(Number(vm.mem)    * 1024 * 1024) : '—';
+      const memTotal = vm.maxmem ? fmtSize(Number(vm.maxmem) * 1024 * 1024) : '—';
       const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
         ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
         : '';
@@ -876,7 +886,7 @@ function renderServerTab(data) {
         <td>${vm.vmid}</td>
         <td>${escHtml(vm.name || '—')}${recoveryBadge}${webuiBadge}</td>
         <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—'}</td>
-        <td>${memUsedGB}/${memTotalGB} GB</td>
+        <td>${memUsed} / ${memTotal}</td>
         <td>${actionBtns}</td>
       `;
       tbody.appendChild(tr);
@@ -1488,7 +1498,12 @@ async function requestJson(url, options = {}) {
 }
 
 function escHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\x22/g, '&quot;')
+    .replace(/\x27/g, '&#39;');
 }
 
 function parseJsonList(value) {
@@ -5064,10 +5079,11 @@ function applyRefreshInterval(seconds) {
 const refreshSelect = document.getElementById('refresh-interval-select');
 if (refreshSelect) {
   const saved = localStorage.getItem('refreshInterval');
-  if (saved) {
-    const opt = refreshSelect.querySelector(`option[value="${saved}"]`);
-    if (opt) { opt.selected = true; applyRefreshInterval(Number(saved)); }
-  }
+  const defaultInterval = 10;
+  const initial = saved !== null ? Number(saved) : defaultInterval;
+  const opt = refreshSelect.querySelector(`option[value="${initial}"]`);
+  if (opt) opt.selected = true;
+  applyRefreshInterval(initial);
   refreshSelect.addEventListener('change', () => applyRefreshInterval(Number(refreshSelect.value)));
 }
 
