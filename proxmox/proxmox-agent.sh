@@ -6,11 +6,20 @@
 set -euo pipefail
 
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
+PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-60}"
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
+
+# Prevent duplicate instances
+if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting." | tee -a "$AGENT_LOG"
+    exit 1
+fi
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
@@ -453,6 +462,9 @@ usb_provision_loop() {
             vidpid="${PRESENT_BUSES[$bus_path]}"
             product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
             provision_vm "$bus_path" "$vidpid" "$product_name" || true
+            # Send telemetry after each provision so UI stays current during bulk spin-up
+            build_usb_state_json
+            curl_api POST /api/proxmox/telemetry "$(collect_telemetry)" >/dev/null 2>&1 || true
         fi
     done
 
