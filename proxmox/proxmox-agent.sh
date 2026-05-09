@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.26"
+AGENT_VERSION="1.28"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -507,7 +507,9 @@ reclone_vm_instance() {
     local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
 
     destroy_vm "$vmid"
-    clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "${STATE_VMID_TO_IMAGE[$vmid]:-1}" "$device_type"
+    # NOTE: destroy_vm() unsets STATE_VMID_TO_IMAGE[$vmid], so we must save the
+    # image number BEFORE calling it.
+    clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "${_saved_image}" "$device_type"
     STATE_BUS_TO_VMID["$bus_path"]="$vmid"
     STATE_VMID_TO_BUS["$vmid"]="$bus_path"
     STATE_MISSING_BY_BUS["$bus_path"]=""
@@ -670,7 +672,7 @@ execute_vm_command() {
     case "$action" in
         start_vm)     timeout 60 qm start "$vmid" ;;
         stop_vm)      timeout 60 qm stop "$vmid" ;;
-        reboot_vm)    qm reboot "$vmid" ;;
+        reboot_vm)    qm reboot "$vmid" 2>/dev/null || true ;;
         snapshot_vm)  qm snapshot "$vmid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim" ;;
         reclone_vm)   reclone_vm_instance "$vmid" ;;
         delete_vm)

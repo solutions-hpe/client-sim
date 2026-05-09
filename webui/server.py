@@ -1645,6 +1645,19 @@ def _client_os_counts() -> dict[str, int]:
     return counts
 
 
+def _read_local_kill_switch() -> str:
+    """Read kill_switch from the repo's configs/simulation.conf without full parse."""
+    try:
+        conf = (REPO_DIR / "configs" / "simulation.conf").read_text(encoding="utf-8")
+        for line in conf.splitlines():
+            if line.strip().startswith("kill_switch"):
+                val = line.split("=", 1)[-1].strip()
+                return val if val in ("on", "off") else "off"
+    except Exception:
+        pass
+    return "off"
+
+
 def _proxmox_status_payload() -> dict[str, Any]:
     return {
         **proxmox_state,
@@ -3431,7 +3444,7 @@ async def _fetch_central_client_names(wsite: str, central_site: str) -> list[str
     headers = _central_headers()
     names: list[str] = []
 
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient() as client:
         for path in ["/monitoring/v2/clients/wireless", "/monitoring/v1/clients/wireless"]:
             for site_param in ["site", "site_name"]:
                 try:
@@ -3985,6 +3998,7 @@ async def api_init() -> dict[str, Any]:
         "relay": _relay_status_payload(),
         "installer_version": INSTALLER_VERSION,
         "kill_switch": gkill_switch_state["value"],
+        "local_kill_switch": _read_local_kill_switch(),
     }
 
 
@@ -4359,6 +4373,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({"type": "reclone_update", **dict(reclone_state)}))
     await websocket.send_text(json.dumps({"type": "update_all_progress", **dict(update_all_state)}))
     await websocket.send_text(json.dumps({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": time.time(), "token_state": _central_token_state()}))
+    # Send current kill switch state so reconnecting clients don't miss a change
+    await websocket.send_text(json.dumps({"type": "gkill_switch_update", "value": gkill_switch_state["value"]}))
 
     try:
         while True:

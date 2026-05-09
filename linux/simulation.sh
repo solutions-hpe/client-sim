@@ -276,10 +276,11 @@ report_status() {
 
   local payload
   printf -v payload \
-    '{"hostname":"%s","simulation_id":"%s","platform":"%s","iteration":%s,"connected_ssid":"%s","gateway_reachable":%s,"vh_connected":false,"active_simulations":[%s],"errors":%s,"config":{"sim_phy":"%s","kill_switch":"%s","dns_fail":"%s","iperf":"%s","www_traffic":"%s","download":"%s","ping_test":"%s","ssidpw_fail":"%s","auth_fail":"%s","dhcp_fail":"%s"}}' \
+    '{"hostname":"%s","simulation_id":"%s","platform":"%s","hw_type":"%s","iteration":%s,"connected_ssid":"%s","gateway_reachable":%s,"vh_connected":false,"active_simulations":[%s],"errors":%s,"config":{"sim_phy":"%s","kill_switch":"%s","dns_fail":"%s","iperf":"%s","www_traffic":"%s","download":"%s","ping_test":"%s","ssidpw_fail":"%s","auth_fail":"%s","dhcp_fail":"%s"}}' \
     "$(json_escape "$hostname")" \
     "$(json_escape "$simulation_id")" \
     "$(json_escape "$platform")" \
+    "$(json_escape "$hw_type")" \
     "$iteration" \
     "$(json_escape "$connected_ssid")" \
     "$gateway_json" \

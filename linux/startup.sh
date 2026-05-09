@@ -2,6 +2,15 @@
 version=.02
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
+
+# Instance guard — prevent multiple concurrent startups from racing
+_LOCK_FILE="/usr/local/scripts/.startup.lock"
+if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
+    echo "$(date): startup.sh already running (lock held), exiting" >> "$debug"
+    exit 0
+fi
+trap 'rmdir "$_LOCK_FILE" 2>/dev/null || true' EXIT INT TERM
+
 echo Startup Script Version $version
 echo Clearing Log File | tee "$debug" "$log"
 echo $(date) | tee -a "$debug"
@@ -84,7 +93,7 @@ fi
 #------------------------------------------------------------
 #Configuring Syslog Server
 #------------------------------------------------------------
-if [ $syslog == "on" ]; then
+if [ "$syslog" == "on" ]; then
   #Ensure the remote syslog line exists, replace if different
   if grep -q '^\*\.\*@' /etc/rsyslog.conf; then
     sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf

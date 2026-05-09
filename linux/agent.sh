@@ -42,7 +42,7 @@ for c in cmds:
 
   case "$action" in
     restart_sim)
-      pkill -f simulation.sh 2>/dev/null || true
+      pkill -f '[/]simulation.sh' 2>/dev/null || true
       sleep 2
       bash /usr/local/scripts/startup.sh &
       message="Simulation restarted"
@@ -66,11 +66,11 @@ for c in cmds:
       if [[ "$ks_val" != "on" && "$ks_val" != "off" ]]; then ks_val="on"; fi
       sed -i "s/^kill_switch=.*/kill_switch=${ks_val}/" /usr/local/scripts/simulation.conf
       if [[ "$ks_val" == "on" ]]; then
-        pkill -f simulation.sh 2>/dev/null || true
+        pkill -f '[/]simulation.sh' 2>/dev/null || true
         message="Kill switch activated"
       else
         # Turn off: restart simulation so it picks up the new config
-        pkill -f simulation.sh 2>/dev/null || true
+        pkill -f '[/]simulation.sh' 2>/dev/null || true
         sleep 1
         bash /usr/local/scripts/startup.sh &
         message="Kill switch deactivated — simulation restarting"

@@ -158,7 +158,9 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             if [[ "$_cfg_code" == "200" && -s "$_cfg_tmp" ]]; then
                 if ! diff -q "$_cfg_tmp" /usr/local/scripts/simulation.conf >/dev/null 2>&1; then
                     echo "simulation.conf changed — updating" | tee -a "$debug" "$log"
-                    sudo cp "$_cfg_tmp" /usr/local/scripts/simulation.conf
+                    # Atomic write: mv is atomic on the same filesystem, prevents
+                    # simulation.sh reading a partial file during rapid_update cycles
+                    sudo mv "$_cfg_tmp" /usr/local/scripts/simulation.conf
                 else
                     echo "simulation.conf unchanged" | tee -a "$debug"
                 fi

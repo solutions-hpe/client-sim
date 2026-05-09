@@ -958,11 +958,8 @@ async function loadProxmoxApproved() {
 
 function applySettingsToUI(s) {
   const settings = mergeSettings(s);
-  // Local kill switch — from simulation.conf [simulation] kill_switch
-  if ('kill_switch' in settings) {
-    simDisabledState.local = settings.kill_switch === 'on';
-    renderSimDisabledBanner();
-  }
+  // Local kill switch is driven by /api/init local_kill_switch (from simulation.conf),
+  // NOT from WebUI settings — the settings object never contains kill_switch.
   if (repoUrlInput) repoUrlInput.value = settings.repo_url || repoUrlInput.value;
   if (branchInput && !branchInput.matches(':focus')) branchInput.value = settings.repo_branch || '';
   if (setupActiveBranch) setupActiveBranch.textContent = settings.repo_branch || '—';
@@ -4874,8 +4871,12 @@ loadSimulations();
     }
     // Relay
     if (init.relay) setRelayStatus(init.relay);
-    // Kill switch
+    // Kill switch (global from GitHub, local from simulation.conf)
     if (init.kill_switch !== undefined) applyGkillSwitch(init.kill_switch);
+    if (init.local_kill_switch !== undefined) {
+      simDisabledState.local = init.local_kill_switch === 'on';
+      renderSimDisabledBanner();
+    }
     // Installer version badge
     const badge = document.getElementById('installer-version');
     if (badge && init.installer_version) badge.textContent = `v${init.installer_version}`;
