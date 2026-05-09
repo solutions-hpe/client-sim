@@ -4588,29 +4588,31 @@ updateCentralToolbar();
 activateSetupSubtab('setup-github');
 connectWebSocket();
 loadSimulations();
-requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
-requestJson('/api/kill-switch/status').then(d => applyGkillSwitch(d.value)).catch(() => {});
-requestJson('/api/proxmox/status').then((data) => {
-  if (
-    data.connected
-    || (data.vms || []).length
-    || (data.usb_state || []).length
-    || (data.unknown_usb || []).length
-    || (data.pending_proxmox || []).length
-    || (data.approved_proxmox || []).length
-  ) renderServerTab(data);
-}).catch(() => {});
-requestJson('/api/proxmox/reclone-status').then(renderRecloneStatus).catch(() => {});
 
-// Fetch installer version once on load and display in header
+// Single init call replaces 5 separate REST calls — UI renders immediately from cache
 (async () => {
   try {
-    const health = await requestJson('/api/health');
-    const badge = document.getElementById('installer-version');
-    if (badge && health.installer_version) {
-      badge.textContent = `v${health.installer_version}`;
+    const init = await requestJson('/api/init');
+    // Proxmox
+    if (init.proxmox && (init.proxmox.connected || (init.proxmox.vms || []).length || (init.proxmox.usb_state || []).length || (init.proxmox.unknown_usb || []).length || (init.proxmox.pending_proxmox || []).length || (init.proxmox.approved_proxmox || []).length)) {
+      renderServerTab(init.proxmox);
     }
-  } catch (_) { /* silent — version badge is non-critical */ }
+    // Reclone
+    if (init.reclone) renderRecloneStatus(init.reclone);
+    // Central
+    if (init.central) {
+      centralTokenValid = Boolean(init.central.token_valid);
+      setCentralApiStatus(centralTokenValid, init.central.token_state);
+      handleCentralUpdate(init.central.status || {}, Date.now() / 1000, init.central.wireless_clients || {}, init.central.hardware_alerts || [], init.central.client_count_status || {});
+    }
+    // Relay
+    if (init.relay) setRelayStatus(init.relay);
+    // Kill switch
+    if (init.kill_switch !== undefined) applyGkillSwitch(init.kill_switch);
+    // Installer version badge
+    const badge = document.getElementById('installer-version');
+    if (badge && init.installer_version) badge.textContent = `v${init.installer_version}`;
+  } catch (_) { /* silent — WS will provide live state */ }
 })();
 
 // ── Log viewer ────────────────────────────────────────────────────────────────

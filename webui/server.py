@@ -36,6 +36,7 @@ if not _HTTPX_AVAILABLE:
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+STATE_CACHE_FILE = BASE_DIR / "state_cache.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
 CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
@@ -174,6 +175,51 @@ def _save_settings() -> None:
         SETTINGS_FILE.write_text(json.dumps(_encrypt_settings(settings), indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
+
+
+# ── State snapshot cache (JSON file, no DB) ──────────────────────────────────
+_state_cache_last_save: float = 0.0
+STATE_CACHE_MIN_INTERVAL = 10.0  # max one write per 10 s
+
+
+def _save_state_cache(force: bool = False) -> None:
+    global _state_cache_last_save
+    now = time.time()
+    if not force and (now - _state_cache_last_save) < STATE_CACHE_MIN_INTERVAL:
+        return
+    try:
+        cache = {
+            "proxmox_state": {**proxmox_state, "connected": False},
+            "central_status": central_status,
+            "central_wireless_clients": dict(central_wireless_clients),
+            "ts": now,
+        }
+        STATE_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        _state_cache_last_save = now
+    except Exception as exc:
+        logger.warning("Could not write state cache: %s", exc)
+
+
+def _load_state_cache() -> None:
+    """Restore last-known state from disk so the UI renders immediately on restart
+    instead of showing empty state for up to one full agent poll interval (60 s)."""
+    try:
+        if not STATE_CACHE_FILE.exists():
+            return
+        cache = json.loads(STATE_CACHE_FILE.read_text(encoding="utf-8"))
+        age = time.time() - cache.get("ts", 0)
+        if age > 3600:  # ignore stale cache (>1 h old)
+            logger.info("State cache is %.0f s old — skipping restore", age)
+            return
+        cached_px = cache.get("proxmox_state", {})
+        if cached_px:
+            proxmox_state.update(cached_px)
+            proxmox_state["connected"] = False  # never restore as connected
+        central_status.update(cache.get("central_status", {}))
+        central_wireless_clients.update(cache.get("central_wireless_clients", {}))
+        logger.info("Restored state cache from disk (age=%.0fs)", age)
+    except Exception as exc:
+        logger.warning("Could not load state cache: %s", exc)
 
 
 def _normalize_relay_enabled(value: Any) -> str:
@@ -990,6 +1036,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
         await asyncio.to_thread(_append_and_trim_history, new_records)
 
     await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": now, "token_state": _central_token_state()})
+    _save_state_cache()
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -1341,6 +1388,9 @@ background_tasks: dict[str, asyncio.Task[Any]] = {}
 reclone_run_lock = asyncio.Lock()
 last_schedule_trigger: str | None = None
 
+# Restore last-known state so UI renders immediately instead of waiting for first agent poll
+_load_state_cache()
+
 
 class ClientStatus(BaseModel):
     hostname: str
@@ -1580,6 +1630,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
 
 
 async def _broadcast_proxmox_state() -> None:
+    _save_state_cache()
     await broadcast({"type": "proxmox_update", **_proxmox_status_payload()})
 
 
@@ -2980,7 +3031,10 @@ async def api_central_poll() -> dict[str, Any]:
     """Trigger an immediate Central poll cycle."""
     if not _central_ready():
         raise HTTPException(status_code=422, detail="Central not configured.")
-    asyncio.create_task(_poll_central_once(httpx.AsyncClient()))
+    async def _poll_with_client() -> None:
+        async with httpx.AsyncClient() as client:
+            await _poll_central_once(client)
+    asyncio.create_task(_poll_with_client())
     return {"status": "ok", "message": "Poll started."}
 
 
@@ -3734,6 +3788,33 @@ async def api_logs_stream():
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/init")
+async def api_init() -> dict[str, Any]:
+    """Single endpoint that returns all state needed for initial page render.
+    Replaces 5+ separate REST calls made on page load."""
+    cfg = dict(settings["central_config"])
+    for secret_key in ("client_secret", "access_token", "refresh_token"):
+        cfg.pop(secret_key, None)
+    cfg["access_token_configured"] = bool(settings["central_config"].get("access_token") or central_token.get("access_token"))
+    cfg["refresh_token_configured"] = bool(settings["central_config"].get("refresh_token") or central_token.get("refresh_token"))
+    cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
+    return {
+        "proxmox": _proxmox_status_payload(),
+        "reclone": dict(reclone_state),
+        "central": {
+            "status": _central_status_payload(),
+            "wireless_clients": dict(central_wireless_clients),
+            "hardware_alerts": _hw_alerts_payload(),
+            "client_count_status": _client_count_payload(),
+            "token_valid": bool(central_token.get("access_token") and time.time() < central_token.get("expires_at", 0)),
+            "token_state": _central_token_state(),
+        },
+        "relay": _relay_status_payload(),
+        "installer_version": INSTALLER_VERSION,
+        "kill_switch": str(settings.get("global_kill_switch", "off")),
+    }
 
 
 @app.get("/api/health")

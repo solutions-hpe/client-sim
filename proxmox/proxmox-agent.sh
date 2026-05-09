@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.04"
+AGENT_VERSION="1.05"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -17,7 +17,7 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting." | tee -a "$AGENT_LOG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting."
     exit 1
 fi
 echo $$ > "$PIDFILE"
@@ -46,7 +46,7 @@ declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$AGENT_LOG"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 if [[ -z "$SERVER_URL" ]]; then
     log "ERROR: CLIENT_SIM_SERVER_URL not set."
@@ -249,6 +249,7 @@ load_state_file() {
     STATE_VMID_TO_BUS=()
     STATE_MISSING_BY_BUS=()
     STATE_VMID_TO_IMAGE=()
+    local vmid bus_path missing_since image_num
     while IFS=$'\t' read -r vmid bus_path missing_since image_num; do
         [[ -z "$vmid" || -z "$bus_path" ]] && continue
         STATE_BUS_TO_VMID["$bus_path"]="$vmid"
@@ -348,8 +349,8 @@ clone_vm_for_usb() {
     _teardown() {
         local reason="$1"
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
-        qm stop "$vmid" 2>/dev/null || true
-        qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        timeout 60 qm stop "$vmid" 2>/dev/null || true
+        timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
         unset 'STATE_VMID_TO_BUS[$vmid]'
         unset 'STATE_VMID_TO_IMAGE[$vmid]'
         unset 'STATE_BUS_TO_VMID[$bus_path]'
@@ -358,16 +359,16 @@ clone_vm_for_usb() {
     }
 
     # Clone
-    if ! qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
+    if ! timeout 180 qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
         _teardown "qm clone failed (template $template_id missing or VMID $vmid conflict)"
         return 1
     fi
 
-    qm set "$vmid" --onboot 1 --startup "order=2,up=60" 2>/dev/null || true
-    qm set "$vmid" -usb0 "host=$bus_path" 2>/dev/null || true
+    timeout 30 qm set "$vmid" --onboot 1 --startup "order=2,up=60" 2>/dev/null || true
+    timeout 30 qm set "$vmid" -usb0 "host=$bus_path" 2>/dev/null || true
 
     # Start
-    if ! qm start "$vmid" 2>/dev/null; then
+    if ! timeout 60 qm start "$vmid" 2>/dev/null; then
         _teardown "qm start failed"
         return 1
     fi
@@ -390,7 +391,7 @@ clone_vm_for_usb() {
     # cloud-init from resetting it on next boot.
     local hostname_set=0
     for _ in $(seq 1 6); do
-        if qm guest exec "$vmid" -- bash -c "
+        if timeout 30 qm guest exec "$vmid" -- bash -c "
             echo '${full_name}' > /etc/hostname &&
             hostname '${full_name}' &&
             hostnamectl set-hostname '${full_name}' 2>/dev/null || true &&
@@ -412,11 +413,11 @@ clone_vm_for_usb() {
     log "Set hostname to $full_name on VM $vmid"
 
     # Write USB device type for startup.sh
-    qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
+    timeout 30 qm guest exec "$vmid" -- bash -c "echo 'sim_phy=${device_type}' > /usr/local/scripts/usb-phy-override.conf" >/dev/null 2>&1 \
         && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
         || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
 
-    qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
+    timeout 30 qm guest exec "$vmid" -- reboot >/dev/null 2>&1 || true
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }
 
@@ -458,8 +459,8 @@ provision_vm() {
 destroy_vm() {
     local vmid="$1"
     local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
-    qm stop "$vmid" 2>/dev/null || true
-    qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    timeout 60 qm stop "$vmid" 2>/dev/null || true
+    timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
     if [[ -n "$bus_path" ]]; then
         unset 'STATE_MISSING_BY_BUS[$bus_path]'
         unset 'STATE_BUS_TO_VMID[$bus_path]'
@@ -665,8 +666,8 @@ JSON
 execute_vm_command() {
     local action="$1" vmid="${2:-}" _type="${3:-}"
     case "$action" in
-        start_vm)     qm start "$vmid" ;;
-        stop_vm)      qm stop "$vmid" ;;
+        start_vm)     timeout 60 qm start "$vmid" ;;
+        stop_vm)      timeout 60 qm stop "$vmid" ;;
         reboot_vm)    qm reboot "$vmid" ;;
         snapshot_vm)  qm snapshot "$vmid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim" ;;
         reclone_vm)   reclone_vm_instance "$vmid" ;;
@@ -680,8 +681,8 @@ execute_vm_command() {
                 qm snapshot "$vid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim" || true
             done
             ;;
-        start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do qm start "$vid" || true; done ;;
-        stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do qm stop  "$vid" || true; done ;;
+        start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
+        stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent)
             local agent_script="/usr/local/bin/client-sim-proxmox-agent"
             local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
