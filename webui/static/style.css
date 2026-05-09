@@ -3,13 +3,13 @@
  * Brand colors, typography, and layout aligned to hpe.com design language.
  *
  * HPE Green  : #01A982   HPE Navy   : #263040
- * Font       : MetricHPE (Arial fallback)
+ * Font       : System UI stack (MetricHPE CDN is no longer available)
  */
 
 /* ── Design tokens ─────────────────────────────────────────────── */
 :root {
   color-scheme: light;
-  font-family: "MetricHPE", "Metric HPE", Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
 
   --hpe-green:       #01A982;
   --hpe-green-dark:  #00896F;
@@ -37,28 +37,6 @@
   --danger:  var(--hpe-red);
   --warning: var(--hpe-orange);
   --blue:    #0073E6;
-}
-
-/* ── Font face (MetricHPE, falls back to Arial silently) ────────── */
-@font-face {
-  font-family: "MetricHPE";
-  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Light.woff2") format("woff2");
-  font-weight: 300; font-display: swap;
-}
-@font-face {
-  font-family: "MetricHPE";
-  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Regular.woff2") format("woff2");
-  font-weight: 400; font-display: swap;
-}
-@font-face {
-  font-family: "MetricHPE";
-  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Medium.woff2") format("woff2");
-  font-weight: 500; font-display: swap;
-}
-@font-face {
-  font-family: "MetricHPE";
-  src: url("https://h50007.www5.hpe.com/hpecss/fonts/MetricHPE-Web-Bold.woff2") format("woff2");
-  font-weight: 700; font-display: swap;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────── */
