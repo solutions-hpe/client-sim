@@ -439,7 +439,7 @@ clone_vm_for_usb() {
         local reason="$1"
         rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
-        timeout 60 qm stop "$vmid" 2>/dev/null || true
+        timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
         timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
         unset 'STATE_VMID_TO_BUS[$vmid]'
         unset 'STATE_VMID_TO_IMAGE[$vmid]'
@@ -595,7 +595,7 @@ destroy_vm() {
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}-${vmid}" "" >/dev/null 2>&1 || true
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}" "" >/dev/null 2>&1 || true
     fi
-    timeout 60 qm stop "$vmid" 2>/dev/null || true
+    timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
     timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
     if [[ -n "$bus_path" ]]; then
         unset 'STATE_MISSING_BY_BUS[$bus_path]'
@@ -611,7 +611,7 @@ destroy_vm() {
 # Used by parallel reclone jobs where state is managed by the parent process.
 _destroy_vm_qm_only() {
     local vmid="$1"
-    timeout 60 qm stop "$vmid" 2>/dev/null || true
+    timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
     timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
 }
 
@@ -1246,7 +1246,7 @@ PY
             curl_api DELETE "/api/commands/pending?target=${_dhostname}-${_dvmid}" "" >/dev/null 2>&1 || true
             # Run qm stop+destroy in a background subshell (no state writes)
             (
-                timeout 60 qm stop "$_dvmid" 2>/dev/null || true
+                timeout 60 qm stop "$_dvmid" --skiplock 2>/dev/null || true
                 timeout 60 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
                 log "Parallel delete done: VM $_dvmid"
             ) &
