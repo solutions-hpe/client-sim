@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.98"
+AGENT_VERSION="1.99"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -938,7 +938,8 @@ print(json.dumps(out))
 " 2>/dev/null || echo "[]")
     fi
 
-    # Fallback: qm list + pct list (no CPU stats; maxmem unavailable)
+    # Fallback: qm list + pct list (no real-time CPU/mem usage; maxmem from qm list col 4)
+    # qm list columns: VMID  NAME  STATUS  MEM(MB)  BOOTDISK(GB)  PID
     if [[ "$vms_json" == "[]" ]] && command -v qm &>/dev/null; then
         local tmpl_ids=""
         for conf in /etc/pve/qemu-server/*.conf; do

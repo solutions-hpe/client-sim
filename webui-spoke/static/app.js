@@ -1775,6 +1775,17 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
   const missingTimeoutSeconds = (parseInt(currentSettings.usb_missing_timeout, 10) || 60) * 60;
 
+  // Running VM stats pill
+  const allVms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
+  const runningVms = allVms.filter((v) => v.status === 'running' && !v.is_template);
+  const usbStatPills = document.getElementById('usb-vm-stat-pills');
+  if (usbStatPills) {
+    const simRunning = runningVms.filter((v) => v.name && v.name.startsWith('client-sim-')).length;
+    const totalRunning = runningVms.length;
+    usbStatPills.innerHTML = `<span class="server-stat-pill" title="Total non-template VMs currently running">🟢 ${totalRunning} running VM${totalRunning !== 1 ? 's' : ''}</span>`
+      + (simRunning > 0 ? `<span class="server-stat-pill" title="client-sim-* VMs running">${simRunning} sim client${simRunning !== 1 ? 's' : ''}</span>` : '');
+  }
+
   // Client-side filter: remove devices that are now certified or ignored, and skip empty vidpids.
   // This prevents stale server broadcasts from restoring a device the user just acted on.
   const certifiedSet = new Set(certified.map((d) => String(d?.vidpid || '').toLowerCase()).filter(Boolean));
@@ -1794,8 +1805,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
     const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
 
     // Build VM name list for active entries
-    const vmMap = new Map((Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [])
-      .map((v) => [Number(v.vmid), v]));
+    const vmMap = new Map(allVms.map((v) => [Number(v.vmid), v]));
     const activeVmHtml = activeEntries.length === 0 ? '—' : activeEntries.map((e) => {
       const vm = vmMap.get(Number(e.vmid));
       const name = escHtml(vm?.name || `VM ${e.vmid}`);
@@ -2707,10 +2717,165 @@ async function loadSettings() {
     const settings = await requestJson('/api/settings');
     applySettingsToUI(settings || {});
     await loadUsbConfig().catch(() => {});
+    await loadSpokeAcmeSettings().catch(() => {});
   } catch (error) {
     showSettingsMessage(`Error loading settings: ${error.message}`, true);
   }
 }
+
+
+
+function spokeAcmeBadgeClass(daysRemaining) {
+  if (typeof daysRemaining !== 'number' || Number.isNaN(daysRemaining)) return 'badge-grey';
+  if (daysRemaining > 30) return 'badge-green';
+  if (daysRemaining >= 10) return 'badge-yellow';
+  return 'badge-red';
+}
+
+function toggleSpokeAcmeDnsSection() {
+  const challenge = document.getElementById('spoke-acme-challenge')?.value || 'http-01';
+  document.getElementById('spoke-acme-dns-section')?.classList.toggle('hidden', challenge !== 'dns-01');
+}
+
+function renderSpokeAcmeStatus(certInfo = {}, cfg = {}) {
+  const container = document.getElementById('spoke-acme-cert-status');
+  if (!container) return;
+  if (!certInfo || certInfo.source === 'none') {
+    container.innerHTML = `
+      <div class="setup-status-item"><span class="setup-status-label">Certificate</span><span class="setup-status-value">Not configured</span></div>
+      <div class="setup-status-item"><span class="setup-status-label">Challenge</span><span class="setup-status-value">${escapeHtml(cfg.challenge || 'http-01')}</span></div>
+      <div class="setup-status-item"><span class="setup-status-label">Authority</span><span class="setup-status-value">${escapeHtml(cfg.ca || 'letsencrypt')}</span></div>
+      <div class="setup-status-item"><span class="setup-status-label">HTTPS Mode</span><span class="setup-status-value">${cfg.spoke_tls === 'on' ? 'Enabled on restart' : 'Disabled'}</span></div>
+    `;
+    return;
+  }
+  const days = Number(certInfo.days_remaining ?? 0);
+  container.innerHTML = `
+    <div class="setup-status-item"><span class="setup-status-label">Domain</span><span class="setup-status-value">${escapeHtml(certInfo.domain || cfg.domain || '—')}</span></div>
+    <div class="setup-status-item"><span class="setup-status-label">Expires</span><span class="setup-status-value">${escapeHtml(certInfo.expires || '—')} <span class="badge ${spokeAcmeBadgeClass(days)}">${Number.isFinite(days) ? `${days} days` : 'unknown'}</span></span></div>
+    <div class="setup-status-item"><span class="setup-status-label">Issuer</span><span class="setup-status-value">${escapeHtml(certInfo.issuer || '—')}</span></div>
+    <div class="setup-status-item"><span class="setup-status-label">HTTPS Mode</span><span class="setup-status-value">${cfg.spoke_tls === 'on' ? 'Enabled on restart' : 'Disabled'}</span></div>
+  `;
+}
+
+async function loadSpokeAcmeSettings() {
+  const data = await requestJson('/api/acme');
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value || '';
+  };
+  setValue('spoke-acme-domain', data.domain || '');
+  setValue('spoke-acme-email', data.email || '');
+  setValue('spoke-acme-ca', data.ca || 'letsencrypt');
+  setValue('spoke-acme-challenge', data.challenge || 'http-01');
+  setValue('spoke-acme-dns-provider', data.dns_provider || 'cloudflare');
+  const enabled = document.getElementById('spoke-acme-enabled');
+  if (enabled) enabled.checked = !!data.enabled;
+  const tlsEnabled = document.getElementById('spoke-tls-enabled');
+  if (tlsEnabled) tlsEnabled.checked = data.spoke_tls === 'on';
+  const token = document.getElementById('spoke-acme-cf-token');
+  if (token) token.value = '';
+  toggleSpokeAcmeDnsSection();
+  renderSpokeAcmeStatus(data.cert_info || {}, data);
+}
+
+async function saveSpokeAcmeConfig() {
+  const payload = {
+    enabled: !!document.getElementById('spoke-acme-enabled')?.checked,
+    domain: document.getElementById('spoke-acme-domain')?.value.trim() || '',
+    email: document.getElementById('spoke-acme-email')?.value.trim() || '',
+    ca: document.getElementById('spoke-acme-ca')?.value || 'letsencrypt',
+    challenge: document.getElementById('spoke-acme-challenge')?.value || 'http-01',
+    dns_provider: document.getElementById('spoke-acme-dns-provider')?.value || '',
+    dns_credentials: { cf_api_token: document.getElementById('spoke-acme-cf-token')?.value || '' },
+    spoke_tls: document.getElementById('spoke-tls-enabled')?.checked ? 'on' : 'off'
+  };
+  try {
+    const data = await requestJson('/api/acme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const msg = document.getElementById('spoke-acme-msg');
+    if (msg) {
+      msg.textContent = 'TLS certificate settings saved.';
+      msg.className = 'form-msg msg-ok';
+    }
+    renderSpokeAcmeStatus(data.cert_info || {}, data);
+    const token = document.getElementById('spoke-acme-cf-token');
+    if (token) token.value = '';
+  } catch (error) {
+    const msg = document.getElementById('spoke-acme-msg');
+    if (msg) {
+      msg.textContent = `Error: ${error.message}`;
+      msg.className = 'form-msg msg-error';
+    }
+  }
+}
+
+let spokeAcmePoller = null;
+
+async function pollSpokeAcmeStatus() {
+  try {
+    const status = await requestJson('/api/acme/status');
+    if (!status.running) {
+      if (spokeAcmePoller) {
+        clearInterval(spokeAcmePoller);
+        spokeAcmePoller = null;
+      }
+      const btn = document.getElementById('spoke-acme-request-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Request Certificate Now';
+      }
+      const msg = document.getElementById('spoke-acme-msg');
+      if (status.last_result?.success) {
+        if (msg) {
+          msg.textContent = `Certificate issued for ${status.last_result.domain} — restart the spoke to enable HTTPS.`;
+          msg.className = 'form-msg msg-ok';
+        }
+        await loadSpokeAcmeSettings();
+      } else if (status.last_error && msg) {
+        msg.textContent = status.last_error;
+        msg.className = 'form-msg msg-error';
+      }
+    }
+  } catch (error) {
+    console.warn('ACME status poll failed', error);
+  }
+}
+
+async function requestSpokeAcmeCert() {
+  const btn = document.getElementById('spoke-acme-request-btn');
+  const msg = document.getElementById('spoke-acme-msg');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Requesting certificate…';
+  }
+  if (msg) {
+    msg.textContent = 'Requesting certificate… (this may take 60-90 seconds)';
+    msg.className = 'form-msg msg-ok';
+  }
+  try {
+    await requestJson('/api/acme/request', { method: 'POST' });
+    if (spokeAcmePoller) clearInterval(spokeAcmePoller);
+    spokeAcmePoller = setInterval(pollSpokeAcmeStatus, 2000);
+    await pollSpokeAcmeStatus();
+  } catch (error) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Request Certificate Now';
+    }
+    if (msg) {
+      msg.textContent = `Error: ${error.message}`;
+      msg.className = 'form-msg msg-error';
+    }
+  }
+}
+
+window.saveSpokeAcmeConfig = saveSpokeAcmeConfig;
+window.requestSpokeAcmeCert = requestSpokeAcmeCert;
+
 
 async function loadCentralStatus() {
   centralStatusInitialized = true;
@@ -3590,6 +3755,17 @@ function handleMessage(message) {
     });
     window._lastCommands = message.commands || [];
     renderCommandTable(message.commands);
+    return;
+  }
+
+  if (message.type === 'cert_renewed') {
+    showToast(`TLS certificate renewed — expires ${message.expires || 'unknown'}`, 'success');
+    loadSpokeAcmeSettings().catch(() => {});
+    return;
+  }
+
+  if (message.type === 'acme_status') {
+    if (!message.running) pollSpokeAcmeStatus();
     return;
   }
 
@@ -4534,6 +4710,7 @@ if (setupSubtabButtons.length) {
   setupSubtabButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
       activateSetupSubtab(btn.dataset.subtab);
+      if (btn.dataset.subtab === 'setup-tls') loadSpokeAcmeSettings().catch(() => {});
     });
   });
 }
@@ -5433,3 +5610,5 @@ let loadServiceLogs = () => {};
   window._logsLoadHistory = loadHistory;
   window._logsSetSource   = (src) => { if (sourceSelect) sourceSelect.value = src; };
 })();
+
+document.getElementById('spoke-acme-challenge')?.addEventListener('change', toggleSpokeAcmeDnsSection);

@@ -1,16 +1,18 @@
-# Client Simulation — Reporting API
+# webui-spoke — Client Simulation Client API
 
-This document describes how simulation clients communicate with the Client-Sim Dashboard webserver. Clients use this API to:
+This document describes how simulation clients communicate with the local **webui-spoke** server. Clients use this API to:
 
-1. **Report status** (heartbeat/beacon) so the dashboard knows they are alive
-2. **Pull configuration** to receive their `simulation.conf` (including any in-dashboard overrides)
+1. **Report status** (heartbeat/beacon) so the spoke knows they are alive
+2. **Pull configuration** to receive their `simulation.conf` (including any in-spoke overrides)
 3. **Pull scripts** to stay up to date with the latest simulation scripts
+
+> Note: the client VM API remains local to the spoke. Even when hub relay is enabled, clients still talk to `webui-spoke`; the spoke separately relays telemetry and command state to `webui-hub`.
 
 ---
 
 ## Quick Start
 
-### 1. Point clients at the webserver
+### 1. Point clients at the spoke server
 
 Set `server_url` in `simulation.conf` on each client:
 
@@ -19,7 +21,7 @@ Set `server_url` in `simulation.conf` on each client:
 server_url=http://169.253.1.1:8000
 ```
 
-Replace `169.253.1.1` with the dashboard server's IP address. For the standard Proxmox deployment this is the `eth1` address of the WebUI LXC on `vmbr255`. For a development/test server use the host IP and port `8000`.
+Replace `169.253.1.1` with the webui-spoke server's IP address. For the standard Proxmox deployment this is the `eth1` address of the webui-spoke LXC on `vmbr255`. For a development/test server use the host IP and port `8000`.
 
 If `server_url` is blank or unreachable, all API calls are skipped and the client runs in standalone mode — it continues to use whatever scripts and config it last downloaded.
 
@@ -41,7 +43,7 @@ Expected response:
 }
 ```
 
-`repo_synced: true` confirms the server has successfully cloned the git repo and can serve scripts and config. If `repo_synced` is `false`, check the **Setup** tab in the dashboard for the sync error — clients cannot pull scripts until the repo is ready.
+`repo_synced: true` confirms the server has successfully cloned the git repo and can serve scripts and config. If `repo_synced` is `false`, check the **Setup** tab in the spoke UI for the sync error — clients cannot pull scripts until the repo is ready.
 
 ### 3. Confirm config is being served
 
@@ -87,7 +89,7 @@ curl -sf "${server_url}/api/health" > /dev/null || exit 0
 
 ### 2. Report Status (Heartbeat)
 
-Clients POST a JSON beacon on every simulation cycle so the dashboard can track their state.
+Clients POST a JSON beacon on every simulation cycle so the spoke can track their state.
 
 ```
 POST /api/status
@@ -132,7 +134,7 @@ Content-Type: application/json
 | `gateway_reachable` | bool | Whether the default gateway responded to ping |
 | `vh_connected` | bool | Whether VH (VirtualHub) connection is active |
 | `active_simulations` | array of strings | Which simulations are currently running |
-| `errors` | array of strings | *(optional)* Error messages accumulated since the last beacon. The server stores the last 50 per client (circular buffer) and displays them in the dashboard error log. Cleared from the client buffer only after a successful POST. |
+| `errors` | array of strings | *(optional)* Error messages accumulated since the last beacon. The server stores the last 50 per client (circular buffer) and displays them in the spoke error log. Cleared from the client buffer only after a successful POST. |
 | `config` | object | Key/value pairs from the client's active `simulation.conf` section |
 
 **Response:**
@@ -144,7 +146,7 @@ Content-Type: application/json
 }
 ```
 
-The `client` object is the full serialized client record as stored in the dashboard.
+The `client` object is the full serialized client record as stored in the spoke.
 
 **Shell example (from `simulation.sh`):**
 
@@ -162,7 +164,7 @@ The response is ignored — if the POST fails the simulation continues normally.
 
 ### 3. Pull Configuration
 
-Clients fetch their effective `simulation.conf` from the server. The server returns the file from the synced git repo, with any active in-dashboard overrides applied for this hostname.
+Clients fetch their effective `simulation.conf` from the server. The server returns the file from the synced git repo, with any active in-spoke overrides applied for this hostname.
 
 ```
 GET /api/config?hostname=<hostname>
@@ -170,7 +172,7 @@ GET /api/config?hostname=<hostname>
 
 | Parameter | Required | Description |
 |---|---|---|
-| `hostname` | No | If provided, any overrides set via the dashboard for this client are merged in. If omitted, the raw file is returned. |
+| `hostname` | No | If provided, any overrides set via the spoke for this client are merged in. If omitted, the raw file is returned. |
 
 **Response:** Plain text — the full contents of `configs/simulation.conf` (INI format), with overrides applied as key=value replacements in the client's section.
 
@@ -248,7 +250,7 @@ Every simulation loop, a client should:
 3.    Yes → GET /api/config?hostname=<h>  →  apply updated config
 4.         GET /api/scripts/list          →  download any new/changed scripts
 5.  Run simulations based on active config
-6.  POST /api/status                      →  report current state to dashboard
+6.  POST /api/status                      →  report current state to spoke
 7.  Sleep, repeat
 ```
 
@@ -258,7 +260,7 @@ Steps 2–4 are performed by `update.sh`. Step 6 is performed by `simulation.sh`
 
 ## Dashboard-Side Controls (Optional)
 
-The dashboard can push overrides to individual clients or all clients at once. Clients receive these overrides automatically when they next call `GET /api/config?hostname=<h>` — no polling required.
+The spoke can push overrides to individual clients or all clients at once. Clients receive these overrides automatically when they next call `GET /api/config?hostname=<h>` — no polling required.
 
 | Endpoint | Description |
 |---|---|
@@ -275,13 +277,13 @@ The dashboard can push overrides to individual clients or all clients at once. C
 }
 ```
 
-Overrides are in-memory only — they are cleared when the dashboard restarts, or when explicitly deleted.
+Overrides are in-memory only — they are cleared when the spoke restarts, or when explicitly deleted.
 
 ---
 
 ## WebSocket (Real-Time)
 
-The dashboard streams live updates over WebSocket at `ws://<host>:<port>/ws`. Clients do not need to use this — it is intended for the browser UI.
+The spoke streams live updates over WebSocket at `ws://<host>:<port>/ws`. Clients do not need to use this — it is intended for the browser UI.
 
 Message types broadcast by the server:
 - `full_state` — snapshot of all clients (sent on connect)
@@ -289,7 +291,7 @@ Message types broadcast by the server:
 - `overrides_update` — overrides were applied to a client
 - `overrides_cleared` — overrides were removed from a client
 - `repo_status` — git sync status changed
-- `settings_update` — dashboard settings changed
+- `settings_update` — spoke settings changed
 - `central_update` — Aruba Central poll completed; payload now also includes `hardware_alerts` and `client_count_status`
 - `version_status` — installer version check result (`current_version`, `available_version`, `last_checked`, `update_available`, `update_in_progress`, `update_error`)
 - `relay_status` — relay connection status

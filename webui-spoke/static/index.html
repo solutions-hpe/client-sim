@@ -246,10 +246,11 @@
       <div id="usb-summary-panel" class="setup-card setup-section-gap">
         <div class="setup-card-header">
           <h2>USB Devices</h2>
+          <div id="usb-vm-stat-pills" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>
         </div>
         <table class="data-table" id="usb-summary-table">
           <thead>
-            <tr><th>Device</th><th>VID:PID</th><th>Type</th><th>Active VMs</th><th>Missing</th><th>Count</th></tr>
+            <tr><th>Device</th><th>VID:PID</th><th>Type</th><th title="VMs with this USB device actively assigned via USB provisioning">Active VMs</th><th>Missing</th><th>Count</th></tr>
           </thead>
           <tbody id="usb-summary-tbody"></tbody>
         </table>
@@ -683,6 +684,7 @@
       <button class="setup-subtab" data-subtab="setup-relay" role="tab">Relay</button>
       <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
       <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
+      <button class="setup-subtab" data-subtab="setup-tls" role="tab">TLS Certificate</button>
       <button class="setup-subtab" data-subtab="setup-troubleshoot" role="tab">Troubleshooting</button>
     </nav>
 
@@ -1276,6 +1278,68 @@
     </div>
 
     <!-- ── Troubleshooting sub-tab ── -->
+
+
+    <div id="setup-tls" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap" style="max-width:760px;">
+        <div class="setup-card-header">
+          <h2>TLS Certificate</h2>
+          <p>Configure automatic certificate management via ACME (Let's Encrypt / ZeroSSL). Enabling ACME will switch the spoke to HTTPS. Ensure port 80 and 443 (or your spoke port) are accessible.</p>
+        </div>
+        <div id="spoke-acme-cert-status" class="setup-status-grid"></div>
+        <div class="setup-form" style="margin-top:16px;">
+          <div class="form-group">
+            <label class="form-label">Domain</label>
+            <input id="spoke-acme-domain" type="text" class="form-input" placeholder="spoke.example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Email</label>
+            <input id="spoke-acme-email" type="email" class="form-input" placeholder="admin@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Certificate Authority</label>
+            <select id="spoke-acme-ca" class="form-input">
+              <option value="letsencrypt">Let's Encrypt (Production)</option>
+              <option value="letsencrypt_staging">Let's Encrypt (Staging)</option>
+              <option value="zerossl">ZeroSSL</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Challenge Type</label>
+            <select id="spoke-acme-challenge" class="form-input">
+              <option value="http-01">HTTP-01 (port 80 must be open)</option>
+              <option value="dns-01">DNS-01 (requires DNS provider)</option>
+            </select>
+          </div>
+          <div id="spoke-acme-dns-section" class="hidden">
+            <div class="form-group">
+              <label class="form-label">DNS Provider</label>
+              <select id="spoke-acme-dns-provider" class="form-input">
+                <option value="cloudflare">Cloudflare</option>
+                <option value="azure_dns">Azure DNS (coming soon)</option>
+                <option value="route53">AWS Route53 (coming soon)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cloudflare API Token</label>
+              <input id="spoke-acme-cf-token" type="password" class="form-input" placeholder="Leave blank to keep existing">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label"><input id="spoke-acme-enabled" type="checkbox"> Enable automatic renewal</label>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label"><input id="spoke-tls-enabled" type="checkbox"> Enable HTTPS (SPOKE_TLS) on next restart</label>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-primary" type="button" onclick="saveSpokeAcmeConfig()">Save</button>
+            <button class="btn btn-secondary" type="button" onclick="requestSpokeAcmeCert()" id="spoke-acme-request-btn">Request Certificate Now</button>
+          </div>
+          <p id="spoke-acme-msg" class="form-msg"></p>
+        </div>
+      </div>
+    </div>
+
     <div id="setup-troubleshoot" class="setup-subpanel hidden">
       <div class="setup-card">
         <div class="setup-card-header">

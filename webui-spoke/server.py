@@ -6,6 +6,8 @@ import contextlib
 import copy
 import hashlib
 import json
+from dataclasses import asdict
+import acme as spoke_acme
 import logging
 import os
 import re
@@ -300,6 +302,7 @@ settings: dict[str, Any] = {
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
+    "relay_tenant_id": _persisted.get("relay_tenant_id", ""),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
@@ -316,6 +319,7 @@ settings: dict[str, Any] = {
     "reclone_concurrency": str(_persisted.get("reclone_concurrency", "1")),
     "l1_vlan_start": str(_persisted.get("l1_vlan_start", "100")),
     "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
+    "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
 }
 
 # Initialise in-memory token from persisted values so a restart
@@ -1413,6 +1417,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
     background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
     background_tasks["baseline_saver"] = asyncio.create_task(hourly_baseline_saver())
+    background_tasks["acme_renewal"] = asyncio.create_task(acme_renewal_loop())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -1443,6 +1448,8 @@ COMMAND_MAX = 100          # keep last N commands in history
 COMMAND_EXPIRE_SECS = 900  # 15 minutes
 
 ws_connections: list[WebSocket] = []
+_acme_challenges: dict[str, str] = {}
+_acme_status: dict[str, Any] = {"running": False, "last_result": None, "last_error": None}
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
 gkill_switch_state: dict[str, Any] = {"value": "off", "last_fetched": None, "error": None}
@@ -1452,6 +1459,7 @@ relay_state: dict[str, Any] = {
     "connected": False,
     "last_sync": None,
     "error": None,
+    "registration_status": "unregistered",  # "unregistered" | "pending" | "approved"
 }
 proxmox_state: dict[str, Any] = {
     "connected": False,
@@ -1540,6 +1548,7 @@ class SettingsUpdate(BaseModel):
     relay_server_url: str | None = None
     relay_api_key: str | None = None
     relay_island_id: str | None = None
+    relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
     usb_vidpids: str | None = None
     usb_missing_timeout: str | None = None
@@ -1556,6 +1565,7 @@ class SettingsUpdate(BaseModel):
     reclone_concurrency: str | None = None
     l1_vlan_start: str | None = None
     l1_vlan_end: str | None = None
+    spoke_tls: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -2137,7 +2147,140 @@ def _relay_status_payload() -> dict[str, Any]:
     return dict(relay_state)
 
 
+def _build_registration_config() -> dict[str, Any]:
+    """Build the seed config payload sent to hub on first registration."""
+    return {
+        "repo_branch": settings.get("repo_branch", "main"),
+        "repo_url": REPO_URL,
+        "site_mappings": settings.get("site_mappings", {}),
+        "monitored_checks": settings.get("monitored_checks", []),
+        "hardware_checks": settings.get("hardware_checks", []),
+        "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
+        "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
+        "reclone_concurrency": settings.get("reclone_concurrency", "1"),
+        "vm_image_1_template_id": settings.get("vm_image_1_template_id", "100"),
+        "vm_image_2_template_id": settings.get("vm_image_2_template_id", "200"),
+        "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
+        "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "usb_vidpids": settings.get("usb_vidpids", "[]"),
+        "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
+        "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
+        "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
+        "l1_vlan_start": settings.get("l1_vlan_start", "100"),
+        "l1_vlan_end": settings.get("l1_vlan_end", "199"),
+    }
+
+
+async def _hub_self_register(server_url: str) -> None:
+    """POST to hub /api/islands/register with full config payload.
+    Stores the returned island_id. If already approved, also stores api_key and tenant_id."""
+    hostname = socket.gethostname()
+    payload = {
+        "hostname": hostname,
+        "label": hostname,
+        "config": _build_registration_config(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15, verify=False) as hc:
+            resp = await hc.post(f"{server_url}/api/islands/register", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        island_id = data.get("island_id", "")
+        status = data.get("status", "pending")
+        if island_id:
+            settings["relay_island_id"] = island_id
+        if status == "approved":
+            settings["relay_api_key"] = data.get("api_key", "")
+            settings["relay_tenant_id"] = data.get("tenant_id", "")
+            relay_state["registration_status"] = "approved"
+            logger.info("Hub registration: approved immediately island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
+        else:
+            relay_state["registration_status"] = "pending"
+            logger.info("Hub registration submitted: island_id=%s status=pending", island_id)
+        _save_settings()
+    except Exception as exc:
+        logger.warning("Hub self-register failed: %s", exc)
+        relay_state.update({"connected": False, "error": f"Registration failed: {exc}"})
+
+
+async def _hub_check_approval(server_url: str, island_id: str) -> None:
+    """Re-POST registration to check if island has been approved.
+    Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
+    hostname = socket.gethostname()
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as hc:
+            resp = await hc.post(f"{server_url}/api/islands/register", json={
+                "hostname": hostname,
+                "label": hostname,
+                "config": {},
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        status = data.get("status", "pending")
+        if status == "approved":
+            settings["relay_api_key"] = data.get("api_key", "")
+            settings["relay_tenant_id"] = data.get("tenant_id", "")
+            relay_state["registration_status"] = "approved"
+            _save_settings()
+            logger.info("Hub approval received: island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
+        else:
+            relay_state["registration_status"] = "pending"
+            logger.info("Hub registration still pending: island_id=%s", island_id)
+    except Exception as exc:
+        logger.warning("Hub approval check failed: %s", exc)
+
+
+async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply a config_update command payload pushed from hub.
+    Returns an ack result dict."""
+    changed: list[str] = []
+    relay_config_changed = False
+
+    if "relay_server_url" in payload:
+        settings["relay_server_url"] = payload["relay_server_url"].strip()
+        relay_config_changed = True
+        changed.append("relay_server_url")
+    if "relay_api_key" in payload:
+        settings["relay_api_key"] = payload["relay_api_key"].strip()
+        relay_config_changed = True
+        changed.append("relay_api_key")
+    if "relay_tenant_id" in payload:
+        settings["relay_tenant_id"] = payload["relay_tenant_id"].strip()
+        relay_config_changed = True
+        changed.append("relay_tenant_id")
+
+    for key in (
+        "repo_branch", "reclone_schedule_enabled", "reclone_schedule_cron",
+        "reclone_concurrency", "vm_silent_timeout", "usb_auto_provision",
+        "ignored_hostnames", "l1_vlan_start", "l1_vlan_end",
+        "vm_image_1_template_id", "vm_image_2_template_id", "vm_image_1_pct",
+    ):
+        if key in payload:
+            settings[key] = payload[key]
+            changed.append(key)
+
+    if relay_config_changed:
+        relay_state.update({
+            "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
+            "connected": False,
+            "error": None,
+        })
+        if settings.get("relay_tenant_id"):
+            relay_state["registration_status"] = "approved"
+    _save_settings()
+    await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+    logger.info("Applied hub config_update: %s", changed)
+    return {
+        "success": True,
+        "task_type": "config_update",
+        "detail": f"Applied: {', '.join(changed) if changed else 'no changes'}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def relay_sync_once() -> None:
+    """One relay cycle: register if needed, check approval if pending,
+    then post telemetry, fetch inbox, process commands, and ack each."""
     if settings.get("relay_enabled") != "on" or not settings.get("relay_server_url"):
         relay_state["enabled"] = False
         return
@@ -2151,7 +2294,25 @@ async def relay_sync_once() -> None:
     server_url = settings["relay_server_url"].rstrip("/")
     island_id = settings.get("relay_island_id", "")
     api_key = settings.get("relay_api_key", "")
-    headers = {"X-API-Key": api_key} if api_key else {}
+    tenant_id = settings.get("relay_tenant_id", "")
+
+    # ── Phase 1: Register if no island_id yet ──────────────────────────────────
+    if not island_id:
+        await _hub_self_register(server_url)
+        await broadcast({"type": "relay_status", **relay_state})
+        return
+
+    # ── Phase 2: Pending approval — poll hub for approval ──────────────────────
+    if not api_key or not tenant_id:
+        relay_state["registration_status"] = relay_state.get("registration_status", "pending")
+        await _hub_check_approval(server_url, island_id)
+        await broadcast({"type": "relay_status", **relay_state})
+        return
+
+    # ── Phase 3: Approved — full relay cycle ───────────────────────────────────
+    relay_state["registration_status"] = "approved"
+    headers = {"X-API-Key": api_key}
+    base = f"{server_url}/api/{tenant_id}/islands/{island_id}"
 
     try:
         async with state_lock:
@@ -2161,9 +2322,9 @@ async def relay_sync_once() -> None:
                 "timestamp": time.time(),
             }
 
-        async with httpx.AsyncClient(timeout=10) as hc:
-            await hc.post(f"{server_url}/api/islands/{island_id}/telemetry", json=telemetry, headers=headers)
-            resp = await hc.get(f"{server_url}/api/islands/{island_id}/inbox", headers=headers)
+        async with httpx.AsyncClient(timeout=10, verify=False) as hc:
+            await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
+            resp = await hc.get(f"{base}/inbox", headers=headers)
             resp.raise_for_status()
             remote_cmds = resp.json()
 
@@ -2172,12 +2333,49 @@ async def relay_sync_once() -> None:
 
         async with state_lock:
             for rc in remote_cmds:
+                cmd_id = rc.get("id", "")
+                cmd_type = rc.get("type", "")
+                payload_data = rc.get("payload", {})
                 target = rc.get("target", "")
                 action = rc.get("action", "")
                 args = rc.get("args", {})
+
+                # ── config_update: apply hub-pushed config and ack ─────────────
+                if cmd_type == "config_update":
+                    result = await _apply_hub_config(payload_data)
+                    if cmd_id:
+                        async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                            await hc_ack.post(f"{base}/ack", json={
+                                "command_id": cmd_id,
+                                "status": "executed",
+                                "result": result,
+                            }, headers=headers)
+                    continue
+
+                # ── gkill_switch: update local gkill state ─────────────────────
+                if cmd_type == "gkill_switch":
+                    new_val = (payload_data.get("value") or action or "").strip()
+                    if new_val in ("on", "off"):
+                        gkill_switch_state["value"] = new_val
+                        await broadcast({"type": "gkill_switch", "value": new_val})
+                        logger.info("gkill_switch set to %s by hub", new_val)
+                    if cmd_id:
+                        async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                            await hc_ack.post(f"{base}/ack", json={
+                                "command_id": cmd_id,
+                                "status": "executed",
+                                "result": {
+                                    "success": True,
+                                    "task_type": "gkill_switch",
+                                    "detail": f"gkill set to {gkill_switch_state['value']}",
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                },
+                            }, headers=headers)
+                    continue
+
+                # ── regular client/proxmox commands ────────────────────────────
                 if not target or not action:
                     continue
-                cmd_type = rc.get("type")
                 if target == "all":
                     for hostname in list(clients.keys()):
                         commands.append(_make_command(hostname, action, args, command_type=cmd_type))
@@ -2185,6 +2383,14 @@ async def relay_sync_once() -> None:
                     commands.append(_make_command(target, action, args, command_type=cmd_type))
                 if len(commands) > COMMAND_MAX:
                     del commands[:len(commands) - COMMAND_MAX]
+
+                # Ack each queued command
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                        await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "queued",
+                        }, headers=headers)
 
         if remote_cmds:
             await broadcast({"type": "commands_update", "commands": _serialize_commands()})
@@ -2665,6 +2871,25 @@ async def _run_self_update() -> None:
         await broadcast({"type": "version_status", **update_state})
 
 
+
+
+async def acme_renewal_loop() -> None:
+    while True:
+        try:
+            renewed = await spoke_acme.renew_if_needed(BASE_DIR)
+            if renewed:
+                cert_info = spoke_acme.get_cert_info()
+                _acme_status["last_result"] = {"success": True, "expires": cert_info.get("expires"), "domain": cert_info.get("domain"), "renewed": True}
+                _acme_status["last_error"] = None
+                await broadcast({"type": "cert_renewed", "expires": cert_info.get("expires")})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("ACME renewal loop error: %s", exc)
+            _acme_status["last_error"] = str(exc)
+        await asyncio.sleep(86400)
+
+
 async def heartbeat_check() -> None:
     await asyncio.sleep(HEARTBEAT_INTERVAL)
     while True:
@@ -2726,8 +2951,10 @@ async def api_settings_get() -> dict[str, Any]:
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
         "relay_island_id": settings.get("relay_island_id", ""),
+        "relay_tenant_id": settings.get("relay_tenant_id", ""),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
         "relay_api_key_configured": bool(settings.get("relay_api_key")),
+        "spoke_tls": settings.get("spoke_tls", "off"),
     }
 
 
@@ -2760,6 +2987,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.relay_island_id is not None:
         settings["relay_island_id"] = update.relay_island_id.strip()
+        relay_config_changed = True
+
+    if update.relay_tenant_id is not None:
+        settings["relay_tenant_id"] = update.relay_tenant_id.strip()
         relay_config_changed = True
 
     if update.relay_enabled is not None:
@@ -2881,6 +3112,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.l1_vlan_end is not None:
         settings["l1_vlan_end"] = str(max(1, min(4094, int(update.l1_vlan_end.strip() or "199"))))
+
+    if update.spoke_tls is not None:
+        settings["spoke_tls"] = _normalize_toggle(update.spoke_tls)
 
     _save_settings()
 
@@ -3948,6 +4182,81 @@ async def api_self_update() -> dict[str, Any]:
     return {"status": "ok", "message": f"Update to v{available} started — service will restart shortly"}
 
 
+
+
+@app.get("/api/acme")
+async def api_acme_get() -> dict[str, Any]:
+    cfg = spoke_acme.load_acme_config()
+    data = asdict(cfg)
+    data["dns_credentials"] = {key: ("***" if value else "") for key, value in (cfg.dns_credentials or {}).items()}
+    data["cert_info"] = spoke_acme.get_cert_info()
+    data["spoke_tls"] = settings.get("spoke_tls", "off")
+    return data
+
+
+@app.post("/api/acme")
+async def api_acme_update(payload: dict[str, Any]) -> dict[str, Any]:
+    existing = spoke_acme.load_acme_config()
+    incoming_credentials = payload.get("dns_credentials") or {}
+    merged_credentials = dict(existing.dns_credentials or {})
+    for key, value in incoming_credentials.items():
+        if value in (None, "", "***"):
+            continue
+        merged_credentials[key] = value
+    cfg = spoke_acme.AcmeConfig(
+        enabled=bool(payload.get("enabled", existing.enabled)),
+        domain=str(payload.get("domain", existing.domain) or "").strip(),
+        email=str(payload.get("email", existing.email) or "").strip(),
+        challenge=str(payload.get("challenge", existing.challenge) or existing.challenge),
+        ca=str(payload.get("ca", existing.ca) or existing.ca),
+        dns_provider=str(payload.get("dns_provider", existing.dns_provider) or "").strip(),
+        dns_credentials=merged_credentials,
+        last_renewed=existing.last_renewed,
+        last_error=existing.last_error,
+        cert_expiry=existing.cert_expiry,
+    )
+    spoke_acme.save_acme_config(cfg)
+    if "spoke_tls" in payload:
+        settings["spoke_tls"] = _normalize_toggle(payload.get("spoke_tls"))
+        _save_settings()
+    data = asdict(cfg)
+    data["dns_credentials"] = {key: ("***" if value else "") for key, value in (cfg.dns_credentials or {}).items()}
+    data["cert_info"] = spoke_acme.get_cert_info()
+    data["spoke_tls"] = settings.get("spoke_tls", "off")
+    return data
+
+
+async def _run_acme_request() -> None:
+    _acme_status["running"] = True
+    _acme_status["last_result"] = None
+    _acme_status["last_error"] = None
+    await broadcast({"type": "acme_status", **_acme_status})
+    cfg = spoke_acme.load_acme_config()
+    result = await spoke_acme.request_certificate(cfg, BASE_DIR)
+    _acme_status["running"] = False
+    _acme_status["last_result"] = result
+    _acme_status["last_error"] = None if result.get("success") else result.get("error")
+    if result.get("success"):
+        settings["spoke_tls"] = "on"
+        _save_settings()
+        logger.info("TLS certificate ready. Restart the spoke service with SPOKE_TLS=on to enable HTTPS.")
+        await broadcast({"type": "cert_renewed", "expires": result.get("expires")})
+    await broadcast({"type": "acme_status", **_acme_status})
+
+
+@app.post("/api/acme/request")
+async def api_acme_request() -> dict[str, Any]:
+    if _acme_status.get("running"):
+        return {"status": "running"}
+    asyncio.create_task(_run_acme_request())
+    return {"status": "started"}
+
+
+@app.get("/api/acme/status")
+async def api_acme_status() -> dict[str, Any]:
+    return dict(_acme_status)
+
+
 @app.get("/api/config", response_class=PlainTextResponse)
 async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")
@@ -4659,6 +4968,14 @@ async def api_notifications_test(body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {"status": "ok", "channel": channel}
+
+
+@app.get("/.well-known/acme-challenge/{token}", include_in_schema=False)
+async def acme_challenge(token: str):
+    key_authorization = _acme_challenges.get(token)
+    if not key_authorization:
+        raise HTTPException(404)
+    return PlainTextResponse(key_authorization)
 
 
 @app.websocket("/ws")
