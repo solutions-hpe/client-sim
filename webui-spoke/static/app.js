@@ -321,7 +321,7 @@ function renderSimDisabledBanner() {
   const tip = g && l
     ? 'Kill switch active in both the global repo and local config'
     : g ? 'Global kill switch ON in solutions-hpe/main — all islands affected'
-        : 'Local kill switch ON in simulation.conf — this island only';
+        : 'Local kill switch ON in simulation.conf — this spoke only';
   banner.textContent = `🛑 Simulation Disabled — ${scope}`;
   banner.title = tip;
   banner.style.display = '';

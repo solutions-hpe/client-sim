@@ -49,6 +49,7 @@ CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
 CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
+HUB_REPO_RAW = os.getenv("HUB_REPO_RAW", "https://raw.githubusercontent.com/solutions-hpe/webui-hub")
 
 
 def _detect_own_vmid() -> int | None:
@@ -2248,7 +2249,7 @@ async def _hub_self_register(server_url: str) -> None:
 
 
 async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
-    """Re-POST registration to check if island has been approved.
+    """Re-POST registration to check if spoke has been approved.
     Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
     hostname = socket.gethostname()
     _relay_diag_append("check_approval", spoke_id=spoke_id)

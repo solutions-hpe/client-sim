@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.09"
+AGENT_VERSION="2.10"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1039,10 +1039,14 @@ JSON
 # (update_agent command) and from the main loop's periodic self-check.
 self_update_agent() {
     local agent_script="/usr/local/bin/client-sim-proxmox-agent"
-    local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
+    local env_file="/etc/client-sim-proxmox-agent.env"
+    local branch
+    branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$env_file" 2>/dev/null | tr -d '[:space:]')
+    branch="${branch:-lrb}"
+    local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}"
     local tmp_file
     tmp_file=$(mktemp)
-    log "Checking for agent update from GitHub (current: v${AGENT_VERSION})..."
+    log "Checking for agent update from GitHub (branch: ${branch}, current: v${AGENT_VERSION})..."
     if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
         rm -f "$tmp_file"
         log "ERROR: Failed to download agent update"

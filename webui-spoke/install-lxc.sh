@@ -70,6 +70,7 @@ fi
 ###############################################################################
 REPO_URL="${REPO_URL:-https://github.com/solutions-hpe/client-sim.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
+HUB_REPO_RAW="${HUB_REPO_RAW:-https://raw.githubusercontent.com/solutions-hpe/webui-hub}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/client-sim-dashboard}"
 REPO_CACHE="${REPO_CACHE:-/opt/client-sim-repo}"
 SERVICE_USER="${SERVICE_USER:-dashboard}"
@@ -127,7 +128,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.09"
+VERSION="2.10"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -160,6 +161,7 @@ echo " $(date)"
 echo "============================================================"
 echo " Repo URL   : $REPO_URL"
 echo " Branch     : $REPO_BRANCH"
+echo " Hub raw    : $HUB_REPO_RAW"
 echo " Install dir: $INSTALL_DIR"
 echo " Port       : $PORT"
 echo " Mode       : $MODE"
@@ -435,6 +437,26 @@ else
 fi
 
 ###############################################################################
+# STEP 5c — Shared UI library (shared.js, shared.css from webui-hub)
+#
+# Both files are fetched from the same branch as the spoke repo so dev work
+# on lrb automatically pulls the lrb version of the shared library.
+# Failures are non-fatal — the spoke continues with whatever version exists.
+###############################################################################
+info "Fetching shared UI library from webui-hub (branch: ${REPO_BRANCH})..."
+SHARED_STATIC_DIR="${INSTALL_DIR}/static"
+mkdir -p "$SHARED_STATIC_DIR"
+_hub_raw="${HUB_REPO_RAW}/${REPO_BRANCH}/shared"
+for _sf in shared.js shared.css; do
+  if curl -sSf --max-time 30 "${_hub_raw}/${_sf}" -o "${SHARED_STATIC_DIR}/${_sf}" >>"$LOG" 2>&1; then
+    ok "Downloaded ${_sf} from webui-hub:${REPO_BRANCH}"
+  else
+    warn "Could not fetch ${_sf} from webui-hub — keeping existing file if present"
+  fi
+done
+unset _hub_raw _sf
+
+###############################################################################
 # STEP 6 — Python virtual environment + dependencies
 #
 # --reinstall : remove and recreate venv from scratch
@@ -478,6 +500,7 @@ if [[ "$REINSTALL" -eq 1 || ! -f "$INSTALL_DIR/.env" ]]; then
   cat >"$INSTALL_DIR/.env" <<EOF
 REPO_URL=$REPO_URL
 REPO_BRANCH=$REPO_BRANCH
+HUB_REPO_RAW=$HUB_REPO_RAW
 REPO_DIR=$REPO_CACHE
 OFFLINE_TIMEOUT=$OFFLINE_TIMEOUT
 EOF
@@ -486,6 +509,7 @@ else
   info "Updating environment config (preserving existing values)..."
   write_env_key "REPO_URL"        "$REPO_URL"
   write_env_key "REPO_BRANCH"     "$REPO_BRANCH"
+  write_env_key "HUB_REPO_RAW"   "$HUB_REPO_RAW"
   write_env_key "REPO_DIR"        "$REPO_CACHE"
   write_env_key "OFFLINE_TIMEOUT" "$OFFLINE_TIMEOUT"
   ok "Environment file checked — existing values preserved"
