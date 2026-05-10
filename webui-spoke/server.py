@@ -5180,4 +5180,4 @@ async def root():
     return HTMLResponse(content=html)
 
 
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
