@@ -31,7 +31,7 @@
           <span class="repo-label">Central API:</span>
           <span id="central-api-text">Unknown</span>
         </div>
-        <span id="relay-indicator" class="ind-dot grey" title="Relay not configured" style="display:none;"></span>
+        <span id="relay-indicator" class="ind-dot grey" title="Hub not configured" style="display:none;"></span>
         <span id="gkill-indicator" class="gkill-banner" style="display:none;"></span>
         <div class="ws-status" aria-live="polite">
           <span id="ws-dot" class="status-dot offline"></span>
@@ -681,7 +681,7 @@
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab" data-subtab="setup-github" role="tab">GitHub</button>
       <button class="setup-subtab" data-subtab="setup-proxmox" role="tab">Proxmox</button>
-      <button class="setup-subtab" data-subtab="setup-relay" role="tab">Relay</button>
+      <button class="setup-subtab" data-subtab="setup-relay" role="tab">Hub</button>
       <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
       <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
       <button class="setup-subtab" data-subtab="setup-tls" role="tab">TLS Certificate</button>
@@ -1008,16 +1008,16 @@
     <div id="setup-relay" class="setup-subpanel hidden">
       <div class="setup-card setup-section-gap">
             <div class="setup-card-header">
-              <h2>Relay</h2>
-              <p>Configure optional relay sync between this WebUI and a central management server.</p>
+              <h2>Hub</h2>
+              <p>Configure optional Hub sync between this WebUI and a central management server.</p>
             </div>
 
             <div class="setup-form">
               <div class="settings-section">
-                <div class="settings-section-title">Relay (Central Server)</div>
+                <div class="settings-section-title">Hub (Central Server)</div>
                 <div class="form-row">
                   <div class="form-group">
-                    <label>Relay Enabled</label>
+                    <label>Hub Enabled</label>
                     <select id="relay-enabled-select" data-key="relay_enabled">
                       <option value="off">Off</option>
                       <option value="on">On</option>

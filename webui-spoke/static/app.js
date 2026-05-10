@@ -344,8 +344,8 @@ function setRelayStatus(data = {}) {  const stateText = document.getElementById(
   if (dot) {
     dot.className = data.connected ? 'ind-dot green' : 'ind-dot red';
     dot.title = data.connected
-      ? `Relay connected — last sync: ${new Date((data.last_sync || 0) * 1000).toLocaleTimeString()}`
-      : `Relay disconnected: ${data.error || 'unknown'}`;
+      ? `Hub connected — last sync: ${new Date((data.last_sync || 0) * 1000).toLocaleTimeString()}`
+      : `Hub disconnected: ${data.error || 'unknown'}`;
   }
 }
 
@@ -3634,7 +3634,7 @@ async function renderServiceStatus() {
       central_token: 'Aruba Central Token',
       central_poller: 'Aruba Central Poller',
       update_checker: 'Update Checker',
-      relay: 'Relay Loop',
+      relay: 'Hub Loop',
       client_history_saver: 'Client History Save',
       command_expiry: 'Command Expiry',
       auto_recovery: 'Auto Recovery',
@@ -4738,7 +4738,7 @@ async function _autoSaveRelay() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    showInlineMessage(relayMsg, 'Relay settings saved.', false);
+    showInlineMessage(relayMsg, 'Hub settings saved.', false);
     if (apiKey && relayApiKeyInput) relayApiKeyInput.value = '';
     await loadSettings();
     await requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
