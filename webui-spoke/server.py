@@ -154,6 +154,9 @@ def _decrypt_settings(raw: dict) -> dict:
 # Installer version — written by install-lxc.sh at install time
 _version_file = BASE_DIR / "INSTALLER_VERSION"
 INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exists() else "dev"
+# App version — from VERSION file in repo root
+_app_version_file = BASE_DIR / "VERSION"
+APP_VERSION: str = _app_version_file.read_text().strip() if _app_version_file.exists() else INSTALLER_VERSION
 REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 # Max error entries kept per client in memory.
@@ -300,6 +303,7 @@ settings: dict[str, Any] = {
     "repo_sync_interval": _persisted.get("repo_sync_interval", SYNC_INTERVAL),
     "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
+    "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
     "relay_tenant_id": _persisted.get("relay_tenant_id", ""),
@@ -1549,6 +1553,7 @@ class SettingsUpdate(BaseModel):
     repo_sync_interval: int | None = None
     relay_enabled: str | None = None
     relay_server_url: str | None = None
+    relay_spoke_name: str | None = None
     relay_api_key: str | None = None
     relay_island_id: str | None = None
     relay_tenant_id: str | None = None
@@ -2178,14 +2183,28 @@ async def _hub_self_register(server_url: str) -> None:
     """POST to hub /api/islands/register with full config payload.
     Stores the returned island_id. If already approved, also stores api_key and tenant_id."""
     hostname = socket.gethostname()
+    spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     payload = {
         "hostname": hostname,
         "label": hostname,
+        "spoke_name": spoke_name,
         "config": _build_registration_config(),
     }
     try:
         async with httpx.AsyncClient(timeout=15, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/islands/register", json=payload)
+            if resp.status_code == 409:
+                data = resp.json()
+                conflict = data.get("conflict", "name_in_use")
+                msg = data.get("message", f"Spoke name '{spoke_name}' is already in use on the hub. Choose a different name.")
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                relay_state.update({
+                    "connected": False,
+                    "registration_status": "name_conflict",
+                    "error": f"{ts} — {msg}",
+                })
+                logger.warning("Hub registration name conflict: %s", msg)
+                return
             resp.raise_for_status()
             data = resp.json()
         island_id = data.get("island_id", "")
@@ -2196,6 +2215,7 @@ async def _hub_self_register(server_url: str) -> None:
             settings["relay_api_key"] = data.get("api_key", "")
             settings["relay_tenant_id"] = data.get("tenant_id", "")
             relay_state["registration_status"] = "approved"
+            relay_state["error"] = ""
             logger.info("Hub registration: approved immediately island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
         else:
             relay_state["registration_status"] = "pending"
@@ -2953,6 +2973,7 @@ async def api_settings_get() -> dict[str, Any]:
         },
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
+        "relay_spoke_name": settings.get("relay_spoke_name", ""),
         "relay_island_id": settings.get("relay_island_id", ""),
         "relay_tenant_id": settings.get("relay_tenant_id", ""),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
@@ -2980,6 +3001,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.relay_server_url is not None:
         settings["relay_server_url"] = update.relay_server_url.strip()
+        relay_config_changed = True
+
+    if update.relay_spoke_name is not None:
+        settings["relay_spoke_name"] = update.relay_spoke_name.strip()
         relay_config_changed = True
 
     if update.relay_api_key is not None:
@@ -3200,7 +3225,12 @@ async def api_relay_sites(tenant_id: str | None = Query(None)) -> dict[str, Any]
 
 @app.get("/api/relay/status")
 async def api_relay_status_endpoint() -> dict[str, Any]:
-    return relay_state
+    return {
+        **relay_state,
+        "spoke_id": settings.get("relay_island_id", ""),
+        "api_key_configured": bool(settings.get("relay_api_key")),
+        "spoke_name": settings.get("relay_spoke_name", ""),
+    }
 
 
 @app.get("/api/proxmox/usb-config")
@@ -4115,6 +4145,7 @@ async def _api_health_payload() -> dict[str, Any]:
         client_count = len(clients)
     return {
         "status": "ok",
+        "version": APP_VERSION,
         "clients": client_count,
         "repo_synced": repo_state["synced"],
         "repo_error": repo_state["error"],
@@ -4141,6 +4172,7 @@ async def api_version() -> dict[str, Any]:
     """Return installed and available installer versions."""
     return {
         "status": "ok",
+        "app_version": APP_VERSION,
         "current_version": update_state["current_version"],
         "available_version": update_state["available_version"],
         "update_available": update_state["update_available"],

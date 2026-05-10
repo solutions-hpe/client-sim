@@ -66,6 +66,7 @@ let currentSettings = {
   hardware_checks: [],
   relay_enabled: 'off',
   relay_server_url: '',
+  relay_spoke_name: '',
   relay_island_id: '',
   relay_poll_interval: 60,
   relay_api_key_configured: false,
@@ -332,14 +333,20 @@ function applyGkillSwitch(value) {
   renderSimDisabledBanner();
 }
 
-function setRelayStatus(data = {}) {  const stateText = document.getElementById('relay-state-text');
+function setRelayStatus(data = {}) {
+  const stateText = document.getElementById('relay-state-text');
   const lastTime = document.getElementById('relay-last-time');
   const lastError = document.getElementById('relay-last-error');
   const dot = document.getElementById('relay-indicator');
+  const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
+  const apikeyStatus = document.getElementById('relay-apikey-status');
 
-  if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : data.error ? '✗ Error' : 'Enabled (pending)';
+  const isNameConflict = data.registration_status === 'name_conflict' || (data.error || '').startsWith('name_conflict:');
+  if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : isNameConflict ? '✗ Name conflict' : data.error ? '✗ Error' : data.registration_status === 'pending' ? 'Pending approval' : 'Enabled';
   if (lastTime) lastTime.textContent = data.last_sync ? new Date(data.last_sync * 1000).toLocaleTimeString() : '—';
   if (lastError) lastError.textContent = data.error || '—';
+  if (spokeIdDisplay) spokeIdDisplay.textContent = data.spoke_id || data.island_id || '—';
+  if (apikeyStatus) apikeyStatus.textContent = data.api_key_configured ? '✓ Received' : 'Pending approval';
 
   if (dot) {
     dot.className = data.connected ? 'ind-dot green' : 'ind-dot red';
@@ -433,9 +440,8 @@ const centralNewFields = document.getElementById('central-new-fields');
 const centralClientIdBadge = document.getElementById('central-client-id-badge');
 const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
 const relayEnabledSelect = document.getElementById('relay-enabled-select');
-const relayIslandIdInput = document.getElementById('relay-island-id-input');
+const relaySpokeName = document.getElementById('relay-spoke-name-input');
 const relayServerUrlInput = document.getElementById('relay-server-url-input');
-const relayApiKeyInput = document.getElementById('relay-api-key-input');
 const relayMsg = document.getElementById('relay-message');
 
 // Notifications + sync interval
@@ -575,6 +581,7 @@ function mergeSettings(next = {}) {
       : (currentSettings.hardware_checks || []),
     relay_enabled: next.relay_enabled ?? currentSettings.relay_enabled ?? 'off',
     relay_server_url: next.relay_server_url ?? currentSettings.relay_server_url ?? '',
+    relay_spoke_name: next.relay_spoke_name ?? currentSettings.relay_spoke_name ?? '',
     relay_island_id: next.relay_island_id ?? currentSettings.relay_island_id ?? '',
     relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
@@ -1044,7 +1051,11 @@ function applySettingsToUI(s) {
   if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
   if (relayEnabledSelect && !relayEnabledSelect.matches(':focus')) relayEnabledSelect.value = settings.relay_enabled || 'off';
   setInputValueIfIdle(relayServerUrlInput, settings.relay_server_url || '');
-  setInputValueIfIdle(relayIslandIdInput, settings.relay_island_id || '');
+  setInputValueIfIdle(relaySpokeName, settings.relay_spoke_name || '');
+  const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
+  if (spokeIdDisplay) spokeIdDisplay.textContent = settings.relay_island_id || '—';
+  const apikeyStatus = document.getElementById('relay-apikey-status');
+  if (apikeyStatus) apikeyStatus.textContent = settings.relay_api_key_configured ? '✓ Received' : 'Pending approval';
   const relayIndicator = document.getElementById('relay-indicator');
   if (relayIndicator) {
     const relayOn = settings.relay_enabled === 'on' && settings.relay_server_url;
@@ -4767,10 +4778,8 @@ async function _autoSaveRelay() {
   const payload = {
     relay_enabled: relayEnabledSelect?.value || 'off',
     relay_server_url: relayServerUrlInput?.value?.trim() || '',
-    relay_island_id: relayIslandIdInput?.value?.trim() || '',
+    relay_spoke_name: relaySpokeName?.value?.trim() || '',
   };
-  const apiKey = relayApiKeyInput?.value?.trim();
-  if (apiKey) payload.relay_api_key = apiKey;
   try {
     await requestJson('/api/settings', {
       method: 'POST',
@@ -4778,7 +4787,6 @@ async function _autoSaveRelay() {
       body: JSON.stringify(payload)
     });
     showInlineMessage(relayMsg, 'Hub settings saved.', false);
-    if (apiKey && relayApiKeyInput) relayApiKeyInput.value = '';
     await loadSettings();
     await requestJson('/api/relay/status').then(setRelayStatus).catch(() => {});
   } catch (error) {
@@ -4787,7 +4795,7 @@ async function _autoSaveRelay() {
 }
 
 if (relayEnabledSelect) relayEnabledSelect.addEventListener('change', _autoSaveRelay);
-[relayServerUrlInput, relayIslandIdInput, relayApiKeyInput].forEach((el) => {
+[relayServerUrlInput, relaySpokeName].forEach((el) => {
   if (el) el.addEventListener('blur', _autoSaveRelay);
 });
 
@@ -5489,9 +5497,9 @@ loadSimulations();
       simDisabledState.local = init.local_kill_switch === 'on';
       renderSimDisabledBanner();
     }
-    // Installer version badge
+    // Version badge — prefer app_version (VERSION file), fall back to installer_version
     const badge = document.getElementById('installer-version');
-    if (badge && init.installer_version) badge.textContent = `v${init.installer_version}`;
+    if (badge) badge.textContent = `v${init.app_version || init.installer_version || '—'}`;
   } catch (_) { /* silent — WS will provide live state */ }
 })();
 

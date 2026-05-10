@@ -1025,7 +1025,6 @@
 
             <div class="setup-form">
               <div class="settings-section">
-                <div class="settings-section-title">Hub (Central Server)</div>
                 <div class="form-row">
                   <div class="form-group">
                     <label>Hub Enabled</label>
@@ -1034,19 +1033,15 @@
                       <option value="on">On</option>
                     </select>
                   </div>
-                  <div class="form-group">
-                    <label>Spoke ID</label>
-                    <input id="relay-island-id-input" type="text" data-key="relay_island_id" placeholder="e.g. island-lab-01">
+                  <div class="form-group" style="flex:2;">
+                    <label>Spoke Name</label>
+                    <input id="relay-spoke-name-input" type="text" data-key="relay_spoke_name" placeholder="e.g. Lab-01-Proxmox">
                   </div>
                 </div>
                 <div class="form-row">
                   <div class="form-group" style="flex:2;">
-                    <label>Central Server URL</label>
-                    <input id="relay-server-url-input" type="text" data-key="relay_server_url" placeholder="https://central.example.com">
-                  </div>
-                  <div class="form-group" style="flex:1;">
-                    <label>API Key</label>
-                    <input id="relay-api-key-input" type="password" data-key="relay_api_key" placeholder="shared secret" autocomplete="new-password">
+                    <label>Server URL</label>
+                    <input id="relay-server-url-input" type="text" data-key="relay_server_url" placeholder="https://hub.example.com">
                   </div>
                 </div>
               </div>
@@ -1057,6 +1052,14 @@
                 <div class="setup-status-item">
                   <span class="setup-status-label">Status</span>
                   <span id="relay-state-text" class="setup-status-value">—</span>
+                </div>
+                <div class="setup-status-item">
+                  <span class="setup-status-label">Spoke ID</span>
+                  <span id="relay-spoke-id-display" class="setup-status-value muted">—</span>
+                </div>
+                <div class="setup-status-item">
+                  <span class="setup-status-label">API Key</span>
+                  <span id="relay-apikey-status" class="setup-status-value muted">—</span>
                 </div>
                 <div class="setup-status-item">
                   <span class="setup-status-label">Last Sync</span>
