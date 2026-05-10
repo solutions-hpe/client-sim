@@ -67,7 +67,7 @@ let currentSettings = {
   relay_enabled: 'off',
   relay_server_url: '',
   relay_spoke_name: '',
-  relay_island_id: '',
+  relay_spoke_id: '',
   relay_poll_interval: 60,
   relay_api_key_configured: false,
   usb_vidpids: '[]',
@@ -345,7 +345,7 @@ function setRelayStatus(data = {}) {
   if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : isNameConflict ? '✗ Name conflict' : data.error ? '✗ Error' : data.registration_status === 'pending' ? 'Pending approval' : 'Enabled';
   if (lastTime) lastTime.textContent = data.last_sync ? new Date(data.last_sync * 1000).toLocaleTimeString() : '—';
   if (lastError) lastError.textContent = data.error || '—';
-  if (spokeIdDisplay) spokeIdDisplay.textContent = data.spoke_id || data.island_id || '—';
+  if (spokeIdDisplay) spokeIdDisplay.textContent = data.spoke_id || data.spoke_id || '—';
   if (apikeyStatus) apikeyStatus.textContent = data.api_key_configured ? '✓ Received' : 'Pending approval';
 
   if (dot) {
@@ -583,7 +583,7 @@ function mergeSettings(next = {}) {
     relay_enabled: next.relay_enabled ?? currentSettings.relay_enabled ?? 'off',
     relay_server_url: next.relay_server_url ?? currentSettings.relay_server_url ?? '',
     relay_spoke_name: next.relay_spoke_name ?? currentSettings.relay_spoke_name ?? '',
-    relay_island_id: next.relay_island_id ?? currentSettings.relay_island_id ?? '',
+    relay_spoke_id: next.relay_spoke_id ?? currentSettings.relay_spoke_id ?? '',
     relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
     usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
@@ -1055,7 +1055,7 @@ function applySettingsToUI(s) {
   setInputValueIfIdle(relaySpokeName, settings.relay_spoke_name || '');
   setInputValueIfIdle(relayTenantHintInput, settings.relay_tenant_hint || '');
   const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
-  if (spokeIdDisplay) spokeIdDisplay.textContent = settings.relay_island_id || '—';
+  if (spokeIdDisplay) spokeIdDisplay.textContent = settings.relay_spoke_id || '—';
   const apikeyStatus = document.getElementById('relay-apikey-status');
   if (apikeyStatus) apikeyStatus.textContent = settings.relay_api_key_configured ? '✓ Received' : 'Pending approval';
   const relayIndicator = document.getElementById('relay-indicator');
@@ -4821,7 +4821,7 @@ if (relayDiagBtn) {
         `server_url    : ${cfg.server_url}`,
         `spoke_name    : ${cfg.spoke_name}`,
         `hostname      : ${cfg.hostname}`,
-        `island_id     : ${cfg.island_id}`,
+        `spoke_id     : ${cfg.spoke_id}`,
         `api_key       : ${cfg.api_key_configured ? '✅ set' : '❌ not set'}`,
         `tenant_id     : ${cfg.tenant_id}`,
       ].join('\n');

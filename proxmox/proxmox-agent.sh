@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.07"
+AGENT_VERSION="2.08"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -644,10 +644,14 @@ destroy_vm() {
 _destroy_vm_qm_only() {
     local vmid="$1"
     log "Stopping VM $vmid before destroy"
-    timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
-    _wait_vm_stopped "$vmid" 90 || true
+    # Use qm's own --timeout so Proxmox manages graceful→force shutdown internally.
+    # timeout 30 + external kill was cutting the shutdown short, leaving the VM running
+    # and causing qm destroy to fail silently.
+    qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
+        qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
+    _wait_vm_stopped "$vmid" 30 || true
     log "Destroying VM $vmid"
-    timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
     _wait_vmid_gone "$vmid" 60 || true
     log "VM $vmid destroyed"
 }
@@ -1284,9 +1288,10 @@ PY
             curl_api DELETE "/api/commands/pending?target=${_dhostname}-${_dvmid}" "" >/dev/null 2>&1 || true
             # Run qm stop+destroy in a background subshell (no state writes)
             (
-                timeout 30 qm stop "$_dvmid" --skiplock 2>/dev/null || true
-                _wait_vm_stopped "$_dvmid" 90 || true
-                timeout 120 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+                qm stop "$_dvmid" --skiplock --timeout 120 2>/dev/null || \
+                    qm stop "$_dvmid" --skiplock --timeout 0 2>/dev/null || true
+                _wait_vm_stopped "$_dvmid" 30 || true
+                timeout 300 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
                 _wait_vmid_gone "$_dvmid" 60 || true
                 log "Parallel delete done: VM $_dvmid"
             ) &

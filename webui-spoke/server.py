@@ -306,7 +306,7 @@ settings: dict[str, Any] = {
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_tenant_hint": _persisted.get("relay_tenant_hint", ""),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
-    "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
+    "relay_spoke_id": _persisted.get("relay_spoke_id", _persisted.get("relay_island_id", _persisted.get("relay_site_id", ""))),
     "relay_tenant_id": _persisted.get("relay_tenant_id", ""),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
@@ -1568,7 +1568,7 @@ class SettingsUpdate(BaseModel):
     relay_spoke_name: str | None = None
     relay_tenant_hint: str | None = None
     relay_api_key: str | None = None
-    relay_island_id: str | None = None
+    relay_spoke_id: str | None = None
     relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
     usb_vidpids: str | None = None
@@ -2193,8 +2193,8 @@ def _build_registration_config() -> dict[str, Any]:
 
 
 async def _hub_self_register(server_url: str) -> None:
-    """POST to hub /api/islands/register with full config payload.
-    Stores the returned island_id. If already approved, also stores api_key and tenant_id."""
+    """POST to hub /api/spokes/register with full config payload.
+    Stores the returned spoke_id. If already approved, also stores api_key and tenant_id."""
     hostname = socket.gethostname()
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     payload = {
@@ -2204,11 +2204,11 @@ async def _hub_self_register(server_url: str) -> None:
         "tenant_id_hint": settings.get("relay_tenant_hint", "").strip(),
         "config": _build_registration_config(),
     }
-    _relay_diag_append("register_attempt", url=f"{server_url}/api/islands/register",
+    _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
                        hostname=hostname, spoke_name=spoke_name)
     try:
         async with httpx.AsyncClient(timeout=15, verify=False) as hc:
-            resp = await hc.post(f"{server_url}/api/islands/register", json=payload)
+            resp = await hc.post(f"{server_url}/api/spokes/register", json=payload)
             if resp.status_code == 409:
                 data = resp.json()
                 conflict = data.get("conflict", "name_in_use")
@@ -2224,22 +2224,22 @@ async def _hub_self_register(server_url: str) -> None:
                 return
             resp.raise_for_status()
             data = resp.json()
-        island_id = data.get("island_id", "")
+        spoke_id = data.get("spoke_id", "")
         status = data.get("status", "pending")
-        if island_id:
-            settings["relay_island_id"] = island_id
+        if spoke_id:
+            settings["relay_spoke_id"] = spoke_id
         if status == "approved":
             settings["relay_api_key"] = data.get("api_key", "")
             settings["relay_tenant_id"] = data.get("tenant_id", "")
             relay_state["registration_status"] = "approved"
             relay_state["error"] = ""
-            _relay_diag_append("register_ok", status="approved", island_id=island_id,
+            _relay_diag_append("register_ok", status="approved", spoke_id=spoke_id,
                                tenant_id=data.get("tenant_id"))
-            logger.info("Hub registration: approved immediately island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
+            logger.info("Hub registration: approved immediately spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
         else:
             relay_state["registration_status"] = "pending"
-            _relay_diag_append("register_ok", status="pending", island_id=island_id)
-            logger.info("Hub registration submitted: island_id=%s status=pending", island_id)
+            _relay_diag_append("register_ok", status="pending", spoke_id=spoke_id)
+            logger.info("Hub registration submitted: spoke_id=%s status=pending", spoke_id)
         _save_settings()
     except Exception as exc:
         _relay_diag_append("register_error", error=str(exc))
@@ -2247,14 +2247,14 @@ async def _hub_self_register(server_url: str) -> None:
         relay_state.update({"connected": False, "error": f"Registration failed: {exc}"})
 
 
-async def _hub_check_approval(server_url: str, island_id: str) -> None:
+async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     """Re-POST registration to check if island has been approved.
     Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
     hostname = socket.gethostname()
-    _relay_diag_append("check_approval", island_id=island_id)
+    _relay_diag_append("check_approval", spoke_id=spoke_id)
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as hc:
-            resp = await hc.post(f"{server_url}/api/islands/register", json={
+            resp = await hc.post(f"{server_url}/api/spokes/register", json={
                 "hostname": hostname,
                 "label": hostname,
                 "config": {},
@@ -2267,13 +2267,13 @@ async def _hub_check_approval(server_url: str, island_id: str) -> None:
             settings["relay_tenant_id"] = data.get("tenant_id", "")
             relay_state["registration_status"] = "approved"
             _save_settings()
-            _relay_diag_append("approval_received", island_id=island_id,
+            _relay_diag_append("approval_received", spoke_id=spoke_id,
                                tenant_id=data.get("tenant_id"))
-            logger.info("Hub approval received: island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
+            logger.info("Hub approval received: spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
         else:
             relay_state["registration_status"] = "pending"
-            _relay_diag_append("still_pending", island_id=island_id)
-            logger.info("Hub registration still pending: island_id=%s", island_id)
+            _relay_diag_append("still_pending", spoke_id=spoke_id)
+            logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
     except Exception as exc:
         _relay_diag_append("check_approval_error", error=str(exc))
         logger.warning("Hub approval check failed: %s", exc)
@@ -2341,12 +2341,12 @@ async def relay_sync_once() -> None:
 
     relay_state["enabled"] = True
     server_url = settings["relay_server_url"].rstrip("/")
-    island_id = settings.get("relay_island_id", "")
+    spoke_id = settings.get("relay_spoke_id", "")
     api_key = settings.get("relay_api_key", "")
     tenant_id = settings.get("relay_tenant_id", "")
 
-    # ── Phase 1: Register if no island_id yet ──────────────────────────────────
-    if not island_id:
+    # ── Phase 1: Register if no spoke_id yet ──────────────────────────────────
+    if not spoke_id:
         await _hub_self_register(server_url)
         await broadcast({"type": "relay_status", **relay_state})
         return
@@ -2354,19 +2354,19 @@ async def relay_sync_once() -> None:
     # ── Phase 2: Pending approval — poll hub for approval ──────────────────────
     if not api_key or not tenant_id:
         relay_state["registration_status"] = relay_state.get("registration_status", "pending")
-        await _hub_check_approval(server_url, island_id)
+        await _hub_check_approval(server_url, spoke_id)
         await broadcast({"type": "relay_status", **relay_state})
         return
 
     # ── Phase 3: Approved — full relay cycle ───────────────────────────────────
     relay_state["registration_status"] = "approved"
     headers = {"X-API-Key": api_key}
-    base = f"{server_url}/api/{tenant_id}/islands/{island_id}"
+    base = f"{server_url}/api/{tenant_id}/islands/{spoke_id}"
 
     try:
         async with state_lock:
             telemetry = {
-                "island_id": island_id,
+                "spoke_id": spoke_id,
                 "clients": [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)],
                 "timestamp": time.time(),
             }
@@ -3001,7 +3001,7 @@ async def api_settings_get() -> dict[str, Any]:
         "relay_server_url": settings.get("relay_server_url", ""),
         "relay_spoke_name": settings.get("relay_spoke_name", ""),
         "relay_tenant_hint": settings.get("relay_tenant_hint", ""),
-        "relay_island_id": settings.get("relay_island_id", ""),
+        "relay_spoke_id": settings.get("relay_spoke_id", ""),
         "relay_tenant_id": settings.get("relay_tenant_id", ""),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
         "relay_api_key_configured": bool(settings.get("relay_api_key")),
@@ -3044,8 +3044,8 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             settings["relay_api_key"] = api_key
             relay_config_changed = True
 
-    if update.relay_island_id is not None:
-        settings["relay_island_id"] = update.relay_island_id.strip()
+    if update.relay_spoke_id is not None:
+        settings["relay_spoke_id"] = update.relay_spoke_id.strip()
         relay_config_changed = True
 
     if update.relay_tenant_id is not None:
@@ -3258,7 +3258,7 @@ async def api_relay_sites(tenant_id: str | None = Query(None)) -> dict[str, Any]
 async def api_relay_status_endpoint() -> dict[str, Any]:
     return {
         **relay_state,
-        "spoke_id": settings.get("relay_island_id", ""),
+        "spoke_id": settings.get("relay_spoke_id", ""),
         "api_key_configured": bool(settings.get("relay_api_key")),
         "spoke_name": settings.get("relay_spoke_name", ""),
     }
@@ -3296,7 +3296,7 @@ async def api_relay_diag() -> dict[str, Any]:
         "server_url": server_url or "(not set)",
         "spoke_name": settings.get("relay_spoke_name", "") or "(not set — will use hostname)",
         "hostname": hostname,
-        "island_id": settings.get("relay_island_id", "") or "(none)",
+        "spoke_id": settings.get("relay_spoke_id", "") or "(none)",
         "api_key_configured": bool(settings.get("relay_api_key")),
         "tenant_id": settings.get("relay_tenant_id", "") or "(none)",
     }
