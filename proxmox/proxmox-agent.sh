@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.08"
+AGENT_VERSION="2.09"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -62,9 +62,11 @@ declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 write_reclone_state_cache() {
-    local status="$1" vmids_json="${2:-[]}"
+    local status="$1" vmids_json="${2:-[]}" phase="${3:-}"
+    local phase_field=""
+    [[ -n "$phase" ]] && phase_field=",\"phase\":\"${phase}\""
     cat >"$RECLONE_STATE_CACHE" <<JSON
-{"status":"${status}","active_vmids":${vmids_json},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+{"status":"${status}","active_vmids":${vmids_json}${phase_field},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
 }
 
@@ -649,10 +651,11 @@ _destroy_vm_qm_only() {
     # and causing qm destroy to fail silently.
     qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
         qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
-    _wait_vm_stopped "$vmid" 30 || true
+    # Wait up to 150s (120s qm stop + 30s buffer) for the VM to reach stopped state
+    _wait_vm_stopped "$vmid" 150 || true
     log "Destroying VM $vmid"
     timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
-    _wait_vmid_gone "$vmid" 60 || true
+    _wait_vmid_gone "$vmid" 90 || true
     log "VM $vmid destroyed"
 }
 
@@ -665,7 +668,9 @@ _reclone_parallel_job() {
     _vm_name=$(get_vm_name "$vmid")
     # Expire stale client inbox commands before destroying so the new VM doesn't inherit them
     curl_api DELETE "/api/commands/pending?target=${_vm_name}-${vmid}" "" >/dev/null 2>&1 || true
+    write_reclone_state_cache "running" "[${vmid}]" "stopping"
     _destroy_vm_qm_only "$vmid"
+    write_reclone_state_cache "running" "[${vmid}]" "cloning"
     if clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"; then
         log "Parallel reclone done: VM $vmid bus=$bus_path type=$device_type image=$saved_image"
     else

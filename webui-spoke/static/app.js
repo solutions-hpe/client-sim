@@ -1901,7 +1901,9 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
         : 'badge-grey';
   recloneStatusBadge.className = `badge ${badgeClass}`;
   if (isCloning) {
-    recloneStatusBadge.textContent = `Cloning VM ${state.current_vm}`;
+    const phaseMap = { stopping: 'Stopping', cloning: 'Cloning', starting: 'Starting' };
+    const phaseLabel = phaseMap[state.phase] || 'Cloning';
+    recloneStatusBadge.textContent = `${phaseLabel} VM ${state.current_vm}`;
   } else if (status === 'idle') {
     recloneStatusBadge.textContent = 'Stopped';
   } else {
@@ -5594,6 +5596,8 @@ async function refreshAll() {
       renderSimDisabledBanner();
     }
   } catch (_) { /* silent */ }
+  // Also refresh simulations tab data so it stays current on auto-refresh
+  try { await loadSimulations(); } catch (_) { /* silent */ }
 }
 
 function applyRefreshInterval(seconds) {
