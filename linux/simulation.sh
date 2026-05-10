@@ -105,6 +105,8 @@ site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
 ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
+dot1x_password=$(get_value 'simulation' 'dot1x_password')
+dot1x_eap=$(get_value 'simulation' 'dot1x_eap')
 allow_offline=$(get_value 'simulation' 'allow_offline')
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
@@ -116,6 +118,21 @@ username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 site_based_num=$(get_value 'simulation' 'site_based_num')
 simulation_id=s
 simulation_id+=$(echo "$HOSTNAME" | rev | cut -c "1-${site_based_num}" | rev | cut -c 1-1)
+#------------------------------------------------------------
+# 802.1x identity — derived from hostname (e.g. sim-client-90001 → username-90001)
+# WHY: The 9XXXXX suffix uniquely identifies the VM slot; the username prefix
+# is the EAP identity presented to the RADIUS server for DOT1X SSIDs.
+# Invalid hostnames (non-matching pattern) log an error and disable DOT1X.
+#------------------------------------------------------------
+_dot1x_hostnum=$(echo "$HOSTNAME" | grep -oE '[0-9]{5,6}$' || true)
+if [[ "$_dot1x_hostnum" =~ ^9[0-9]{4,5}$ ]] && (( _dot1x_hostnum >= 90000 && _dot1x_hostnum <= 100000 )); then
+  dot1x_user="username-${_dot1x_hostnum}"
+else
+  dot1x_user=""
+  [[ "$(get_value "$simulation_id" 'ssid')" == "DOT1X" ]] && \
+    report_error "802.1x: cannot derive username from hostname '$HOSTNAME' — expected sim-client-9XXXXX" "error"
+fi
+dot1x_pw="${dot1x_password:-password}"
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -159,7 +176,7 @@ override_keys=(kill_switch sim_load github_repo repo_location vh_server site_bas
   wsite sim_phy ssid ssidpw dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail smb_address ping_address dns_latency_1 dns_latency_2 \
   dns_latency_3 dns_bad_ip_1 dns_bad_ip_2 dns_bad_ip_3 dns_bad_record_1 dns_bad_record_2 \
-  dns_bad_record_3 vh_server_addr iperf_server)
+  dns_bad_record_3 vh_server_addr iperf_server dot1x_password dot1x_eap)
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
@@ -447,6 +464,85 @@ manage_connection() {
   nmcli -w "$wait_time" connection "$action" "$target_ssid"
 }
 #------------------------------------------------------------
+# connect_dot1x: connect to an 802.1x (DOT1X) SSID via nmcli
+# WHY: Analogous to connect_wifi but uses EAP credentials instead of
+# a pre-shared key. Supports PEAP/MSCHAPv2 (default) and EAP-TLS.
+# Username is derived from hostname; password comes from $dot1x_pw
+# (set to dot1x_password normally, or dot1x_password_fail for auth_fail).
+# Server certificate validation is intentionally disabled for lab use.
+#------------------------------------------------------------
+connect_dot1x() {
+  local _target_ssid
+  nmcli radio wifi on
+  echo "Ensuring WiFi Adapter is ON (DOT1X)" | tee -a "$debug"
+  sleep 2
+  if [ "$site_based_ssid" == "on" ]; then
+    _target_ssid="$wsite-$ssid"
+  else
+    _target_ssid="$ssid"
+  fi
+  if [[ -z "$dot1x_user" ]]; then
+    report_error "802.1x: no valid username for '$HOSTNAME' — skipping DOT1X connect" "error"
+    return 1
+  fi
+  local current_ssid
+  current_ssid=$(nmcli -t -f active,ssid dev wifi | awk -F: '$1=="yes"{print $2}')
+  if [ "$current_ssid" == "$_target_ssid" ]; then
+    echo "Already connected to $_target_ssid (DOT1X) — skipping" | tee -a "$debug"
+    return 0
+  fi
+  if ! wait_for_ssid "$_target_ssid"; then
+    return 1
+  fi
+  # Remove existing DOT1X profiles so we always connect fresh with current credentials.
+  local _dot1x_cons
+  _dot1x_cons=$(nmcli -t -f NAME con | grep DOT1X 2>/dev/null || true)
+  [[ -n "$_dot1x_cons" ]] && sudo nmcli con del "$_dot1x_cons"
+  local _eap="${dot1x_eap:-peap}"
+  echo "Connecting DOT1X: ssid=$_target_ssid user=$dot1x_user eap=$_eap" | tee -a "$debug"
+  if [[ "$_eap" == "tls" ]]; then
+    # EAP-TLS — certificate flags ignored for lab use (no cert required)
+    if ! nmcli connection add type wifi ssid "$_target_ssid" con-name "DOT1X-$_target_ssid" \
+        wifi-sec.key-mgmt wpa-eap \
+        802-1x.eap tls \
+        802-1x.identity "$dot1x_user" \
+        802-1x.ca-cert-flag ignore \
+        802-1x.client-cert-flag ignore \
+        802-1x.private-key-flag ignore 2>&1 | tee -a "$debug"; then
+      report_error "DOT1X (TLS) connection add failed: $_target_ssid" "error"
+      return 1
+    fi
+  else
+    # PEAP/MSCHAPv2 (default) — no server cert validation
+    if ! nmcli connection add type wifi ssid "$_target_ssid" con-name "DOT1X-$_target_ssid" \
+        wifi-sec.key-mgmt wpa-eap \
+        802-1x.eap peap \
+        802-1x.phase2-auth mschapv2 \
+        802-1x.identity "$dot1x_user" \
+        802-1x.password "$dot1x_pw" \
+        802-1x.phase2-ca-cert-flag ignore 2>&1 | tee -a "$debug"; then
+      report_error "DOT1X (PEAP) connection add failed: $_target_ssid" "error"
+      return 1
+    fi
+  fi
+  if ! nmcli -w 120 connection up "DOT1X-$_target_ssid" 2>&1 | tee -a "$debug"; then
+    report_error "DOT1X connection up failed: $_target_ssid user=$dot1x_user eap=$_eap" "error"
+    return 1
+  fi
+}
+#------------------------------------------------------------
+# connect_network: dispatch to connect_wifi or connect_dot1x based on ssid value
+# WHY: Single call site for all connection attempts — DOT1X and PSK share the
+# same call paths; this keeps the simulation logic clean.
+#------------------------------------------------------------
+connect_network() {
+  if [[ "$ssid" == "DOT1X" ]]; then
+    connect_dot1x
+  else
+    connect_wifi
+  fi
+}
+#------------------------------------------------------------
 # run_simulation: launch a sub-simulation script in the background
 # WHY: nohup + & detaches it so the main loop isn't blocked.
 # We check the file exists first to avoid a confusing bash error.
@@ -477,8 +573,8 @@ should_run_sim() {
 #------------------------------------------------------------
 # Initial WiFi connection attempt before entering the main loop
 #------------------------------------------------------------
-if ! connect_wifi; then
-  report_error "Pre-simulation WiFi connect failed for SSID '$ssid'" "error"
+if ! connect_network; then
+  report_error "Pre-simulation network connect failed for SSID '$ssid'" "error"
 fi
 gateway_reachable=false
 dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
@@ -529,7 +625,7 @@ else
   if [ "$vh_server" == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
   sleep 15
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-  connect_wifi
+  connect_network
   sleep 15
   dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
 fi
@@ -569,30 +665,52 @@ if [ "$kill_switch" != "on" ] && [ "$gkill_switch" != "on" ]; then
   if [ "$ssidpw_fail" == "on" ] || [ "$auth_fail" == "on" ] && [[ -n "${wladapter}" ]]; then
     if [ "$ssidpw_fail" == "on" ]; then
      for i in {1..100}; do
-      echo "Running SSID Incorrect Password iteration $i/100" | tee -a "$debug"
-      ssidpw="$(get_value "$simulation_id" 'ssidpw')_fail"
-      # Remove cached PSK profiles so nmcli can't auto-reconnect with the correct password.
-      # WHY: Without this, nmcli uses the saved profile and connects successfully,
-      # defeating the simulation purpose.
-      _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
-      [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
-      connect_wifi
+      echo "Running Incorrect Password iteration $i/100" | tee -a "$debug"
+      if [[ "$ssid" == "DOT1X" ]]; then
+        dot1x_pw="${dot1x_password}_fail"
+        _dot1x_cons=$(nmcli -t -f NAME con | grep DOT1X 2>/dev/null || true)
+        [[ -n "$_dot1x_cons" ]] && sudo nmcli con del "$_dot1x_cons"
+        connect_dot1x
+      else
+        ssidpw="$(get_value "$simulation_id" 'ssidpw')_fail"
+        # Remove cached PSK profiles so nmcli can't auto-reconnect with the correct password.
+        # WHY: Without this, nmcli uses the saved profile and connects successfully,
+        # defeating the simulation purpose.
+        _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+        [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
+        connect_wifi
+      fi
      done
     fi
     if [ "$auth_fail" == "on" ]; then
      echo "Running Auth Failure simulation" | tee -a "$debug"
      for i in {1..100}; do
       echo "Auth fail iteration $i/100" | tee -a "$debug"
-      _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
-      [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
-      manage_connection up 5
-      sleep 5
-      manage_connection down 5
+      if [[ "$ssid" == "DOT1X" ]]; then
+        dot1x_pw="${dot1x_password}_fail"
+        _dot1x_cons=$(nmcli -t -f NAME con | grep DOT1X 2>/dev/null || true)
+        [[ -n "$_dot1x_cons" ]] && sudo nmcli con del "$_dot1x_cons"
+        connect_dot1x
+        sleep 5
+        _dot1x_cons=$(nmcli -t -f NAME con | grep DOT1X 2>/dev/null || true)
+        [[ -n "$_dot1x_cons" ]] && sudo nmcli -w 5 connection down "$_dot1x_cons" 2>/dev/null || true
+      else
+        _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
+        [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
+        manage_connection up 5
+        sleep 5
+        manage_connection down 5
+      fi
      done
     fi
-   # Restore correct password so the device can reconnect for updates/maintenance
-   ssidpw=$(get_value "$simulation_id" 'ssidpw')
-   connect_wifi
+   # Restore correct credentials so the device can reconnect for updates/maintenance
+   if [[ "$ssid" == "DOT1X" ]]; then
+     dot1x_pw="${dot1x_password}"
+     connect_dot1x
+   else
+     ssidpw=$(get_value "$simulation_id" 'ssidpw')
+     connect_wifi
+   fi
   else
    #------------------------------------------------------------
    # Normal simulation path — verify gateway, launch sub-simulations
@@ -609,11 +727,13 @@ if [ "$kill_switch" != "on" ] && [ "$gkill_switch" != "on" ]; then
     if [ "$vh_server" == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
     sleep 15
     wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-    # Remove stale PSK profiles before reconnecting.
+    # Remove stale PSK/DOT1X profiles before reconnecting.
     # WHY: A cached bad profile causes nmcli to use wrong credentials silently.
     _psks=$(nmcli -t -f NAME con | grep PSK 2>/dev/null || true)
     [[ -n "$_psks" ]] && sudo nmcli con del "$_psks"
-    connect_wifi
+    _dot1x_cons=$(nmcli -t -f NAME con | grep DOT1X 2>/dev/null || true)
+    [[ -n "$_dot1x_cons" ]] && sudo nmcli con del "$_dot1x_cons"
+    connect_network
     echo "WLAN Adapter: $wladapter" | tee -a "$debug"
     sleep 15
     if [[ -n "$dfgw" ]] && ping -c2 -W2 "$dfgw" >/dev/null 2>&1; then
