@@ -42,10 +42,16 @@ for c in cmds:
 
   case "$action" in
     restart_sim)
-      pkill -f '[/]simulation.sh' 2>/dev/null || true
-      sleep 2
-      bash /usr/local/scripts/startup.sh &
-      message="Simulation restarted"
+      # Send SIGUSR1 to simulation.sh so it exits its loop and re-execs cleanly.
+      # DO NOT use pkill — pkill kills the managed process that launch-terminals.sh
+      # is watching, which causes "; systemctl reboot" to fire immediately.
+      _sim_pid=$(pgrep -f '[/]simulation.sh' | head -1)
+      if [[ -n "$_sim_pid" ]]; then
+        kill -USR1 "$_sim_pid" 2>/dev/null || true
+        message="Restart signal sent (PID $_sim_pid)"
+      else
+        message="simulation.sh not running — no action taken"
+      fi
       ;;
     reboot)
       # Early-boot guard: if simulation.sh isn't running yet we are still in the
@@ -75,15 +81,17 @@ for c in cmds:
       ks_val="${arg_value:-on}"
       if [[ "$ks_val" != "on" && "$ks_val" != "off" ]]; then ks_val="on"; fi
       sed -i "s/^kill_switch=.*/kill_switch=${ks_val}/" /usr/local/scripts/simulation.conf
+      # Send SIGUSR1 to break simulation.sh out of its loop/sleep so it re-execs
+      # and picks up the new kill_switch value immediately.
+      # DO NOT use pkill — see restart_sim comment above.
+      _sim_pid=$(pgrep -f '[/]simulation.sh' | head -1)
+      if [[ -n "$_sim_pid" ]]; then
+        kill -USR1 "$_sim_pid" 2>/dev/null || true
+      fi
       if [[ "$ks_val" == "on" ]]; then
-        pkill -f '[/]simulation.sh' 2>/dev/null || true
         message="Kill switch activated"
       else
-        # Turn off: restart simulation so it picks up the new config
-        pkill -f '[/]simulation.sh' 2>/dev/null || true
-        sleep 1
-        bash /usr/local/scripts/startup.sh &
-        message="Kill switch deactivated — simulation restarting"
+        message="Kill switch deactivated — simulation will restart"
       fi
       ;;
     *)

@@ -14,6 +14,7 @@ API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-10}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
+SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
 USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
@@ -585,6 +586,15 @@ provision_vm() {
 destroy_vm() {
     local vmid="$1"
     local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
+    # Expire any pending client inbox commands for this VM's hostname BEFORE destroying.
+    # Without this, stale commands (e.g. reboot) remain in the queue and are delivered
+    # to the replacement VM when the same VMID slot is re-used, causing an immediate reboot.
+    local _destroy_hostname
+    _destroy_hostname=$(get_vm_name "$vmid" 2>/dev/null || true)
+    if [[ -n "$_destroy_hostname" ]]; then
+        curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}-${vmid}" "" >/dev/null 2>&1 || true
+        curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}" "" >/dev/null 2>&1 || true
+    fi
     timeout 60 qm stop "$vmid" 2>/dev/null || true
     timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
     if [[ -n "$bus_path" ]]; then
@@ -976,6 +986,41 @@ print(json.dumps(out))
 JSON
 }
 
+# ── Self-update ────────────────────────────────────────────────────────────────
+# Downloads the latest agent script from GitHub, validates it, and replaces the
+# running binary if the SHA256 hash differs. Called both from the inbox handler
+# (update_agent command) and from the main loop's periodic self-check.
+self_update_agent() {
+    local agent_script="/usr/local/bin/client-sim-proxmox-agent"
+    local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
+    local tmp_file
+    tmp_file=$(mktemp)
+    log "Checking for agent update from GitHub (current: v${AGENT_VERSION})..."
+    if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
+        rm -f "$tmp_file"
+        log "ERROR: Failed to download agent update"
+        return 1
+    fi
+    if ! bash -n "$tmp_file" 2>/dev/null; then
+        rm -f "$tmp_file"
+        log "ERROR: Downloaded agent script failed syntax check — aborting update"
+        return 1
+    fi
+    local current_hash new_hash new_version
+    current_hash=$(sha256sum "$agent_script" 2>/dev/null | awk '{print $1}')
+    new_hash=$(sha256sum "$tmp_file" | awk '{print $1}')
+    new_version=$(grep '^AGENT_VERSION=' "$tmp_file" | cut -d'"' -f2)
+    if [[ "$current_hash" == "$new_hash" ]]; then
+        rm -f "$tmp_file"
+        log "Agent is already up to date (v${AGENT_VERSION})"
+    else
+        chmod +x "$tmp_file"
+        mv "$tmp_file" "$agent_script"
+        log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 30s..."
+        ( sleep 30 && systemctl restart client-sim-proxmox-agent ) &
+    fi
+}
+
 execute_vm_command() {
     local action="$1" vmid="${2:-}" _type="${3:-}"
     case "$action" in
@@ -1001,35 +1046,7 @@ execute_vm_command() {
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent)
-            local agent_script="/usr/local/bin/client-sim-proxmox-agent"
-            local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
-            local tmp_file
-            tmp_file=$(mktemp)
-            log "Checking for agent update from GitHub (current: v${AGENT_VERSION})..."
-            if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
-                rm -f "$tmp_file"
-                log "ERROR: Failed to download agent update"
-                return 1
-            fi
-            # Validate downloaded script is valid bash before replacing
-            if ! bash -n "$tmp_file" 2>/dev/null; then
-                rm -f "$tmp_file"
-                log "ERROR: Downloaded agent script failed syntax check — aborting update"
-                return 1
-            fi
-            local current_hash new_hash new_version
-            current_hash=$(sha256sum "$agent_script" 2>/dev/null | awk '{print $1}')
-            new_hash=$(sha256sum "$tmp_file" | awk '{print $1}')
-            new_version=$(grep '^AGENT_VERSION=' "$tmp_file" | cut -d'"' -f2)
-            if [[ "$current_hash" == "$new_hash" ]]; then
-                rm -f "$tmp_file"
-                log "Agent is already up to date (v${AGENT_VERSION})"
-            else
-                chmod +x "$tmp_file"
-                mv "$tmp_file" "$agent_script"
-                log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 30s..."
-                ( sleep 30 && systemctl restart client-sim-proxmox-agent ) &
-            fi
+            self_update_agent
             ;;
         *)          return 1 ;;
     esac
@@ -1038,6 +1055,7 @@ execute_vm_command() {
 mkdir -p /var/lib/client-sim
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
+_LAST_SELF_UPDATE=0
 log "Host block $host_id → VM range $start_vmid-$end_vmid"
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
@@ -1232,6 +1250,14 @@ while true; do
 
     # Post telemetry after USB scan (has fresh USB state in this process)
     post_telemetry
+
+    # Periodic self-update: check GitHub every SELF_UPDATE_INTERVAL seconds.
+    # This ensures the agent updates even if the WebUI never sends update_agent.
+    _now=$(date +%s)
+    if (( _now - _LAST_SELF_UPDATE >= SELF_UPDATE_INTERVAL )); then
+        _LAST_SELF_UPDATE=$_now
+        self_update_agent || true
+    fi
 
     sleep "$POLL_INTERVAL"
 done

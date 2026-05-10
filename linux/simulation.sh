@@ -3,6 +3,13 @@ version=.05
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
 echo Simulation Script Version $version | tee "$debug"
+
+# SIGUSR1 trap — used by agent.sh restart_sim / kill_switch commands for graceful restart.
+# Instead of pkill (which kills the managed process and triggers the ; systemctl reboot in
+# launch-terminals.sh), agent.sh sends USR1 to this PID. The flag breaks the main loop or
+# the kill-switch sleep so simulation.sh exits naturally and re-execs itself cleanly.
+_restart_requested=0
+trap '_restart_requested=1' USR1
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
@@ -643,6 +650,8 @@ fi
 echo "Kill Switch is $kill_switch (global: $gkill_switch)" | tee -a "$debug"
 if [ "$kill_switch" != "on" ] && [ "$gkill_switch" != "on" ]; then
  for z in {1..100}; do
+  # Honor SIGUSR1 restart request — exit loop cleanly so exec-restart picks up new config.
+  [[ "$_restart_requested" -eq 1 ]] && break
   #----------------------------------------------------------
   # Per-iteration gateway check — used by report_error() and to decide
   # whether to skip simulations this cycle.
@@ -815,7 +824,11 @@ else
  #------------------------------------------------------------
  echo "Kill switch enabled — parking for 5 minutes" | tee -a "$debug"
  report_error "Kill switch is ON — all simulations suspended" "warning"
- sleep 300
+ # Sleep in small increments so a SIGUSR1 restart request is honoured promptly.
+ for _ks_wait in $(seq 1 30); do
+   [[ "$_restart_requested" -eq 1 ]] && break
+   sleep 10
+ done
 fi
 #------------------------------------------------------------
 # Post-loop: cleanup, background updates, optional offline period
