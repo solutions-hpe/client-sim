@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.89"
+AGENT_VERSION="1.92"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -19,6 +19,7 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
 USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
+RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -58,6 +59,13 @@ declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACK
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+write_reclone_state_cache() {
+    local status="$1" vmids_json="${2:-[]}"
+    cat >"$RECLONE_STATE_CACHE" <<JSON
+{"status":"${status}","active_vmids":${vmids_json},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+JSON
+}
 
 if [[ -z "$SERVER_URL" ]]; then
     log "ERROR: CLIENT_SIM_SERVER_URL not set."
@@ -959,6 +967,7 @@ print(json.dumps(out))
   "pve_version": "${pve_version}",
   "missing_timeout_mins": ${MISSING_TIMEOUT},
   "vms": ${vms_json:-[]},
+  "reclone_state": $(cat "$RECLONE_STATE_CACHE" 2>/dev/null || echo '{"status":"idle","active_vmids":[]}'),
   "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
   "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
@@ -1027,6 +1036,7 @@ execute_vm_command() {
 }
 
 mkdir -p /var/lib/client-sim
+write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
 log "Host block $host_id → VM range $start_vmid-$end_vmid"
 if [[ -z "$API_KEY" ]]; then
@@ -1171,6 +1181,11 @@ PY
 
         # Wait for reclone jobs and ACK results in a background subshell so
         # process_inbox returns immediately — never blocked by multi-minute clones.
+        local _rc_vmids_json="[]"
+        if [[ ${#_rc_batch_vmids[@]} -gt 0 ]]; then
+            _rc_vmids_json="[$(IFS=,; echo "${_rc_batch_vmids[*]}")]"
+            write_reclone_state_cache running "$_rc_vmids_json"
+        fi
         local _snap_pids=("${_rc_pids[@]}")
         local _snap_ids=("${_rc_batch_ids[@]}")
         local _snap_vmids=("${_rc_batch_vmids[@]}")
@@ -1192,6 +1207,7 @@ PY
                 [[ -n "$_b" ]] && STATE_MISSING_BY_BUS["$_b"]=""
             done
             save_state_file
+            write_reclone_state_cache idle "[]"
         ) &
     fi
 }

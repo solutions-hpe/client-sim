@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Client-Sim Dashboard — LXC Installer v0.03
+# Client Simulator — LXC Installer v0.03
 #
 # Usage:
 #   sudo bash install-lxc.sh              # install or update in-place
@@ -127,7 +127,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="1.92"
+VERSION="1.93"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -155,7 +155,7 @@ trap 'err "Installer failed at line $LINENO — check $LOG"' ERR
 ###############################################################################
 echo
 echo "============================================================"
-echo " Client-Sim Dashboard Installer v${VERSION}  [${MODE}]"
+echo " Client Simulator Installer v${VERSION}  [${MODE}]"
 echo " $(date)"
 echo "============================================================"
 echo " Repo URL   : $REPO_URL"
@@ -498,7 +498,7 @@ chmod 640 "$INSTALL_DIR/.env"
 info "Installing systemd service..."
 cat >/etc/systemd/system/client-sim-dashboard.service <<EOF
 [Unit]
-Description=Client-Sim Dashboard
+Description=Client Simulator
 After=network-online.target
 Wants=network-online.target
 

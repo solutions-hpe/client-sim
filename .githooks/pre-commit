@@ -14,9 +14,9 @@ fail=0
 # Python: compile-check any staged .py files
 staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
 for f in $staged_py; do
-    if ! python3 -m py_compile "$f" 2>/tmp/pyc_err; then
+    if ! py_err=$(python3 -m py_compile "$f" 2>&1); then
         echo "[pre-commit] ✗ Python syntax error in $f:"
-        cat /tmp/pyc_err
+        echo "$py_err"
         fail=1
     fi
 done
@@ -24,9 +24,9 @@ done
 # Bash: check staged .sh files
 staged_sh=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
 for f in $staged_sh; do
-    if ! bash -n "$f" 2>/tmp/sh_err; then
+    if ! sh_err=$(bash -n "$f" 2>&1); then
         echo "[pre-commit] ✗ Bash syntax error in $f:"
-        cat /tmp/sh_err
+        echo "$sh_err"
         fail=1
     fi
 done

@@ -2688,9 +2688,6 @@ async def heartbeat_check() -> None:
 
 
 @app.get("/api/settings")
-
-
-@app.get("/api/settings")
 async def api_settings_get() -> dict[str, Any]:
     cfg = dict(settings["central_config"])
     # Strip all secrets — return only non-sensitive fields + presence flags

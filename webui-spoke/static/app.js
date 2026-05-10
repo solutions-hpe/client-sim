@@ -313,7 +313,7 @@ function renderSimDisabledBanner() {
   const { global: g, local: l } = simDisabledState;
   if (!g && !l) {
     banner.style.display = 'none';
-    document.title = 'Client-Sim Dashboard';
+    document.title = 'Client Simulator';
     return;
   }
   const scope = g && l ? 'Globally & Locally' : g ? 'Globally' : 'Locally';
@@ -324,7 +324,7 @@ function renderSimDisabledBanner() {
   banner.textContent = `🛑 Simulation Disabled — ${scope}`;
   banner.title = tip;
   banner.style.display = '';
-  document.title = `🛑 Simulation Disabled (${scope}) — Client-Sim`;
+  document.title = `🛑 Simulation Disabled (${scope}) — Client Simulator`;
 }
 
 function applyGkillSwitch(value) {
@@ -550,7 +550,6 @@ const hwChecksMsg = document.getElementById('hw-checks-msg');
 const hwChecksPreview = document.getElementById('hw-checks-preview');
 const configSimulationForm = document.getElementById('config-simulation-form');
 const configAddressesForm  = document.getElementById('config-addresses-form');
-const configSimulationSaveBtn = document.getElementById('config-simulation-save');
 const configSimulationMsg = document.getElementById('config-simulation-message');
 const configBucketsContainer = document.getElementById('config-buckets-container');
 const configBucketsMsg = document.getElementById('config-buckets-message');
@@ -873,8 +872,8 @@ function renderServerTab(data) {
     sorted.forEach((vm) => {
       const isRecloning  = recloningVmids.has(Number(vm.vmid));
       const isWebui      = webuiVmid != null && Number(vm.vmid) === webuiVmid;
-      const statusDot    = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
-      const statusLabel  = isRecloning ? 'recloning…' : (vm.status || 'unknown');
+      const baseStatusText = `${vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫'} ${vm.status || 'unknown'}`;
+      const statusLabel  = isRecloning ? '🟡 recloning…' : baseStatusText;
       const memUsed  = vm.mem    ? fmtSize(Number(vm.mem)    * 1024 * 1024) : '—';
       const memTotal = vm.maxmem ? fmtSize(Number(vm.maxmem) * 1024 * 1024) : '—';
       // Show CPU only for running VMs — stopped VMs always report 0 which is misleading
@@ -894,9 +893,10 @@ function renderServerTab(data) {
 
       const tr = document.createElement('tr');
       tr.dataset.vmid = vm.vmid;
+      tr.dataset.status = baseStatusText;
       tr.innerHTML = `
         <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"${isWebui ? ' disabled' : ''}></td>
-        <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
+        <td class="vm-status-cell">${statusLabel}</td>
         <td>${vm.vmid}</td>
         <td>${escHtml(vm.name || '—')}${recoveryBadge}${webuiBadge}</td>
         <td>${cpuVal}</td>
@@ -1969,8 +1969,8 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
 // Called whenever reclone state changes (reclone_update WS message).
 function updateVmRecloneIcons() {
   const state = latestRecloneState || {};
-  const tbody = document.getElementById('server-vm-tbody');
-  if (!tbody) return;
+  const tbodies = document.querySelectorAll('[id^="server-vm-tbody-"]');
+  if (!tbodies.length) return;
 
   const recloningVmids = new Set();
   if (state.status === 'running') {
@@ -1980,16 +1980,17 @@ function updateVmRecloneIcons() {
     });
   }
 
-  tbody.querySelectorAll('tr[data-vmid]').forEach((row) => {
-    const vmid = Number(row.dataset.vmid);
-    const cell = row.querySelector('.vm-status-cell');
-    if (!cell) return;
-    if (recloningVmids.has(vmid)) {
-      cell.textContent = '🟡 recloning…';
-    } else {
-      // Restore from data-status if available, else leave as-is
-      if (row.dataset.status) cell.textContent = row.dataset.status;
-    }
+  tbodies.forEach((tbody) => {
+    tbody.querySelectorAll('tr[data-vmid]').forEach((row) => {
+      const vmid = Number(row.dataset.vmid);
+      const cell = row.querySelector('.vm-status-cell');
+      if (!cell) return;
+      if (recloningVmids.has(vmid)) {
+        cell.textContent = '🟡 recloning…';
+      } else if (row.dataset.status) {
+        cell.textContent = row.dataset.status;
+      }
+    });
   });
 }
 
