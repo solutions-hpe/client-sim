@@ -28,7 +28,7 @@ except ImportError:
     _HTTPX_AVAILABLE = False
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -49,7 +49,7 @@ CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
 CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
-HUB_REPO_RAW = os.getenv("HUB_REPO_RAW", "https://raw.githubusercontent.com/solutions-hpe/webui-hub")
+CS_WEBUI_REPO_RAW = os.getenv("CS_WEBUI_REPO_RAW", "https://raw.githubusercontent.com/solutions-hpe/cs-webui")
 
 
 def _detect_own_vmid() -> int | None:
@@ -5170,6 +5170,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         with contextlib.suppress(ValueError):
             ws_connections.remove(websocket)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    index = STATIC_DIR / "index.html"
+    html = index.read_text()
+    html = html.replace("{{WEBUI_MODE}}", "spoke")
+    return HTMLResponse(content=html)
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
