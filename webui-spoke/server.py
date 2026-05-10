@@ -304,6 +304,7 @@ settings: dict[str, Any] = {
     "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
+    "relay_tenant_hint": _persisted.get("relay_tenant_hint", ""),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_island_id": _persisted.get("relay_island_id", _persisted.get("relay_site_id", "")),
     "relay_tenant_id": _persisted.get("relay_tenant_id", ""),
@@ -1465,6 +1466,17 @@ relay_state: dict[str, Any] = {
     "error": None,
     "registration_status": "unregistered",  # "unregistered" | "pending" | "approved"
 }
+# Capped registration diagnostic log — last 50 attempts
+_RELAY_DIAG_MAX = 50
+relay_diag_log: list[dict[str, Any]] = []
+
+
+def _relay_diag_append(event: str, **kwargs: Any) -> None:
+    """Append one entry to relay_diag_log, keeping the list capped."""
+    entry = {"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "event": event, **kwargs}
+    relay_diag_log.append(entry)
+    if len(relay_diag_log) > _RELAY_DIAG_MAX:
+        del relay_diag_log[:-_RELAY_DIAG_MAX]
 proxmox_state: dict[str, Any] = {
     "connected": False,
     "last_seen": None,
@@ -1554,6 +1566,7 @@ class SettingsUpdate(BaseModel):
     relay_enabled: str | None = None
     relay_server_url: str | None = None
     relay_spoke_name: str | None = None
+    relay_tenant_hint: str | None = None
     relay_api_key: str | None = None
     relay_island_id: str | None = None
     relay_tenant_id: str | None = None
@@ -2188,8 +2201,11 @@ async def _hub_self_register(server_url: str) -> None:
         "hostname": hostname,
         "label": hostname,
         "spoke_name": spoke_name,
+        "tenant_id_hint": settings.get("relay_tenant_hint", "").strip(),
         "config": _build_registration_config(),
     }
+    _relay_diag_append("register_attempt", url=f"{server_url}/api/islands/register",
+                       hostname=hostname, spoke_name=spoke_name)
     try:
         async with httpx.AsyncClient(timeout=15, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/islands/register", json=payload)
@@ -2203,6 +2219,7 @@ async def _hub_self_register(server_url: str) -> None:
                     "registration_status": "name_conflict",
                     "error": f"{ts} — {msg}",
                 })
+                _relay_diag_append("register_409", conflict=conflict, message=msg)
                 logger.warning("Hub registration name conflict: %s", msg)
                 return
             resp.raise_for_status()
@@ -2216,12 +2233,16 @@ async def _hub_self_register(server_url: str) -> None:
             settings["relay_tenant_id"] = data.get("tenant_id", "")
             relay_state["registration_status"] = "approved"
             relay_state["error"] = ""
+            _relay_diag_append("register_ok", status="approved", island_id=island_id,
+                               tenant_id=data.get("tenant_id"))
             logger.info("Hub registration: approved immediately island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
         else:
             relay_state["registration_status"] = "pending"
+            _relay_diag_append("register_ok", status="pending", island_id=island_id)
             logger.info("Hub registration submitted: island_id=%s status=pending", island_id)
         _save_settings()
     except Exception as exc:
+        _relay_diag_append("register_error", error=str(exc))
         logger.warning("Hub self-register failed: %s", exc)
         relay_state.update({"connected": False, "error": f"Registration failed: {exc}"})
 
@@ -2230,6 +2251,7 @@ async def _hub_check_approval(server_url: str, island_id: str) -> None:
     """Re-POST registration to check if island has been approved.
     Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
     hostname = socket.gethostname()
+    _relay_diag_append("check_approval", island_id=island_id)
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/islands/register", json={
@@ -2245,11 +2267,15 @@ async def _hub_check_approval(server_url: str, island_id: str) -> None:
             settings["relay_tenant_id"] = data.get("tenant_id", "")
             relay_state["registration_status"] = "approved"
             _save_settings()
+            _relay_diag_append("approval_received", island_id=island_id,
+                               tenant_id=data.get("tenant_id"))
             logger.info("Hub approval received: island_id=%s tenant_id=%s", island_id, data.get("tenant_id"))
         else:
             relay_state["registration_status"] = "pending"
+            _relay_diag_append("still_pending", island_id=island_id)
             logger.info("Hub registration still pending: island_id=%s", island_id)
     except Exception as exc:
+        _relay_diag_append("check_approval_error", error=str(exc))
         logger.warning("Hub approval check failed: %s", exc)
 
 
@@ -2974,6 +3000,7 @@ async def api_settings_get() -> dict[str, Any]:
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
         "relay_spoke_name": settings.get("relay_spoke_name", ""),
+        "relay_tenant_hint": settings.get("relay_tenant_hint", ""),
         "relay_island_id": settings.get("relay_island_id", ""),
         "relay_tenant_id": settings.get("relay_tenant_id", ""),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
@@ -3005,6 +3032,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.relay_spoke_name is not None:
         settings["relay_spoke_name"] = update.relay_spoke_name.strip()
+        relay_config_changed = True
+
+    if update.relay_tenant_hint is not None:
+        settings["relay_tenant_hint"] = update.relay_tenant_hint.strip()
         relay_config_changed = True
 
     if update.relay_api_key is not None:
@@ -3230,6 +3261,51 @@ async def api_relay_status_endpoint() -> dict[str, Any]:
         "spoke_id": settings.get("relay_island_id", ""),
         "api_key_configured": bool(settings.get("relay_api_key")),
         "spoke_name": settings.get("relay_spoke_name", ""),
+    }
+
+
+@app.get("/api/relay/diag")
+async def api_relay_diag() -> dict[str, Any]:
+    """Return registration diagnostics: config summary, live hub reachability, and registration log."""
+    server_url = settings.get("relay_server_url", "").rstrip("/")
+    hostname = socket.gethostname()
+
+    # Live reachability check
+    reachability: dict[str, Any] = {"tested_url": server_url or "(not set)", "ok": False, "detail": ""}
+    if server_url:
+        try:
+            async with httpx.AsyncClient(timeout=8, verify=False) as hc:
+                r = await hc.get(f"{server_url}/api/health")
+                reachability = {
+                    "tested_url": f"{server_url}/api/health",
+                    "ok": r.status_code < 400,
+                    "http_status": r.status_code,
+                    "detail": r.text[:200],
+                }
+        except Exception as exc:
+            reachability = {
+                "tested_url": f"{server_url}/api/health",
+                "ok": False,
+                "detail": str(exc),
+            }
+    else:
+        reachability["detail"] = "Server URL not configured"
+
+    config_check = {
+        "relay_enabled": settings.get("relay_enabled", "off"),
+        "server_url": server_url or "(not set)",
+        "spoke_name": settings.get("relay_spoke_name", "") or "(not set — will use hostname)",
+        "hostname": hostname,
+        "island_id": settings.get("relay_island_id", "") or "(none)",
+        "api_key_configured": bool(settings.get("relay_api_key")),
+        "tenant_id": settings.get("relay_tenant_id", "") or "(none)",
+    }
+
+    return {
+        "config": config_check,
+        "current_state": dict(relay_state),
+        "reachability": reachability,
+        "log": list(reversed(relay_diag_log)),
     }
 
 

@@ -442,6 +442,7 @@ const centralClientSecretBadge = document.getElementById('central-client-secret-
 const relayEnabledSelect = document.getElementById('relay-enabled-select');
 const relaySpokeName = document.getElementById('relay-spoke-name-input');
 const relayServerUrlInput = document.getElementById('relay-server-url-input');
+const relayTenantHintInput = document.getElementById('relay-tenant-hint-input');
 const relayMsg = document.getElementById('relay-message');
 
 // Notifications + sync interval
@@ -1052,6 +1053,7 @@ function applySettingsToUI(s) {
   if (relayEnabledSelect && !relayEnabledSelect.matches(':focus')) relayEnabledSelect.value = settings.relay_enabled || 'off';
   setInputValueIfIdle(relayServerUrlInput, settings.relay_server_url || '');
   setInputValueIfIdle(relaySpokeName, settings.relay_spoke_name || '');
+  setInputValueIfIdle(relayTenantHintInput, settings.relay_tenant_hint || '');
   const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
   if (spokeIdDisplay) spokeIdDisplay.textContent = settings.relay_island_id || '—';
   const apikeyStatus = document.getElementById('relay-apikey-status');
@@ -4779,6 +4781,7 @@ async function _autoSaveRelay() {
     relay_enabled: relayEnabledSelect?.value || 'off',
     relay_server_url: relayServerUrlInput?.value?.trim() || '',
     relay_spoke_name: relaySpokeName?.value?.trim() || '',
+    relay_tenant_hint: relayTenantHintInput?.value?.trim() || '',
   };
   try {
     await requestJson('/api/settings', {
@@ -4795,9 +4798,71 @@ async function _autoSaveRelay() {
 }
 
 if (relayEnabledSelect) relayEnabledSelect.addEventListener('change', _autoSaveRelay);
-[relayServerUrlInput, relaySpokeName].forEach((el) => {
+[relayServerUrlInput, relaySpokeName, relayTenantHintInput].forEach((el) => {
   if (el) el.addEventListener('blur', _autoSaveRelay);
 });
+
+// Registration diagnostics button
+const relayDiagBtn = document.getElementById('relay-diag-btn');
+const relayDiagPanel = document.getElementById('relay-diag-panel');
+if (relayDiagBtn) {
+  relayDiagBtn.addEventListener('click', async () => {
+    relayDiagBtn.disabled = true;
+    relayDiagBtn.textContent = '⏳ Running…';
+    try {
+      const d = await requestJson('/api/relay/diag');
+      if (!relayDiagPanel) return;
+      relayDiagPanel.classList.remove('hidden');
+
+      // Config check
+      const cfg = d.config || {};
+      const cfgLines = [
+        `relay_enabled : ${cfg.relay_enabled}`,
+        `server_url    : ${cfg.server_url}`,
+        `spoke_name    : ${cfg.spoke_name}`,
+        `hostname      : ${cfg.hostname}`,
+        `island_id     : ${cfg.island_id}`,
+        `api_key       : ${cfg.api_key_configured ? '✅ set' : '❌ not set'}`,
+        `tenant_id     : ${cfg.tenant_id}`,
+      ].join('\n');
+      const cfgEl = document.getElementById('relay-diag-config');
+      if (cfgEl) cfgEl.textContent = cfgLines;
+
+      // Reachability
+      const reach = d.reachability || {};
+      const reachEl = document.getElementById('relay-diag-reach');
+      if (reachEl) {
+        const icon = reach.ok ? '✅' : '❌';
+        reachEl.textContent = `${icon} ${reach.tested_url}\n${reach.detail || ''}`;
+        reachEl.style.color = reach.ok ? 'var(--success,#22c55e)' : 'var(--error,#ef4444)';
+      }
+
+      // Log
+      const log = d.log || [];
+      const logCountEl = document.getElementById('relay-diag-log-count');
+      if (logCountEl) logCountEl.textContent = String(log.length);
+      const logEl = document.getElementById('relay-diag-log');
+      if (logEl) {
+        if (!log.length) {
+          logEl.textContent = '(no registration attempts recorded yet — relay may not have been enabled or synced)';
+        } else {
+          logEl.textContent = log.map(e => {
+            const rest = Object.entries(e).filter(([k]) => k !== 'ts' && k !== 'event')
+              .map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ');
+            return `[${e.ts}] ${e.event}  ${rest}`;
+          }).join('\n');
+        }
+      }
+    } catch (err) {
+      const logEl = document.getElementById('relay-diag-log');
+      if (logEl) logEl.textContent = `Error fetching diagnostics: ${err}`;
+      if (relayDiagPanel) relayDiagPanel.classList.remove('hidden');
+    } finally {
+      relayDiagBtn.disabled = false;
+      relayDiagBtn.textContent = '🔍 Run Registration Diagnostics';
+    }
+  });
+}
 
 if (addVidPidBtn) {
   addVidPidBtn.addEventListener('click', addVidPid);

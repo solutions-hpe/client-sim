@@ -762,6 +762,11 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   font-size: 0.78rem;
   color: var(--muted);
 }
+.form-hint-inline {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: normal;
+}
 
 .form-static {
   padding: 7px 10px;
