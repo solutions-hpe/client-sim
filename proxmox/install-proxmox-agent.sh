@@ -10,20 +10,23 @@ set -euo pipefail
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
 SERVICE_NAME="client-sim-proxmox-agent"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
-REPO_RAW="https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb"
 
 SERVER_URL=""
 API_KEY=""
 POLL_INTERVAL="60"
+REPO_BRANCH="${REPO_BRANCH:-lrb}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --server)   SERVER_URL="$2";   shift 2 ;;
-        --key)      API_KEY="$2";      shift 2 ;;
+        --server)   SERVER_URL="$2";    shift 2 ;;
+        --key)      API_KEY="$2";       shift 2 ;;
         --interval) POLL_INTERVAL="$2"; shift 2 ;;
+        --branch)   REPO_BRANCH="$2";   shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+REPO_RAW="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}"
 
 if [[ -z "$SERVER_URL" ]]; then
     echo "ERROR: --server <url> is required"
@@ -37,6 +40,7 @@ fi
 
 echo "=== Client-Sim Proxmox Agent Installer v${SCRIPT_VERSION} ==="
 echo "Server : $SERVER_URL"
+echo "Branch : $REPO_BRANCH"
 echo "Key    : ${API_KEY:+(set)}"
 echo
 
@@ -54,6 +58,7 @@ cat > "$ENV_FILE" <<ENV
 CLIENT_SIM_SERVER_URL=${SERVER_URL}
 CLIENT_SIM_API_KEY=${API_KEY}
 CLIENT_SIM_POLL_INTERVAL=${POLL_INTERVAL}
+CLIENT_SIM_REPO_BRANCH=${REPO_BRANCH}
 ENV
 chmod 600 "$ENV_FILE"
 echo "  OK: $ENV_FILE"
