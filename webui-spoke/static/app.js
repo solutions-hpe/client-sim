@@ -857,18 +857,29 @@ function renderServerTab(data) {
     const thChk  = document.getElementById(`server-th-check-${catKey}`);
     if (!tbody) return;
 
-    tbody.innerHTML = '';
-    if (thChk) { thChk.disabled = vmList.length === 0; thChk.checked = false; }
-    if (empty) empty.style.display = vmList.length ? 'none' : '';
-    if (!vmList.length) return;
+    // Sort: stopped/paused first, then by VMID ascending
+    const sorted = [...vmList].sort((a, b) => {
+      const aRunning = a.status === 'running' ? 1 : 0;
+      const bRunning = b.status === 'running' ? 1 : 0;
+      if (aRunning !== bRunning) return aRunning - bRunning;
+      return Number(a.vmid) - Number(b.vmid);
+    });
 
-    vmList.forEach((vm) => {
+    tbody.innerHTML = '';
+    if (thChk) { thChk.disabled = sorted.length === 0; thChk.checked = false; }
+    if (empty) empty.style.display = sorted.length ? 'none' : '';
+    if (!sorted.length) return;
+
+    sorted.forEach((vm) => {
       const isRecloning  = recloningVmids.has(Number(vm.vmid));
       const isWebui      = webuiVmid != null && Number(vm.vmid) === webuiVmid;
       const statusDot    = isRecloning ? '🟡' : (vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫');
       const statusLabel  = isRecloning ? 'recloning…' : (vm.status || 'unknown');
       const memUsed  = vm.mem    ? fmtSize(Number(vm.mem)    * 1024 * 1024) : '—';
       const memTotal = vm.maxmem ? fmtSize(Number(vm.maxmem) * 1024 * 1024) : '—';
+      // Show CPU only for running VMs — stopped VMs always report 0 which is misleading
+      const cpuVal = (vm.status === 'running') && vm.cpu != null && !Number.isNaN(Number(vm.cpu))
+        ? Number(vm.cpu).toFixed(1) + '%' : '—';
       const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
         ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
         : '';
@@ -888,7 +899,7 @@ function renderServerTab(data) {
         <td class="vm-status-cell">${statusDot} ${statusLabel}</td>
         <td>${vm.vmid}</td>
         <td>${escHtml(vm.name || '—')}${recoveryBadge}${webuiBadge}</td>
-        <td>${vm.cpu != null && !Number.isNaN(Number(vm.cpu)) ? Number(vm.cpu).toFixed(1) + '%' : '—'}</td>
+        <td>${cpuVal}</td>
         <td>${memUsed} / ${memTotal}</td>
         <td>${actionBtns}</td>
       `;
@@ -1778,9 +1789,20 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
   certified.forEach((device) => {
     const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
     const presentUsb = Array.isArray(latestProxmoxData.present_usb) ? latestProxmoxData.present_usb : [];
-    const active = entries.filter((item) => !item.missing_since).length;
+    const activeEntries = entries.filter((item) => !item.missing_since);
     const missing = entries.filter((item) => item.missing_since).length;
     const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
+
+    // Build VM name list for active entries
+    const vmMap = new Map((Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [])
+      .map((v) => [Number(v.vmid), v]));
+    const activeVmHtml = activeEntries.length === 0 ? '—' : activeEntries.map((e) => {
+      const vm = vmMap.get(Number(e.vmid));
+      const name = escHtml(vm?.name || `VM ${e.vmid}`);
+      const dot = vm?.status === 'running' ? '🟢' : '⚫';
+      return `<div style="white-space:nowrap">${dot} ${name}</div>`;
+    }).join('');
+
     const tr = document.createElement('tr');
     const missingHtml = missing
       ? `<div class="usb-missing-list">${entries.filter((item) => item.missing_since).map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
@@ -1789,7 +1811,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
       <td>${device.label || device.vidpid || '—'}</td>
       <td>${device.vidpid || '—'}</td>
       <td class="usb-type-${device.type || 'wireless'}">${device.type || 'wireless'}</td>
-      <td>${active}</td>
+      <td>${activeVmHtml}</td>
       <td>${missingHtml}</td>
       <td>${total}</td>
     `;
@@ -1972,29 +1994,47 @@ function updateVmRecloneIcons() {
 }
 
 function renderAutoProvisionStatus() {
-  // ── VM page status bar ─────────────────────────────────────────────────────
+  // ── VM page status bar (right side of tab nav) ─────────────────────────────
   const bar = document.getElementById('autoprov-status-bar');
   if (bar) {
     const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
     const autoProv = currentSettings.usb_auto_provision === 'on';
-    const provisioning = usbState.filter((e) => e.prov_status === 'provisioning');
-    const queued = usbState.filter((e) => e.prov_status === 'missing');
-    bar.classList.remove('hidden', 'is-active', 'is-idle');
     const iconEl = document.getElementById('autoprov-status-icon');
     const textEl = document.getElementById('autoprov-status-text');
+    bar.classList.remove('hidden', 'is-active', 'is-idle');
+
     if (!autoProv) {
       bar.classList.add('is-idle');
       if (iconEl) iconEl.textContent = '⏹';
       if (textEl) textEl.textContent = 'Auto-Provisioning: Not Running';
-    } else if (provisioning.length > 0) {
-      bar.classList.add('is-active');
-      const left = queued.length;
-      if (iconEl) iconEl.textContent = '⏳';
-      if (textEl) textEl.textContent = `Auto-Provisioning: ${provisioning.length} cloning${left > 0 ? ` · ${left} left to clone` : ''}`;
     } else {
-      bar.classList.add('is-idle');
-      if (iconEl) iconEl.textContent = '✅';
-      if (textEl) textEl.textContent = 'Auto-Provisioning: All VMs active';
+      const total = usbState.length;
+      const provisioning = usbState.filter((e) => e.prov_status === 'provisioning');
+      const activeUsb    = usbState.filter((e) => e.prov_status === 'active');
+
+      // Cross-reference: "active" USB entries whose VM is not yet running in Proxmox
+      const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
+      const runningVmids = new Set(vms.filter((v) => v.status === 'running').map((v) => Number(v.vmid)));
+      const startingUp = activeUsb.filter((e) => e.vmid != null && !runningVmids.has(Number(e.vmid)));
+      const fullyActive = activeUsb.length - startingUp.length;
+
+      if (total === 0) {
+        bar.classList.add('is-idle');
+        if (iconEl) iconEl.textContent = '📋';
+        if (textEl) textEl.textContent = 'Auto-Provisioning: No USB devices tracked';
+      } else if (provisioning.length > 0 || startingUp.length > 0) {
+        bar.classList.add('is-active');
+        if (iconEl) iconEl.textContent = '⏳';
+        const parts = [];
+        if (provisioning.length > 0) parts.push(`${provisioning.length} cloning`);
+        if (startingUp.length > 0) parts.push(`${startingUp.length} starting up`);
+        parts.push(`${fullyActive} / ${total} active`);
+        if (textEl) textEl.textContent = `Auto-Provisioning: ${parts.join(' · ')}`;
+      } else {
+        bar.classList.add('is-idle');
+        if (iconEl) iconEl.textContent = '✅';
+        if (textEl) textEl.textContent = `Auto-Provisioning: All ${total} VMs active`;
+      }
     }
   }
 

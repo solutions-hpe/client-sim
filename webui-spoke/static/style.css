@@ -1348,12 +1348,13 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .autoprov-status-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
+  gap: 6px;
+  padding: 4px 12px;
   border-radius: 6px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 500;
-  margin-bottom: 8px;
+  margin-left: auto;
+  white-space: nowrap;
   background: var(--card-bg, #f9fafb);
   border: 1px solid var(--border);
   color: var(--text);
@@ -1371,6 +1372,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   gap: 6px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  align-items: center;
 }
 .vm-cat-tab {}
 .vm-cat-tab.active {}
