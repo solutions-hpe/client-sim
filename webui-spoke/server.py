@@ -2656,7 +2656,14 @@ def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
 
     timeout (default 120 s) prevents git clone/fetch from hanging indefinitely
     when the network is slow or GitHub is temporarily unresponsive.
+    GIT_TERMINAL_PROMPT=0 ensures git never blocks waiting for credentials —
+    public repos work without a token; private repos fail fast with a clear error.
     """
+    git_env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/echo",
+    }
     try:
         result = subprocess.run(
             ["git", *args],
@@ -2664,6 +2671,7 @@ def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=git_env,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"git {' '.join(args)} timed out after {timeout}s")
@@ -2686,6 +2694,7 @@ def sync_repo_once() -> None:
         raise RuntimeError(f"{REPO_DIR} exists but is not a git repository")
 
     logger.info("Pulling latest repo state from %s branch %s", REPO_URL, branch)
+    _git("remote", "set-url", "origin", REPO_URL)  # ensure no stale authed URL
     _git("fetch", "--prune", "origin")
     _git("checkout", branch)
     _git("reset", "--hard", f"origin/{branch}")
