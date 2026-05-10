@@ -39,7 +39,7 @@ Aruba Central (AP/switch telemetry)
 - **webui-hub**: multi-tenant central management, approval workflow, fleet view, tenant-scoped relay API
 - **webui-spoke**: local execution, local monitoring, local client API, Aruba Central polling, command acknowledgements
 
-> User-facing docs should call this component **webui-spoke** or **spoke**. Some relay settings still use `relay_island_id` internally for API compatibility.
+> User-facing docs should call this component **webui-spoke** or **spoke**. Current settings and API payloads use `relay_spoke_id` naming.
 
 ---
 
@@ -53,7 +53,7 @@ Aruba Central (AP/switch telemetry)
 2. **Enter the container and run the installer**:
 
    ```bash
-   sudo bash install-lxc.sh --branch main --port 8000
+   sudo bash install-lxc.sh --branch lrb --port 8000
    ```
 
    Common alternatives:
@@ -83,10 +83,19 @@ The LXC installer:
 1. installs Python, git, and dnsmasq
 2. assigns `169.253.1.1/24` to the client-side NIC by default
 3. configures dnsmasq to serve DHCP on the client-side NIC only
-4. deploys the FastAPI app and systemd service
-5. prints health information and the `server_url` clients should use
+4. downloads the shared `cs-webui` frontend on the selected branch and injects `WEBUI_MODE=spoke`
+5. deploys the FastAPI app and systemd service
+6. prints health information and the `server_url` clients should use
 
 By default, DHCP serves `169.253.1.11`–`169.253.1.254` on the isolated client network.
+
+### Unified frontend (`cs-webui`)
+
+`webui-spoke` serves the shared frontend from the `cs-webui` repo rather than maintaining a separate spoke-only UI.
+
+- `install-lxc.sh` fetches `static/app.js`, `static/style.css`, and `templates/index.html` from `cs-webui` on the same branch selected for the spoke install.
+- `server.py` serves the shared HTML template and injects `WEBUI_MODE=spoke` at runtime.
+- Use `--branch <name>` to keep the spoke backend and shared frontend aligned (`lrb` for development, `main` for production).
 
 ---
 
@@ -117,12 +126,12 @@ Example settings payload:
 1. On the first relay cycle, the spoke calls:
 
    ```text
-   POST {relay_server_url}/api/islands/register
+   POST {relay_server_url}/api/spokes/register
    ```
 
 2. The spoke sends its hostname/label plus seed configuration (repo branch, site mappings, monitored checks, hardware checks, USB/reclone settings, etc.).
 3. The hub returns an initial registration record.
-4. The spoke stores `relay_island_id` automatically when the hub returns it.
+4. The spoke stores `relay_spoke_id` automatically when the hub returns it.
 5. A **superadmin approves the spoke** in `webui-hub`.
 6. After approval, the hub returns:
    - `relay_tenant_id`
@@ -136,7 +145,7 @@ Example settings payload:
 | `relay_server_url` | Base URL for `webui-hub` | Set by operator |
 | `relay_enabled` | Turns relay on/off | Set by operator |
 | `relay_poll_interval` | Relay loop interval in seconds | Set by operator |
-| `relay_island_id` | Spoke ID assigned by hub | Auto-set after registration |
+| `relay_spoke_id` | Spoke ID assigned by hub | Auto-set after registration |
 | `relay_tenant_id` | Tenant scope assigned by hub | Auto-set after approval |
 | `relay_api_key` | API key used for tenant relay calls | Auto-set after approval |
 
@@ -145,9 +154,9 @@ Example settings payload:
 After approval, all hub relay traffic uses tenant-scoped URLs:
 
 ```text
-/api/{tenant_id}/islands/{island_id}/telemetry
-/api/{tenant_id}/islands/{island_id}/inbox
-/api/{tenant_id}/islands/{island_id}/ack
+/api/{tenant_id}/spokes/{spoke_id}/telemetry
+/api/{tenant_id}/spokes/{spoke_id}/inbox
+/api/{tenant_id}/spokes/{spoke_id}/ack
 ```
 
 The spoke relay cycle then:
@@ -194,7 +203,7 @@ The spoke persists its configuration in `settings.json` and exposes it through `
 | `repo_sync_interval` | Repo pull interval in seconds |
 | `relay_enabled` | `on` or `off` |
 | `relay_server_url` | Hub URL |
-| `relay_island_id` | Hub-assigned spoke ID |
+| `relay_spoke_id` | Hub-assigned spoke ID |
 | `relay_tenant_id` | Hub-assigned tenant ID |
 | `relay_poll_interval` | Relay polling interval in seconds |
 | `site_mappings` | Local `wsite` to Aruba Central site name mapping |

@@ -8,6 +8,7 @@
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Hub-and-Spoke WebUI Architecture](#hub-and-spoke-webui-architecture)
 - [Features](#features)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
@@ -43,6 +44,15 @@ This is useful for:
 - 🐛 **Debugging** network-related issues
 
 ---
+
+## Hub-and-Spoke WebUI Architecture
+
+The HPE Client-Sim platform now uses a shared frontend from `cs-webui`. The hub backend (`webui-hub`) and the spoke backend in this repo (`webui-spoke/server.py`) both serve the same frontend assets, while the backend injects `WEBUI_MODE` at runtime to enable the correct experience.
+
+- `WEBUI_MODE=hub` enables the hub-centric, multi-tenant experience in `webui-hub`.
+- `WEBUI_MODE=spoke` enables the local spoke experience in `client-sim`.
+- `webui-spoke/install-lxc.sh` fetches the shared frontend from `cs-webui` at install/update time and injects `WEBUI_MODE=spoke`.
+- `lrb` is the development branch across `client-sim`, `webui-hub`, and `cs-webui`; `main` is the production branch.
 
 ## Features
 
@@ -190,7 +200,7 @@ Get-ChildItem "C:\Scripts\*.ps1"
 
 ## Web Dashboard
 
-The Client-Sim Web Dashboard is a FastAPI application that provides centralised visibility into all simulation clients.  It holds all state **in memory** — no database is required.  If the service restarts, it resumes collecting data on the next beacon cycle.
+The Client-Sim Web Dashboard is the spoke-side FastAPI application (`webui-spoke/server.py`) in the HPE Client-Sim platform. It serves the shared `cs-webui` frontend, injects `WEBUI_MODE=spoke` at runtime, and provides local visibility into all simulation clients. Live client state remains primarily **in memory** — if the service restarts, it resumes collecting data on the next beacon cycle.
 
 ### What it provides
 
@@ -204,6 +214,10 @@ The Client-Sim Web Dashboard is a FastAPI application that provides centralised 
 | API docs | Interactive Swagger UI at `/docs` |
 
 > **Source of truth**: the dashboard continuously syncs from the GitHub repo in the background.  `simulation.conf` and scripts are always served from the latest commit on the configured branch.
+
+### Frontend source (`cs-webui`)
+
+The spoke UI assets are not maintained separately in this repo anymore. During install/update, `webui-spoke/install-lxc.sh` fetches the shared frontend from `cs-webui` on the selected branch, downloads `static/app.js`, `static/style.css`, and `templates/index.html`, and injects `WEBUI_MODE=spoke` into the HTML template.
 
 ---
 
@@ -256,11 +270,16 @@ Assign a **static IP** or DHCP reservation so clients always reach the same addr
 # On the Proxmox host
 pct enter <CTID>
 
-# Inside the container — one-liner install (defaults: branch=main, port=8000)
-curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui-spoke/install-lxc.sh | sudo bash
+# Inside the container — development install (`lrb`, port `8000`)
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui-spoke/install-lxc.sh \
+  | sudo bash -s -- --branch lrb --port 8000
 
-# One-liner with custom branch and port
+# Production install (`main`)
 curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui-spoke/install-lxc.sh \
+  | sudo bash -s -- --branch main --port 8000
+
+# Custom branch and port
+curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui-spoke/install-lxc.sh \
   | sudo bash -s -- --branch lrb --port 9000
 ```
 
@@ -309,11 +328,12 @@ sudo bash webui-spoke/install-lxc.sh
 | 3 | Creates a locked-down `dashboard` service user |
 | 4 | Clones the client-sim repo to `/opt/client-sim-repo` |
 | 5 | Copies the `webui-spoke/` application to `/opt/client-sim-dashboard` |
-| 6 | Creates a Python virtual environment and installs dependencies |
-| 7 | Writes `/opt/client-sim-dashboard/.env` with runtime settings |
-| 8 | Installs and enables a `systemd` service (`client-sim-dashboard`) |
-| 9 | Sets correct ownership/permissions |
-| 10 | Starts the service and runs a health check |
+| 6 | Fetches the shared frontend from `cs-webui` on the selected branch and injects `WEBUI_MODE=spoke` |
+| 7 | Creates a Python virtual environment and installs dependencies |
+| 8 | Writes `/opt/client-sim-dashboard/.env` with runtime settings |
+| 9 | Installs and enables a `systemd` service (`client-sim-dashboard`) |
+| 10 | Sets correct ownership/permissions |
+| 11 | Starts the service and runs a health check |
 
 At the end of the install the container IP, dashboard URL, and the `simulation.conf` snippet to add to each client are printed to the console.
 
@@ -332,6 +352,25 @@ curl http://localhost:8000/api/health
 
 Install log: `/var/log/client-sim-dashboard-install.log`
 
+### Proxmox agent
+
+The Proxmox agent runs on the Proxmox host and works alongside the spoke LXC. Install it with:
+
+```bash
+sudo bash proxmox/install-proxmox-agent.sh --server http://<spoke-ip>:8000 --branch lrb
+```
+
+Common options:
+
+```bash
+sudo bash proxmox/install-proxmox-agent.sh --server http://<spoke-ip>:8000 --branch main
+sudo bash proxmox/install-proxmox-agent.sh --server http://<spoke-ip>:8000 --key <api-key> --interval 60 --branch lrb
+```
+
+- `--branch <name>` selects the repo branch used for installs and future self-updates.
+- The installer writes `CLIENT_SIM_REPO_BRANCH` to `/etc/client-sim-proxmox-agent.env`.
+- The agent reads that branch value during self-update so dev hosts stay on `lrb` and production hosts stay on `main`.
+
 ---
 
 ### Option 2 — Docker / Docker Compose
@@ -341,7 +380,7 @@ cd webui-spoke
 docker compose up --build
 ```
 
-The `docker-compose.yml` exposes port **8000** and passes `REPO_URL`, `REPO_BRANCH`, and `OFFLINE_TIMEOUT` as environment variables.  Edit `docker-compose.yml` to change defaults.
+The `docker-compose.yml` exposes port **8000** and passes `REPO_URL`, `REPO_BRANCH`, and `OFFLINE_TIMEOUT` as environment variables. Use `REPO_BRANCH=lrb` for development or `REPO_BRANCH=main` for production when you want the spoke backend and `cs-webui` frontend to stay aligned. Edit `docker-compose.yml` to change defaults.
 
 ```bash
 # Detach and run in background
@@ -371,7 +410,7 @@ uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REPO_URL` | `https://github.com/solutions-hpe/client-sim.git` | GitHub repo to sync from |
-| `REPO_BRANCH` | `main` | Branch to track (override with `--branch` flag) |
+| `REPO_BRANCH` | `lrb` | Branch to track (override with `--branch` flag) |
 | `REPO_DIR` | `/opt/client-sim-repo` | Local repo checkout path |
 | `OFFLINE_TIMEOUT` | `60` | Seconds before a client shows as offline |
 | `PORT` | `8000` | TCP port (LXC installer only; override with `--port` flag) |
@@ -667,6 +706,8 @@ client-sim/
 ├── install.sh                          # Installation script
 ├── upgrade.yml                         # Configuration for upgrades
 │
+├── webui-spoke/                        # Spoke FastAPI backend + LXC installer
+├── proxmox/                            # Proxmox agent + installer
 ├── linux/                              # Linux/Bash scripts
 │   ├── simulation.sh                   # Main simulation loop ⭐
 │   ├── startup.sh                      # Startup initialization
