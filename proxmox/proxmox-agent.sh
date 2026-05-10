@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.16"
+AGENT_VERSION="2.17"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -454,6 +454,82 @@ _wait_vmid_gone() {
     return 1
 }
 
+get_guest_type() {
+    local vmid="$1"
+    if [[ -f "/etc/pve/qemu-server/${vmid}.conf" ]]; then
+        printf 'qemu'
+        return 0
+    fi
+    if [[ -f "/etc/pve/lxc/${vmid}.conf" ]]; then
+        printf 'lxc'
+        return 0
+    fi
+    qm status "$vmid" >/dev/null 2>&1 && { printf 'qemu'; return 0; }
+    pct status "$vmid" >/dev/null 2>&1 && { printf 'lxc'; return 0; }
+    return 1
+}
+
+_wait_guest_stopped() {
+    local guest_type="$1" vmid="$2" max_wait="${3:-90}"
+    local elapsed=0 cmd="qm"
+    [[ "$guest_type" == "lxc" ]] && cmd="pct"
+    while [[ $elapsed -lt $max_wait ]]; do
+        local state
+        state=$($cmd status "$vmid" 2>/dev/null | awk '{print $2}')
+        [[ "$state" == "stopped" ]] && return 0
+        sleep 3
+        elapsed=$(( elapsed + 3 ))
+    done
+    log "WARNING: ${guest_type^^} $vmid did not stop within ${max_wait}s"
+    return 1
+}
+
+_wait_guest_gone() {
+    local guest_type="$1" vmid="$2" max_wait="${3:-90}"
+    local elapsed=0 cmd="qm"
+    [[ "$guest_type" == "lxc" ]] && cmd="pct"
+    while [[ $elapsed -lt $max_wait ]]; do
+        $cmd status "$vmid" 2>/dev/null || return 0
+        sleep 3
+        elapsed=$(( elapsed + 3 ))
+    done
+    log "WARNING: ${guest_type^^} $vmid still exists after ${max_wait}s"
+    return 1
+}
+
+_destroy_guest_only() {
+    local vmid="$1" guest_type="${2:-}"
+    if [[ -z "$guest_type" ]]; then
+        guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
+    fi
+    if [[ -z "$guest_type" ]]; then
+        log "ERROR: Unable to determine guest type for VMID $vmid"
+        return 1
+    fi
+
+    log "Stopping ${guest_type^^} $vmid before destroy"
+    if [[ "$guest_type" == "lxc" ]]; then
+        timeout 120 pct stop "$vmid" --force 2>/dev/null || \
+            timeout 120 pct stop "$vmid" --skiplock 2>/dev/null || \
+            timeout 120 pct stop "$vmid" 2>/dev/null || true
+        _wait_guest_stopped "$guest_type" "$vmid" 90 || true
+        log "Destroying LXC $vmid"
+        timeout 300 pct destroy "$vmid" --skiplock --purge --force 2>/dev/null || \
+            timeout 300 pct destroy "$vmid" --purge --force 2>/dev/null || \
+            timeout 300 pct destroy "$vmid" --skiplock --purge 2>/dev/null || \
+            timeout 300 pct destroy "$vmid" --skiplock 2>/dev/null || \
+            timeout 300 pct destroy "$vmid" 2>/dev/null || true
+    else
+        qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
+            qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
+        _wait_guest_stopped "$guest_type" "$vmid" 150 || true
+        log "Destroying VM $vmid"
+        timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    fi
+
+    _wait_guest_gone "$guest_type" "$vmid" 90
+}
+
 clone_vm_for_usb() {
     local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}"
     local guest_ready=0
@@ -615,22 +691,31 @@ provision_vm() {
     log "Provisioned VM $free_vmid for USB $bus_path ($vidpid) type=$device_type image=$image_num (${IMAGE1_PCT}% img1 target, ${img1_count}/${total_vms} currently img1)"
 }
 
-destroy_vm() {
+_expire_vm_pending_commands() {
     local vmid="$1"
-    local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
-    # Expire any pending client inbox commands for this VM's hostname BEFORE destroying.
-    # Without this, stale commands (e.g. reboot) remain in the queue and are delivered
-    # to the replacement VM when the same VMID slot is re-used, causing an immediate reboot.
     local _destroy_hostname
     _destroy_hostname=$(get_vm_name "$vmid" 2>/dev/null || true)
     if [[ -n "$_destroy_hostname" ]]; then
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}-${vmid}" "" >/dev/null 2>&1 || true
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}" "" >/dev/null 2>&1 || true
     fi
-    timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
-    _wait_vm_stopped "$vmid" 90 || true
-    timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
-    _wait_vmid_gone "$vmid" 60 || true
+}
+
+destroy_vm() {
+    local vmid="$1" guest_type="${2:-}"
+    local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
+    if [[ -z "$guest_type" ]]; then
+        guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
+    fi
+
+    # Expire any pending client inbox commands for this VM's hostname BEFORE destroying.
+    # Without this, stale commands (e.g. reboot) remain in the queue and are delivered
+    # to the replacement VM when the same VMID slot is re-used, causing an immediate reboot.
+    _expire_vm_pending_commands "$vmid"
+    if ! _destroy_guest_only "$vmid" "$guest_type"; then
+        log "ERROR: Failed to destroy VMID $vmid"
+        return 1
+    fi
     if [[ -n "$bus_path" ]]; then
         unset 'STATE_MISSING_BY_BUS[$bus_path]'
         unset 'STATE_BUS_TO_VMID[$bus_path]'
@@ -638,7 +723,7 @@ destroy_vm() {
     unset 'STATE_VMID_TO_BUS[$vmid]'
     unset 'STATE_VMID_TO_IMAGE[$vmid]'
     save_state_file
-    log "Destroyed VM $vmid"
+    log "Destroyed ${guest_type^^} $vmid"
 }
 
 # Destroy VM via qm only — does NOT update in-memory state or write the state file.
@@ -1284,33 +1369,30 @@ PY
         ) &
     fi
 
-    # Parallel delete_vm: stop+destroy all selected VMs concurrently, then update state once.
-    # Sequential processing would take 2 min/VM — this completes all deletes in ~2 min total.
+    # Parallel delete_vm: stop+destroy all selected guests concurrently, then update state once.
     if [[ ${#_del_vmids[@]} -gt 0 ]]; then
         load_state_file
-        local _del_pids=()
+        local _del_pids=() _del_results=()
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
-            # Expire stale client inbox commands before destroying
-            local _dhostname
-            _dhostname=$(get_vm_name "$_dvmid" 2>/dev/null || echo "sim-client")
-            curl_api DELETE "/api/commands/pending?target=${_dhostname}-${_dvmid}" "" >/dev/null 2>&1 || true
-            # Run qm stop+destroy in a background subshell (no state writes)
+            _expire_vm_pending_commands "$_dvmid"
             (
-                qm stop "$_dvmid" --skiplock --timeout 120 2>/dev/null || \
-                    qm stop "$_dvmid" --skiplock --timeout 0 2>/dev/null || true
-                _wait_vm_stopped "$_dvmid" 30 || true
-                timeout 300 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
-                _wait_vmid_gone "$_dvmid" 60 || true
-                log "Parallel delete done: VM $_dvmid"
+                _destroy_guest_only "$_dvmid"
             ) &
             _del_pids+=($!)
         done
-        # Wait for all background deletes to finish
-        for _dpid in "${_del_pids[@]}"; do wait "$_dpid" 2>/dev/null || true; done
-        # Update state once after all deletes complete
+        for _di in "${!_del_pids[@]}"; do
+            if wait "${_del_pids[$_di]}" 2>/dev/null; then
+                _del_results[$_di]="completed"
+                log "Parallel delete done: VMID ${_del_vmids[$_di]}"
+            else
+                _del_results[$_di]="failed"
+                log "Parallel delete failed: VMID ${_del_vmids[$_di]}"
+            fi
+        done
         load_state_file
         for _di in "${!_del_vmids[@]}"; do
+            [[ "${_del_results[$_di]:-failed}" == "completed" ]] || continue
             local _dvmid="${_del_vmids[$_di]}"
             local _dbus="${STATE_VMID_TO_BUS[$_dvmid]:-}"
             if [[ -n "$_dbus" ]]; then
@@ -1321,12 +1403,16 @@ PY
             unset "STATE_VMID_TO_IMAGE[$_dvmid]"
         done
         save_state_file
-        # ACK all delete commands
         for _di in "${!_del_vmids[@]}"; do
+            local _status="${_del_results[$_di]:-failed}"
+            local _message="delete_vm completed"
+            if [[ "$_status" != "completed" ]]; then
+                _message="delete_vm failed — check $AGENT_LOG"
+            fi
             curl_api POST /api/inbox/ack \
-                "{\"id\":\"${_del_ids[$_di]}\",\"status\":\"completed\",\"message\":\"delete_vm completed\"}" \
+                "{\"id\":\"${_del_ids[$_di]}\",\"status\":\"$_status\",\"message\":\"$_message\"}" \
                 >/dev/null 2>&1
-            log "ACK delete: ${_del_ids[$_di]} vmid=${_del_vmids[$_di]}"
+            log "ACK delete: ${_del_ids[$_di]} vmid=${_del_vmids[$_di]} status=$_status"
         done
         post_telemetry
     fi

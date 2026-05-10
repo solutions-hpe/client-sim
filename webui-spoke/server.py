@@ -1821,6 +1821,43 @@ def _proxmox_status_payload() -> dict[str, Any]:
     }
 
 
+def _find_proxmox_vm(vmid: int) -> dict[str, Any] | None:
+    for vm in proxmox_state.get("vms", []):
+        try:
+            if int(vm.get("vmid")) == vmid:
+                return dict(vm)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _prepare_delete_vm_args(args: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(args, dict):
+        raise HTTPException(status_code=422, detail="args must be an object")
+    try:
+        vmid = int(args.get("vmid"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="A valid vmid is required") from None
+
+    vm = _find_proxmox_vm(vmid)
+    if vm is None:
+        if not proxmox_state.get("vms"):
+            raise HTTPException(status_code=503, detail="No Proxmox VM inventory is available yet")
+        raise HTTPException(status_code=404, detail=f"VM {vmid} was not found in Proxmox inventory")
+    if vm.get("is_template"):
+        raise HTTPException(status_code=400, detail="Templates cannot be deleted from the VM list")
+    if WEBUI_VMID is not None and vmid == WEBUI_VMID:
+        raise HTTPException(status_code=403, detail="Cannot delete the container running this service")
+
+    prepared = dict(args)
+    prepared["vmid"] = vmid
+    vm_type = str(vm.get("type") or "qemu").strip().lower()
+    prepared["vm_type"] = vm_type if vm_type in {"qemu", "lxc"} else "qemu"
+    if vm.get("name"):
+        prepared["vm_name"] = str(vm.get("name"))
+    return prepared
+
+
 async def _broadcast_proxmox_state() -> None:
     global _last_proxmox_hash
     _save_state_cache()
@@ -3508,6 +3545,19 @@ async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
 
 
+@app.delete("/api/proxmox/vms/{vmid}")
+async def api_proxmox_delete_vm(vmid: int) -> dict[str, Any]:
+    args = _prepare_delete_vm_args({"vmid": vmid})
+    cmd = await _queue_proxmox_command("delete_vm", args)
+    return {
+        "queued": 1,
+        "ids": [cmd["id"]],
+        "vmid": vmid,
+        "vm_type": args.get("vm_type"),
+        "vm_name": args.get("vm_name"),
+    }
+
+
 @app.post("/api/proxmox/register")
 async def proxmox_register(request: Request, body: dict = Body(...)) -> JSONResponse:
     """Called by agent with no key. Adds to pending if not approved."""
@@ -4986,14 +5036,8 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         args = {}
     if not isinstance(args, dict):
         raise HTTPException(status_code=422, detail="args must be an object")
-
-    # Prevent deletion of the LXC container that hosts this service.
-    if action == "delete_vm" and WEBUI_VMID is not None:
-        try:
-            if int(args.get("vmid", -1)) == WEBUI_VMID:
-                raise HTTPException(status_code=403, detail="Cannot delete the container running this service")
-        except (TypeError, ValueError):
-            pass
+    if target == "proxmox" and action == "delete_vm":
+        args = _prepare_delete_vm_args(args)
 
     new_cmds: list[dict[str, Any]] = []
 
