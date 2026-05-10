@@ -98,6 +98,82 @@ save_api_key() {
     API_KEY="$key"
 }
 
+clear_api_key() {
+    if grep -q '^CLIENT_SIM_API_KEY=' "$ENV_FILE" 2>/dev/null; then
+        sed -i 's/^CLIENT_SIM_API_KEY=.*/CLIENT_SIM_API_KEY=/' "$ENV_FILE"
+    fi
+    API_KEY=""
+}
+
+curl_api_status() {
+    local method="$1" path="$2" data="${3:-}"
+    local args=(-sS --max-time 15 -X "$method" "${SERVER_URL}${path}" -H "Content-Type: application/json" -w $'\n%{http_code}')
+    [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
+    [[ -n "$data" ]] && args+=(-d "$data")
+    curl "${args[@]}"
+}
+
+normalize_command_name() {
+    printf '%s' "${1//-/_}"
+}
+
+json_payload() {
+    python3 - "$@" <<'PY'
+import json
+import sys
+print(json.dumps({
+    "id": sys.argv[1],
+    "status": sys.argv[2],
+    "message": sys.argv[3],
+}))
+PY
+}
+
+ack_inbox_command() {
+    local cmd_id="$1" status="$2" message="${3:-}"
+    local payload response_with_status http_status body attempt
+    payload=$(json_payload "$cmd_id" "$status" "$message") || return 1
+    for attempt in 1 2 3; do
+        response_with_status=$(curl_api_status POST /api/inbox/ack "$payload" 2>/dev/null || true)
+        http_status="${response_with_status##*$'\n'}"
+        body="${response_with_status%$'\n'*}"
+        case "$http_status" in
+            200)
+                log "ACK: ${cmd_id} status=${status}"
+                return 0
+                ;;
+            404)
+                log "ACK skipped: ${cmd_id} already gone from server queue"
+                return 0
+                ;;
+            202|401|403)
+                handle_auth_failure "$http_status" "/api/inbox/ack"
+                ;;
+            "")
+                ;;
+            *)
+                log "WARNING: ACK ${cmd_id} attempt ${attempt} returned HTTP ${http_status} ${body:+body=${body:0:160}}"
+                ;;
+        esac
+        sleep 2
+    done
+    log "ERROR: failed to ACK command ${cmd_id} after 3 attempts"
+    return 1
+}
+
+handle_auth_failure() {
+    local status="$1" endpoint="$2"
+    case "$status" in
+        202|401|403)
+            log "Auth/reset required after ${endpoint} (HTTP ${status}) — re-registering agent"
+            clear_api_key
+            register_and_wait_for_key
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 register_and_wait_for_key() {
     local my_hostname response approved key poll_response poll_approved poll_key
     my_hostname=$(hostname)
@@ -530,6 +606,56 @@ _destroy_guest_only() {
     _wait_guest_gone "$guest_type" "$vmid" 90
 }
 
+destroy_lxc() {
+    _destroy_guest_only "$1" "lxc"
+}
+
+clone_lxc_instance() {
+    local vmid="$1" source_vmid="$2"
+    if [[ -z "$source_vmid" ]]; then
+        log "ERROR: No LXC template/source VMID provided for CT $vmid"
+        return 1
+    fi
+
+    local ct_name
+    ct_name=$(pct config "$vmid" 2>/dev/null | awk -F': ' '$1=="hostname" {print $2; exit}')
+    [[ -z "$ct_name" ]] && ct_name="ct-${vmid}"
+
+    local -a reapply_args=()
+    local line key value
+    while IFS= read -r line; do
+        case "$line" in
+            onboot:*|startup:*|cores:*|memory:*|swap:*|features:*|protection:*|tags:*|description:*|nameserver:*|searchdomain:*|unprivileged:*|net[0-9]*:*)
+                key="${line%%:*}"
+                value="${line#*: }"
+                [[ -n "$value" ]] && reapply_args+=("--${key}" "$value")
+                ;;
+        esac
+    done < <(pct config "$vmid" 2>/dev/null || true)
+
+    if ! _destroy_guest_only "$vmid" "lxc"; then
+        log "ERROR: Failed to destroy CT $vmid before reclone"
+        return 1
+    fi
+
+    if ! timeout 600 pct clone "$source_vmid" "$vmid" --hostname "$ct_name" 2>/dev/null; then
+        log "ERROR: pct clone failed for CT $vmid from source $source_vmid"
+        return 1
+    fi
+
+    if [[ ${#reapply_args[@]} -gt 0 ]]; then
+        timeout 120 pct set "$vmid" "${reapply_args[@]}" 2>/dev/null || \
+            log "WARNING: Failed to reapply one or more settings to CT $vmid"
+    fi
+
+    if ! timeout 60 pct start "$vmid" 2>/dev/null; then
+        log "ERROR: pct start failed for CT $vmid"
+        return 1
+    fi
+
+    log "Recloned LXC $vmid from source/template $source_vmid"
+}
+
 clone_vm_for_usb() {
     local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}"
     local guest_ready=0
@@ -939,7 +1065,7 @@ usb_provision_loop() {
         done
         save_state_file
         build_usb_state_json
-        curl_api POST /api/proxmox/telemetry "$(collect_telemetry)" >/dev/null 2>&1 || true
+        post_telemetry || true
     fi
 
     now=$(date +%s)
@@ -1028,7 +1154,11 @@ collect_telemetry() {
         # pvesh returns: cpu (0.0-1.0 fraction), mem (bytes), maxmem (bytes)
         # Normalise: cpu → percent, mem/maxmem → MB. Merge QEMU VMs + LXC containers.
         vms_json=$(python3 -c "
-import json, subprocess, sys
+import json, subprocess, sys, re
+from pathlib import Path
+
+META_RE = re.compile(r'(?:reclone[-_ ](?:source|template)|template[-_ ]source)\\s*[:=]\\s*(\\d+)', re.I)
+
 
 def fetch(path):
     try:
@@ -1038,32 +1168,77 @@ def fetch(path):
     except Exception:
         return []
 
+
+def config_text(kind, vmid):
+    cfg_path = Path('/etc/pve/qemu-server' if kind == 'qemu' else '/etc/pve/lxc') / f'{vmid}.conf'
+    try:
+        return cfg_path.read_text(encoding='utf-8')
+    except Exception:
+        return ''
+
+
+def reclone_info(kind, vmid):
+    text = config_text(kind, vmid)
+    source_vmid = None
+    for line in text.splitlines():
+        if ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        if key.strip() in {'description', 'tags', 'notes', 'comment'}:
+            m = META_RE.search(value)
+            if m:
+                source_vmid = int(m.group(1))
+                break
+    if kind == 'qemu':
+        m = re.search(r'^usb\\d+:\\s.*?host=([^,\\s]+)', text, re.M)
+        bus_path = m.group(1) if m else None
+        supported = bool(bus_path)
+        reason = None if supported else 'No USB passthrough mapping found'
+        is_template = bool(re.search(r'^template:\\s*1\\s*$', text, re.M))
+        return bus_path, source_vmid, supported, reason, is_template
+    supported = source_vmid is not None
+    reason = None if supported else 'Set tags/description with reclone-source=<template CTID>'
+    is_template = bool(re.search(r'^template:\\s*1\\s*$', text, re.M))
+    return None, source_vmid, supported, reason, is_template
+
+
 node = subprocess.run(['hostname', '-s'], capture_output=True, text=True).stdout.strip()
 qemu = fetch(f'/nodes/{node}/qemu')
 lxc  = fetch(f'/nodes/{node}/lxc')
 
 out = []
 for v in qemu:
+    vmid = v.get('vmid')
+    bus_path, source_vmid, supported, reason, is_template = reclone_info('qemu', vmid)
     out.append({
-        'vmid':        v.get('vmid'),
-        'name':        v.get('name', ''),
-        'status':      v.get('status', 'unknown'),
-        'cpu':         round(float(v.get('cpu') or 0) * 100, 1),
-        'mem':         round(int(v.get('mem') or 0) / 1024 / 1024),
-        'maxmem':      round(int(v.get('maxmem') or 0) / 1024 / 1024),
-        'is_template': bool(v.get('template', 0)),
-        'type':        'qemu',
+        'vmid':                vmid,
+        'name':                v.get('name', ''),
+        'status':              v.get('status', 'unknown'),
+        'cpu':                 round(float(v.get('cpu') or 0) * 100, 1),
+        'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
+        'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
+        'is_template':         bool(v.get('template', 0)) or is_template,
+        'type':                'qemu',
+        'reclone_bus_path':    bus_path,
+        'reclone_source_vmid': source_vmid,
+        'reclone_supported':   supported,
+        'reclone_reason':      reason,
     })
 for v in lxc:
+    vmid = v.get('vmid')
+    _bus_path, source_vmid, supported, reason, is_template = reclone_info('lxc', vmid)
     out.append({
-        'vmid':        v.get('vmid'),
-        'name':        v.get('name', ''),
-        'status':      v.get('status', 'unknown'),
-        'cpu':         round(float(v.get('cpu') or 0) * 100, 1),
-        'mem':         round(int(v.get('mem') or 0) / 1024 / 1024),
-        'maxmem':      round(int(v.get('maxmem') or 0) / 1024 / 1024),
-        'is_template': False,
-        'type':        'lxc',
+        'vmid':                vmid,
+        'name':                v.get('name', ''),
+        'status':              v.get('status', 'unknown'),
+        'cpu':                 round(float(v.get('cpu') or 0) * 100, 1),
+        'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
+        'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
+        'is_template':         is_template,
+        'type':                'lxc',
+        'reclone_source_vmid': source_vmid,
+        'reclone_supported':   supported,
+        'reclone_reason':      reason,
     })
 print(json.dumps(out))
 " 2>/dev/null || echo "[]")
@@ -1158,16 +1333,45 @@ self_update_agent() {
 }
 
 execute_vm_command() {
-    local action="$1" vmid="${2:-}" _type="${3:-}"
+    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}"
+    local guest_type="${_type:-qemu}"
+    if [[ -n "$vmid" && "$guest_type" != "lxc" ]]; then
+        if pct status "$vmid" >/dev/null 2>&1 && ! qm status "$vmid" >/dev/null 2>&1; then
+            guest_type="lxc"
+        fi
+    fi
+    action=$(normalize_command_name "$action")
     case "$action" in
-        start_vm)     timeout 60 qm start "$vmid" ;;
-        stop_vm)      timeout 60 qm stop "$vmid" ;;
-        reboot_vm)    qm reboot "$vmid" 2>/dev/null || true ;;
-        snapshot_vm)  qm snapshot "$vmid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim" ;;
-        reclone_vm)   reclone_vm_instance "$vmid" ;;
-        delete_vm)
-            load_state_file
-            destroy_vm "$vmid"
+        start_vm)
+            if [[ "$guest_type" == "lxc" ]]; then timeout 60 pct start "$vmid"; else timeout 60 qm start "$vmid"; fi
+            ;;
+        stop_vm)
+            if [[ "$guest_type" == "lxc" ]]; then timeout 60 pct stop "$vmid"; else timeout 60 qm stop "$vmid"; fi
+            ;;
+        reboot_vm)
+            if [[ "$guest_type" == "lxc" ]]; then pct reboot "$vmid" 2>/dev/null || true; else qm reboot "$vmid" 2>/dev/null || true; fi
+            ;;
+        snapshot_vm)
+            if [[ "$guest_type" == "lxc" ]]; then
+                pct snapshot "$vmid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim"
+            else
+                qm snapshot "$vmid" "auto-$(date +%Y%m%d%H%M)" --description "client-sim"
+            fi
+            ;;
+        reclone_vm)
+            if [[ "$guest_type" == "lxc" ]]; then
+                clone_lxc_instance "$vmid" "$_source_vmid"
+            else
+                reclone_vm_instance "$vmid"
+            fi
+            ;;
+        delete_vm|delete-vm)
+            if [[ "$guest_type" == "lxc" ]]; then
+                destroy_lxc "$vmid"
+            else
+                load_state_file
+                destroy_vm "$vmid"
+            fi
             ;;
         reclone_vms)  [[ -f /opt/client-sim-repo/proxmox/clone.sh ]] && bash /opt/client-sim-repo/proxmox/clone.sh ;;
         provision_unassigned)
@@ -1181,7 +1385,7 @@ execute_vm_command() {
             ;;
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
-        update_agent)
+        update_agent|update-agent)
             self_update_agent
             ;;
         *)          return 1 ;;
@@ -1201,9 +1405,23 @@ refresh_usb_telemetry_only || true
 
 # Helper: collect and POST telemetry immediately
 post_telemetry() {
-    local telem
+    local telem response status body
     telem=$(collect_telemetry 2>/dev/null) || return 0
-    curl_api POST /api/proxmox/telemetry "$telem" >/dev/null 2>&1 || true
+    response=$(curl_api_status POST /api/proxmox/telemetry "$telem" 2>/dev/null || true)
+    status="${response##*$'\n'}"
+    body="${response%$'\n'*}"
+    case "$status" in
+        200) return 0 ;;
+        202|401|403)
+            handle_auth_failure "$status" "/api/proxmox/telemetry"
+            return 0
+            ;;
+        "") return 0 ;;
+        *)
+            log "WARNING: telemetry POST returned HTTP ${status} ${body:+body=${body:0:160}}"
+            return 0
+            ;;
+    esac
 }
 
 # Background real-time telemetry sender (every TELEMETRY_INTERVAL seconds)
@@ -1211,8 +1429,7 @@ post_telemetry() {
 (
     while true; do
         sleep "$TELEMETRY_INTERVAL"
-        telem=$(collect_telemetry 2>/dev/null) || continue
-        curl_api POST /api/proxmox/telemetry "$telem" >/dev/null 2>&1 || true
+        post_telemetry || true
     done
 ) &
 TELEMETRY_PID=$!
@@ -1225,8 +1442,22 @@ post_telemetry || true
 # from the main USB provisioning loop. Reclone wait+ACK is itself backgrounded
 # so process_inbox always returns immediately — never blocked by clone operations.
 process_inbox() {
-    local response
-    response=$(curl_api GET "/api/inbox?hostname=$h" "" 2>/dev/null || echo "[]")
+    local response_with_status response status
+    response_with_status=$(curl_api_status GET "/api/inbox?hostname=$h" "" 2>/dev/null || true)
+    status="${response_with_status##*$'\n'}"
+    response="${response_with_status%$'\n'*}"
+    case "$status" in
+        200) ;;
+        202|401|403)
+            handle_auth_failure "$status" "/api/inbox"
+            return 0
+            ;;
+        "") return 0 ;;
+        *)
+            log "WARNING: inbox poll returned HTTP ${status}"
+            return 0
+            ;;
+    esac
     [[ -z "$response" || "$response" == "[]" ]] && return 0
 
     log "Commands received: $response"
@@ -1242,20 +1473,24 @@ except Exception:
     commands = []
 for cmd in commands:
     cid = str(cmd.get('id', '')).replace('\t', ' ')
-    action = str(cmd.get('action', '')).replace('\t', ' ')
+    action = str(cmd.get('action', '')).replace('\t', ' ').replace('-', '_')
     vmid = cmd.get('args', {}).get('vmid', '')
-    ctype = str(cmd.get('type') or '').replace('\t', ' ')
-    print(f"{cid}\t{action}\t{vmid}\t{ctype}")
+    guest_type = str(cmd.get('args', {}).get('type') or cmd.get('args', {}).get('vm_type') or '').replace('\t', ' ')
+    source_vmid = cmd.get('args', {}).get('source_vmid', '')
+    ctype = str(cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
+    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{ctype}")
 PY
 )
-    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=()
-    local _rc_ids=() _rc_vmids=()
+    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=()
+    local _rc_ids=() _rc_vmids=() _rc_types=() _rc_sources=()
     local _del_ids=() _del_vmids=()
-    while IFS=$'\t' read -r cmd_id action vmid cmd_type; do
+    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid cmd_type; do
         [[ -z "$cmd_id" || -z "$action" ]] && continue
         if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
             _rc_ids+=("$cmd_id")
             _rc_vmids+=("$vmid")
+            _rc_types+=("${guest_type:-qemu}")
+            _rc_sources+=("$source_vmid")
         elif [[ "$action" == "delete_vm" && -n "$vmid" ]]; then
             _del_ids+=("$cmd_id")
             _del_vmids+=("$vmid")
@@ -1263,21 +1498,21 @@ PY
             _seq_ids+=("$cmd_id")
             _seq_actions+=("$action")
             _seq_vmids+=("$vmid")
-            _seq_types+=("$cmd_type")
+            _seq_types+=("${guest_type:-$cmd_type}")
+            _seq_sources+=("$source_vmid")
         fi
     done <<< "$parsed_commands"
 
     for _si in "${!_seq_ids[@]}"; do
         log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
         local status="completed" message=""
-        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" 2>>"$AGENT_LOG"; then
+        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" 2>>"$AGENT_LOG"; then
             message="${_seq_actions[$_si]} completed"
         else
             status="failed"
             message="${_seq_actions[$_si]} failed — check $AGENT_LOG"
         fi
-        curl_api POST /api/inbox/ack "{\"id\":\"${_seq_ids[$_si]}\",\"status\":\"$status\",\"message\":\"$message\"}" >/dev/null 2>&1
-        log "ACK: ${_seq_ids[$_si]} status=$status"
+        ack_inbox_command "${_seq_ids[$_si]}" "$status" "$message" || true
         post_telemetry
     done
 
@@ -1287,32 +1522,40 @@ PY
         local _conc="${RECLONE_CONCURRENCY:-1}"
 
         for _ri in "${!_rc_vmids[@]}"; do
-            local _vmid="${_rc_vmids[$_ri]}" _cmd_id="${_rc_ids[$_ri]}"
-            local _bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
-            if [[ -z "$_bus" ]]; then
-                local _usb_line
-                _usb_line=$(qm config "$_vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ' || true)
-                if [[ "$_usb_line" =~ host=([^,[:space:]]+) ]]; then
-                    _bus="${BASH_REMATCH[1]}"
-                    log "Recovered USB bus_path=$_bus for VM $_vmid from qm config"
-                    STATE_VMID_TO_BUS["$_vmid"]="$_bus"
-                    STATE_BUS_TO_VMID["$_bus"]="$_vmid"
+            local _vmid="${_rc_vmids[$_ri]}" _cmd_id="${_rc_ids[$_ri]}" _guest_type="${_rc_types[$_ri]:-qemu}" _source_vmid="${_rc_sources[$_ri]:-}" _bus=""
+            if [[ "$_guest_type" == "lxc" ]]; then
+                if [[ -z "$_source_vmid" ]]; then
+                    log "WARNING: No LXC template/source configured for CT $_vmid"
+                    ack_inbox_command "$_cmd_id" "failed" "No LXC template/source configured for CT $_vmid" || true
+                    continue
                 fi
-            fi
-            local _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
-            local _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
-            local _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
-            local _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
+            else
+                local _bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
+                if [[ -z "$_bus" ]]; then
+                    local _usb_line
+                    _usb_line=$(qm config "$_vmid" 2>/dev/null | grep -m1 '^usb[0-9]*: ' || true)
+                    if [[ "$_usb_line" =~ host=([^,[:space:]]+) ]]; then
+                        _bus="${BASH_REMATCH[1]}"
+                        log "Recovered USB bus_path=$_bus for VM $_vmid from qm config"
+                        STATE_VMID_TO_BUS["$_vmid"]="$_bus"
+                        STATE_BUS_TO_VMID["$_bus"]="$_vmid"
+                    fi
+                fi
+                local _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
+                local _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
+                local _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
+                local _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
 
-            if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
-                log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
-                curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"USB device not present for VM $_vmid\"}" >/dev/null 2>&1
-                continue
-            fi
-            if [[ "$_dtype" != "$SIM_PHY" ]]; then
-                log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
-                curl_api POST /api/inbox/ack "{\"id\":\"$_cmd_id\",\"status\":\"failed\",\"message\":\"sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY\"}" >/dev/null 2>&1
-                continue
+                if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
+                    log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
+                    ack_inbox_command "$_cmd_id" "failed" "USB device not present for VM $_vmid" || true
+                    continue
+                fi
+                if [[ "$_dtype" != "$SIM_PHY" ]]; then
+                    log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
+                    ack_inbox_command "$_cmd_id" "failed" "sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY" || true
+                    continue
+                fi
             fi
 
             while [[ ${#_rc_active_pids[@]} -ge $_conc ]]; do
@@ -1325,10 +1568,17 @@ PY
             done
 
             _RECLONE_CMD_IDS["$_vmid"]="$_cmd_id"
-            log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
-            (
-                _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
-            ) &
+            if [[ "$_guest_type" == "lxc" ]]; then
+                log "Parallel reclone starting: CT $_vmid (source=$_source_vmid)"
+                (
+                    clone_lxc_instance "$_vmid" "$_source_vmid"
+                ) &
+            else
+                log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
+                (
+                    _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
+                ) &
+            fi
             local _pid=$!
             _rc_active_pids+=("$_pid")
             _rc_pids+=("$_pid")
@@ -1355,8 +1605,8 @@ PY
                     _rc_status="failed"
                     _rc_msg="reclone_vm failed — check $AGENT_LOG"
                 fi
-                curl_api POST /api/inbox/ack "{\"id\":\"${_snap_ids[$_rpi]}\",\"status\":\"$_rc_status\",\"message\":\"$_rc_msg\"}" >/dev/null 2>&1
-                log "ACK: ${_snap_ids[$_rpi]} status=$_rc_status (parallel reclone VM ${_snap_vmids[$_rpi]})"
+                ack_inbox_command "${_snap_ids[$_rpi]}" "$_rc_status" "$_rc_msg" || true
+                log "ACK reclone: ${_snap_ids[$_rpi]} status=$_rc_status vmid=${_snap_vmids[$_rpi]}"
             done
             # Reload state, clear missing flags for completed reclones, persist
             load_state_file
@@ -1409,9 +1659,7 @@ PY
             if [[ "$_status" != "completed" ]]; then
                 _message="delete_vm failed — check $AGENT_LOG"
             fi
-            curl_api POST /api/inbox/ack \
-                "{\"id\":\"${_del_ids[$_di]}\",\"status\":\"$_status\",\"message\":\"$_message\"}" \
-                >/dev/null 2>&1
+            ack_inbox_command "${_del_ids[$_di]}" "$_status" "$_message" || true
             log "ACK delete: ${_del_ids[$_di]} vmid=${_del_vmids[$_di]} status=$_status"
         done
         post_telemetry

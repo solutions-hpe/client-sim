@@ -49,6 +49,7 @@ CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
 CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
 REPO_URL = os.getenv("REPO_URL", "https://github.com/solutions-hpe/client-sim.git")
+CLIENT_SIM_REPO_RAW = os.getenv("CLIENT_SIM_REPO_RAW", "https://raw.githubusercontent.com/solutions-hpe/client-sim")
 CS_WEBUI_REPO_RAW = os.getenv("CS_WEBUI_REPO_RAW", "https://raw.githubusercontent.com/solutions-hpe/cs-webui")
 
 
@@ -1450,8 +1451,9 @@ clients: dict[str, dict[str, Any]] = _load_client_history()
 
 # ── Command inbox ──────────────────────────────────────────────────────────────
 commands: list[dict[str, Any]] = []
-COMMAND_MAX = 100          # keep last N commands in history
-COMMAND_EXPIRE_SECS = 900  # 15 minutes
+COMMAND_MAX = 100                 # keep last N commands in memory
+COMMAND_EXPIRE_SECS = 300         # pending/delivered commands expire after 5 minutes
+COMMAND_RESULT_RETENTION_SECS = 60  # keep ACK'd/expired results briefly so the UI can show them
 
 ws_connections: list[WebSocket] = []
 _acme_challenges: dict[str, str] = {}
@@ -1662,17 +1664,102 @@ async def current_clients() -> list[dict[str, Any]]:
         return [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
 
 
+def _normalize_command_action(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def _normalize_command_type(value: Any) -> str | None:
+    normalized = str(value or "").strip().replace("-", "_")
+    return normalized or None
+
+
+def _command_args_signature(args: dict[str, Any] | None) -> str:
+    try:
+        return json.dumps(args or {}, sort_keys=True, separators=(",", ":"), default=str)
+    except TypeError:
+        safe_args = json.loads(json.dumps(args or {}, default=str))
+        return json.dumps(safe_args, sort_keys=True, separators=(",", ":"))
+
+
+def _trim_commands_locked() -> None:
+    if len(commands) <= COMMAND_MAX:
+        return
+    terminal = {"completed", "failed", "expired"}
+    idx = 0
+    while len(commands) > COMMAND_MAX and idx < len(commands):
+        if commands[idx].get("status") in terminal:
+            del commands[idx]
+            continue
+        idx += 1
+    if len(commands) > COMMAND_MAX:
+        del commands[:len(commands) - COMMAND_MAX]
+
+
+def _cleanup_commands_locked(now: float | None = None) -> tuple[int, int]:
+    now = now or time.time()
+    expired = 0
+    for cmd in commands:
+        if cmd.get("status") in {"pending", "delivered"} and (now - cmd.get("created_at", now)) > COMMAND_EXPIRE_SECS:
+            cmd["status"] = "expired"
+            cmd["updated_at"] = now
+            cmd["purge_after"] = now + COMMAND_RESULT_RETENTION_SECS
+            expired += 1
+
+    before = len(commands)
+    commands[:] = [
+        cmd for cmd in commands
+        if cmd.get("status") not in {"completed", "failed", "expired"}
+        or now < float(cmd.get("purge_after", cmd.get("updated_at", cmd.get("created_at", now)) + COMMAND_RESULT_RETENTION_SECS))
+    ]
+    purged = before - len(commands)
+    _trim_commands_locked()
+    return expired, purged
+
+
+def _find_active_duplicate_command_locked(target: str, action: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    args_sig = _command_args_signature(args)
+    for cmd in commands:
+        if cmd.get("target") != target or cmd.get("action") != action:
+            continue
+        if cmd.get("status") not in {"pending", "delivered"}:
+            continue
+        if _command_args_signature(cmd.get("args", {})) == args_sig:
+            return cmd
+    return None
+
+
+def _enqueue_command_locked(target: str, action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> tuple[dict[str, Any], bool, int, int]:
+    normalized_action = _normalize_command_action(action)
+    normalized_type = _normalize_command_type(command_type)
+    normalized_args = dict(args or {})
+    if target == "proxmox" and normalized_action == "delete_vm":
+        normalized_args = _prepare_delete_vm_args(normalized_args)
+
+    now = time.time()
+    expired, purged = _cleanup_commands_locked(now)
+    existing = _find_active_duplicate_command_locked(target, normalized_action, normalized_args)
+    if existing is not None:
+        return existing, False, expired, purged
+
+    cmd = _make_command(target, normalized_action, normalized_args, command_type=normalized_type)
+    commands.append(cmd)
+    _trim_commands_locked()
+    return cmd, True, expired, purged
+
+
 def _make_command(target: str, action: str, args: dict | None = None, command_type: str | None = None) -> dict[str, Any]:
     now = time.time()
     return {
         "id": str(uuid.uuid4()),
         "target": target,
-        "action": action,
-        "args": args or {},
-        "type": command_type,
+        "action": _normalize_command_action(action),
+        "args": dict(args or {}),
+        "type": _normalize_command_type(command_type),
         "status": "pending",
         "created_at": now,
         "updated_at": now,
+        "expires_at": now + COMMAND_EXPIRE_SECS,
+        "purge_after": None,
         "result": None,
         "message": None,
     }
@@ -1873,14 +1960,21 @@ async def _broadcast_reclone_state() -> None:
     await broadcast({"type": "reclone_update", **dict(reclone_state)})
 
 
-def _update_reclone_log(vmid: int, name: str, status: str) -> None:
+def _update_reclone_log(vmid: int, name: str, status: str, message: str | None = None) -> None:
     timestamp = iso_utcnow()
     for entry in reversed(reclone_state["log"]):
         if entry.get("vmid") == vmid and entry.get("status") in {"queued", "in_progress"}:
             entry.update({"name": name, "status": status, "timestamp": timestamp})
+            if message:
+                entry["message"] = message
+            elif entry.get("message") and status in {"queued", "in_progress"}:
+                entry.pop("message", None)
             break
     else:
-        reclone_state["log"].append({"vmid": vmid, "name": name, "status": status, "timestamp": timestamp})
+        entry = {"vmid": vmid, "name": name, "status": status, "timestamp": timestamp}
+        if message:
+            entry["message"] = message
+        reclone_state["log"].append(entry)
     reclone_state["log"] = reclone_state["log"][-200:]
 
 
@@ -1924,12 +2018,107 @@ def _auto_recovery_pending_vmids() -> list[int]:
     ]
 
 
+def _proxmox_unassigned_present_usb() -> list[dict[str, Any]]:
+    assigned_buses = {
+        str(entry.get("bus_path", "")).strip()
+        for entry in proxmox_state.get("usb_state", [])
+        if str(entry.get("bus_path", "")).strip() and entry.get("vmid") is not None
+    }
+    return [
+        dict(entry)
+        for entry in proxmox_state.get("present_usb", [])
+        if str(entry.get("bus_path", "")).strip()
+        and str(entry.get("bus_path", "")).strip() not in assigned_buses
+    ]
+
+
+
+def _guest_supports_reclone(vm: dict[str, Any]) -> bool:
+    if vm.get("is_template"):
+        return False
+    if WEBUI_VMID is not None:
+        try:
+            if int(vm.get("vmid", -1)) == WEBUI_VMID:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return bool(vm.get("reclone_supported"))
+
+
+
+def _reclone_targets_for_run() -> list[dict[str, Any]]:
+    return sorted(
+        [
+            dict(vm)
+            for vm in proxmox_state.get("vms", [])
+            if vm.get("vmid") is not None and _guest_supports_reclone(vm)
+        ],
+        key=lambda vm: int(vm.get("vmid", 0)),
+    )
+
+
+
+def _reclone_command_args(vm: dict[str, Any]) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "vmid": int(vm.get("vmid")),
+        "type": str(vm.get("type") or "qemu"),
+    }
+    if vm.get("reclone_source_vmid") is not None:
+        args["source_vmid"] = int(vm["reclone_source_vmid"])
+    if vm.get("reclone_bus_path"):
+        args["bus_path"] = str(vm["reclone_bus_path"])
+    return args
+
+
+async def _queue_command(target: str, action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> dict[str, Any]:
+    async with state_lock:
+        cmd, created, expired, purged = _enqueue_command_locked(target, action, args, command_type=command_type)
+        serialized = _serialize_commands()
+    if created or expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return cmd
+
+
 async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> dict[str, Any]:
-    cmd = _make_command("proxmox", action, args, command_type=command_type)
-    commands.append(cmd)
-    if len(commands) > COMMAND_MAX:
-        del commands[:len(commands) - COMMAND_MAX]
-    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    return await _queue_command("proxmox", action, args, command_type=command_type)
+
+
+def _proxmox_update_branch() -> str:
+    branch = str(settings.get("repo_branch", REPO_BRANCH) or REPO_BRANCH).strip()
+    return branch or REPO_BRANCH
+
+
+def _proxmox_update_args() -> dict[str, str]:
+    branch = _proxmox_update_branch()
+    return {
+        "branch": branch,
+        "repo_raw": f"{CLIENT_SIM_REPO_RAW.rstrip('/')}/{branch}",
+    }
+
+
+def _resolve_proxmox_update_target() -> str:
+    hostname = str((proxmox_state.get("node") or {}).get("hostname") or "").strip()
+    if hostname and hostname in approved_proxmox_agents:
+        return hostname
+    if len(approved_proxmox_agents) == 1:
+        return next(iter(approved_proxmox_agents))
+    if not approved_proxmox_agents:
+        raise HTTPException(status_code=409, detail="No approved Proxmox agent is available")
+    raise HTTPException(status_code=409, detail="Unable to determine which Proxmox host should be updated")
+
+
+async def _queue_proxmox_agent_update(target: str | None = None) -> dict[str, Any]:
+    resolved_target = target or _resolve_proxmox_update_target()
+    if resolved_target not in approved_proxmox_agents:
+        raise HTTPException(status_code=404, detail="Proxmox agent not approved")
+    async with state_lock:
+        expired, purged = _cleanup_commands_locked()
+        cmd, created, _expired, _purged = _enqueue_command_locked(resolved_target, "update_agent", _proxmox_update_args())
+        serialized = _serialize_commands()
+    if not created:
+        raise HTTPException(status_code=409, detail=f"An agent update is already queued for {resolved_target}")
+    if expired or purged or created:
+        await broadcast({"type": "commands_update", "commands": serialized})
     return cmd
 
 
@@ -1938,15 +2127,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
         if reclone_state["status"] == "running":
             return
 
-        vms = sorted(
-            [
-                dict(vm) for vm in proxmox_state.get("vms", [])
-                if vm.get("vmid") is not None
-                and int(vm.get("vmid", 0)) > 9000        # only automation-provisioned VMs
-                and not vm.get("is_template")             # skip templates
-            ],
-            key=lambda vm: int(vm.get("vmid", 0)),
-        )
+        vms = _reclone_targets_for_run()
         reclone_state.update({
             "status": "running",
             "type": trigger_type,
@@ -1970,7 +2151,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             await _broadcast_reclone_state()
             await _broadcast_proxmox_state()
 
-            cmd = await _queue_proxmox_command("reclone_vm", {"vmid": vmid}, command_type=trigger_type)
+            cmd = await _queue_proxmox_command("reclone_vm", _reclone_command_args(vm), command_type=trigger_type)
             deadline = time.time() + 1800
             last_status = "pending"
             while time.time() < deadline:
@@ -1985,7 +2166,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                 last_status = status
                 if status in {"completed", "failed", "expired"}:
                     final_status = "completed" if status == "completed" else "failed"
-                    _update_reclone_log(vmid, name, final_status)
+                    _update_reclone_log(vmid, name, final_status, str(current.get("message") or "").strip() or None)
                     if final_status == "completed":
                         reclone_state["completed"] += 1
                     else:
@@ -1995,7 +2176,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                     return
                 await asyncio.sleep(2)
             logger.warning("Rolling reclone: VM %s (%s) timed out", vmid, name)
-            _update_reclone_log(vmid, name, "failed")
+            _update_reclone_log(vmid, name, "failed", "Timed out waiting for Proxmox agent ACK")
             reclone_state["failed"] += 1
             await _broadcast_reclone_state()
             await _broadcast_proxmox_state()
@@ -2009,16 +2190,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
 
             # After recloning existing VMs, trigger provisioning for any
             # unassigned dongles (present USB device with no VM allocated).
-            assigned_buses = {
-                str(entry.get("bus_path", ""))
-                for entry in proxmox_state.get("usb_state", [])
-                if entry.get("vmid") is not None
-            }
-            unassigned = [
-                entry for entry in proxmox_state.get("usb_state", [])
-                if entry.get("vmid") is None
-                and str(entry.get("bus_path", "")) not in assigned_buses
-            ]
+            unassigned = _proxmox_unassigned_present_usb()
             if unassigned:
                 logger.info(
                     "Rolling reclone: found %d unassigned dongle(s) — queuing provision_unassigned",
@@ -2155,28 +2327,26 @@ async def gkill_switch_poller() -> None:
 
 
 async def expire_commands() -> None:
-    """Mark pending/delivered commands as expired after 15 minutes and broadcast."""
-    await asyncio.sleep(30)
+    """Expire stale active commands and purge terminal results after a short grace period."""
+    await asyncio.sleep(15)
     while True:
         try:
-            now = time.time()
-            changed = False
-            for cmd in commands:
-                if cmd["status"] in ("pending", "delivered") and (now - cmd["created_at"]) > COMMAND_EXPIRE_SECS:
-                    cmd["status"] = "expired"
-                    cmd["updated_at"] = now
-                    changed = True
-                    logger.info("Command %s (%s → %s) expired", cmd["id"], cmd["target"], cmd["action"])
-            if changed:
-                await broadcast({"type": "commands_update", "commands": _serialize_commands()})
-                await broadcast({"type": "notification", "level": "warning", "message": "One or more commands expired without being delivered."})
+            async with state_lock:
+                expired, purged = _cleanup_commands_locked()
+                serialized = _serialize_commands()
+            if expired:
+                logger.warning("Expired %d stale command(s) from the in-memory queue", expired)
+                await broadcast({"type": "commands_update", "commands": serialized})
+                await broadcast({"type": "notification", "level": "warning", "message": "One or more commands expired without being ACKed by the agent."})
+            elif purged:
+                await broadcast({"type": "commands_update", "commands": serialized})
             _update_service_health("command_expiry", ok=True)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _update_service_health("command_expiry", ok=False, error=str(exc))
             logger.exception("Command expiry error: %s", exc)
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
 
 
 
@@ -2465,11 +2635,9 @@ async def relay_sync_once() -> None:
                     continue
                 if target == "all":
                     for hostname in list(clients.keys()):
-                        commands.append(_make_command(hostname, action, args, command_type=cmd_type))
+                        _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
                 else:
-                    commands.append(_make_command(target, action, args, command_type=cmd_type))
-                if len(commands) > COMMAND_MAX:
-                    del commands[:len(commands) - COMMAND_MAX]
+                    _enqueue_command_locked(target, action, args, command_type=cmd_type)
 
                 # Ack each queued command
                 if cmd_id:
@@ -2816,11 +2984,9 @@ async def _run_update_all() -> None:
     # ── Phase 1: Agent update ────────────────────────────────────────────────
     try:
         async with state_lock:
-            if approved:
-                cmd = _make_command("proxmox", "update_agent")
-                commands.append(cmd)
-                if len(commands) > COMMAND_MAX:
-                    del commands[:len(commands) - COMMAND_MAX]
+            update_args = _proxmox_update_args()
+            for hostname in approved:
+                cmd, _created, _expired, _purged = _enqueue_command_locked(hostname, "update_agent", dict(update_args))
                 agent_cmd_ids.append(cmd["id"])
 
         update_all_state.update({
@@ -3301,6 +3467,16 @@ async def api_relay_sites(tenant_id: str | None = Query(None)) -> dict[str, Any]
     return {"sites": sites, "tenant_id": tenant_id}
 
 
+@app.get("/api/repo/status")
+async def api_repo_status() -> dict[str, Any]:
+    return {
+        "synced": repo_state.get("synced", False),
+        "error": repo_state.get("error"),
+        "last_sync": repo_state.get("last_sync"),
+        "repo_version": _repo_ver,
+    }
+
+
 @app.get("/api/relay/status")
 async def api_relay_status_endpoint() -> dict[str, Any]:
     return {
@@ -3393,20 +3569,15 @@ async def get_proxmox_usb_config() -> dict[str, Any]:
 async def api_proxmox_reclone_all() -> dict[str, Any]:
     if reclone_state.get("status") == "running":
         raise HTTPException(status_code=409, detail="A reclone run is already in progress")
-    eligible = [
-        vm for vm in proxmox_state.get("vms", [])
-        if vm.get("vmid") is not None
-        and int(vm.get("vmid", 0)) > 9000
-        and not vm.get("is_template")
-    ]
-    unassigned_dongles = [
-        e for e in proxmox_state.get("usb_state", [])
-        if e.get("vmid") is None
-    ]
+    eligible = _reclone_targets_for_run()
+    unassigned_dongles = _proxmox_unassigned_present_usb()
     if not eligible and not unassigned_dongles:
         raise HTTPException(
             status_code=400,
-            detail=f"No eligible VMs or unassigned dongles found (proxmox_state has {len(proxmox_state.get('vms', []))} VMs total)"
+            detail=(
+                "No reclone-capable guests or unassigned certified USB devices were found. "
+                "Guests without a USB mapping or LXC template source are skipped."
+            ),
         )
     asyncio.create_task(_run_rolling_reclone("manual"))
     return {"status": "started", "vm_count": len(eligible), "unassigned_dongles": len(unassigned_dongles)}
@@ -3426,20 +3597,23 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
 
-    if approved_proxmox_agents:
-        if not hostname:
-            return JSONResponse({"error": "hostname required"}, status_code=400)
-        if hostname not in approved_proxmox_agents:
-            entry = pending_proxmox_agents.get(hostname)
-            if entry is None:
-                pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
-            else:
-                entry["ip"] = client_ip
-                entry["last_seen"] = now
-            await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
-            return JSONResponse({"pending": True}, status_code=202)
-        if api_key != approved_proxmox_agents[hostname]:
-            return JSONResponse({"error": "invalid key"}, status_code=401)
+    if not hostname:
+        return JSONResponse({"error": "hostname required"}, status_code=400)
+
+    if hostname not in approved_proxmox_agents:
+        entry = pending_proxmox_agents.get(hostname)
+        if entry is None:
+            pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
+        else:
+            entry["ip"] = client_ip
+            entry["last_seen"] = now
+        await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+        if api_key:
+            return JSONResponse({"error": "agent not approved"}, status_code=401)
+        return JSONResponse({"pending": True}, status_code=202)
+
+    if api_key != approved_proxmox_agents[hostname]:
+        return JSONResponse({"error": "invalid key"}, status_code=401)
 
     if hostname in pending_proxmox_agents:
         pending_proxmox_agents[hostname]["ip"] = client_ip
@@ -3543,6 +3717,19 @@ async def clear_proxmox_logs() -> dict[str, bool]:
 @app.get("/api/proxmox/status")
 async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
+
+
+@app.post("/api/proxmox/update-agent")
+async def api_proxmox_update_agent() -> dict[str, Any]:
+    cmd = await _queue_proxmox_agent_update()
+    return {
+        "queued": 1,
+        "id": cmd["id"],
+        "target": cmd["target"],
+        "branch": cmd["args"].get("branch"),
+        "source": cmd["args"].get("repo_raw"),
+    }
+
 
 
 @app.delete("/api/proxmox/vms/{vmid}")
@@ -4535,14 +4722,11 @@ async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any
     if section == "simulation" and updates.get("kill_switch") == "off":
         async with state_lock:
             known = list(clients.keys())
-            ks_cmds = [_make_command(h, "kill_switch", {"value": "off"}) for h in known]
-            if not ks_cmds:
-                # No clients registered yet — store with "all" target as fallback
-                ks_cmds = [_make_command("all", "kill_switch", {"value": "off"})]
-            commands.extend(ks_cmds)
-            if len(commands) > COMMAND_MAX:
-                del commands[:len(commands) - COMMAND_MAX]
-        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+            targets = known or ["all"]
+            for hostname in targets:
+                _enqueue_command_locked(hostname, "kill_switch", {"value": "off"})
+            serialized = _serialize_commands()
+        await broadcast({"type": "commands_update", "commands": serialized})
 
     return {"status": "ok", "pushed": pushed}
 
@@ -5026,9 +5210,9 @@ async def api_kill_switch_status() -> dict[str, Any]:
 async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Queue a command for one device, all clients, or the proxmox agent."""
     target = str(body.get("target", "")).strip()
-    action = str(body.get("action", "")).strip()
+    action = _normalize_command_action(body.get("action", ""))
     args = body.get("args", {})
-    command_type = body.get("type")
+    command_type = _normalize_command_type(body.get("type"))
 
     if not target or not action:
         raise HTTPException(status_code=422, detail="target and action are required")
@@ -5036,100 +5220,130 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         args = {}
     if not isinstance(args, dict):
         raise HTTPException(status_code=422, detail="args must be an object")
-    if target == "proxmox" and action == "delete_vm":
-        args = _prepare_delete_vm_args(args)
 
     new_cmds: list[dict[str, Any]] = []
+    deduped = 0
 
     async with state_lock:
+        expired, purged = _cleanup_commands_locked()
         if target == "all":
             known = list(clients.keys())
             if not known:
                 raise HTTPException(status_code=400, detail="No clients registered yet")
             for hostname in known:
-                new_cmds.append(_make_command(hostname, action, args, command_type=command_type))
+                cmd, created, _expired, _purged = _enqueue_command_locked(hostname, action, args, command_type=command_type)
+                if created:
+                    new_cmds.append(cmd)
+                else:
+                    deduped += 1
         elif target == "proxmox":
-            new_cmds.append(_make_command(target, action, args, command_type=command_type))
+            cmd, created, _expired, _purged = _enqueue_command_locked(target, action, args, command_type=command_type)
+            if created:
+                new_cmds.append(cmd)
+            else:
+                deduped += 1
         else:
             if target not in clients:
                 raise HTTPException(status_code=404, detail="Client not found")
-            new_cmds.append(_make_command(target, action, args, command_type=command_type))
+            cmd, created, _expired, _purged = _enqueue_command_locked(target, action, args, command_type=command_type)
+            if created:
+                new_cmds.append(cmd)
+            else:
+                deduped += 1
+        serialized = _serialize_commands()
 
-    commands.extend(new_cmds)
-    if len(commands) > COMMAND_MAX:
-        del commands[:len(commands) - COMMAND_MAX]
-
-    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
-    return {"queued": len(new_cmds), "ids": [c["id"] for c in new_cmds]}
+    if new_cmds or expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return {"queued": len(new_cmds), "deduped": deduped, "ids": [c["id"] for c in new_cmds]}
 
 
 @app.get("/api/commands")
 async def list_commands() -> list[dict[str, Any]]:
-    """Return full command history for the UI."""
-    return _serialize_commands()
+    """Return the current in-memory command queue plus short-lived terminal results."""
+    async with state_lock:
+        expired, purged = _cleanup_commands_locked()
+        serialized = _serialize_commands()
+    if expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return serialized
 
 
 @app.get("/api/inbox")
-async def poll_inbox(hostname: str) -> list[dict[str, Any]]:
+async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
     if not hostname:
         raise HTTPException(status_code=422, detail="hostname is required")
-    pending = [
-        c for c in commands
-        if c["status"] == "pending" and (
-            c["target"] == hostname or
-            (c["target"] == "proxmox" and hostname in approved_proxmox_agents)
-        )
-    ]
-    now = time.time()
-    for cmd in pending:
-        cmd["status"] = "delivered"
-        cmd["updated_at"] = now
-    if pending:
-        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
-    return [{"id": c["id"], "action": c["action"], "args": c["args"], "type": c.get("type")} for c in pending]
+    if hostname in approved_proxmox_agents:
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key != approved_proxmox_agents[hostname]:
+            raise HTTPException(status_code=401, detail="invalid key")
+
+    async with state_lock:
+        expired, purged = _cleanup_commands_locked()
+        pending = [
+            c for c in commands
+            if c["status"] == "pending" and (
+                c["target"] == hostname or
+                (c["target"] == "proxmox" and hostname in approved_proxmox_agents)
+            )
+        ]
+        now = time.time()
+        for cmd in pending:
+            cmd["status"] = "delivered"
+            cmd["updated_at"] = now
+        serialized = _serialize_commands()
+        payload = [{"id": c["id"], "action": c["action"], "args": c["args"], "type": c.get("type")} for c in pending]
+
+    if pending or expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return payload
 
 
 @app.post("/api/inbox/ack")
 async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
     """Device reports command result."""
     cmd_id = str(body.get("id", "")).strip()
-    status = str(body.get("status", "completed")).strip()
+    status = str(body.get("status", "completed")).strip().lower()
     message = body.get("message", "")
 
     if status not in ("completed", "failed"):
         raise HTTPException(status_code=422, detail="status must be 'completed' or 'failed'")
 
-    cmd = next((c for c in commands if c["id"] == cmd_id), None)
-    if not cmd:
-        raise HTTPException(status_code=404, detail="Command not found")
+    async with state_lock:
+        expired, purged = _cleanup_commands_locked()
+        cmd = next((c for c in commands if c["id"] == cmd_id), None)
+        if not cmd:
+            raise HTTPException(status_code=404, detail="Command not found")
 
-    cmd["status"] = status
-    cmd["message"] = str(message) if message is not None else ""
-    cmd["updated_at"] = time.time()
-    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+        cmd["status"] = status
+        cmd["message"] = str(message) if message is not None else ""
+        cmd["updated_at"] = time.time()
+        cmd["purge_after"] = cmd["updated_at"] + COMMAND_RESULT_RETENTION_SECS
+        serialized = _serialize_commands()
+
+    await broadcast({"type": "commands_update", "commands": serialized})
     return {"ok": True}
 
 
 @app.delete("/api/commands/pending")
 async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
-    """Expire all pending commands for a given target hostname.
-
-    Called by the Proxmox agent just before destroying a VM so that the
-    replacement VM with the same hostname does not inherit stale commands
-    (e.g. a reboot command that was never ACK'd by the old VM).
-    """
+    """Expire active commands for a given target hostname before replacing a VM."""
     count = 0
     now = time.time()
     async with state_lock:
+        expired, purged = _cleanup_commands_locked(now)
         for cmd in commands:
-            if cmd["target"] == target and cmd["status"] == "pending":
+            if cmd["target"] == target and cmd["status"] in {"pending", "delivered"}:
                 cmd["status"] = "expired"
                 cmd["updated_at"] = now
+                cmd["purge_after"] = now + COMMAND_RESULT_RETENTION_SECS
                 count += 1
+        serialized = _serialize_commands()
     if count:
-        logger.info("Expired %d pending command(s) for target %s before VM destroy", count, target)
-        await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+        logger.info("Expired %d active command(s) for target %s before VM destroy", count, target)
+        await broadcast({"type": "commands_update", "commands": serialized})
+    elif expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
     return {"expired": count}
 
 
