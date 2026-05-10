@@ -170,6 +170,25 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                 echo "Config fetch failed (code: $_cfg_code) — keeping existing" | tee -a "$debug"
             fi
             rm -f "$_cfg_tmp"
+
+            # Also always fetch user-overrides.conf — it can change without a version bump.
+            _ov_tmp=$(mktemp)
+            _ov_code=$(curl -sS --max-time 10 \
+                -o "$_ov_tmp" \
+                -w "%{http_code}" \
+                "$server_url/api/config/overrides" 2>/dev/null)
+            if [[ "$_ov_code" == "200" && -s "$_ov_tmp" ]]; then
+                if ! diff -q "$_ov_tmp" /usr/local/scripts/user-overrides.conf >/dev/null 2>&1; then
+                    echo "user-overrides.conf changed — updating" | tee -a "$debug" "$log"
+                    sudo mv "$_ov_tmp" /usr/local/scripts/user-overrides.conf
+                else
+                    echo "user-overrides.conf unchanged" | tee -a "$debug"
+                fi
+            else
+                echo "user-overrides.conf not available (code: $_ov_code) — keeping existing" | tee -a "$debug"
+                rm -f "$_ov_tmp"
+            fi
+
             source_found=true
         else
             echo "Update available ($local_ver → $remote_ver) — syncing..." | tee -a "$debug" "$log"
