@@ -2511,6 +2511,7 @@ async def _run_update_all() -> None:
     approved = list(approved_proxmox_agents.keys())
     agent_cmd_ids: list[str] = []
 
+    # ── Phase 1: Agent update ────────────────────────────────────────────────
     try:
         async with state_lock:
             if approved:
@@ -2550,18 +2551,37 @@ async def _run_update_all() -> None:
                 await broadcast({"type": "update_all_progress", **update_all_state})
                 if done >= len(agent_cmd_ids):
                     break
+            else:
+                logger.warning(
+                    "Update All: agent ACK timed out after 300s — proceeding to WebUI update anyway"
+                )
 
         if len(approved) == 0:
             logger.info("Update All: no approved agents, proceeding directly to WebUI update")
         else:
             logger.info(
-                "Update All: agents done (%d/%d), proceeding to WebUI update",
+                "Update All: agents done (%d/%d failed), proceeding to WebUI update",
                 update_all_state["completed_agents"],
-                update_all_state["total_agents"],
+                update_all_state["failed_agents"],
             )
+    except Exception as exc:
+        logger.error("Update All: agent phase error (continuing to WebUI update): %s", exc)
+        update_all_state["error"] = str(exc)
 
+    # ── Phase 2: WebUI self-update ───────────────────────────────────────────
+    try:
         update_all_state["phase"] = "webui"
+        update_all_state["error"] = None
         await broadcast({"type": "update_all_progress", **update_all_state})
+
+        # Sync the local repo cache before running the installer so it gets
+        # the freshest content from GitHub (same as the /api/self-update path).
+        try:
+            async with _git_lock:
+                await asyncio.to_thread(sync_repo_once)
+            logger.info("Update All: repo synced before installer")
+        except Exception as sync_exc:
+            logger.warning("Update All: repo sync failed (%s) — installer will retry git fetch", sync_exc)
 
         await _run_self_update()
         if update_state.get("update_error"):
@@ -2573,7 +2593,7 @@ async def _run_update_all() -> None:
     except Exception as exc:
         update_all_state["phase"] = "failed"
         update_all_state["error"] = str(exc)
-        logger.error("Update All failed: %s", exc)
+        logger.error("Update All: WebUI phase error: %s", exc)
     finally:
         update_all_state["running"] = False
         await broadcast({"type": "update_all_progress", **update_all_state})

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.86"
+AGENT_VERSION="1.88"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1018,8 +1018,8 @@ execute_vm_command() {
             else
                 chmod +x "$tmp_file"
                 mv "$tmp_file" "$agent_script"
-                log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 5s..."
-                ( sleep 5 && systemctl restart client-sim-proxmox-agent ) &
+                log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 30s..."
+                ( sleep 30 && systemctl restart client-sim-proxmox-agent ) &
             fi
             ;;
         *)          return 1 ;;
