@@ -3319,6 +3319,34 @@ async def api_relay_diag() -> dict[str, Any]:
     }
 
 
+@app.get("/api/logs/service")
+def api_service_logs(lines: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
+    timestamp = iso_utcnow()
+    try:
+        result = subprocess.run(
+            [
+                "journalctl",
+                "-u",
+                JOURNAL_UNIT,
+                "-n",
+                str(lines),
+                "--no-pager",
+                "--output=short",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            log_lines = result.stdout.splitlines()
+            return {"lines": log_lines, "count": len(log_lines), "timestamp": timestamp}
+    except Exception:
+        pass
+
+    fallback = ["journalctl not available"]
+    return {"lines": fallback, "count": len(fallback), "timestamp": timestamp}
+
+
 @app.get("/api/proxmox/usb-config")
 async def get_proxmox_usb_config() -> dict[str, Any]:
     return _proxmox_usb_config_payload()
