@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.05"
+AGENT_VERSION="2.06"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -424,6 +424,34 @@ build_usb_state_json() {
     echo "$UNKNOWN_USB_JSON" > "$USB_UNKNOWN_CACHE"
 }
 
+# Wait until a VM is fully stopped, with a timeout.
+_wait_vm_stopped() {
+    local vmid="$1" max_wait="${2:-90}"
+    local elapsed=0
+    while [[ $elapsed -lt $max_wait ]]; do
+        local state
+        state=$(qm status "$vmid" 2>/dev/null | awk '{print $2}')
+        [[ "$state" == "stopped" ]] && return 0
+        sleep 3
+        elapsed=$(( elapsed + 3 ))
+    done
+    log "WARNING: VM $vmid did not stop within ${max_wait}s (state=$(qm status "$vmid" 2>/dev/null))"
+    return 1
+}
+
+# Wait until a VMID no longer appears in qm list, with a timeout.
+_wait_vmid_gone() {
+    local vmid="$1" max_wait="${2:-90}"
+    local elapsed=0
+    while [[ $elapsed -lt $max_wait ]]; do
+        qm status "$vmid" 2>/dev/null || return 0
+        sleep 3
+        elapsed=$(( elapsed + 3 ))
+    done
+    log "WARNING: VMID $vmid still exists after ${max_wait}s"
+    return 1
+}
+
 clone_vm_for_usb() {
     local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}"
     local guest_ready=0
@@ -439,8 +467,10 @@ clone_vm_for_usb() {
         local reason="$1"
         rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
-        timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
-        timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
+        _wait_vm_stopped "$vmid" 60 || true
+        timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        _wait_vmid_gone "$vmid" 60 || true
         unset 'STATE_VMID_TO_BUS[$vmid]'
         unset 'STATE_VMID_TO_IMAGE[$vmid]'
         unset 'STATE_BUS_TO_VMID[$bus_path]'
@@ -452,7 +482,7 @@ clone_vm_for_usb() {
     echo "$(date +%s)" > "${PROV_DIR}/${vmid}"
 
     # Clone
-    if ! timeout 180 qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
+    if ! timeout 600 qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
         _teardown "qm clone failed (template $template_id missing or VMID $vmid conflict)"
         return 1
     fi
@@ -595,8 +625,10 @@ destroy_vm() {
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}-${vmid}" "" >/dev/null 2>&1 || true
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}" "" >/dev/null 2>&1 || true
     fi
-    timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
-    timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
+    _wait_vm_stopped "$vmid" 90 || true
+    timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    _wait_vmid_gone "$vmid" 60 || true
     if [[ -n "$bus_path" ]]; then
         unset 'STATE_MISSING_BY_BUS[$bus_path]'
         unset 'STATE_BUS_TO_VMID[$bus_path]'
@@ -611,8 +643,13 @@ destroy_vm() {
 # Used by parallel reclone jobs where state is managed by the parent process.
 _destroy_vm_qm_only() {
     local vmid="$1"
-    timeout 60 qm stop "$vmid" --skiplock 2>/dev/null || true
-    timeout 60 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    log "Stopping VM $vmid before destroy"
+    timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
+    _wait_vm_stopped "$vmid" 90 || true
+    log "Destroying VM $vmid"
+    timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+    _wait_vmid_gone "$vmid" 60 || true
+    log "VM $vmid destroyed"
 }
 
 # Run one reclone in a background subshell. All needed values are passed as arguments
@@ -1247,8 +1284,10 @@ PY
             curl_api DELETE "/api/commands/pending?target=${_dhostname}-${_dvmid}" "" >/dev/null 2>&1 || true
             # Run qm stop+destroy in a background subshell (no state writes)
             (
-                timeout 60 qm stop "$_dvmid" --skiplock 2>/dev/null || true
-                timeout 60 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+                timeout 30 qm stop "$_dvmid" --skiplock 2>/dev/null || true
+                _wait_vm_stopped "$_dvmid" 90 || true
+                timeout 120 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+                _wait_vmid_gone "$_dvmid" 60 || true
                 log "Parallel delete done: VM $_dvmid"
             ) &
             _del_pids+=($!)
