@@ -1114,11 +1114,15 @@ PY
 )
     local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=()
     local _rc_ids=() _rc_vmids=()
+    local _del_ids=() _del_vmids=()
     while IFS=$'\t' read -r cmd_id action vmid cmd_type; do
         [[ -z "$cmd_id" || -z "$action" ]] && continue
         if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
             _rc_ids+=("$cmd_id")
             _rc_vmids+=("$vmid")
+        elif [[ "$action" == "delete_vm" && -n "$vmid" ]]; then
+            _del_ids+=("$cmd_id")
+            _del_vmids+=("$vmid")
         else
             _seq_ids+=("$cmd_id")
             _seq_actions+=("$action")
@@ -1227,6 +1231,50 @@ PY
             save_state_file
             write_reclone_state_cache idle "[]"
         ) &
+    fi
+
+    # Parallel delete_vm: stop+destroy all selected VMs concurrently, then update state once.
+    # Sequential processing would take 2 min/VM — this completes all deletes in ~2 min total.
+    if [[ ${#_del_vmids[@]} -gt 0 ]]; then
+        load_state_file
+        local _del_pids=()
+        for _di in "${!_del_vmids[@]}"; do
+            local _dvmid="${_del_vmids[$_di]}"
+            # Expire stale client inbox commands before destroying
+            local _dhostname
+            _dhostname=$(get_vm_name "$_dvmid" 2>/dev/null || echo "sim-client")
+            curl_api DELETE "/api/commands/pending?target=${_dhostname}-${_dvmid}" "" >/dev/null 2>&1 || true
+            # Run qm stop+destroy in a background subshell (no state writes)
+            (
+                timeout 60 qm stop "$_dvmid" 2>/dev/null || true
+                timeout 60 qm destroy "$_dvmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+                log "Parallel delete done: VM $_dvmid"
+            ) &
+            _del_pids+=($!)
+        done
+        # Wait for all background deletes to finish
+        for _dpid in "${_del_pids[@]}"; do wait "$_dpid" 2>/dev/null || true; done
+        # Update state once after all deletes complete
+        load_state_file
+        for _di in "${!_del_vmids[@]}"; do
+            local _dvmid="${_del_vmids[$_di]}"
+            local _dbus="${STATE_VMID_TO_BUS[$_dvmid]:-}"
+            if [[ -n "$_dbus" ]]; then
+                unset "STATE_MISSING_BY_BUS[$_dbus]"
+                unset "STATE_BUS_TO_VMID[$_dbus]"
+            fi
+            unset "STATE_VMID_TO_BUS[$_dvmid]"
+            unset "STATE_VMID_TO_IMAGE[$_dvmid]"
+        done
+        save_state_file
+        # ACK all delete commands
+        for _di in "${!_del_vmids[@]}"; do
+            curl_api POST /api/inbox/ack \
+                "{\"id\":\"${_del_ids[$_di]}\",\"status\":\"completed\",\"message\":\"delete_vm completed\"}" \
+                >/dev/null 2>&1
+            log "ACK delete: ${_del_ids[$_di]} vmid=${_del_vmids[$_di]}"
+        done
+        post_telemetry
     fi
 }
 
