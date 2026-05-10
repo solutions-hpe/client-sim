@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.17"
+AGENT_VERSION="2.19"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -96,6 +96,31 @@ save_api_key() {
         echo "CLIENT_SIM_API_KEY=${key}" >> "$ENV_FILE"
     fi
     API_KEY="$key"
+}
+
+save_repo_branch() {
+    local branch="$1"
+    if grep -q '^CLIENT_SIM_REPO_BRANCH=' "$ENV_FILE" 2>/dev/null; then
+        sed -i "s/^CLIENT_SIM_REPO_BRANCH=.*/CLIENT_SIM_REPO_BRANCH=${branch}/" "$ENV_FILE"
+    else
+        echo "CLIENT_SIM_REPO_BRANCH=${branch}" >> "$ENV_FILE"
+    fi
+}
+
+schedule_agent_restart() {
+    local service_name="client-sim-proxmox-agent"
+    local systemctl_bin
+    systemctl_bin=$(command -v systemctl || echo /bin/systemctl)
+    if command -v systemd-run >/dev/null 2>&1; then
+        local restart_unit="client-sim-proxmox-agent-restart-$(date +%s)"
+        if systemd-run --quiet --collect --unit "$restart_unit" --on-active=2s "$systemctl_bin" restart "$service_name"; then
+            log "Scheduled agent restart via ${restart_unit}"
+            return 0
+        fi
+        log "WARNING: systemd-run restart scheduling failed; falling back to nohup"
+    fi
+    nohup bash -lc "sleep 2; exec \"$systemctl_bin\" restart \"$service_name\"" >/dev/null 2>&1 &
+    return 0
 }
 
 clear_api_key() {
@@ -1298,18 +1323,20 @@ JSON
 # running binary if the SHA256 hash differs. Called both from the inbox handler
 # (update_agent command) and from the main loop's periodic self-check.
 self_update_agent() {
+    local requested_branch="${1:-}"
     local agent_script="/usr/local/bin/client-sim-proxmox-agent"
-    local env_file="/etc/client-sim-proxmox-agent.env"
-    local branch
-    branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$env_file" 2>/dev/null | tr -d '[:space:]')
+    local configured_branch branch repo_raw download_dir tmp_file
+    configured_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
+    branch="${requested_branch:-$configured_branch}"
     branch="${branch:-lrb}"
-    local repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}"
-    local tmp_file
-    tmp_file=$(mktemp)
+    repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}"
+    download_dir="/var/lib/client-sim/update"
+    tmp_file="${download_dir}/proxmox-agent.sh.download"
+    mkdir -p "$download_dir"
     log "Checking for agent update from GitHub (branch: ${branch}, current: v${AGENT_VERSION})..."
     if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
         rm -f "$tmp_file"
-        log "ERROR: Failed to download agent update"
+        log "ERROR: Failed to download agent update from ${repo_raw}"
         return 1
     fi
     if ! bash -n "$tmp_file" 2>/dev/null; then
@@ -1323,17 +1350,24 @@ self_update_agent() {
     new_version=$(grep '^AGENT_VERSION=' "$tmp_file" | cut -d'"' -f2)
     if [[ "$current_hash" == "$new_hash" ]]; then
         rm -f "$tmp_file"
+        if [[ -n "$requested_branch" && "$requested_branch" != "$configured_branch" ]]; then
+            save_repo_branch "$branch"
+        fi
         log "Agent is already up to date (v${AGENT_VERSION})"
-    else
-        chmod +x "$tmp_file"
-        mv "$tmp_file" "$agent_script"
-        log "Agent updated v${AGENT_VERSION} → v${new_version} — restarting in 30s..."
-        ( sleep 30 && systemctl restart client-sim-proxmox-agent ) &
+        return 0
+    fi
+    install -m 0755 "$tmp_file" "$agent_script"
+    rm -f "$tmp_file"
+    save_repo_branch "$branch"
+    log "Agent updated v${AGENT_VERSION} → v${new_version} from ${repo_raw} — scheduling restart..."
+    if ! schedule_agent_restart; then
+        log "ERROR: Failed to schedule agent restart"
+        return 1
     fi
 }
 
 execute_vm_command() {
-    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}"
+    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}"
     local guest_type="${_type:-qemu}"
     if [[ -n "$vmid" && "$guest_type" != "lxc" ]]; then
         if pct status "$vmid" >/dev/null 2>&1 && ! qm status "$vmid" >/dev/null 2>&1; then
@@ -1386,7 +1420,7 @@ execute_vm_command() {
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent|update-agent)
-            self_update_agent
+            self_update_agent "$_branch"
             ;;
         *)          return 1 ;;
     esac
@@ -1477,14 +1511,15 @@ for cmd in commands:
     vmid = cmd.get('args', {}).get('vmid', '')
     guest_type = str(cmd.get('args', {}).get('type') or cmd.get('args', {}).get('vm_type') or '').replace('\t', ' ')
     source_vmid = cmd.get('args', {}).get('source_vmid', '')
+    branch = str(cmd.get('args', {}).get('branch') or '').replace('\t', ' ')
     ctype = str(cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
-    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{ctype}")
+    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{branch}\t{ctype}")
 PY
 )
-    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=()
+    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=() _seq_branches=()
     local _rc_ids=() _rc_vmids=() _rc_types=() _rc_sources=()
     local _del_ids=() _del_vmids=()
-    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid cmd_type; do
+    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch cmd_type; do
         [[ -z "$cmd_id" || -z "$action" ]] && continue
         if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
             _rc_ids+=("$cmd_id")
@@ -1500,13 +1535,14 @@ PY
             _seq_vmids+=("$vmid")
             _seq_types+=("${guest_type:-$cmd_type}")
             _seq_sources+=("$source_vmid")
+            _seq_branches+=("$branch")
         fi
     done <<< "$parsed_commands"
 
     for _si in "${!_seq_ids[@]}"; do
         log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
         local status="completed" message=""
-        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" 2>>"$AGENT_LOG"; then
+        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" "${_seq_branches[$_si]}" 2>>"$AGENT_LOG"; then
             message="${_seq_actions[$_si]} completed"
         else
             status="failed"
