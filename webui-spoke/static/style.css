@@ -1430,6 +1430,19 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .usb-actions { display:flex; gap:8px; flex-wrap:wrap; }
 #reclone-last-run, #reclone-progress-label { font-size:0.85rem; color:var(--muted); }
 
+/* ── Reclone + Auto-Provisioning 2-col layout ─────────── */
+.reclone-autoprov-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .reclone-autoprov-grid { grid-template-columns: 1fr; }
+}
+.autoprov-live-summary { margin-bottom: 8px; }
+#autoprov-live-panel .reclone-log { max-height: 300px; }
+
 /* ── Agent Log Viewer ─────────────────────────────────── */
 .agent-log-viewer {
   background: #0d1117;

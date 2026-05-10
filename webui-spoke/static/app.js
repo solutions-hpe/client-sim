@@ -2049,47 +2049,83 @@ function renderAutoProvisionStatus() {
     }
   }
 
-  // ── Fleet Reclone tile detail log ──────────────────────────────────────────
-  const section = document.getElementById('auto-prov-section');
-  const logEl = document.getElementById('auto-prov-log');
-  if (!section || !logEl) return;
+  // ── Right-side live panel ───────────────────────────────────────────────────
+  const liveBadge   = document.getElementById('autoprov-live-badge');
+  const liveSummary = document.getElementById('autoprov-live-summary');
+  const logEl       = document.getElementById('auto-prov-log');
+  if (!liveSummary || !logEl) return;
 
   const usbState = Array.isArray(latestProxmoxData.usb_state) ? latestProxmoxData.usb_state : [];
   const autoProv = currentSettings.usb_auto_provision === 'on';
   const missingTimeoutMins = parseInt(latestProxmoxData.missing_timeout_mins, 10) || 60;
+  const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
+  const runningVmids = new Set(vms.filter((v) => v.status === 'running').map((v) => Number(v.vmid)));
 
-  // Only show entries that are not "active" (i.e. provisioning/missing/tearing_down)
-  const active = usbState.filter((e) => e.prov_status && e.prov_status !== 'active');
-
-  if (!autoProv && active.length === 0) {
-    section.classList.add('hidden');
+  if (!autoProv) {
+    if (liveBadge) { liveBadge.textContent = 'Off'; liveBadge.className = 'badge badge-grey'; }
+    liveSummary.innerHTML = `<div class="muted" style="font-size:13px;">Auto-Provisioning is disabled. Enable it in Setup → USB.</div>`;
+    logEl.innerHTML = '';
     return;
   }
 
-  section.classList.remove('hidden');
+  const total        = usbState.length;
+  const provisioning = usbState.filter((e) => e.prov_status === 'provisioning');
+  const activeUsb    = usbState.filter((e) => e.prov_status === 'active');
+  const missingUsb   = usbState.filter((e) => e.prov_status === 'missing');
+  const tearingDown  = usbState.filter((e) => e.prov_status === 'tearing_down');
+  const startingUp   = activeUsb.filter((e) => e.vmid != null && !runningVmids.has(Number(e.vmid)));
+  const fullyActive  = activeUsb.length - startingUp.length;
+  const busy         = provisioning.length + startingUp.length + tearingDown.length;
 
-  if (active.length === 0) {
-    logEl.innerHTML = `<div class="muted" style="padding:8px 0;font-size:13px;">No active provisioning jobs.</div>`;
-    return;
+  // Badge
+  if (liveBadge) {
+    if (total === 0) {
+      liveBadge.textContent = 'Idle'; liveBadge.className = 'badge badge-grey';
+    } else if (busy > 0) {
+      liveBadge.textContent = 'Active'; liveBadge.className = 'badge badge-blue';
+    } else {
+      liveBadge.textContent = `${fullyActive}/${total} Running`; liveBadge.className = 'badge badge-green';
+    }
   }
+
+  // Summary stat pills
+  const pills = [
+    { label: 'Running',     val: fullyActive,        color: '#16a34a' },
+    { label: 'Starting',    val: startingUp.length,  color: '#2563eb', hide: startingUp.length === 0 },
+    { label: 'Cloning',     val: provisioning.length,color: '#7c3aed', hide: provisioning.length === 0 },
+    { label: 'USB Missing', val: missingUsb.length,  color: '#d97706', hide: missingUsb.length === 0 },
+    { label: 'Tearing Down',val: tearingDown.length, color: '#dc2626', hide: tearingDown.length === 0 },
+  ].filter((p) => !p.hide);
+
+  liveSummary.innerHTML = total === 0
+    ? `<div class="muted" style="font-size:13px;">No USB devices tracked yet.</div>`
+    : `<div style="display:flex;gap:10px;flex-wrap:wrap;">${pills.map((p) =>
+        `<span style="font-size:12px;font-weight:600;padding:2px 10px;border-radius:12px;background:${p.color}20;color:${p.color};border:1px solid ${p.color}40;">${p.val} ${p.label}</span>`
+      ).join('')}</div>`;
+
+  // Per-VM live rows — show ALL tracked entries
+  if (usbState.length === 0) { logEl.innerHTML = ''; return; }
 
   const now = Date.now() / 1000;
-  const iconMap = { provisioning: '⏳', missing: '⚠️', tearing_down: '🗑️' };
-  const labelMap = { provisioning: 'Spinning up', missing: 'USB missing', tearing_down: 'Tearing down' };
+  const iconMap  = { active: '✅', provisioning: '⏳', missing: '⚠️', tearing_down: '🗑️' };
+  const labelMap = { active: 'Running', provisioning: 'Cloning', missing: 'USB Missing', tearing_down: 'Tearing Down' };
 
-  logEl.innerHTML = active.map((e) => {
-    const icon = iconMap[e.prov_status] || '•';
-    const label = labelMap[e.prov_status] || e.prov_status;
-    const name = e.name || `USB ${e.bus_path || ''}`;
+  logEl.innerHTML = usbState.map((e) => {
+    const isStarting = e.prov_status === 'active' && e.vmid != null && !runningVmids.has(Number(e.vmid));
+    const icon  = isStarting ? '🔄' : (iconMap[e.prov_status] || '•');
+    const label = isStarting ? 'Starting Up' : (labelMap[e.prov_status] || e.prov_status);
+    const name  = e.name || `USB ${e.bus_path || ''}`;
     let detail = '';
     if (e.prov_status === 'missing' && e.missing_since) {
       const elapsedMins = Math.round((now - e.missing_since) / 60);
-      const remainMins = Math.max(0, missingTimeoutMins - elapsedMins);
+      const remainMins  = Math.max(0, missingTimeoutMins - elapsedMins);
       detail = `<span class="muted">${elapsedMins}m elapsed · tears down in ~${remainMins}m</span>`;
     } else if (e.prov_status === 'tearing_down') {
       detail = `<span class="muted">Destroying VM…</span>`;
     } else if (e.prov_status === 'provisioning') {
       detail = `<span class="muted">Cloning &amp; configuring…</span>`;
+    } else if (isStarting) {
+      detail = `<span class="muted">VM booting…</span>`;
     }
     return `
       <div class="log-entry">

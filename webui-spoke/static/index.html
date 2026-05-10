@@ -109,8 +109,11 @@
     <!-- VMs sub-tab -->
     <div id="server-vms" class="setup-subpanel">
 
-      <!-- Fleet Reclone — always visible regardless of VM category tab -->
-      <div id="reclone-status-panel" class="setup-card setup-section-gap">
+      <!-- 2-col grid: Fleet Reclone (left) | Auto-Provisioning Live Status (right) -->
+      <div class="reclone-autoprov-grid setup-section-gap">
+
+      <!-- Left: Fleet Reclone -->
+      <div id="reclone-status-panel" class="setup-card">
         <div class="setup-card-header">
           <span id="reclone-status-badge" class="badge badge-grey">Idle</span>
           <button id="reclone-now-btn" class="btn btn-secondary" onclick="triggerRecloneAll()">⟳ Reclone All Now</button>
@@ -130,11 +133,19 @@
           <div class="reclone-section-title">↺ Auto-Recovery Log</div>
           <div id="reclone-auto-recovery-log" class="reclone-log"></div>
         </div>
-        <div id="auto-prov-section" class="hidden" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
-          <div class="reclone-section-title">⚡ Auto-Provisioning Activity</div>
-          <div id="auto-prov-log" class="reclone-log"></div>
-        </div>
       </div>
+
+      <!-- Right: Auto-Provisioning Live Status -->
+      <div id="autoprov-live-panel" class="setup-card">
+        <div class="setup-card-header" style="margin-bottom:10px;">
+          <h2 style="font-size:1rem;margin:0;">⚡ Auto-Provisioning</h2>
+          <span id="autoprov-live-badge" class="badge badge-grey">Off</span>
+        </div>
+        <div id="autoprov-live-summary" class="autoprov-live-summary"></div>
+        <div id="auto-prov-log" class="reclone-log" style="max-height:300px;margin-top:8px;"></div>
+      </div>
+
+      </div><!-- end reclone-autoprov-grid -->
 
       <!-- VM category inner tab nav + auto-provisioning status (right side) -->
       <div id="vm-cat-tab-nav" class="vm-cat-tab-nav setup-section-gap">
