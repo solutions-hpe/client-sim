@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Post-merge hook: when merging into main, auto-increment the release version.
+#
+# Version scheme on main: X.YY (e.g. 1.00 → 1.01 → ... → 1.99 → 2.00)
+# The lrb dev branch uses its own incrementing scheme; on merge to main
+# this hook resets the version to the next main release number, ensuring
+# deployed systems always see a version change and sync correctly.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+[[ "$BRANCH" != "main" ]] && exit 0
+
+LINUX_VER_FILE="linux/VERSION"
+INSTALLER="webui-spoke/install-lxc.sh"
+AGENT="proxmox/proxmox-agent.sh"
+
+# ── Determine previous main version ──────────────────────────────────────────
+# Read from ORIG_HEAD (what main was before this merge).
+# Default to "0.99" so the very first merge to main produces "1.00".
+PREV_VERSION=$(git show ORIG_HEAD:"$INSTALLER" 2>/dev/null \
+    | grep '^VERSION=' | head -1 | cut -d'"' -f2 || true)
+PREV_VERSION="${PREV_VERSION:-0.99}"
+
+# ── Increment MAJOR.MINOR, carry at 100 ──────────────────────────────────────
+IFS='.' read -r _major _minor <<< "$PREV_VERSION"
+_major="${_major:-0}"
+_minor_int=$(( 10#${_minor:-99} + 1 ))
+if (( _minor_int > 99 )); then
+    (( _major++ ))
+    _minor_int=0
+fi
+NEW_VERSION=$(printf "%d.%02d" "$_major" "$_minor_int")
+
+echo "[post-merge] Bumping release version: $PREV_VERSION → $NEW_VERSION"
+
+# ── Portable sed in-place (macOS needs '' arg, Linux does not) ────────────────
+_sed_i() { perl -i -pe "$@"; }
+
+_sed_i "s/^VERSION=.*/VERSION=\"${NEW_VERSION}\"/" "$INSTALLER"
+_sed_i "s/^AGENT_VERSION=.*/AGENT_VERSION=\"${NEW_VERSION}\"/" "$AGENT"
+echo "$NEW_VERSION" > "$LINUX_VER_FILE"
+
+# ── Commit the version bump ───────────────────────────────────────────────────
+git add "$INSTALLER" "$AGENT" "$LINUX_VER_FILE"
+git commit --no-verify -m "chore: release v${NEW_VERSION}
+
+Auto-incremented by post-merge hook on merge to main.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+
+echo "[post-merge] Release v${NEW_VERSION} committed ✓"

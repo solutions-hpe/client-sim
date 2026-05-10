@@ -120,6 +120,13 @@ fi
 echo "[pre-commit] Syntax checks passed ✓"
 
 # ── Version bump ──────────────────────────────────────────────────────────────
+# Skip on main — the post-merge hook owns versioning there.
+_current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+if [[ "$_current_branch" == "main" ]]; then
+    echo "[pre-commit] On main branch — version bump managed by post-merge hook"
+    exit 0
+fi
+
 # Skip the bump if every staged change is a .conf file — conf changes are
 # propagated to clients independently via the API diff check in update.sh,
 # so they don't need a VERSION increment.
