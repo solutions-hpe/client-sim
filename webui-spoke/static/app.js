@@ -2068,52 +2068,48 @@ function renderAutoProvisionStatus() {
     return;
   }
 
-  const total        = usbState.length;
-  const provisioning = usbState.filter((e) => e.prov_status === 'provisioning');
-  const activeUsb    = usbState.filter((e) => e.prov_status === 'active');
-  const missingUsb   = usbState.filter((e) => e.prov_status === 'missing');
-  const tearingDown  = usbState.filter((e) => e.prov_status === 'tearing_down');
-  const startingUp   = activeUsb.filter((e) => e.vmid != null && !runningVmids.has(Number(e.vmid)));
-  const fullyActive  = activeUsb.length - startingUp.length;
-  const busy         = provisioning.length + startingUp.length + tearingDown.length;
+  // In-flight entries only: provisioning, starting-up, missing, tearing_down
+  const inFlight = usbState.filter((e) => {
+    if (e.prov_status === 'provisioning' || e.prov_status === 'tearing_down' || e.prov_status === 'missing') return true;
+    if (e.prov_status === 'active' && e.vmid != null && !runningVmids.has(Number(e.vmid))) return true;
+    return false;
+  });
 
   // Badge
   if (liveBadge) {
-    if (total === 0) {
+    const total = usbState.length;
+    if (inFlight.length > 0) {
+      liveBadge.textContent = `${inFlight.length} in progress`; liveBadge.className = 'badge badge-blue';
+    } else if (total === 0) {
       liveBadge.textContent = 'Idle'; liveBadge.className = 'badge badge-grey';
-    } else if (busy > 0) {
-      liveBadge.textContent = 'Active'; liveBadge.className = 'badge badge-blue';
     } else {
-      liveBadge.textContent = `${fullyActive}/${total} Running`; liveBadge.className = 'badge badge-green';
+      liveBadge.textContent = 'All settled'; liveBadge.className = 'badge badge-green';
     }
   }
 
-  // Summary stat pills
-  const pills = [
-    { label: 'Running',     val: fullyActive,        color: '#16a34a' },
-    { label: 'Starting',    val: startingUp.length,  color: '#2563eb', hide: startingUp.length === 0 },
-    { label: 'Cloning',     val: provisioning.length,color: '#7c3aed', hide: provisioning.length === 0 },
-    { label: 'USB Missing', val: missingUsb.length,  color: '#d97706', hide: missingUsb.length === 0 },
-    { label: 'Tearing Down',val: tearingDown.length, color: '#dc2626', hide: tearingDown.length === 0 },
-  ].filter((p) => !p.hide);
+  // Summary line from last completed provisioning/teardown event
+  const summary = latestProxmoxData.prov_summary;
+  if (summary && summary.at) {
+    const when = new Date(summary.at * 1000).toLocaleString();
+    const verb = summary.action === 'provisioned' ? 'provisioned' : 'deleted';
+    const colour = summary.action === 'provisioned' ? '#16a34a' : '#dc2626';
+    liveSummary.innerHTML = `<div style="font-size:12px;color:${colour};margin-bottom:6px;">
+      ${summary.count} VM${summary.count !== 1 ? 's' : ''} ${verb} · ${when}</div>`;
+  } else {
+    liveSummary.innerHTML = '';
+  }
 
-  liveSummary.innerHTML = total === 0
-    ? `<div class="muted" style="font-size:13px;">No USB devices tracked yet.</div>`
-    : `<div style="display:flex;gap:10px;flex-wrap:wrap;">${pills.map((p) =>
-        `<span style="font-size:12px;font-weight:600;padding:2px 10px;border-radius:12px;background:${p.color}20;color:${p.color};border:1px solid ${p.color}40;">${p.val} ${p.label}</span>`
-      ).join('')}</div>`;
-
-  // Per-VM live rows — show ALL tracked entries
-  if (usbState.length === 0) { logEl.innerHTML = ''; return; }
+  // In-flight VM rows
+  if (inFlight.length === 0) {
+    logEl.innerHTML = `<div class="muted" style="padding:6px 0;font-size:13px;">No active provisioning work.</div>`;
+    return;
+  }
 
   const now = Date.now() / 1000;
-  const iconMap  = { active: '✅', provisioning: '⏳', missing: '⚠️', tearing_down: '🗑️' };
-  const labelMap = { active: 'Running', provisioning: 'Cloning', missing: 'USB Missing', tearing_down: 'Tearing Down' };
-
-  logEl.innerHTML = usbState.map((e) => {
-    const isStarting = e.prov_status === 'active' && e.vmid != null && !runningVmids.has(Number(e.vmid));
-    const icon  = isStarting ? '🔄' : (iconMap[e.prov_status] || '•');
-    const label = isStarting ? 'Starting Up' : (labelMap[e.prov_status] || e.prov_status);
+  logEl.innerHTML = inFlight.map((e) => {
+    const isStarting = e.prov_status === 'active';
+    const icon  = isStarting ? '🔄' : e.prov_status === 'provisioning' ? '⏳' : e.prov_status === 'tearing_down' ? '🗑️' : '⚠️';
+    const label = isStarting ? 'Starting Up' : e.prov_status === 'provisioning' ? 'Cloning' : e.prov_status === 'tearing_down' ? 'Tearing Down' : 'USB Missing';
     const name  = e.name || `USB ${e.bus_path || ''}`;
     let detail = '';
     if (e.prov_status === 'missing' && e.missing_since) {
@@ -2127,13 +2123,9 @@ function renderAutoProvisionStatus() {
     } else if (isStarting) {
       detail = `<span class="muted">VM booting…</span>`;
     }
-    return `
-      <div class="log-entry">
-        <span>${icon}</span>
-        <span>VM ${e.vmid ?? '—'}</span>
-        <span class="muted">${name}</span>
-        <span>${label}</span>
-        ${detail}
+    return `<div class="log-entry">
+        <span>${icon}</span><span>VM ${e.vmid ?? '—'}</span>
+        <span class="muted">${name}</span><span>${label}</span>${detail}
       </div>`;
   }).join('');
 }
@@ -2770,7 +2762,13 @@ function spokeAcmeBadgeClass(daysRemaining) {
 
 function toggleSpokeAcmeDnsSection() {
   const challenge = document.getElementById('spoke-acme-challenge')?.value || 'http-01';
-  document.getElementById('spoke-acme-dns-section')?.classList.toggle('hidden', challenge !== 'dns-01');
+  const isDns = challenge === 'dns-01';
+  document.getElementById('spoke-acme-dns-section')?.classList.toggle('hidden', !isDns);
+  if (isDns) {
+    const provider = document.getElementById('spoke-acme-dns-provider')?.value || 'cloudflare';
+    document.getElementById('spoke-acme-cloudflare-fields')?.classList.toggle('hidden', provider !== 'cloudflare');
+    document.getElementById('spoke-acme-he-fields')?.classList.toggle('hidden', provider !== 'hurricane_electric');
+  }
 }
 
 function renderSpokeAcmeStatus(certInfo = {}, cfg = {}) {
@@ -2823,7 +2821,10 @@ async function saveSpokeAcmeConfig() {
     ca: document.getElementById('spoke-acme-ca')?.value || 'letsencrypt',
     challenge: document.getElementById('spoke-acme-challenge')?.value || 'http-01',
     dns_provider: document.getElementById('spoke-acme-dns-provider')?.value || '',
-    dns_credentials: { cf_api_token: document.getElementById('spoke-acme-cf-token')?.value || '' },
+    dns_credentials: {
+      cf_api_token: document.getElementById('spoke-acme-cf-token')?.value || '',
+      he_ddns_key: document.getElementById('spoke-acme-he-ddns-key')?.value || '',
+    },
     spoke_tls: document.getElementById('spoke-tls-enabled')?.checked ? 'on' : 'off'
   };
   try {
@@ -2840,6 +2841,8 @@ async function saveSpokeAcmeConfig() {
     renderSpokeAcmeStatus(data.cert_info || {}, data);
     const token = document.getElementById('spoke-acme-cf-token');
     if (token) token.value = '';
+    const heKey = document.getElementById('spoke-acme-he-ddns-key');
+    if (heKey) heKey.value = '';
   } catch (error) {
     const msg = document.getElementById('spoke-acme-msg');
     if (msg) {
@@ -5648,3 +5651,4 @@ let loadServiceLogs = () => {};
 })();
 
 document.getElementById('spoke-acme-challenge')?.addEventListener('change', toggleSpokeAcmeDnsSection);
+document.getElementById('spoke-acme-dns-provider')?.addEventListener('change', toggleSpokeAcmeDnsSection);

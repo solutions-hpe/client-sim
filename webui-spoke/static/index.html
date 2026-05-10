@@ -1327,13 +1327,21 @@
               <label class="form-label">DNS Provider</label>
               <select id="spoke-acme-dns-provider" class="form-input">
                 <option value="cloudflare">Cloudflare</option>
+                <option value="hurricane_electric">Hurricane Electric DNS</option>
                 <option value="azure_dns">Azure DNS (coming soon)</option>
                 <option value="route53">AWS Route53 (coming soon)</option>
               </select>
             </div>
-            <div class="form-group">
+            <div id="spoke-acme-cloudflare-fields" class="form-group">
               <label class="form-label">Cloudflare API Token</label>
               <input id="spoke-acme-cf-token" type="password" class="form-input" placeholder="Leave blank to keep existing">
+            </div>
+            <div id="spoke-acme-he-fields" class="hidden">
+              <div class="form-group">
+                <label class="form-label">HE DDNS Key</label>
+                <input id="spoke-acme-he-ddns-key" type="password" class="form-input" placeholder="Leave blank to keep existing">
+                <p class="form-hint">In dns.he.net: create a TXT record for <code>_acme-challenge.yourdomain</code>, enable DDNS on it, then paste the generated key here.</p>
+              </div>
             </div>
           </div>
           <div class="form-group">

@@ -1472,7 +1472,10 @@ proxmox_state: dict[str, Any] = {
     "missing_timeout_mins": 60,
     "agent_version": None,
     "pve_version": None,
+    "prov_summary": None,   # {"action": "provisioned"|"deleted", "count": N, "at": <unix ts>}
 }
+# Previous usb_state vmid→prov_status snapshot for transition detection
+_prev_usb_by_vmid: dict[str, str] = {}
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
@@ -3310,6 +3313,25 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
+
+    # Detect provisioning/teardown completions for summary tracking
+    global _prev_usb_by_vmid
+    new_usb: list[dict] = proxmox_state["usb_state"]
+    new_by_vmid = {str(e["vmid"]): e.get("prov_status", "active") for e in new_usb if e.get("vmid") is not None}
+    if _prev_usb_by_vmid:
+        newly_provisioned = [
+            vmid for vmid, st in new_by_vmid.items()
+            if st == "active" and _prev_usb_by_vmid.get(vmid) == "provisioning"
+        ]
+        torn_down = [
+            vmid for vmid, st in _prev_usb_by_vmid.items()
+            if vmid not in new_by_vmid and st in ("tearing_down", "missing")
+        ]
+        if newly_provisioned:
+            proxmox_state["prov_summary"] = {"action": "provisioned", "count": len(newly_provisioned), "at": now}
+        elif torn_down:
+            proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
+    _prev_usb_by_vmid = new_by_vmid
 
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
