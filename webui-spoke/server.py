@@ -2451,14 +2451,22 @@ def _read_local_kill_switch() -> str:
 def _proxmox_status_payload() -> dict[str, Any]:
     node = proxmox_state.get("node") or {}
     client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
+    usb_by_vmid = {
+        str(entry.get("vmid")): entry
+        for entry in proxmox_state.get("usb_state", [])
+        if entry.get("vmid") is not None
+    }
     vms = []
     for vm in proxmox_state.get("vms", []):
         enriched_vm = dict(vm)
         enriched_vm["pending_checkin"] = _vm_pending_checkin(enriched_vm, client_seen)
+        usb_entry = usb_by_vmid.get(str(vm.get("vmid")), {})
+        enriched_vm["prov_status"] = usb_entry.get("prov_status") or "active"
         vms.append(enriched_vm)
     return {
         **proxmox_state,
         "vms": vms,
+        "prov_run": dict(proxmox_state.get("prov_run") or {}),
         "hostname": str(node.get("hostname") or "").strip(),
         "pending_proxmox": _pending_proxmox_payload(),
         "approved_proxmox": _approved_proxmox_payload(),
