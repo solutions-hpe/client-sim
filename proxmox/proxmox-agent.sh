@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.26"
+AGENT_VERSION="2.27"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -402,8 +402,8 @@ prune_stale_state_vmids() {
     local qm_vmids vmid bus_path stale_count=0
     local -A existing_vmids=()
 
-    if ! qm_vmids=$(qm list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ { print $1 }'); then
-        log "WARNING: qm list failed; skipping stale VM state cleanup"
+    if ! qm_vmids=$({ qm list 2>/dev/null || true; pct list 2>/dev/null || true; } | awk '$1 ~ /^[0-9]+$/ { print $1 }'); then
+        log "WARNING: failed to enumerate existing guests; skipping stale VM state cleanup"
         return
     fi
 
@@ -467,6 +467,33 @@ scan_usb_devices() {
             UNKNOWN_USB_LINES+=("${bus_path}"$'\t'"${vidpid}"$'\t'"${name}")
         fi
     done
+}
+
+usb_missing_timeout_seconds() {
+    printf '%s' "$(( MISSING_TIMEOUT * 60 ))"
+}
+
+find_present_bus_for_vidpid() {
+    local vidpid="$1" bus_path
+    for bus_path in "${!PRESENT_BUSES[@]}"; do
+        [[ "${PRESENT_BUSES[$bus_path]}" == "$vidpid" ]] || continue
+        printf '%s' "$bus_path"
+        return 0
+    done
+    return 1
+}
+
+guest_is_template() {
+    local vmid="$1" guest_type="${2:-}" conf=""
+    if [[ -z "$guest_type" ]]; then
+        guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
+    fi
+    case "$guest_type" in
+        qemu) conf="/etc/pve/qemu-server/${vmid}.conf" ;;
+        lxc)  conf="/etc/pve/lxc/${vmid}.conf" ;;
+        *)    return 1 ;;
+    esac
+    [[ -f "$conf" ]] && grep -Eq '^template:\s*1\s*$' "$conf"
 }
 
 build_usb_state_json() {
@@ -977,6 +1004,7 @@ reclone_vm_instance() {
 
 usb_provision_loop() {
     local now bus_path vidpid product_name vmid missing_since
+    local timeout_seconds missing_age _reconnected_bus _current_bus _state_vidpid _guest_type _assigned_vmid
 
     refresh_usb_config
     scan_usb_devices
@@ -985,9 +1013,10 @@ usb_provision_loop() {
     # ── Stale state cleanup: remove entries for VMIDs that no longer exist ────
     # Prevents dongles from being "stuck" assigned to a manually-deleted VM.
     local -A _existing_vmids=()
+    local -A _reconnected_vidpids=()
     while IFS= read -r _vid; do
         [[ -n "$_vid" ]] && _existing_vmids["$_vid"]="1"
-    done < <(qm list 2>/dev/null | awk 'NR>1{print $1}')
+    done < <({ qm list 2>/dev/null || true; pct list 2>/dev/null || true; } | awk '$1 ~ /^[0-9]+$/ { print $1 }')
     local _state_changed=0
     for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
         if [[ -z "${_existing_vmids[$vmid]:-}" ]]; then
@@ -996,13 +1025,67 @@ usb_provision_loop() {
             [[ -n "$_stale_bus" ]] && {
                 unset "STATE_BUS_TO_VMID[$_stale_bus]"
                 unset "STATE_MISSING_BY_BUS[$_stale_bus]"
+                unset "STATE_VIDPID_BY_BUS[$_stale_bus]"
             }
             unset "STATE_VMID_TO_BUS[$vmid]"
             unset "STATE_VMID_TO_IMAGE[$vmid]"
             _state_changed=1
         fi
     done
-    [[ "$_state_changed" -eq 1 ]] && save_state_file
+
+    now=$(date +%s)
+    timeout_seconds=$(usb_missing_timeout_seconds)
+    for _current_bus in "${!STATE_BUS_TO_VMID[@]}"; do
+        vmid="${STATE_BUS_TO_VMID[$_current_bus]}"
+        missing_since="${STATE_MISSING_BY_BUS[$_current_bus]:-}"
+        _state_vidpid="${USB_VIDPID_BY_BUS[$_current_bus]:-${STATE_VIDPID_BY_BUS[$_current_bus]:-}}"
+        [[ -n "$_state_vidpid" ]] && STATE_VIDPID_BY_BUS["$_current_bus"]="$_state_vidpid"
+
+        if [[ -n "$missing_since" && -n "$_state_vidpid" ]]; then
+            _reconnected_bus=$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)
+            if [[ -n "$_reconnected_bus" ]]; then
+                if [[ "$_reconnected_bus" != "$_current_bus" ]]; then
+                    _assigned_vmid="${STATE_BUS_TO_VMID[$_reconnected_bus]:-}"
+                    if [[ -z "$_assigned_vmid" || "$_assigned_vmid" == "$vmid" ]]; then
+                        unset "STATE_BUS_TO_VMID[$_current_bus]"
+                        unset "STATE_MISSING_BY_BUS[$_current_bus]"
+                        unset "STATE_VIDPID_BY_BUS[$_current_bus]"
+                        STATE_VMID_TO_BUS["$vmid"]="$_reconnected_bus"
+                        STATE_BUS_TO_VMID["$_reconnected_bus"]="$vmid"
+                        STATE_VIDPID_BY_BUS["$_reconnected_bus"]="$_state_vidpid"
+                        _current_bus="$_reconnected_bus"
+                    fi
+                fi
+                STATE_MISSING_BY_BUS["$_current_bus"]=""
+                _reconnected_vidpids["$_state_vidpid"]=1
+                _state_changed=1
+                log "USB dongle vidpid $_state_vidpid reconnected, clearing missing state for VM $vmid"
+                continue
+            fi
+        fi
+
+        if [[ -z "${PRESENT_BUSES[$_current_bus]:-}" ]]; then
+            if [[ -z "$missing_since" ]]; then
+                STATE_MISSING_BY_BUS["$_current_bus"]="$now"
+                _state_changed=1
+                log "USB $_current_bus missing for VM $vmid; grace timer started"
+            else
+                missing_age=$(( now - missing_since ))
+                if (( missing_age > timeout_seconds )); then
+                    _guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
+                    if guest_is_template "$vmid" "$_guest_type"; then
+                        log "USB dongle missing for ${missing_age}s but VM $vmid is a template; skipping teardown"
+                        continue
+                    fi
+                    log "USB dongle missing for ${missing_age}s — tearing down VM $vmid"
+                    [[ -n "$_state_vidpid" && -n "$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)" ]] && _reconnected_vidpids["$_state_vidpid"]=1
+                    if destroy_vm "$vmid" "$_guest_type"; then
+                        _state_changed=1
+                    fi
+                fi
+            fi
+        fi
+    done
 
     # ── Parallel provision: new USB dongles not yet assigned a VM ─────────────
     # Pre-assign VMIDs in the parent before forking so parallel subshells
@@ -1052,6 +1135,10 @@ usb_provision_loop() {
         _prov_products+=("$product_name")
         _prov_images+=("$_img_num")
         _prov_types+=("$_dtype")
+
+        if [[ -n "${_reconnected_vidpids[$vidpid]:-}" ]]; then
+            log "USB dongle vidpid $vidpid reconnected — auto-provisioning new VM"
+        fi
     done
 
     if [[ ${#_prov_buses[@]} -gt 0 ]]; then
@@ -1088,29 +1175,13 @@ usb_provision_loop() {
                 unset 'STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]'
             fi
         done
+        _state_changed=1
         save_state_file
         build_usb_state_json
         post_telemetry || true
     fi
 
-    now=$(date +%s)
-    for bus_path in "${!STATE_BUS_TO_VMID[@]}"; do
-        vmid="${STATE_BUS_TO_VMID[$bus_path]}"
-        if [[ -z "${PRESENT_BUSES[$bus_path]:-}" ]]; then
-            missing_since="${STATE_MISSING_BY_BUS[$bus_path]:-}"
-            if [[ -z "$missing_since" ]]; then
-                STATE_MISSING_BY_BUS["$bus_path"]="$now"
-                log "USB $bus_path missing for VM $vmid; grace timer started"
-            elif (( now - missing_since > MISSING_TIMEOUT * 60 )); then
-                destroy_vm "$vmid"
-            fi
-        elif [[ -n "${STATE_MISSING_BY_BUS[$bus_path]:-}" ]]; then
-            STATE_MISSING_BY_BUS["$bus_path"]=""
-            log "USB $bus_path returned for VM $vmid"
-        fi
-    done
-
-    save_state_file
+    [[ "$_state_changed" -eq 1 ]] && save_state_file
     build_usb_state_json
 }
 
