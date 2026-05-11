@@ -452,6 +452,10 @@ connect_wifi() {
     report_error "nmcli failed to create connection profile for '$target_ssid'" "error"
     return 1
   fi
+  # Kill any graphical secret agent that lxsession may have restarted since
+  # startup so nothing can intercept NM's credential lookup mid-connection.
+  pkill -f nm-applet 2>/dev/null || true
+  pkill -f lxpolkit 2>/dev/null || true
   if ! nmcli --wait 180 connection up "$target_ssid" ifname "$wladapter"; then
     report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
     return 1

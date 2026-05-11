@@ -203,9 +203,21 @@ _nm_sim_id="s$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -
 _nm_target_ssid=$(get_value "$_nm_sim_id" 'ssid')
 _nm_ssidpw=$(get_value "$_nm_sim_id" 'ssidpw')
 _nm_site_based=$(get_value 'simulation' 'site_based_ssid')
-_nm_wsite=$(get_value 'address' 'wsite')
+# WHY: wsite lives under the simulation bucket section (e.g. [s1]), NOT [address].
+# Reading from [address] returned an empty string, which made the pre-stored profile
+# name "-PSK" instead of "DFW-PSK" — NM couldn't find it and called the graphical
+# secret agent, producing the "Authentication Required" popup every boot.
+_nm_wsite=$(get_value "$_nm_sim_id" 'wsite')
+# Apply per-user wsite override if present (mirrors simulation.sh's apply_override logic)
+_nm_username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
+_nm_wsite_override=$(get_value "$_nm_username" 'wsite')
+[[ -n "$_nm_wsite_override" ]] && _nm_wsite="$_nm_wsite_override"
 [[ "$_nm_site_based" == "on" ]] && _nm_target_ssid="${_nm_wsite}-${_nm_target_ssid}"
 _nm_wladapter=$(ip -br a | grep "wlx\|wlan" | awk '{print $1}' | head -n1)
+# Kill any graphical secret agent right before pre-storing so nothing intercepts NM
+pkill -f nm-applet 2>/dev/null || true
+pkill -f lxpolkit 2>/dev/null || true
+pkill -f 'polkit-gnome-authentication-agent' 2>/dev/null || true
 if [[ -n "$_nm_target_ssid" && -n "$_nm_ssidpw" && -n "$_nm_wladapter" ]]; then
   nmcli connection delete "$_nm_target_ssid" >/dev/null 2>&1 || true
   if nmcli connection add type wifi \
@@ -221,7 +233,7 @@ if [[ -n "$_nm_target_ssid" && -n "$_nm_ssidpw" && -n "$_nm_wladapter" ]]; then
 else
   echo "Skipping WiFi pre-store: ssid='$_nm_target_ssid' pw=$([ -n "$_nm_ssidpw" ] && echo set || echo missing) adapter='$_nm_wladapter'" | tee -a "$debug"
 fi
-unset _nm_sim_id _nm_target_ssid _nm_ssidpw _nm_site_based _nm_wsite _nm_wladapter
+unset _nm_sim_id _nm_target_ssid _nm_ssidpw _nm_site_based _nm_wsite _nm_wsite_override _nm_username _nm_wladapter
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
