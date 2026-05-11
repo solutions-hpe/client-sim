@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.76"
+AGENT_VERSION="2.77"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1831,6 +1831,7 @@ PY
             unset "STATE_VMID_TO_IMAGE[$_dvmid]"
         done
         save_state_file
+        build_usb_state_json  # rebuild cache so post_telemetry doesn't report stale VMs
         for _di in "${!_del_vmids[@]}"; do
             local _status="${_del_results[$_di]:-failed}"
             local _message="delete_vm completed"
