@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.20"
+AGENT_VERSION="2.21"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1324,12 +1324,13 @@ JSON
 # (update_agent command) and from the main loop's periodic self-check.
 self_update_agent() {
     local requested_branch="${1:-}"
+    local requested_repo_raw="${2:-}"
     local agent_script="/usr/local/bin/client-sim-proxmox-agent"
     local configured_branch branch repo_raw download_dir tmp_file
     configured_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
     branch="${requested_branch:-$configured_branch}"
     branch="${branch:-lrb}"
-    repo_raw="https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}"
+    repo_raw="${requested_repo_raw:-https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}}"
     download_dir="/var/lib/client-sim/update"
     tmp_file="${download_dir}/proxmox-agent.sh.download"
     mkdir -p "$download_dir"
@@ -1367,7 +1368,7 @@ self_update_agent() {
 }
 
 execute_vm_command() {
-    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}"
+    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}"
     local guest_type="${_type:-qemu}"
     if [[ -n "$vmid" && "$guest_type" != "lxc" ]]; then
         if pct status "$vmid" >/dev/null 2>&1 && ! qm status "$vmid" >/dev/null 2>&1; then
@@ -1420,7 +1421,7 @@ execute_vm_command() {
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent|update-agent)
-            self_update_agent "$_branch"
+            self_update_agent "$_branch" "$_repo_raw"
             ;;
         *)          return 1 ;;
     esac
@@ -1512,14 +1513,15 @@ for cmd in commands:
     guest_type = str(cmd.get('args', {}).get('type') or cmd.get('args', {}).get('vm_type') or '').replace('\t', ' ')
     source_vmid = cmd.get('args', {}).get('source_vmid', '')
     branch = str(cmd.get('args', {}).get('branch') or '').replace('\t', ' ')
+    repo_raw = str(cmd.get('args', {}).get('repo_raw') or '').replace('\t', ' ')
     ctype = str(cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
-    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{branch}\t{ctype}")
+    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{branch}\t{repo_raw}\t{ctype}")
 PY
 )
-    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=() _seq_branches=()
+    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=() _seq_branches=() _seq_repo_raws=()
     local _rc_ids=() _rc_vmids=() _rc_types=() _rc_sources=()
     local _del_ids=() _del_vmids=()
-    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch cmd_type; do
+    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type; do
         [[ -z "$cmd_id" || -z "$action" ]] && continue
         if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
             _rc_ids+=("$cmd_id")
@@ -1536,13 +1538,14 @@ PY
             _seq_types+=("${guest_type:-$cmd_type}")
             _seq_sources+=("$source_vmid")
             _seq_branches+=("$branch")
+            _seq_repo_raws+=("$repo_raw")
         fi
     done <<< "$parsed_commands"
 
     for _si in "${!_seq_ids[@]}"; do
         log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
         local status="completed" message=""
-        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" "${_seq_branches[$_si]}" 2>>"$AGENT_LOG"; then
+        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" "${_seq_branches[$_si]}" "${_seq_repo_raws[$_si]}" 2>>"$AGENT_LOG"; then
             message="${_seq_actions[$_si]} completed"
         else
             status="failed"
