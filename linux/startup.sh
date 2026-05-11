@@ -8,12 +8,23 @@ debug="/usr/local/scripts/debug-startup.log"
 # locks from the previous session are physically impossible. This is safer
 # than a persistent-path lock + rmdir approach: even if exec bash replaces
 # this process (voiding the EXIT trap), the lock vanishes on the next reboot.
+# Self-remove from XDG autostart — launch-terminals.sh is the authoritative
+# launcher.  Older update.sh versions incorrectly deployed startup.desktop to
+# /etc/xdg/autostart/, creating a second invocation that competed with the
+# launch-terminals.sh window.  Remove it once on first run so it never fires again.
+sudo rm -f /etc/xdg/autostart/startup.desktop 2>/dev/null || true
+
+# Instance guard — prevent multiple concurrent startups from racing.
+# Lock lives in /run/ (tmpfs) which is cleared on every boot, so stale
+# locks from the previous session are physically impossible. This is safer
+# than a persistent-path lock + rmdir approach: even if exec bash replaces
+# this process (voiding the EXIT trap), the lock vanishes on the next reboot.
 _LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
     echo "$(date): startup.sh already running (lock held) — parking to prevent spurious reboot" >> "$debug"
     # DO NOT exit here. The parent shell is: bash -c "startup.sh ; systemctl reboot"
     # Exiting would trigger the reboot even though the real simulation is still healthy.
-    # Instead, park this duplicate invocation by sleeping until killed or rebooted.
+    # Instead, park this duplicate invocation until killed or rebooted.
     exec tail -f /dev/null
 fi
 trap 'rmdir "$_LOCK_FILE" 2>/dev/null || true' EXIT INT TERM
