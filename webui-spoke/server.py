@@ -312,6 +312,7 @@ def _save_state_cache(force: bool = False) -> None:
             "proxmox_state": {**proxmox_state, "connected": False},
             "central_status": central_status,
             "central_wireless_clients": dict(central_wireless_clients),
+            "repo_state": dict(repo_state),
             "ts": now,
         }
         _atomic_write_json(STATE_CACHE_FILE, cache)
@@ -369,6 +370,13 @@ def _load_state_cache() -> None:
             proxmox_state["connected"] = False  # never restore as connected
         central_status.update(cache.get("central_status", {}))
         central_wireless_clients.update(cache.get("central_wireless_clients", {}))
+        cached_repo = cache.get("repo_state", {})
+        if cached_repo:
+            # Restore last_sync timestamp and last error for display, but mark
+            # synced=False — we haven't actually synced since this restart yet.
+            repo_state["last_sync"] = cached_repo.get("last_sync")
+            repo_state["error"] = cached_repo.get("error")
+            repo_state["synced"] = False
         logger.info("Restored state cache from disk (age=%.0fs)", age)
     except Exception as exc:
         logger.warning("Could not load state cache: %s", exc)
