@@ -46,6 +46,7 @@ COMMAND_QUEUE_FILE = BASE_DIR / "command_queue.json"
 RECLONE_STATE_FILE = BASE_DIR / "reclone_state.json"
 RELAY_STATE_FILE = BASE_DIR / "relay_state.json"
 UPDATE_STATE_FILE = BASE_DIR / "update_state.json"
+VM_WATCHDOG_FILE = BASE_DIR / "vm_watchdog.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
 CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
@@ -188,6 +189,8 @@ RELAY_INTERVAL_DEFAULT = 60   # 1 minute
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
 HISTORY_HOURS = 24
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
+VM_WATCHDOG_TIMEOUT_SECS = 86400
+VM_WATCHDOG_INTERVAL_SECS = 1800
 
 # Self-update: the installer lives inside the synced repo
 _INSTALLER_PATH = REPO_DIR / "webui-spoke" / "install-lxc.sh"
@@ -343,6 +346,13 @@ def _save_update_state() -> None:
         logger.warning("Could not persist update state to %s: %s", UPDATE_STATE_FILE, exc)
 
 
+def _save_vm_watchdog() -> None:
+    try:
+        _atomic_write_json(VM_WATCHDOG_FILE, vm_watchdog)
+    except Exception as exc:
+        logger.warning("Could not persist VM watchdog state to %s: %s", VM_WATCHDOG_FILE, exc)
+
+
 def _load_state_cache() -> None:
     """Restore last-known state from disk so the UI renders immediately on restart
     instead of showing empty state for up to one full agent poll interval (60 s)."""
@@ -461,6 +471,50 @@ def _load_update_state() -> None:
         logger.info("Restored update state from disk")
     except Exception as exc:
         logger.warning("Could not load update state: %s", exc)
+
+
+def _load_vm_watchdog() -> None:
+    try:
+        if not VM_WATCHDOG_FILE.exists():
+            return
+        raw = json.loads(VM_WATCHDOG_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("vm watchdog state must be an object")
+        restored: dict[str, dict[str, Any]] = {}
+        changed = False
+        for raw_vmid, entry in raw.items():
+            if not isinstance(entry, dict):
+                changed = True
+                continue
+            try:
+                vmid_key = str(int(raw_vmid))
+            except (TypeError, ValueError):
+                changed = True
+                continue
+            clone_completed_at = _parse_ts(entry.get("clone_completed_at"))
+            if clone_completed_at is None:
+                changed = True
+                continue
+            try:
+                reclone_count = max(0, int(entry.get("reclone_count", 0) or 0))
+            except (TypeError, ValueError):
+                reclone_count = 0
+                changed = True
+            normalized = {
+                "clone_completed_at": clone_completed_at,
+                "reclone_count": reclone_count,
+                "hostname": str(entry.get("hostname") or "").strip(),
+            }
+            if entry != normalized or raw_vmid != vmid_key:
+                changed = True
+            restored[vmid_key] = normalized
+        vm_watchdog.clear()
+        vm_watchdog.update(restored)
+        if changed:
+            _save_vm_watchdog()
+        logger.info("Restored VM watchdog state from disk")
+    except Exception as exc:
+        logger.warning("Could not load VM watchdog state: %s", exc)
 
 
 def _normalize_relay_enabled(value: Any) -> str:
@@ -1778,6 +1832,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     _load_reclone_state()
     _load_relay_state()
     _load_update_state()
+    _load_vm_watchdog()
     background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
@@ -1787,6 +1842,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
+    background_tasks["vm_watchdog"] = asyncio.create_task(vm_watchdog_loop())
     background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
     background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
     background_tasks["baseline_saver"] = asyncio.create_task(hourly_baseline_saver())
@@ -1897,6 +1953,7 @@ reclone_state: dict[str, Any] = {
     "last_run": None,
     "started_at": None,
 }
+vm_watchdog: dict[str, dict[str, Any]] = {}
 update_all_state: dict[str, Any] = {
     "running": False,
     "phase": "idle",
@@ -2212,6 +2269,67 @@ def _parse_ts(value: Any) -> float | None:
     return None
 
 
+def _vm_watchdog_key(vmid: Any) -> str | None:
+    try:
+        return str(int(vmid))
+    except (TypeError, ValueError):
+        return None
+
+
+def _client_last_seen_for_hostname(hostname: Any, client_seen: dict[str, Any] | None = None) -> datetime | None:
+    normalized = str(hostname or "").strip().lower()
+    if not normalized:
+        return None
+    seen_map = client_seen or {name: info.get("last_seen") for name, info in clients.items()}
+    for candidate, last_seen in seen_map.items():
+        if str(candidate or "").strip().lower() == normalized and isinstance(last_seen, datetime):
+            return last_seen
+    return None
+
+
+def _vm_has_checked_in(hostname: Any, clone_completed_at: float | None, client_seen: dict[str, Any] | None = None) -> bool:
+    if clone_completed_at is None:
+        return False
+    last_seen = _client_last_seen_for_hostname(hostname, client_seen)
+    return bool(last_seen and last_seen.timestamp() > float(clone_completed_at))
+
+
+def _record_vm_watchdog_clone_completed(
+    vmid: Any,
+    hostname: Any,
+    *,
+    clone_completed_at: float | None = None,
+    reclone_count: int | None = None,
+) -> bool:
+    vmid_key = _vm_watchdog_key(vmid)
+    if vmid_key is None:
+        return False
+    current = vm_watchdog.get(vmid_key) or {}
+    if reclone_count is None:
+        try:
+            reclone_count = max(0, int(current.get("reclone_count", 0) or 0))
+        except (TypeError, ValueError):
+            reclone_count = 0
+    vm_watchdog[vmid_key] = {
+        "clone_completed_at": float(clone_completed_at if clone_completed_at is not None else time.time()),
+        "reclone_count": max(0, int(reclone_count)),
+        "hostname": str(hostname or current.get("hostname") or "").strip(),
+    }
+    return True
+
+
+def _vm_pending_checkin(vm: dict[str, Any], client_seen: dict[str, Any] | None = None) -> bool:
+    vmid_key = _vm_watchdog_key(vm.get("vmid"))
+    if vmid_key is None:
+        return False
+    entry = vm_watchdog.get(vmid_key)
+    if not entry:
+        return False
+    clone_completed_at = _parse_ts(entry.get("clone_completed_at"))
+    hostname = str(entry.get("hostname") or vm.get("name") or "").strip()
+    return not _vm_has_checked_in(hostname, clone_completed_at, client_seen)
+
+
 def _proxmox_usb_config_payload() -> dict[str, Any]:
     # Read sim_phy from the repo's simulation.conf so the agent knows which
     # USB device type (wired/wireless) to provision and assign.
@@ -2326,8 +2444,15 @@ def _read_local_kill_switch() -> str:
 
 def _proxmox_status_payload() -> dict[str, Any]:
     node = proxmox_state.get("node") or {}
+    client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
+    vms = []
+    for vm in proxmox_state.get("vms", []):
+        enriched_vm = dict(vm)
+        enriched_vm["pending_checkin"] = _vm_pending_checkin(enriched_vm, client_seen)
+        vms.append(enriched_vm)
     return {
         **proxmox_state,
+        "vms": vms,
         "hostname": str(node.get("hostname") or "").strip(),
         "pending_proxmox": _pending_proxmox_payload(),
         "approved_proxmox": _approved_proxmox_payload(),
@@ -2752,6 +2877,8 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                     final_status = "completed" if status == "completed" else "failed"
                     _update_reclone_log(vmid, name, final_status, str(current.get("message") or "").strip() or None)
                     if final_status == "completed":
+                        _record_vm_watchdog_clone_completed(vmid, name)
+                        _save_vm_watchdog()
                         reclone_state["completed"] += 1
                     else:
                         reclone_state["failed"] += 1
@@ -2852,6 +2979,65 @@ async def auto_recovery_check() -> None:
         await asyncio.sleep(1800)
 
 
+
+
+async def vm_watchdog_loop() -> None:
+    await asyncio.sleep(VM_WATCHDOG_INTERVAL_SECS)
+    while True:
+        try:
+            now = time.time()
+            client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
+            vm_names = {
+                str(int(vm.get("vmid"))): str(vm.get("name") or "").strip()
+                for vm in proxmox_state.get("vms", [])
+                if vm.get("vmid") is not None
+            }
+            changed = False
+            broadcast_needed = False
+            for vmid_key, entry in list(vm_watchdog.items()):
+                clone_completed_at = _parse_ts(entry.get("clone_completed_at"))
+                if clone_completed_at is None:
+                    vm_watchdog.pop(vmid_key, None)
+                    changed = True
+                    broadcast_needed = True
+                    continue
+                hostname = str(entry.get("hostname") or vm_names.get(vmid_key) or "").strip()
+                if hostname and hostname != entry.get("hostname"):
+                    entry["hostname"] = hostname
+                    changed = True
+                if _vm_has_checked_in(hostname, clone_completed_at, client_seen):
+                    vm_watchdog.pop(vmid_key, None)
+                    changed = True
+                    broadcast_needed = True
+                    continue
+                if (now - clone_completed_at) <= VM_WATCHDOG_TIMEOUT_SECS:
+                    continue
+                vmid_int = int(vmid_key)
+                if _has_pending_reclone(vmid_int):
+                    continue
+                vm = _find_proxmox_vm(vmid_int) or {"vmid": vmid_int}
+                await _queue_proxmox_command("reclone_vm", _reclone_command_args(vm), command_type="watchdog")
+                reclone_count = max(0, int(entry.get("reclone_count", 0) or 0)) + 1
+                _record_vm_watchdog_clone_completed(
+                    vmid_int,
+                    hostname or vm.get("name"),
+                    clone_completed_at=now,
+                    reclone_count=reclone_count,
+                )
+                changed = True
+                broadcast_needed = True
+                logger.warning("VM watchdog queued reclone for VM %s (%s) after 24h without check-in", vmid_int, hostname or vm.get("name") or f"VM {vmid_int}")
+            if changed:
+                _save_vm_watchdog()
+            if broadcast_needed:
+                await _broadcast_proxmox_state()
+            _update_service_health("vm_watchdog", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("vm_watchdog", ok=False, error=str(exc))
+            logger.exception("VM watchdog error: %s", exc)
+        await asyncio.sleep(VM_WATCHDOG_INTERVAL_SECS)
 
 
 async def schedule_check() -> None:
@@ -4506,6 +4692,10 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
         ]
         if newly_provisioned:
             proxmox_state["prov_summary"] = {"action": "provisioned", "count": len(newly_provisioned), "at": now}
+            for vmid in newly_provisioned:
+                vm = next((item for item in enriched_vms if str(item.get("vmid")) == vmid), {})
+                _record_vm_watchdog_clone_completed(vmid, vm.get("name"))
+            _save_vm_watchdog()
         elif torn_down:
             proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
     _update_provision_run_state(enriched_vms, new_usb, now)
@@ -5625,6 +5815,7 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
         return {"status": "ignored", "reason": "template hostname"}
 
     now = utcnow()
+    watchdog_changed = False
     async with state_lock:
         existing = clients.get(status.hostname, {})
 
@@ -5667,9 +5858,22 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
             "recent_errors": recent_errors,
             "error_count": total_errors,
         }
+        normalized_hostname = str(status.hostname or "").strip().lower()
+        for vmid_key, entry in list(vm_watchdog.items()):
+            if str(entry.get("hostname") or "").strip().lower() != normalized_hostname:
+                continue
+            clone_completed_at = _parse_ts(entry.get("clone_completed_at"))
+            if clone_completed_at is None or now.timestamp() <= clone_completed_at:
+                continue
+            vm_watchdog.pop(vmid_key, None)
+            watchdog_changed = True
+        if watchdog_changed:
+            _save_vm_watchdog()
         payload = serialize_client(status.hostname, clients[status.hostname])
 
     await broadcast({"type": "status_update", "client": payload})
+    if watchdog_changed:
+        await _broadcast_proxmox_state()
     return {"status": "ok", "client": payload}
 
 
