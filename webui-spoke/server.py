@@ -42,6 +42,10 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 STATE_CACHE_FILE = BASE_DIR / "state_cache.json"
+COMMAND_QUEUE_FILE = BASE_DIR / "command_queue.json"
+RECLONE_STATE_FILE = BASE_DIR / "reclone_state.json"
+RELAY_STATE_FILE = BASE_DIR / "relay_state.json"
+UPDATE_STATE_FILE = BASE_DIR / "update_state.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
 CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
@@ -287,6 +291,12 @@ _sim_conf_cache: dict[str, Any] = {
 }
 
 
+def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = None) -> None:
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=indent, default=str), encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def _save_state_cache(force: bool = False) -> None:
     global _state_cache_last_save
     now = time.time()
@@ -299,10 +309,38 @@ def _save_state_cache(force: bool = False) -> None:
             "central_wireless_clients": dict(central_wireless_clients),
             "ts": now,
         }
-        STATE_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        _atomic_write_json(STATE_CACHE_FILE, cache)
         _state_cache_last_save = now
     except Exception as exc:
         logger.warning("Could not write state cache: %s", exc)
+
+
+def _save_commands() -> None:
+    try:
+        _atomic_write_json(COMMAND_QUEUE_FILE, commands)
+    except Exception as exc:
+        logger.warning("Could not persist command queue to %s: %s", COMMAND_QUEUE_FILE, exc)
+
+
+def _save_reclone_state() -> None:
+    try:
+        _atomic_write_json(RECLONE_STATE_FILE, reclone_state)
+    except Exception as exc:
+        logger.warning("Could not persist reclone state to %s: %s", RECLONE_STATE_FILE, exc)
+
+
+def _save_relay_state() -> None:
+    try:
+        _atomic_write_json(RELAY_STATE_FILE, relay_state)
+    except Exception as exc:
+        logger.warning("Could not persist relay state to %s: %s", RELAY_STATE_FILE, exc)
+
+
+def _save_update_state() -> None:
+    try:
+        _atomic_write_json(UPDATE_STATE_FILE, update_state)
+    except Exception as exc:
+        logger.warning("Could not persist update state to %s: %s", UPDATE_STATE_FILE, exc)
 
 
 def _load_state_cache() -> None:
@@ -313,9 +351,6 @@ def _load_state_cache() -> None:
             return
         cache = json.loads(STATE_CACHE_FILE.read_text(encoding="utf-8"))
         age = time.time() - cache.get("ts", 0)
-        if age > 3600:  # ignore stale cache (>1 h old)
-            logger.info("State cache is %.0f s old — skipping restore", age)
-            return
         cached_px = cache.get("proxmox_state", {})
         if cached_px:
             proxmox_state.update(cached_px)
@@ -325,6 +360,107 @@ def _load_state_cache() -> None:
         logger.info("Restored state cache from disk (age=%.0fs)", age)
     except Exception as exc:
         logger.warning("Could not load state cache: %s", exc)
+
+
+def _load_commands() -> None:
+    try:
+        if not COMMAND_QUEUE_FILE.exists():
+            return
+        raw = json.loads(COMMAND_QUEUE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            raise ValueError("command queue must be a list")
+        now = time.time()
+        changed = False
+        restored: list[dict[str, Any]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                changed = True
+                continue
+            cmd = dict(entry)
+            if cmd.get("status") == "executing":
+                cmd["status"] = "pending"
+                cmd["updated_at"] = now
+                changed = True
+            restored.append(cmd)
+        commands[:] = restored
+        expired, purged = _cleanup_commands_locked(now)
+        if expired or purged:
+            changed = True
+        if changed:
+            _save_commands()
+        logger.info("Restored %d command(s) from disk", len(commands))
+    except Exception as exc:
+        logger.warning("Could not load command queue: %s", exc)
+
+
+def _load_reclone_state() -> None:
+    try:
+        if not RECLONE_STATE_FILE.exists():
+            return
+        raw = json.loads(RECLONE_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("reclone state must be an object")
+        for key in reclone_state:
+            if key in raw:
+                reclone_state[key] = raw[key]
+        changed = False
+        if reclone_state.get("status") == "running":
+            reclone_state["status"] = "interrupted"
+            reclone_state["current_vm"] = None
+            reclone_state["started_at"] = None
+            log_entry = {
+                "vmid": None,
+                "name": "System",
+                "status": "interrupted",
+                "timestamp": iso_utcnow(),
+                "message": "Rolling reclone interrupted by restart",
+            }
+            reclone_state["log"] = list(reclone_state.get("log") or []) + [log_entry]
+            reclone_state["log"] = reclone_state["log"][-200:]
+            changed = True
+        if changed:
+            _save_reclone_state()
+        logger.info("Restored reclone state from disk")
+    except Exception as exc:
+        logger.warning("Could not load reclone state: %s", exc)
+
+
+def _load_relay_state() -> None:
+    global relay_registration_refresh_needed
+    try:
+        if not RELAY_STATE_FILE.exists():
+            return
+        raw = json.loads(RELAY_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("relay state must be an object")
+        for key in relay_state:
+            if key in raw:
+                relay_state[key] = raw[key]
+        relay_state["connected"] = False
+        relay_registration_refresh_needed = bool(relay_state.get("enabled"))
+        _save_relay_state()
+        logger.info("Restored relay state from disk")
+    except Exception as exc:
+        logger.warning("Could not load relay state: %s", exc)
+
+
+def _load_update_state() -> None:
+    try:
+        if not UPDATE_STATE_FILE.exists():
+            return
+        raw = json.loads(UPDATE_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("update state must be an object")
+        for key in update_state:
+            if key in raw:
+                update_state[key] = raw[key]
+        if update_state.get("update_in_progress"):
+            update_state["update_in_progress"] = False
+            update_state["update_error"] = "Update interrupted by restart"
+            _save_update_state()
+        logger.info("Restored update state from disk")
+    except Exception as exc:
+        logger.warning("Could not load update state: %s", exc)
 
 
 def _normalize_relay_enabled(value: Any) -> str:
@@ -1637,6 +1773,11 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     logger.info("Client Simulator  v%s  starting up", INSTALLER_VERSION)
     logger.info("=" * 60)
     central_history = await asyncio.to_thread(_load_history)
+    _load_state_cache()
+    _load_commands()
+    _load_reclone_state()
+    _load_relay_state()
+    _load_update_state()
     background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
@@ -1755,10 +1896,6 @@ background_tasks: dict[str, asyncio.Task[Any]] = {}
 service_health: dict[str, dict[str, Any]] = {}
 reclone_run_lock = asyncio.Lock()
 last_schedule_trigger: str | None = None
-
-# Restore last-known state so UI renders immediately instead of waiting for first agent poll
-_load_state_cache()
-
 
 class ClientStatus(BaseModel):
     hostname: str
@@ -1941,6 +2078,8 @@ def _cleanup_commands_locked(now: float | None = None) -> tuple[int, int]:
     ]
     purged = before - len(commands)
     _trim_commands_locked()
+    if expired or purged:
+        _save_commands()
     return expired, purged
 
 
@@ -1972,6 +2111,7 @@ def _enqueue_command_locked(target: str, action: str, args: dict[str, Any] | Non
     cmd = _make_command(target, normalized_action, normalized_args, command_type=normalized_type)
     commands.append(cmd)
     _trim_commands_locked()
+    _save_commands()
     return cmd, True, expired, purged
 
 
@@ -2231,6 +2371,7 @@ async def _broadcast_proxmox_state() -> None:
 
 
 async def _broadcast_reclone_state() -> None:
+    _save_reclone_state()
     await broadcast({"type": "reclone_update", **dict(reclone_state)})
 
 
@@ -2250,6 +2391,7 @@ def _update_reclone_log(vmid: int, name: str, status: str, message: str | None =
             entry["message"] = message
         reclone_state["log"].append(entry)
     reclone_state["log"] = reclone_state["log"][-200:]
+    _save_reclone_state()
 
 
 def _parse_reclone_schedule(value: Any) -> tuple[str, int, int] | None:
@@ -2556,6 +2698,7 @@ async def auto_recovery_check() -> None:
                         "timestamp": iso_utcnow(),
                     })
                 reclone_state["auto_recovery_log"] = reclone_state["auto_recovery_log"][-50:]
+                _save_reclone_state()
                 await broadcast({
                     "type": "notification",
                     "level": "warning",
@@ -2680,6 +2823,16 @@ def _relay_status_payload() -> dict[str, Any]:
     return dict(relay_state)
 
 
+async def _broadcast_relay_state() -> None:
+    _save_relay_state()
+    await broadcast({"type": "relay_status", **_relay_status_payload()})
+
+
+async def _broadcast_update_state() -> None:
+    _save_update_state()
+    await broadcast({"type": "version_status", **dict(update_state)})
+
+
 def _build_registration_config() -> dict[str, Any]:
     """Build the seed config payload sent to hub on first registration."""
     return {
@@ -2735,6 +2888,7 @@ async def _hub_self_register(server_url: str) -> None:
                     "error": f"{ts} — {msg}",
                 })
                 relay_registration_refresh_needed = False
+                _save_relay_state()
                 _relay_diag_append("register_409", conflict=conflict, message=msg)
                 logger.warning("Hub registration name conflict: %s", msg)
                 return
@@ -2767,12 +2921,14 @@ async def _hub_self_register(server_url: str) -> None:
             _relay_diag_append("register_ok", status="pending", spoke_id=spoke_id)
             logger.info("Hub registration submitted: spoke_id=%s status=pending", spoke_id)
         relay_registration_refresh_needed = False
+        _save_relay_state()
         _save_settings()
     except Exception as exc:
         relay_registration_refresh_needed = True
         _relay_diag_append("register_error", error=str(exc))
         logger.warning("Hub self-register failed: %s", exc)
         relay_state.update({"connected": False, "error": f"Registration failed: {exc}"})
+        _save_relay_state()
 
 
 async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
@@ -2828,6 +2984,7 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
             _relay_diag_append("still_pending", spoke_id=spoke_id)
             logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
         relay_registration_refresh_needed = False
+        _save_relay_state()
         if updated:
             _save_settings()
     except Exception as exc:
@@ -2887,6 +3044,7 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
             "registration_status": _relay_registration_status_from_settings(),
         })
         relay_registration_refresh_needed = False
+        _save_relay_state()
     _save_settings()
     await broadcast({"type": "settings_update", "settings": await api_settings_get()})
     logger.info("Applied hub config_update: %s", changed)
@@ -2904,11 +3062,12 @@ async def relay_sync_once() -> None:
     global relay_registration_refresh_needed
     if settings.get("relay_enabled") != "on" or not settings.get("relay_server_url"):
         relay_state["enabled"] = False
+        _save_relay_state()
         return
 
     if not _HTTPX_AVAILABLE or httpx is None:
         relay_state.update({"enabled": True, "connected": False, "error": "httpx not installed"})
-        await broadcast({"type": "relay_status", **relay_state})
+        await _broadcast_relay_state()
         return
 
     relay_state["enabled"] = True
@@ -2920,7 +3079,7 @@ async def relay_sync_once() -> None:
     # ── Phase 1: Register if no spoke_id yet ──────────────────────────────────
     if not spoke_id:
         await _hub_self_register(server_url)
-        await broadcast({"type": "relay_status", **relay_state})
+        await _broadcast_relay_state()
         return
 
     if relay_registration_refresh_needed:
@@ -2937,7 +3096,7 @@ async def relay_sync_once() -> None:
         api_key = settings.get("relay_api_key", "")
         tenant_id = settings.get("relay_tenant_id", "")
         if not api_key or not tenant_id:
-            await broadcast({"type": "relay_status", **relay_state})
+            await _broadcast_relay_state()
             return
 
     # ── Phase 3: Approved — full relay cycle ───────────────────────────────────
@@ -3078,7 +3237,7 @@ async def relay_sync_once() -> None:
         relay_state.update({"connected": False, "error": str(exc)})
         logger.warning("Relay sync failed: %s", exc)
 
-    await broadcast({"type": "relay_status", **relay_state})
+    await _broadcast_relay_state()
 
 
 async def relay_loop() -> None:
@@ -3383,7 +3542,7 @@ async def check_for_update() -> None:
                 update_state["update_available"],
             )
             _update_service_health("update_checker", ok=True)
-            await broadcast({"type": "version_status", **update_state})
+            await _broadcast_update_state()
             if update_state["update_available"]:
                 logger.info("New version %s available — triggering self-update", available)
                 await _run_self_update()
@@ -3498,12 +3657,12 @@ async def _run_self_update() -> None:
         msg = f"Self-update: installer not found at {_INSTALLER_PATH}"
         logger.error(msg)
         update_state["update_error"] = msg
-        await broadcast({"type": "version_status", **update_state})
+        await _broadcast_update_state()
         return
     update_state["update_in_progress"] = True
     update_state["update_log"] = []
     update_state["update_error"] = None
-    await broadcast({"type": "version_status", **update_state})
+    await _broadcast_update_state()
     try:
         import shlex as _shlex, os as _os
         # Use create_subprocess_shell so /bin/sh resolves bash via its own PATH.
@@ -3529,7 +3688,7 @@ async def _run_self_update() -> None:
             line = _ansi_re.sub('', raw.decode(errors="replace")).rstrip()
             update_state["update_log"].append(line)
             logger.info("self-update: %s", line)
-            await broadcast({"type": "version_status", **update_state})
+            await _broadcast_update_state()
         await proc.wait()
         # -15 (SIGTERM) is expected when the installer schedules a deferred
         # `systemctl restart` and asyncio cleans up the subprocess transport
@@ -3542,18 +3701,18 @@ async def _run_self_update() -> None:
             logger.error("Self-update installer exited with code %s", proc.returncode)
             update_state["update_in_progress"] = False
             update_state["update_error"] = f"Installer exited with code {proc.returncode} — check logs"
-            await broadcast({"type": "version_status", **update_state})
+            await _broadcast_update_state()
         else:
             logger.info("Self-update installer completed successfully (rc=%s)", proc.returncode)
             update_state["update_in_progress"] = False
             update_state["update_error"] = None
-            await broadcast({"type": "version_status", **update_state})
+            await _broadcast_update_state()
     except Exception as exc:
         logger.exception("Self-update failed")
         update_state["update_in_progress"] = False
         update_state["update_error"] = str(exc)
         update_state["update_log"].append(f"ERROR: {exc}")
-        await broadcast({"type": "version_status", **update_state})
+        await _broadcast_update_state()
 
 
 
@@ -3703,6 +3862,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             "registration_status": _relay_registration_status_from_settings(),
         })
         relay_registration_refresh_needed = bool(relay_state["enabled"])
+        _save_relay_state()
 
     if update.central_api is not None:
         merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
@@ -3877,7 +4037,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     payload = await api_settings_get()
     await broadcast({"type": "settings_update", "settings": payload})
     if relay_config_changed:
-        await broadcast({"type": "relay_status", **_relay_status_payload()})
+        await _broadcast_relay_state()
     return {"status": "ok", "settings": payload}
 
 
@@ -3911,6 +4071,7 @@ async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Bod
             "registration_status": "unregistered",
         })
         relay_registration_refresh_needed = False
+        _save_relay_state()
         relay_config_changed = True
         relay_payload = _relay_status_payload()
     elif provider_key == "central":
@@ -3940,7 +4101,7 @@ async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Bod
     payload = await api_settings_get()
     await broadcast({"type": "settings_update", "settings": payload})
     if relay_config_changed and relay_payload is not None:
-        await broadcast({"type": "relay_status", **relay_payload})
+        await _broadcast_relay_state()
 
     response: dict[str, Any] = {"status": "ok", "provider": provider_key, "settings": payload}
     if relay_payload is not None:
@@ -5120,7 +5281,7 @@ async def api_self_update() -> dict[str, Any]:
     update_state["update_available"] = (
         available is not None and available != update_state["current_version"]
     )
-    await broadcast({"type": "version_status", **update_state})
+    await _broadcast_update_state()
     if not update_state["update_available"]:
         return {"status": "ok", "message": f"Already up to date (v{update_state['current_version']})"}
     asyncio.create_task(_run_self_update())
@@ -5744,11 +5905,13 @@ async def api_server_clear_cache() -> dict[str, Any]:
         proxmox_log_buffer.clear()
         pending_proxmox_agents.clear()
         commands.clear()
+        _save_commands()
         reclone_state.update({
             "status": "idle", "type": None, "total": 0, "completed": 0,
             "failed": 0, "current_vm": None, "log": [], "auto_recovery_log": [],
             "last_run": None, "started_at": None,
         })
+        _save_reclone_state()
         update_all_state.update({
             "running": False, "phase": "idle", "total_agents": 0,
             "completed_agents": 0, "failed_agents": 0, "agent_cmds": [],
@@ -5770,8 +5933,16 @@ async def api_setup_clear_cache() -> dict[str, Any]:
     import shutil
 
     # 1. Delete cached data files
-    for path in [CLIENT_HISTORY_FILE, STATE_CACHE_FILE, HISTORY_FILE,
-                 CLIENT_COUNT_BASELINE_FILE]:
+    for path in [
+        CLIENT_HISTORY_FILE,
+        STATE_CACHE_FILE,
+        COMMAND_QUEUE_FILE,
+        RECLONE_STATE_FILE,
+        RELAY_STATE_FILE,
+        UPDATE_STATE_FILE,
+        HISTORY_FILE,
+        CLIENT_COUNT_BASELINE_FILE,
+    ]:
         try:
             path.unlink(missing_ok=True)
         except Exception:
@@ -5926,6 +6097,8 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
         for cmd in pending:
             cmd["status"] = "delivered"
             cmd["updated_at"] = now
+        if pending:
+            _save_commands()
         serialized = _serialize_commands()
         payload = [{"id": c["id"], "action": c["action"], "args": c["args"], "type": c.get("type")} for c in pending]
 
@@ -5954,6 +6127,7 @@ async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
         cmd["message"] = str(message) if message is not None else ""
         cmd["updated_at"] = time.time()
         cmd["purge_after"] = cmd["updated_at"] + COMMAND_RESULT_RETENTION_SECS
+        _save_commands()
         serialized = _serialize_commands()
 
     await broadcast({"type": "commands_update", "commands": serialized})
@@ -5973,6 +6147,8 @@ async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
                 cmd["updated_at"] = now
                 cmd["purge_after"] = now + COMMAND_RESULT_RETENTION_SECS
                 count += 1
+        if count:
+            _save_commands()
         serialized = _serialize_commands()
     if count:
         logger.info("Expired %d active command(s) for target %s before VM destroy", count, target)
@@ -5985,11 +6161,14 @@ async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
 @app.delete("/api/commands/{cmd_id}")
 async def delete_command(cmd_id: str) -> dict[str, bool]:
     """Remove a command from history."""
-    before = len(commands)
-    commands[:] = [c for c in commands if c["id"] != cmd_id]
-    if len(commands) == before:
-        raise HTTPException(status_code=404, detail="Command not found")
-    await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+    async with state_lock:
+        before = len(commands)
+        commands[:] = [c for c in commands if c["id"] != cmd_id]
+        if len(commands) == before:
+            raise HTTPException(status_code=404, detail="Command not found")
+        _save_commands()
+        serialized = _serialize_commands()
+    await broadcast({"type": "commands_update", "commands": serialized})
     return {"ok": True}
 
 
