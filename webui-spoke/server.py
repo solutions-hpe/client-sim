@@ -1938,6 +1938,8 @@ _prev_usb_by_vmid: dict[str, str] = {}
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
+proxmox_watchdog_log: list[dict[str, Any]] = []
+PROXMOX_WATCHDOG_LOG_MAX = 100
 # Pending/approved Proxmox agent registry
 pending_proxmox_agents: dict[str, dict[str, Any]] = {}
 approved_proxmox_agents: dict[str, str] = dict(settings.get("proxmox_approved_agents", {}))
@@ -4724,6 +4726,42 @@ async def clear_proxmox_logs() -> dict[str, bool]:
     """Clear the in-memory agent log buffer."""
     proxmox_log_buffer.clear()
     await broadcast({"type": "proxmox_log_update", "lines": [], "cleared": True})
+    return {"ok": True}
+
+
+@app.post("/api/proxmox/watchdog_event")
+async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
+    event = str(body.get("event", "") or "").strip()
+    service = str(body.get("service", "") or "").strip()
+    hostname = str(body.get("hostname", "") or "").strip()
+    timestamp = str(body.get("timestamp", "") or "").strip()
+    try:
+        failure_count = max(0, int(body.get("failure_count", 0) or 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="failure_count must be an integer")
+
+    if not all((event, service, hostname, timestamp)):
+        raise HTTPException(status_code=400, detail="event, service, hostname, and timestamp are required")
+
+    entry = {
+        "event": event,
+        "service": service,
+        "hostname": hostname,
+        "timestamp": timestamp,
+        "failure_count": failure_count,
+    }
+    proxmox_watchdog_log.append(entry)
+    if len(proxmox_watchdog_log) > PROXMOX_WATCHDOG_LOG_MAX:
+        del proxmox_watchdog_log[:len(proxmox_watchdog_log) - PROXMOX_WATCHDOG_LOG_MAX]
+
+    log_line = (
+        f"[{timestamp}] WATCHDOG event={event} service={service} "
+        f"hostname={hostname} failure_count={failure_count}"
+    )
+    proxmox_log_buffer.append(log_line)
+    if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
+        del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+    await broadcast({"type": "proxmox_log_update", "lines": [log_line]})
     return {"ok": True}
 
 

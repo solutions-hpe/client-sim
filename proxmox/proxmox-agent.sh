@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.38"
+AGENT_VERSION="2.39"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -17,6 +17,9 @@ INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
 STATE_FILE="/etc/client-sim-usb-state.conf"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
+AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
+HEALTH_STALE_SECS="${CLIENT_SIM_AGENT_HEALTH_STALE_SECS:-180}"
+HEALTH_FILE="/var/lib/client-sim/agent-health.json"
 USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
 USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"

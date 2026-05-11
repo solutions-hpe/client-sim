@@ -14,3 +14,4 @@ StandardError=append:/var/log/client-sim-proxmox-agent.log
 
 [Install]
 WantedBy=multi-user.target
+Alias=proxmox-agent.service
