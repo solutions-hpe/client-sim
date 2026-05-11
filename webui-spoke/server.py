@@ -1333,8 +1333,11 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
         site_health: dict[str, Any] = {}
 
         if _is_new_central_api():
-            # New Central v1alpha1: no alerts endpoint yet — use sites-health
-            # and AP status per site for monitoring
+            # New Central v1alpha1: derive synthetic alert_type_counts from available endpoints.
+            # Fetch sites-health, devices, and clients in parallel for the mapped site.
+
+            # ── sites-health ──────────────────────────────────────────────
+            site_id: str | None = None
             try:
                 resp = await client.get(
                     f"{base_url}/network-monitoring/v1alpha1/sites-health",
@@ -1355,8 +1358,7 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
                         sname = item.get("siteName") or item.get("site_name") or ""
                         if sname.lower() == central_site.lower():
                             site_health = item
-                            # Map health fields to synthetic alert_type_counts
-                            # so existing check evaluation logic still works
+                            site_id = item.get("siteId") or item.get("site_id")
                             score = item.get("healthScore", item.get("health_score", 100))
                             ap_count = item.get("apCount", item.get("ap_count", 0))
                             alert_type_counts["SITE_HEALTH"] = int(score)
@@ -1365,7 +1367,48 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
             except Exception as exc:
                 logger.warning("New Central sites-health fetch failed for site %s: %s", central_site, exc)
 
-            # New Central: no insights endpoint either — skip
+            # ── devices (AP_DOWN, SWITCH_DOWN, GATEWAY_DOWN) ──────────────
+            try:
+                params: dict[str, Any] = {"limit": 500}
+                if site_id:
+                    params["filter"] = f"siteId eq '{site_id}'"
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/devices",
+                    headers=headers, params=params, timeout=20,
+                )
+                if resp.status_code == 200:
+                    ap_down = switch_down = gw_down = 0
+                    for dev in resp.json().get("items", []):
+                        dtype = (dev.get("deviceType") or "").upper()
+                        status = (dev.get("status") or "").upper()
+                        is_down = status not in ("UP", "ONLINE")
+                        if dtype == "ACCESS_POINT" and is_down:
+                            ap_down += 1
+                        elif dtype == "SWITCH" and is_down:
+                            switch_down += 1
+                        elif dtype == "GATEWAY" and is_down:
+                            gw_down += 1
+                    alert_type_counts["AP_DOWN"] = ap_down
+                    alert_type_counts["SWITCH_DOWN"] = switch_down
+                    alert_type_counts["GATEWAY_DOWN"] = gw_down
+            except Exception as exc:
+                logger.warning("New Central devices fetch failed for site %s: %s", central_site, exc)
+
+            # ── clients (CLIENT_COUNT) ─────────────────────────────────────
+            try:
+                cparams: dict[str, Any] = {}
+                if site_id:
+                    cparams["site-id"] = site_id
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/clients",
+                    headers=headers, params=cparams, timeout=20,
+                )
+                if resp.status_code == 200:
+                    alert_type_counts["CLIENT_COUNT"] = int(resp.json().get("count", 0))
+            except Exception as exc:
+                logger.warning("New Central clients fetch failed for site %s: %s", central_site, exc)
+
+            # New Central: no insights endpoint — skip
             insight_cat_counts: dict[str, int] = {}
         else:
             for alerts_path in ["/monitoring/v1/alerts", "/monitoring/v2/alerts"]:
@@ -5085,19 +5128,26 @@ async def api_central_available() -> dict[str, Any]:
     """Return available alert types and insight categories from Central. Always returns 200."""
     if not _central_ready():
         return {"alerts": [], "insights": [], "warning": "Central not configured."}
-    if not central_token.get("access_token"):
-        return {"alerts": [], "insights": [], "warning": "No valid token — save & test connection first."}
 
-    # New Central v1alpha1 has no alerts/insights endpoints — return static synthetic checks
+    # New Central v1alpha1 has no alerts/insights endpoints — return static synthetic checks.
+    # These correspond to the metrics _poll_central_once() derives from sites-health, /aps, and /devices.
+    # No live token is required to return this static list.
     if _is_new_central_api():
         return {
             "alerts": [
-                {"id": "SITE_HEALTH", "name": "Site Health Score"},
-                {"id": "AP_COUNT",    "name": "AP Count"},
+                {"id": "SITE_HEALTH",    "name": "Site Health Score (0–100)"},
+                {"id": "AP_COUNT",       "name": "Total AP Count"},
+                {"id": "AP_DOWN",        "name": "APs Down / Offline"},
+                {"id": "SWITCH_DOWN",    "name": "Switches Down / Offline"},
+                {"id": "GATEWAY_DOWN",   "name": "Gateways Down / Offline"},
+                {"id": "CLIENT_COUNT",   "name": "Connected Client Count"},
             ],
             "insights": [],
             "warning": None,
         }
+
+    if not central_token.get("access_token"):
+        return {"alerts": [], "insights": [], "warning": "No valid token — save & test connection first."}
 
     # Static fallback list of well-known Aruba Central alert types (used when no live alerts exist)
     KNOWN_ALERT_TYPES: dict[str, str] = {
@@ -5195,12 +5245,6 @@ async def api_central_available() -> dict[str, Any]:
         using_fallback = True
     if using_fallback:
         warnings.append("No live checks returned by Central — showing standard Aruba Central check types.")
-
-    return {
-        "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
-        "insights": [{"id": k, "name": v} for k, v in sorted(insight_categories.items())],
-        "warning": "; ".join(warnings) if warnings else None,
-    }
 
     return {
         "alerts": [{"id": k, "name": v} for k, v in sorted(alert_types.items())],
