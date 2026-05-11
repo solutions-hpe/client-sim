@@ -963,6 +963,17 @@ function renderServerTab(data) {
   if (selectAll) selectAll.checked = false;
 }
 
+function normalizeProxmoxHostname(hostname) {
+  return String(hostname || '').trim().replace(/\.+$/, '').toLowerCase();
+}
+
+function proxmoxHostnameMatches(left, right) {
+  const a = normalizeProxmoxHostname(left);
+  const b = normalizeProxmoxHostname(right);
+  if (!a || !b) return false;
+  return a === b || a.split('.', 1)[0] === b.split('.', 1)[0];
+}
+
 function renderProxmoxApproveState(pending, approved) {
   const btn = document.getElementById('agent-approve-btn');
   const extraCard = document.getElementById('proxmox-extra-pending');
@@ -972,23 +983,25 @@ function renderProxmoxApproveState(pending, approved) {
   const currentHostname = (document.getElementById('server-node-name') || {}).textContent || '';
 
   // Determine if current tile host is pending or approved
-  const isPending = pending.some((a) => a.hostname === currentHostname);
-  const isApproved = approved.some((a) => a.hostname === currentHostname);
+  const isPending = pending.some((a) => proxmoxHostnameMatches(a.hostname, currentHostname));
+  const isApproved = approved.some((a) => proxmoxHostnameMatches(a.hostname, currentHostname));
 
   // Other pending agents (not the one shown in the tile)
-  const otherPending = pending.filter((a) => a.hostname !== currentHostname);
+  const otherPending = pending.filter((a) => !proxmoxHostnameMatches(a.hostname, currentHostname));
 
   btn._approveHostname = null;
 
   if (isPending) {
+    const match = pending.find((a) => proxmoxHostnameMatches(a.hostname, currentHostname));
     btn.textContent = '✓ Approve Agent';
     btn.style.display = '';
-    btn._approveHostname = currentHostname;
+    btn._approveHostname = match?.hostname || currentHostname;
     btn._action = 'approve';
   } else if (isApproved) {
+    const match = approved.find((a) => proxmoxHostnameMatches(a.hostname, currentHostname));
     btn.textContent = '✕ Revoke Agent';
     btn.style.display = '';
-    btn._approveHostname = currentHostname;
+    btn._approveHostname = match?.hostname || currentHostname;
     btn._action = 'revoke';
   } else if (pending.length > 0) {
     // No connected agent yet — show Approve for the first pending

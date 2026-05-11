@@ -2817,6 +2817,7 @@ def _relay_hub_base_url(server_url: str, tenant_id: str) -> str:
 async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply a config_update command payload pushed from hub.
     Returns an ack result dict."""
+    global relay_registration_refresh_needed
     changed: list[str] = []
     relay_config_changed = False
 
@@ -2834,6 +2835,10 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
         settings["relay_tenant_hint"] = tenant_id
         relay_config_changed = True
         changed.append("relay_tenant_id")
+    if "relay_spoke_id" in payload:
+        settings["relay_spoke_id"] = payload["relay_spoke_id"].strip()
+        relay_config_changed = True
+        changed.append("relay_spoke_id")
 
     for key in (
         "repo_branch", "reclone_schedule_enabled", "reclone_schedule_cron",
@@ -2850,9 +2855,9 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
             "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
             "connected": False,
             "error": None,
+            "registration_status": _relay_registration_status_from_settings(),
         })
-        if settings.get("relay_tenant_id"):
-            relay_state["registration_status"] = "approved"
+        relay_registration_refresh_needed = False
     _save_settings()
     await broadcast({"type": "settings_update", "settings": await api_settings_get()})
     logger.info("Applied hub config_update: %s", changed)
@@ -2966,11 +2971,12 @@ async def relay_sync_once() -> None:
                     result = await _apply_hub_config(payload_data)
                     if cmd_id:
                         async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
-                            await hc_ack.post(f"{base}/ack", json={
+                            ack_resp = await hc_ack.post(f"{base}/ack", json={
                                 "command_id": cmd_id,
                                 "status": "executed",
                                 "result": result,
                             }, headers=headers)
+                            ack_resp.raise_for_status()
                     continue
 
                 # ── gkill_switch: update local gkill state ─────────────────────
@@ -2982,7 +2988,7 @@ async def relay_sync_once() -> None:
                         logger.info("gkill_switch set to %s by hub", new_val)
                     if cmd_id:
                         async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
-                            await hc_ack.post(f"{base}/ack", json={
+                            ack_resp = await hc_ack.post(f"{base}/ack", json={
                                 "command_id": cmd_id,
                                 "status": "executed",
                                 "result": {
@@ -2992,6 +2998,7 @@ async def relay_sync_once() -> None:
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
                                 },
                             }, headers=headers)
+                            ack_resp.raise_for_status()
                     continue
 
                 # ── regular client/proxmox commands ────────────────────────────
@@ -3006,10 +3013,11 @@ async def relay_sync_once() -> None:
                 # Ack each queued command
                 if cmd_id:
                     async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
-                        await hc_ack.post(f"{base}/ack", json={
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
                             "command_id": cmd_id,
                             "status": "queued",
                         }, headers=headers)
+                        ack_resp.raise_for_status()
 
         if remote_cmds:
             await broadcast({"type": "commands_update", "commands": _serialize_commands()})
