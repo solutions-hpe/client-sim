@@ -1893,6 +1893,7 @@ relay_state: dict[str, Any] = {
     "last_sync": None,
     "error": None,
     "registration_status": _relay_registration_status_from_settings(),
+    "api_key_configured": bool(settings.get("relay_api_key")),
 }
 relay_registration_refresh_needed = bool(relay_state["enabled"])
 # Capped registration diagnostic log — last 50 attempts
@@ -4495,6 +4496,7 @@ async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Bod
             "last_sync": None,
             "error": None,
             "registration_status": "unregistered",
+            "api_key_configured": bool(settings.get("relay_api_key")),
         })
         relay_registration_refresh_needed = False
         _save_relay_state()
