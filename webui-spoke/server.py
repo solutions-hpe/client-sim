@@ -3293,9 +3293,10 @@ async def _hub_self_register(server_url: str) -> None:
     }
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
                        hostname=hostname, spoke_name=spoke_name, spoke_id=spoke_id)
+    hub_base = _relay_hub_base_url(server_url, settings.get("relay_tenant_id", ""))
     try:
         async with httpx.AsyncClient(timeout=15, verify=_hub_tls_verify()) as hc:
-            resp = await hc.post(f"{server_url}/api/spokes/register", json=payload)
+            resp = await hc.post(f"{hub_base}/api/spokes/register", json=payload)
             if resp.status_code == 409:
                 data = resp.json()
                 conflict = data.get("conflict", "name_in_use")
@@ -3358,9 +3359,10 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     tenant_hint = (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip()
     _relay_diag_append("check_approval", spoke_id=spoke_id)
+    hub_base = _relay_hub_base_url(server_url, settings.get("relay_tenant_id", ""))
     try:
         async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc:
-            resp = await hc.post(f"{server_url}/api/spokes/register", json={
+            resp = await hc.post(f"{hub_base}/api/spokes/register", json={
                 "spoke_id": spoke_id,
                 "hostname": hostname,
                 "label": hostname,
