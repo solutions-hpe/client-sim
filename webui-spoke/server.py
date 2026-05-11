@@ -3434,11 +3434,14 @@ async def relay_sync_once() -> None:
     try:
         async with state_lock:
             proxmox_vms = list(proxmox_state.get("vms", []))
+            usb_state = list(proxmox_state.get("usb_state", []))
+            unknown_usb = list(proxmox_state.get("unknown_usb", []))
+            clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
             telemetry = {
                 "spoke_id": spoke_id,
                 "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
                 "hostname": socket.gethostname(),
-                "clients": [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)],
+                "clients": clients_snapshot,
                 "timestamp": time.time(),
                 "proxmox": {
                     "connected": bool(proxmox_state.get("connected", False)),
@@ -3455,9 +3458,33 @@ async def relay_sync_once() -> None:
                         }
                         for vm in proxmox_vms
                     ],
-                    "usb_count": len(proxmox_state.get("usb_state", [])),
+                    "usb_state": usb_state,
+                    "unknown_usb": unknown_usb,
+                    "usb_count": len(usb_state),
                     "agent_version": proxmox_state.get("agent_version"),
                     "pve_version": proxmox_state.get("pve_version"),
+                },
+                "proxmox_vms": proxmox_vms,
+                "usb_devices": usb_state,
+                "api_server": {
+                    "health": {
+                        "status": "ok",
+                        "version": APP_VERSION,
+                        "clients": len(clients_snapshot),
+                        "repo_synced": repo_state["synced"],
+                        "repo_error": repo_state["error"],
+                        "installer_version": INSTALLER_VERSION,
+                    },
+                    "services": {name: dict(info) for name, info in service_health.items()},
+                    "task_names": list(background_tasks.keys()),
+                },
+                "central": {
+                    "status": _central_status_payload(),
+                    "wireless_clients": dict(central_wireless_clients),
+                    "hardware_alerts": _hw_alerts_payload(),
+                    "client_count_status": _client_count_payload(),
+                    "token_valid": bool(central_token.get("access_token") and time.time() < central_token.get("expires_at", 0)),
+                    "token_state": _central_token_state(),
                 },
             }
 
@@ -6132,6 +6159,7 @@ async def api_init() -> dict[str, Any]:
     cfg["refresh_token_configured"] = bool(settings["central_config"].get("refresh_token") or central_token.get("refresh_token"))
     cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
     return {
+        "mode": "spoke",
         "proxmox": _proxmox_status_payload(),
         "settings": {
             "central_api": _public_central_api_settings(),
@@ -6151,6 +6179,7 @@ async def api_init() -> dict[str, Any]:
         },
         "relay": _relay_status_payload(),
         "installer_version": INSTALLER_VERSION,
+        "app_version": APP_VERSION,
         "kill_switch": gkill_switch_state["value"],
         "local_kill_switch": _read_local_kill_switch(),
     }
