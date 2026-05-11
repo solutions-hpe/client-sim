@@ -5787,22 +5787,33 @@ async def api_simulations() -> dict[str, Any]:
                 parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
                 site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
 
-                _SIM_TEST_KEYS = [
+                # Per-bucket test keys (read from [sN] sections)
+                _BUCKET_TEST_KEYS = [
                     "dns_fail", "assoc_fail", "dhcp_fail", "port_flap",
                     "iperf", "www_traffic", "download", "ping_test",
                 ]
+                # Global test keys (read from [simulation] section, applied to all buckets)
+                # WHY: ssidpw_fail and auth_fail are global settings in simulation.conf
+                # but simulation.sh/dashboard.sh include them in active_simulations POSTs.
+                _GLOBAL_TEST_KEYS = ["ssidpw_fail", "auth_fail"]
+                global_tests = {
+                    k: parser.get("simulation", k, fallback="off").strip().lower() == "on"
+                    for k in _GLOBAL_TEST_KEYS
+                }
+
                 sim_section_re = re.compile(r"^s\d$")
                 for section in parser.sections():
                     if not sim_section_re.match(section):
                         continue
+                    bucket_tests = {
+                        k: parser.get(section, k, fallback="off").strip().lower() == "on"
+                        for k in _BUCKET_TEST_KEYS
+                    }
                     simulations[section] = {
                         "id": section,
                         "wsite": parser.get(section, "wsite", fallback=""),
                         "central_check": parser.get(section, "central_check", fallback="").strip(),
-                        "tests": {
-                            k: parser.get(section, k, fallback="off").strip().lower() == "on"
-                            for k in _SIM_TEST_KEYS
-                        },
+                        "tests": {**bucket_tests, **global_tests},
                         "configured_clients": [],
                         "active_client_count": 0,
                         "central_pass_fail": None,
