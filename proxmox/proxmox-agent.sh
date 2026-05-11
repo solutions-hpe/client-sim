@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.34"
+AGENT_VERSION="2.35"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -386,8 +386,31 @@ load_state_file() {
     STATE_MISSING_BY_BUS=()
     STATE_VMID_TO_IMAGE=()
     STATE_VIDPID_BY_BUS=()
-    local vmid bus_path missing_since image_num vidpid
-    while IFS=$'\t' read -r vmid bus_path missing_since image_num vidpid; do
+    local vmid bus_path missing_since image_num vidpid line rest
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+
+        # Preserve empty tab-delimited fields; `read` with tab IFS collapses them and
+        # turns a blank missing_since into the image number on every reload.
+        vmid="${line%%$'\t'*}"
+        rest="${line#*$'\t'}"
+        [[ "$rest" == "$line" ]] && continue
+        bus_path="${rest%%$'\t'*}"
+        rest="${rest#*$'\t'}"
+        missing_since="${rest%%$'\t'*}"
+        if [[ "$rest" == *$'\t'* ]]; then
+            rest="${rest#*$'\t'}"
+            image_num="${rest%%$'\t'*}"
+            if [[ "$rest" == *$'\t'* ]]; then
+                vidpid="${rest#*$'\t'}"
+            else
+                vidpid=""
+            fi
+        else
+            image_num="1"
+            vidpid=""
+        fi
+
         [[ -z "$vmid" || -z "$bus_path" ]] && continue
         STATE_BUS_TO_VMID["$bus_path"]="$vmid"
         STATE_VMID_TO_BUS["$vmid"]="$bus_path"
@@ -1580,8 +1603,12 @@ post_telemetry || true
 # from the main USB provisioning loop. Reclone wait+ACK is itself backgrounded
 # so process_inbox always returns immediately — never blocked by clone operations.
 process_inbox() {
-    local response_with_status response status
-    response_with_status=$(curl_api_status GET "/api/inbox?hostname=$h" "" 2>/dev/null || true)
+    local response_with_status response status poll_hostname
+    local -a args
+    poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
+    args=(-sS --max-time 15 -G "${SERVER_URL}/api/inbox" --data-urlencode "hostname=${poll_hostname}" -w $'\n%{http_code}')
+    [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
+    response_with_status=$(curl "${args[@]}" 2>/dev/null || true)
     status="${response_with_status##*$'\n'}"
     response="${response_with_status%$'\n'*}"
     case "$status" in
