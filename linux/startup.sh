@@ -22,11 +22,12 @@ sudo rm -f /etc/xdg/autostart/startup.desktop 2>/dev/null || true
 # this process (voiding the EXIT trap), the lock vanishes on the next reboot.
 _LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
-    echo "$(date): startup.sh already running (lock held) — parking to prevent spurious reboot" >> "$debug"
+    echo "$(date): startup.sh already running — this window is a duplicate." >> "$debug"
     # DO NOT exit here. The parent shell is: bash -c "startup.sh ; systemctl reboot"
     # Exiting would trigger the reboot even though the real simulation is still healthy.
-    # Instead, park this duplicate invocation until killed or rebooted.
-    exec tail -f /dev/null
+    # Instead, tail the debug log so this window shows live output rather than blank.
+    echo "=== startup.sh is running in another window — showing live debug log ==="
+    exec tail -f "$debug"
 fi
 trap 'rmdir "$_LOCK_FILE" 2>/dev/null || true' EXIT INT TERM
 
