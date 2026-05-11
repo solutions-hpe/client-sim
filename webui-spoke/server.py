@@ -203,6 +203,8 @@ update_state: dict[str, Any] = {
     "update_in_progress": False,
     "update_log": [],
     "update_error": None,
+    "cswebui_current": APP_VERSION,
+    "cswebui_available": None,
 }
 
 
@@ -3948,6 +3950,8 @@ async def refresh_webui_frontend() -> None:
 
     if remote_ver == local_ver:
         logger.info("webui refresh: deployed cs-webui %s is current — no update needed", local_ver)
+        update_state["cswebui_current"] = local_ver or APP_VERSION
+        update_state["cswebui_available"] = remote_ver
         return
 
     logger.info("webui refresh: deployed=%s  remote=%s — downloading updated files", local_ver, remote_ver)
@@ -3982,6 +3986,8 @@ async def refresh_webui_frontend() -> None:
         pass
 
     logger.info("webui refresh: cs-webui updated %s → %s — browser reload required", local_ver, remote_ver)
+    update_state["cswebui_current"] = remote_ver
+    update_state["cswebui_available"] = remote_ver
 
 
 async def periodic_webui_refresh() -> None:
@@ -5756,6 +5762,8 @@ async def api_version() -> dict[str, Any]:
         "update_available": update_state["update_available"],
         "last_checked": update_state["last_checked"],
         "update_in_progress": update_state["update_in_progress"],
+        "cswebui_current": update_state.get("cswebui_current") or APP_VERSION,
+        "cswebui_available": update_state.get("cswebui_available"),
     }
 
 
