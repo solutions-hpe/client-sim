@@ -3,6 +3,10 @@ version=.04
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
+# Ensure log files exist and are writable by the running user.
+# /usr/local/scripts/ is root-owned; files created there by sudo are root-owned
+# and unwritable by the simulation user.  Touch + chmod once here before any tee.
+sudo touch "$log" "$debug" 2>/dev/null && sudo chmod a+w "$log" "$debug" 2>/dev/null || true
 echo "Update Script Version $version" | tee "$debug"
 echo "$(date)" | tee -a "$debug"
 source '/usr/local/scripts/ini-parser.sh'

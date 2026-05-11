@@ -2,6 +2,7 @@
 version=.03
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-startup.log"
+sudo touch "$log" "$debug" 2>/dev/null && sudo chmod a+w "$log" "$debug" 2>/dev/null || true
 
 # Instance guard — prevent multiple concurrent startups from racing.
 # Lock lives in /run/ (tmpfs) which is cleared on every boot, so stale

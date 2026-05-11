@@ -2,6 +2,7 @@
 version=.05
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-simulation.log"
+sudo touch "$log" "$debug" 2>/dev/null && sudo chmod a+w "$log" "$debug" 2>/dev/null || true
 echo Simulation Script Version $version | tee "$debug"
 
 # SIGUSR1 trap — used by agent.sh restart_sim / kill_switch commands for graceful restart.
