@@ -133,7 +133,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.45"
+VERSION="2.46"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -676,11 +676,28 @@ fi
 # Give the (possibly deferred) restart time to complete before health check.
 sleep 5
 
+_service_ready=0
+info "Waiting for dashboard API to be ready..."
+for _i in $(seq 1 30); do
+  if systemctl is-active --quiet client-sim-dashboard \
+    && curl -fsSL --connect-timeout 2 --max-time 2 "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
+    _service_ready=1
+    ok "Dashboard API ready on :${PORT}"
+    break
+  fi
+  sleep 2
+done
+
 if systemctl is-active --quiet client-sim-dashboard; then
   ok "Service running"
 else
   warn "Service may not have started — check: journalctl -u client-sim-dashboard"
 fi
+
+if [[ "${_service_ready}" -ne 1 ]]; then
+  warn "Dashboard API did not become ready before installer exit — check: journalctl -u client-sim-dashboard"
+fi
+unset _service_ready _i
 
 ###############################################################################
 # HEALTH CHECK
