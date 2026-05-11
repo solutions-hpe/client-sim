@@ -5279,6 +5279,7 @@ async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
     return {"alerts": alerts, "count": len(alerts), "warning": warning}
 
 
+@app.post("/api/central/poll")
 async def api_central_poll() -> dict[str, Any]:
     """Trigger an immediate Central poll cycle."""
     if not _central_ready():
@@ -5879,17 +5880,23 @@ async def _run_acme_request() -> None:
     _acme_status["last_result"] = None
     _acme_status["last_error"] = None
     await broadcast({"type": "acme_status", **_acme_status})
-    cfg = spoke_acme.load_acme_config()
-    result = await spoke_acme.request_certificate(cfg, BASE_DIR)
-    _acme_status["running"] = False
-    _acme_status["last_result"] = result
-    _acme_status["last_error"] = None if result.get("success") else result.get("error")
-    if result.get("success"):
-        settings["spoke_tls"] = "on"
-        _save_settings()
-        logger.info("TLS certificate ready. Restart the spoke service with SPOKE_TLS=on to enable HTTPS.")
-        await broadcast({"type": "cert_renewed", "expires": result.get("expires")})
-    await broadcast({"type": "acme_status", **_acme_status})
+    try:
+        cfg = spoke_acme.load_acme_config()
+        result = await spoke_acme.request_certificate(cfg, BASE_DIR)
+        _acme_status["last_result"] = result
+        _acme_status["last_error"] = None if result.get("success") else result.get("error")
+        if result.get("success"):
+            settings["spoke_tls"] = "on"
+            _save_settings()
+            logger.info("TLS certificate ready. Restart the spoke service with SPOKE_TLS=on to enable HTTPS.")
+            await broadcast({"type": "cert_renewed", "expires": result.get("expires")})
+    except Exception as exc:
+        logger.exception("ACME certificate request failed: %s", exc)
+        _acme_status["last_error"] = str(exc)
+        _acme_status["last_result"] = None
+    finally:
+        _acme_status["running"] = False
+        await broadcast({"type": "acme_status", **_acme_status})
 
 
 @app.post("/api/acme/request")
