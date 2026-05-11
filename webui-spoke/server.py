@@ -4728,21 +4728,24 @@ async def api_relay_diag() -> dict[str, Any]:
     server_url = settings.get("relay_server_url", "").rstrip("/")
     hostname = socket.gethostname()
 
-    # Live reachability check
+    # Live reachability check — use just the base URL (scheme+host+port), not the tenant path
+    from urllib.parse import urlparse as _urlparse
+    _parsed = _urlparse(server_url) if server_url else None
+    hub_base_url = f"{_parsed.scheme}://{_parsed.netloc}" if _parsed and _parsed.netloc else server_url
     reachability: dict[str, Any] = {"tested_url": server_url or "(not set)", "ok": False, "detail": ""}
     if server_url:
         try:
             async with httpx.AsyncClient(timeout=8, verify=_hub_tls_verify()) as hc:
-                r = await hc.get(f"{server_url}/api/health")
+                r = await hc.get(f"{hub_base_url}/api/health")
                 reachability = {
-                    "tested_url": f"{server_url}/api/health",
+                    "tested_url": f"{hub_base_url}/api/health",
                     "ok": r.status_code < 400,
                     "http_status": r.status_code,
                     "detail": r.text[:200],
                 }
         except Exception as exc:
             reachability = {
-                "tested_url": f"{server_url}/api/health",
+                "tested_url": f"{hub_base_url}/api/health",
                 "ok": False,
                 "detail": str(exc),
             }
