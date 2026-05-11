@@ -6856,6 +6856,11 @@ async def root():
     index = STATIC_DIR / "index.html"
     html = index.read_text()
     html = html.replace("{{WEBUI_MODE}}", "spoke")
+    # Inject version as cache-busting query param on static assets so the browser
+    # automatically fetches updated files after "Check & Update Now" — no manual
+    # hard-refresh required.
+    html = html.replace('href="/static/style.css"', f'href="/static/style.css?v={APP_VERSION}"')
+    html = html.replace('src="/static/app.js"', f'src="/static/app.js?v={APP_VERSION}"')
     return HTMLResponse(content=html)
 
 
