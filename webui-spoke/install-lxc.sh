@@ -129,7 +129,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.25"
+VERSION="2.26"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -543,7 +543,7 @@ PY
 
 existing_spoke_id=""
 if [[ -f "$INSTALL_DIR/.env" ]]; then
-  existing_spoke_id=$(grep '^SPOKE_ID=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d ' ')
+  existing_spoke_id=$(grep '^SPOKE_ID=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d ' ' || true)
 fi
 if [[ "$(is_valid_uuid "$existing_spoke_id")" == "True" ]]; then
   SPOKE_ID="$existing_spoke_id"
