@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.31"
+AGENT_VERSION="2.33"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -494,6 +494,53 @@ guest_is_template() {
         *)    return 1 ;;
     esac
     [[ -f "$conf" ]] && grep -Eq '^template:\s*1\s*$' "$conf"
+}
+
+reconcile_present_usb_state() {
+    local _current_bus vmid missing_since _present_vidpid _state_vidpid _reconnected_bus _assigned_vmid
+    local _changed=1
+
+    for _current_bus in "${!STATE_BUS_TO_VMID[@]}"; do
+        vmid="${STATE_BUS_TO_VMID[$_current_bus]}"
+        missing_since="${STATE_MISSING_BY_BUS[$_current_bus]:-}"
+        _present_vidpid="${PRESENT_BUSES[$_current_bus]:-}"
+        _state_vidpid="${_present_vidpid:-${USB_VIDPID_BY_BUS[$_current_bus]:-${STATE_VIDPID_BY_BUS[$_current_bus]:-}}}"
+
+        if [[ -n "$_state_vidpid" && "${STATE_VIDPID_BY_BUS[$_current_bus]:-}" != "$_state_vidpid" ]]; then
+            STATE_VIDPID_BY_BUS["$_current_bus"]="$_state_vidpid"
+            _changed=0
+        fi
+
+        if [[ -n "$_present_vidpid" ]]; then
+            if [[ -n "$missing_since" ]]; then
+                unset "STATE_MISSING_BY_BUS[$_current_bus]"
+                _changed=0
+                log "USB $_current_bus present again, clearing missing state for VM $vmid"
+            fi
+            continue
+        fi
+
+        [[ -n "$_state_vidpid" ]] || continue
+        _reconnected_bus=$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)
+        [[ -n "$_reconnected_bus" && "$_reconnected_bus" != "$_current_bus" ]] || continue
+
+        _assigned_vmid="${STATE_BUS_TO_VMID[$_reconnected_bus]:-}"
+        if [[ -n "$_assigned_vmid" && "$_assigned_vmid" != "$vmid" ]]; then
+            continue
+        fi
+
+        unset "STATE_BUS_TO_VMID[$_current_bus]"
+        unset "STATE_MISSING_BY_BUS[$_current_bus]"
+        unset "STATE_VIDPID_BY_BUS[$_current_bus]"
+        STATE_VMID_TO_BUS["$vmid"]="$_reconnected_bus"
+        STATE_BUS_TO_VMID["$_reconnected_bus"]="$vmid"
+        STATE_VIDPID_BY_BUS["$_reconnected_bus"]="$_state_vidpid"
+        unset "STATE_MISSING_BY_BUS[$_reconnected_bus]"
+        _changed=0
+        log "USB dongle vidpid $_state_vidpid moved from $_current_bus to $_reconnected_bus, clearing missing state for VM $vmid"
+    done
+
+    return $_changed
 }
 
 build_usb_state_json() {
@@ -1004,7 +1051,7 @@ reclone_vm_instance() {
 
 usb_provision_loop() {
     local now bus_path vidpid product_name vmid missing_since
-    local timeout_seconds missing_age _reconnected_bus _current_bus _state_vidpid _guest_type _assigned_vmid
+    local timeout_seconds missing_age _current_bus _state_vidpid _guest_type
 
     refresh_usb_config
     scan_usb_devices
@@ -1035,53 +1082,35 @@ usb_provision_loop() {
 
     now=$(date +%s)
     timeout_seconds=$(usb_missing_timeout_seconds)
+    if reconcile_present_usb_state; then
+        _state_changed=1
+    fi
     for _current_bus in "${!STATE_BUS_TO_VMID[@]}"; do
         vmid="${STATE_BUS_TO_VMID[$_current_bus]}"
         missing_since="${STATE_MISSING_BY_BUS[$_current_bus]:-}"
         _state_vidpid="${USB_VIDPID_BY_BUS[$_current_bus]:-${STATE_VIDPID_BY_BUS[$_current_bus]:-}}"
         [[ -n "$_state_vidpid" ]] && STATE_VIDPID_BY_BUS["$_current_bus"]="$_state_vidpid"
 
-        if [[ -n "$missing_since" && -n "$_state_vidpid" ]]; then
-            _reconnected_bus=$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)
-            if [[ -n "$_reconnected_bus" ]]; then
-                if [[ "$_reconnected_bus" != "$_current_bus" ]]; then
-                    _assigned_vmid="${STATE_BUS_TO_VMID[$_reconnected_bus]:-}"
-                    if [[ -z "$_assigned_vmid" || "$_assigned_vmid" == "$vmid" ]]; then
-                        unset "STATE_BUS_TO_VMID[$_current_bus]"
-                        unset "STATE_MISSING_BY_BUS[$_current_bus]"
-                        unset "STATE_VIDPID_BY_BUS[$_current_bus]"
-                        STATE_VMID_TO_BUS["$vmid"]="$_reconnected_bus"
-                        STATE_BUS_TO_VMID["$_reconnected_bus"]="$vmid"
-                        STATE_VIDPID_BY_BUS["$_reconnected_bus"]="$_state_vidpid"
-                        _current_bus="$_reconnected_bus"
-                    fi
-                fi
-                STATE_MISSING_BY_BUS["$_current_bus"]=""
-                _reconnected_vidpids["$_state_vidpid"]=1
-                _state_changed=1
-                log "USB dongle vidpid $_state_vidpid reconnected, clearing missing state for VM $vmid"
-                continue
-            fi
+        if [[ -n "${PRESENT_BUSES[$_current_bus]:-}" ]]; then
+            continue
         fi
 
-        if [[ -z "${PRESENT_BUSES[$_current_bus]:-}" ]]; then
-            if [[ -z "$missing_since" ]]; then
-                STATE_MISSING_BY_BUS["$_current_bus"]="$now"
-                _state_changed=1
-                log "USB $_current_bus missing for VM $vmid; grace timer started"
-            else
-                missing_age=$(( now - missing_since ))
-                if (( missing_age > timeout_seconds )); then
-                    _guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
-                    if guest_is_template "$vmid" "$_guest_type"; then
-                        log "USB dongle missing for ${missing_age}s but VM $vmid is a template; skipping teardown"
-                        continue
-                    fi
-                    log "USB dongle missing for ${missing_age}s — tearing down VM $vmid"
-                    [[ -n "$_state_vidpid" && -n "$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)" ]] && _reconnected_vidpids["$_state_vidpid"]=1
-                    if destroy_vm "$vmid" "$_guest_type"; then
-                        _state_changed=1
-                    fi
+        if [[ -z "$missing_since" ]]; then
+            STATE_MISSING_BY_BUS["$_current_bus"]="$now"
+            _state_changed=1
+            log "USB $_current_bus missing for VM $vmid; grace timer started"
+        else
+            missing_age=$(( now - missing_since ))
+            if (( missing_age > timeout_seconds )); then
+                _guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
+                if guest_is_template "$vmid" "$_guest_type"; then
+                    log "USB dongle missing for ${missing_age}s but VM $vmid is a template; skipping teardown"
+                    continue
+                fi
+                log "USB dongle missing for ${missing_age}s — tearing down VM $vmid"
+                [[ -n "$_state_vidpid" && -n "$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)" ]] && _reconnected_vidpids["$_state_vidpid"]=1
+                if destroy_vm "$vmid" "$_guest_type"; then
+                    _state_changed=1
                 fi
             fi
         fi
@@ -1189,6 +1218,9 @@ refresh_usb_telemetry_only() {
     refresh_usb_config
     scan_usb_devices
     load_state_file
+    if reconcile_present_usb_state; then
+        save_state_file
+    fi
     build_usb_state_json
 }
 

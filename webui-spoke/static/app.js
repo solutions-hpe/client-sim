@@ -1840,11 +1840,13 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
     });
 
   usbSummaryTbody.innerHTML = '';
+  const presentUsb = Array.isArray(latestProxmoxData.present_usb) ? latestProxmoxData.present_usb : [];
+  const presentBusSet = new Set(presentUsb.map((item) => String(item?.bus_path || '').trim()).filter(Boolean));
   certified.forEach((device) => {
     const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
-    const presentUsb = Array.isArray(latestProxmoxData.present_usb) ? latestProxmoxData.present_usb : [];
-    const activeEntries = entries.filter((item) => !item.missing_since);
-    const missing = entries.filter((item) => item.missing_since).length;
+    const missingEntries = entries.filter((item) => item.missing_since && !presentBusSet.has(String(item?.bus_path || '').trim()));
+    const activeEntries = entries.filter((item) => !missingEntries.includes(item));
+    const missing = missingEntries.length;
     const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
 
     // Build VM name list for active entries
@@ -1858,7 +1860,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
 
     const tr = document.createElement('tr');
     const missingHtml = missing
-      ? `<div class="usb-missing-list">${entries.filter((item) => item.missing_since).map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
+      ? `<div class="usb-missing-list">${missingEntries.map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
       : '—';
     tr.innerHTML = `
       <td>${device.label || device.vidpid || '—'}</td>
@@ -1892,7 +1894,7 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
 
   if (usbCountdownTimer) window.clearInterval(usbCountdownTimer);
   updateUsbCountdowns();
-  if (usbState.some((item) => item.missing_since)) {
+  if (usbState.some((item) => item.missing_since && !presentBusSet.has(String(item?.bus_path || '').trim()))) {
     usbCountdownTimer = window.setInterval(updateUsbCountdowns, 1000);
   }
 }

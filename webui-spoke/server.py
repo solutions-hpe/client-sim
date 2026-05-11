@@ -2307,6 +2307,35 @@ def _proxmox_unassigned_present_usb() -> list[dict[str, Any]]:
 
 
 
+def _normalize_proxmox_usb_state(
+    usb_state: Any,
+    present_usb: Any,
+) -> list[dict[str, Any]]:
+    present_by_bus = {
+        str(entry.get("bus_path", "")).strip(): dict(entry)
+        for entry in (present_usb if isinstance(present_usb, list) else [])
+        if isinstance(entry, dict) and str(entry.get("bus_path", "")).strip()
+    }
+    normalized: list[dict[str, Any]] = []
+    for raw_entry in usb_state if isinstance(usb_state, list) else []:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = dict(raw_entry)
+        bus_path = str(entry.get("bus_path", "")).strip()
+        present_entry = present_by_bus.get(bus_path)
+        if present_entry:
+            entry["missing_since"] = None
+            if entry.get("prov_status") in {None, "", "missing", "tearing_down"}:
+                entry["prov_status"] = "active"
+            if not entry.get("vidpid") and present_entry.get("vidpid"):
+                entry["vidpid"] = present_entry.get("vidpid")
+            if not entry.get("name") and present_entry.get("name"):
+                entry["name"] = present_entry.get("name")
+        normalized.append(entry)
+    return normalized
+
+
+
 def _guest_supports_reclone(vm: dict[str, Any]) -> bool:
     if vm.get("is_template"):
         return False
@@ -4150,12 +4179,15 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
         and str(d.get("vidpid", "")).strip().lower() not in exclude_vidpids
     ]
 
+    normalized_present_usb = body.get("present_usb", [])
+    normalized_usb_state = _normalize_proxmox_usb_state(body.get("usb_state", []), normalized_present_usb)
+
     proxmox_state["connected"] = True
     proxmox_state["last_seen"] = now
     proxmox_state["node"] = node
     proxmox_state["vms"] = enriched_vms
-    proxmox_state["usb_state"] = body.get("usb_state", [])
-    proxmox_state["present_usb"] = body.get("present_usb", [])
+    proxmox_state["usb_state"] = normalized_usb_state
+    proxmox_state["present_usb"] = normalized_present_usb
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
