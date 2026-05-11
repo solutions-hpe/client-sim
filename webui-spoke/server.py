@@ -397,10 +397,10 @@ settings: dict[str, Any] = {
     "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
-    "relay_tenant_hint": _persisted.get("relay_tenant_hint", ""),
+    "relay_tenant_hint": _persisted.get("relay_tenant_hint", _persisted.get("relay_tenant_id", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
     "relay_spoke_id": _persisted.get("relay_spoke_id", _persisted.get("relay_island_id", _persisted.get("relay_site_id", ""))),
-    "relay_tenant_id": _persisted.get("relay_tenant_id", ""),
+    "relay_tenant_id": _persisted.get("relay_tenant_id", _persisted.get("relay_tenant_hint", "")),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
@@ -457,6 +457,27 @@ def _public_central_api_settings() -> dict[str, Any]:
     cfg["classic"]["password_configured"] = bool(settings.get("central_api", {}).get("classic", {}).get("password"))
     cfg["central"]["client_secret_configured"] = bool(settings.get("central_api", {}).get("central", {}).get("client_secret"))
     return cfg
+
+
+
+def _public_notification_settings() -> dict[str, Any]:
+    notif = copy.deepcopy(settings.get("notifications", {}))
+    smtp_password = str(notif.pop("smtp_password", "") or "")
+    teams_webhook_url = str(notif.pop("teams_webhook_url", "") or "")
+    notif["smtp_password_configured"] = bool(smtp_password)
+    notif["teams_webhook_url_configured"] = bool(teams_webhook_url)
+    return notif
+
+
+
+def _public_acme_settings(cfg: Any) -> dict[str, Any]:
+    data = asdict(cfg)
+    credentials = dict(cfg.dns_credentials or {})
+    data["dns_credentials"] = {key: "" for key in credentials}
+    data["dns_credentials_configured"] = {key: bool(value) for key, value in credentials.items()}
+    data["cf_api_token_set"] = bool(credentials.get("cf_api_token"))
+    data["he_ddns_key_set"] = bool(credentials.get("he_ddns_key"))
+    return data
 
 
 def _sync_central_runtime_config() -> None:
@@ -2548,7 +2569,7 @@ async def _hub_self_register(server_url: str) -> None:
         "hostname": hostname,
         "label": hostname,
         "spoke_name": spoke_name,
-        "tenant_id_hint": settings.get("relay_tenant_hint", "").strip(),
+        "tenant_id_hint": (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip(),
         "config": _build_registration_config(),
     }
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
@@ -2576,8 +2597,10 @@ async def _hub_self_register(server_url: str) -> None:
         if spoke_id:
             settings["relay_spoke_id"] = spoke_id
         if status == "approved":
+            tenant_id = data.get("tenant_id", "")
             settings["relay_api_key"] = data.get("api_key", "")
-            settings["relay_tenant_id"] = data.get("tenant_id", "")
+            settings["relay_tenant_id"] = tenant_id
+            settings["relay_tenant_hint"] = tenant_id
             relay_state["registration_status"] = "approved"
             relay_state["error"] = ""
             _relay_diag_append("register_ok", status="approved", spoke_id=spoke_id,
@@ -2610,8 +2633,10 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
             data = resp.json()
         status = data.get("status", "pending")
         if status == "approved":
+            tenant_id = data.get("tenant_id", "")
             settings["relay_api_key"] = data.get("api_key", "")
-            settings["relay_tenant_id"] = data.get("tenant_id", "")
+            settings["relay_tenant_id"] = tenant_id
+            settings["relay_tenant_hint"] = tenant_id
             relay_state["registration_status"] = "approved"
             _save_settings()
             _relay_diag_append("approval_received", spoke_id=spoke_id,
@@ -2641,7 +2666,9 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
         relay_config_changed = True
         changed.append("relay_api_key")
     if "relay_tenant_id" in payload:
-        settings["relay_tenant_id"] = payload["relay_tenant_id"].strip()
+        tenant_id = payload["relay_tenant_id"].strip()
+        settings["relay_tenant_id"] = tenant_id
+        settings["relay_tenant_hint"] = tenant_id
         relay_config_changed = True
         changed.append("relay_tenant_id")
 
@@ -3346,16 +3373,13 @@ async def api_settings_get() -> dict[str, Any]:
         "reclone_concurrency": settings.get("reclone_concurrency", "1"),
         "l1_vlan_start": settings.get("l1_vlan_start", "100"),
         "l1_vlan_end": settings.get("l1_vlan_end", "199"),
-        "notifications": {
-            k: v for k, v in settings.get("notifications", {}).items()
-            if k not in ("smtp_password", "teams_webhook_url")  # never expose secrets
-        },
+        "notifications": _public_notification_settings(),
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
         "relay_spoke_name": settings.get("relay_spoke_name", ""),
-        "relay_tenant_hint": settings.get("relay_tenant_hint", ""),
+        "relay_tenant_hint": settings.get("relay_tenant_hint", settings.get("relay_tenant_id", "")),
         "relay_spoke_id": settings.get("relay_spoke_id", ""),
-        "relay_tenant_id": settings.get("relay_tenant_id", ""),
+        "relay_tenant_id": settings.get("relay_tenant_id", settings.get("relay_tenant_hint", "")),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
         "relay_api_key_configured": bool(settings.get("relay_api_key")),
         "spoke_tls": settings.get("spoke_tls", "off"),
@@ -3375,9 +3399,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         changed_branch = True
 
     if update.github_token is not None:
-        token = update.github_token.strip()
-        if token:  # blank = keep existing
-            settings["github_token"] = token
+        settings["github_token"] = update.github_token.strip()
 
     if update.relay_server_url is not None:
         settings["relay_server_url"] = update.relay_server_url.strip()
@@ -3388,21 +3410,23 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         relay_config_changed = True
 
     if update.relay_tenant_hint is not None:
-        settings["relay_tenant_hint"] = update.relay_tenant_hint.strip()
+        tenant_id = update.relay_tenant_hint.strip()
+        settings["relay_tenant_hint"] = tenant_id
+        settings["relay_tenant_id"] = tenant_id
         relay_config_changed = True
 
     if update.relay_api_key is not None:
-        api_key = update.relay_api_key.strip()
-        if api_key:
-            settings["relay_api_key"] = api_key
-            relay_config_changed = True
+        settings["relay_api_key"] = update.relay_api_key.strip()
+        relay_config_changed = True
 
     if update.relay_spoke_id is not None:
         settings["relay_spoke_id"] = update.relay_spoke_id.strip()
         relay_config_changed = True
 
     if update.relay_tenant_id is not None:
-        settings["relay_tenant_id"] = update.relay_tenant_id.strip()
+        tenant_id = update.relay_tenant_id.strip()
+        settings["relay_tenant_id"] = tenant_id
+        settings["relay_tenant_hint"] = tenant_id
         relay_config_changed = True
 
     if update.relay_enabled is not None:
@@ -3433,9 +3457,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
                 if key in classic_update:
                     merged_api["classic"][key] = str(classic_update.get(key, "")).strip()
             if "password" in classic_update:
-                password = str(classic_update.get("password", ""))
-                if password:
-                    merged_api["classic"]["password"] = password
+                merged_api["classic"]["password"] = str(classic_update.get("password", ""))
 
         central_update = update.central_api.get("central")
         if isinstance(central_update, dict):
@@ -3443,23 +3465,20 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
                 if key in central_update:
                     merged_api["central"][key] = str(central_update.get(key, "")).strip()
             if "client_secret" in central_update:
-                client_secret = str(central_update.get("client_secret", ""))
-                if client_secret:
-                    merged_api["central"]["client_secret"] = client_secret
+                merged_api["central"]["client_secret"] = str(central_update.get("client_secret", ""))
 
         settings["central_api"] = merged_api
         _sync_central_runtime_config()
 
     if update.central_config is not None:
         merged = dict(settings["central_config"])
-        # Only update keys that are explicitly provided and non-empty for secrets
+        # Only update keys that are explicitly provided so omitted secrets are preserved.
         for key in ("cluster_url", "client_id", "customer_id", "api_version"):
             if key in update.central_config:
                 merged[key] = update.central_config[key].strip()
         for secret_key in ("client_secret", "access_token", "refresh_token"):
-            val = update.central_config.get(secret_key, "").strip()
-            if val:  # blank = keep existing
-                merged[secret_key] = val
+            if secret_key in update.central_config:
+                merged[secret_key] = update.central_config.get(secret_key, "").strip()
         # Switching to New Central — clear stale classic tokens from runtime
         if merged.get("api_version") == "new_central":
             central_token["access_token"] = None
@@ -3478,11 +3497,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["central_api"] = merged_api
         # Classic: load new tokens into runtime state immediately
         if merged.get("api_version", "classic") == "classic":
-            if merged.get("access_token"):
-                central_token["access_token"] = merged["access_token"]
-                central_token["expires_at"] = time.time() + 7200
-            if merged.get("refresh_token"):
-                central_token["refresh_token"] = merged["refresh_token"]
+            central_token["access_token"] = merged.get("access_token") or None
+            central_token["refresh_token"] = merged.get("refresh_token") or None
+            central_token["expires_at"] = time.time() + 7200 if merged.get("access_token") else 0.0
 
     if update.site_mappings is not None:
         settings["site_mappings"] = {k.strip(): v.strip() for k, v in update.site_mappings.items() if k.strip()}
@@ -4839,8 +4856,7 @@ async def api_self_update() -> dict[str, Any]:
 @app.get("/api/acme")
 async def api_acme_get() -> dict[str, Any]:
     cfg = spoke_acme.load_acme_config()
-    data = asdict(cfg)
-    data["dns_credentials"] = {key: ("***" if value else "") for key, value in (cfg.dns_credentials or {}).items()}
+    data = _public_acme_settings(cfg)
     data["cert_info"] = spoke_acme.get_cert_info()
     data["spoke_tls"] = settings.get("spoke_tls", "off")
     return data
@@ -4852,7 +4868,7 @@ async def api_acme_update(payload: dict[str, Any]) -> dict[str, Any]:
     incoming_credentials = payload.get("dns_credentials") or {}
     merged_credentials = dict(existing.dns_credentials or {})
     for key, value in incoming_credentials.items():
-        if value in (None, "", "***"):
+        if value in (None, "***"):
             continue
         merged_credentials[key] = value
     cfg = spoke_acme.AcmeConfig(
@@ -4871,8 +4887,7 @@ async def api_acme_update(payload: dict[str, Any]) -> dict[str, Any]:
     if "spoke_tls" in payload:
         settings["spoke_tls"] = _normalize_toggle(payload.get("spoke_tls"))
         _save_settings()
-    data = asdict(cfg)
-    data["dns_credentials"] = {key: ("***" if value else "") for key, value in (cfg.dns_credentials or {}).items()}
+    data = _public_acme_settings(cfg)
     data["cert_info"] = spoke_acme.get_cert_info()
     data["spoke_tls"] = settings.get("spoke_tls", "off")
     return data
