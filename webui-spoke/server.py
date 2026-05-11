@@ -341,6 +341,17 @@ def _clamp_relay_interval(value: Any) -> int:
     return max(60, min(86400, interval))
 
 
+def _relay_registration_status_from_settings() -> str:
+    relay_on = settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url"))
+    if not relay_on:
+        return "unregistered"
+    if settings.get("relay_api_key") and settings.get("relay_tenant_id"):
+        return "approved"
+    if settings.get("relay_spoke_id"):
+        return "pending"
+    return "unregistered"
+
+
 def _default_central_api_settings() -> dict[str, Any]:
     return {
         "mode": "classic",
@@ -1677,12 +1688,13 @@ repo_state = {"synced": False, "error": None, "last_sync": None}
 gkill_switch_state: dict[str, Any] = {"value": "off", "last_fetched": None, "error": None}
 GKILL_SWITCH_URL = "https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt"
 relay_state: dict[str, Any] = {
-    "enabled": False,
+    "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
     "connected": False,
     "last_sync": None,
     "error": None,
-    "registration_status": "unregistered",  # "unregistered" | "pending" | "approved"
+    "registration_status": _relay_registration_status_from_settings(),
 }
+relay_registration_refresh_needed = bool(relay_state["enabled"])
 # Capped registration diagnostic log — last 50 attempts
 _RELAY_DIAG_MAX = 50
 relay_diag_log: list[dict[str, Any]] = []
@@ -2071,6 +2083,50 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
     }
 
 
+def _normalize_proxmox_hostname(hostname: Any) -> str:
+    return str(hostname or "").strip().rstrip(".").lower()
+
+
+def _proxmox_hostname_aliases(hostname: Any) -> tuple[str, ...]:
+    normalized = _normalize_proxmox_hostname(hostname)
+    if not normalized:
+        return ()
+    aliases = [normalized]
+    short = normalized.split(".", 1)[0]
+    if short and short not in aliases:
+        aliases.append(short)
+    return tuple(aliases)
+
+
+def _proxmox_hostnames_match(left: Any, right: Any) -> bool:
+    left_aliases = set(_proxmox_hostname_aliases(left))
+    return bool(left_aliases and left_aliases.intersection(_proxmox_hostname_aliases(right)))
+
+
+def _resolve_proxmox_agent_hostname(hostname: Any, registry: dict[str, Any]) -> str | None:
+    if not isinstance(registry, dict):
+        return None
+    for registered_hostname in registry:
+        if _proxmox_hostnames_match(hostname, registered_hostname):
+            return registered_hostname
+    return None
+
+
+def _upsert_pending_proxmox_agent(hostname: Any, client_ip: str, now: float) -> str | None:
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+    if not resolved_hostname:
+        resolved_hostname = _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        return None
+    entry = pending_proxmox_agents.get(resolved_hostname)
+    if entry is None:
+        pending_proxmox_agents[resolved_hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
+    else:
+        entry["ip"] = client_ip
+        entry["last_seen"] = now
+    return resolved_hostname
+
+
 def _pending_proxmox_payload() -> list[dict[str, Any]]:
     now = time.time()
     return [
@@ -2316,8 +2372,9 @@ def _proxmox_update_args() -> dict[str, str]:
 
 def _resolve_proxmox_update_target() -> str:
     hostname = str((proxmox_state.get("node") or {}).get("hostname") or "").strip()
-    if hostname and hostname in approved_proxmox_agents:
-        return hostname
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if resolved_hostname:
+        return resolved_hostname
     if len(approved_proxmox_agents) == 1:
         return next(iter(approved_proxmox_agents))
     if not approved_proxmox_agents:
@@ -2621,6 +2678,7 @@ def _build_registration_config() -> dict[str, Any]:
 async def _hub_self_register(server_url: str) -> None:
     """POST to hub /api/spokes/register with full config payload.
     Stores the returned spoke_id. If already approved, also stores api_key and tenant_id."""
+    global relay_registration_refresh_needed
     hostname = socket.gethostname()
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     spoke_id = _ensure_relay_spoke_id()
@@ -2647,6 +2705,7 @@ async def _hub_self_register(server_url: str) -> None:
                     "registration_status": "name_conflict",
                     "error": f"{ts} — {msg}",
                 })
+                relay_registration_refresh_needed = False
                 _relay_diag_append("register_409", conflict=conflict, message=msg)
                 logger.warning("Hub registration name conflict: %s", msg)
                 return
@@ -2669,11 +2728,19 @@ async def _hub_self_register(server_url: str) -> None:
                                tenant_id=data.get("tenant_id"))
             logger.info("Hub registration: approved immediately spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
         else:
+            tenant_hint = str(data.get("tenant_hint", "")).strip()
+            settings["relay_api_key"] = ""
+            settings["relay_tenant_id"] = ""
+            if tenant_hint:
+                settings["relay_tenant_hint"] = tenant_hint
             relay_state["registration_status"] = "pending"
+            relay_state["error"] = ""
             _relay_diag_append("register_ok", status="pending", spoke_id=spoke_id)
             logger.info("Hub registration submitted: spoke_id=%s status=pending", spoke_id)
+        relay_registration_refresh_needed = False
         _save_settings()
     except Exception as exc:
+        relay_registration_refresh_needed = True
         _relay_diag_append("register_error", error=str(exc))
         logger.warning("Hub self-register failed: %s", exc)
         relay_state.update({"connected": False, "error": f"Registration failed: {exc}"})
@@ -2682,6 +2749,7 @@ async def _hub_self_register(server_url: str) -> None:
 async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     """Re-POST registration to check if spoke has been approved.
     Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
+    global relay_registration_refresh_needed
     hostname = socket.gethostname()
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     tenant_hint = (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip()
@@ -2716,12 +2784,25 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
                                tenant_id=data.get("tenant_id"))
             logger.info("Hub approval received: spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
         else:
+            tenant_hint = str(data.get("tenant_hint", "")).strip()
+            if settings.get("relay_api_key"):
+                settings["relay_api_key"] = ""
+                updated = True
+            if settings.get("relay_tenant_id"):
+                settings["relay_tenant_id"] = ""
+                updated = True
+            if tenant_hint and tenant_hint != settings.get("relay_tenant_hint", ""):
+                settings["relay_tenant_hint"] = tenant_hint
+                updated = True
             relay_state["registration_status"] = "pending"
+            relay_state["error"] = ""
             _relay_diag_append("still_pending", spoke_id=spoke_id)
             logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
+        relay_registration_refresh_needed = False
         if updated:
             _save_settings()
     except Exception as exc:
+        relay_registration_refresh_needed = True
         _relay_diag_append("check_approval_error", error=str(exc))
         logger.warning("Hub approval check failed: %s", exc)
 
@@ -2786,6 +2867,7 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
 async def relay_sync_once() -> None:
     """One relay cycle: register if needed, check approval if pending,
     then post telemetry, fetch inbox, process commands, and ack each."""
+    global relay_registration_refresh_needed
     if settings.get("relay_enabled") != "on" or not settings.get("relay_server_url"):
         relay_state["enabled"] = False
         return
@@ -2806,6 +2888,12 @@ async def relay_sync_once() -> None:
         await _hub_self_register(server_url)
         await broadcast({"type": "relay_status", **relay_state})
         return
+
+    if relay_registration_refresh_needed:
+        await _hub_check_approval(server_url, spoke_id)
+        spoke_id = settings.get("relay_spoke_id", spoke_id)
+        api_key = settings.get("relay_api_key", "")
+        tenant_id = settings.get("relay_tenant_id", "")
 
     # ── Phase 2: Pending approval — poll hub for approval ──────────────────────
     if not api_key or not tenant_id:
@@ -2927,6 +3015,28 @@ async def relay_sync_once() -> None:
             await broadcast({"type": "commands_update", "commands": _serialize_commands()})
 
         relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else None
+        if status_code in (401, 403, 404):
+            relay_registration_refresh_needed = True
+            settings["relay_api_key"] = ""
+            settings["relay_tenant_id"] = ""
+            relay_state.update({
+                "connected": False,
+                "registration_status": "pending",
+                "error": f"Hub returned {status_code}; refreshing registration",
+            })
+            _relay_diag_append(
+                "relay_reauth_required",
+                status_code=status_code,
+                method=exc.request.method if exc.request else "",
+                url=str(exc.request.url) if exc.request else "",
+            )
+            _save_settings()
+            await _hub_check_approval(server_url, spoke_id)
+        else:
+            relay_state.update({"connected": False, "error": str(exc)})
+        logger.warning("Relay sync failed: %s", exc)
     except Exception as exc:
         relay_state.update({"connected": False, "error": str(exc)})
         logger.warning("Relay sync failed: %s", exc)
@@ -3498,6 +3608,7 @@ async def api_settings_get() -> dict[str, Any]:
 
 @app.post("/api/settings")
 async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
+    global relay_registration_refresh_needed
     changed_branch = False
     relay_config_changed = False
 
@@ -3552,7 +3663,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
             "connected": False,
             "error": None,
+            "registration_status": _relay_registration_status_from_settings(),
         })
+        relay_registration_refresh_needed = bool(relay_state["enabled"])
 
     if update.central_api is not None:
         merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
@@ -3760,6 +3873,7 @@ async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Bod
             "error": None,
             "registration_status": "unregistered",
         })
+        relay_registration_refresh_needed = False
         relay_config_changed = True
         relay_payload = _relay_status_payload()
     elif provider_key == "central":
@@ -3973,24 +4087,20 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     if not hostname:
         return JSONResponse({"error": "hostname required"}, status_code=400)
 
-    if hostname not in approved_proxmox_agents:
-        entry = pending_proxmox_agents.get(hostname)
-        if entry is None:
-            pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
-        else:
-            entry["ip"] = client_ip
-            entry["last_seen"] = now
+    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if approved_hostname is None:
+        _upsert_pending_proxmox_agent(hostname, client_ip, now)
         await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
         if api_key:
             return JSONResponse({"error": "agent not approved"}, status_code=401)
         return JSONResponse({"pending": True}, status_code=202)
 
-    if api_key != approved_proxmox_agents[hostname]:
+    if api_key != approved_proxmox_agents[approved_hostname]:
         return JSONResponse({"error": "invalid key"}, status_code=401)
 
-    if hostname in pending_proxmox_agents:
-        pending_proxmox_agents[hostname]["ip"] = client_ip
-        pending_proxmox_agents[hostname]["last_seen"] = now
+    pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+    if pending_hostname is not None:
+        pending_proxmox_agents.pop(pending_hostname, None)
         await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
 
     async with state_lock:
@@ -4126,16 +4236,16 @@ async def proxmox_register(request: Request, body: dict = Body(...)) -> JSONResp
         return JSONResponse({"error": "hostname required"}, status_code=400)
     client_ip = request.client.host if request.client else "unknown"
 
-    if hostname in approved_proxmox_agents:
-        return JSONResponse({"approved": True, "key": approved_proxmox_agents[hostname]})
+    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if approved_hostname is not None:
+        pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+        if pending_hostname is not None:
+            pending_proxmox_agents.pop(pending_hostname, None)
+            await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+        return JSONResponse({"approved": True, "key": approved_proxmox_agents[approved_hostname]})
 
     now = time.time()
-    entry = pending_proxmox_agents.get(hostname)
-    if entry is None:
-        pending_proxmox_agents[hostname] = {"ip": client_ip, "first_seen": now, "last_seen": now}
-    else:
-        entry["ip"] = client_ip
-        entry["last_seen"] = now
+    _upsert_pending_proxmox_agent(hostname, client_ip, now)
     await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
     return JSONResponse({"pending": True}, status_code=202)
 
@@ -4143,9 +4253,10 @@ async def proxmox_register(request: Request, body: dict = Body(...)) -> JSONResp
 @app.get("/api/proxmox/key")
 async def proxmox_get_key(hostname: str = Query(...)) -> JSONResponse:
     """Agent polls this until approved. Returns key when ready."""
-    if hostname in approved_proxmox_agents:
-        return JSONResponse({"approved": True, "key": approved_proxmox_agents[hostname]})
-    if hostname in pending_proxmox_agents:
+    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if approved_hostname is not None:
+        return JSONResponse({"approved": True, "key": approved_proxmox_agents[approved_hostname]})
+    if _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents) is not None:
         return JSONResponse({"pending": True}, status_code=202)
     return JSONResponse({"error": "unknown hostname"}, status_code=404)
 
@@ -4157,32 +4268,47 @@ async def proxmox_pending_list() -> list[dict[str, Any]]:
 
 @app.post("/api/proxmox/approve/{hostname}")
 async def proxmox_approve(hostname: str) -> dict[str, Any]:
+    pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if approved_hostname is not None:
+        if pending_hostname is not None:
+            pending_proxmox_agents.pop(pending_hostname, None)
+            await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+            await _broadcast_proxmox_state()
+        return {"approved": True, "hostname": approved_hostname, "key": approved_proxmox_agents[approved_hostname], "existing": True}
+
+    resolved_hostname = pending_hostname or _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        raise HTTPException(status_code=400, detail="hostname is required")
+
     key = str(uuid.uuid4())
-    approved_proxmox_agents[hostname] = key
-    pending_proxmox_agents.pop(hostname, None)
+    approved_proxmox_agents[resolved_hostname] = key
+    pending_proxmox_agents.pop(pending_hostname or resolved_hostname, None)
     settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
     _save_settings()
     await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
     await _broadcast_proxmox_state()
-    return {"approved": True, "hostname": hostname, "key": key}
+    return {"approved": True, "hostname": resolved_hostname, "key": key}
 
 
 @app.post("/api/proxmox/reject/{hostname}")
 async def proxmox_reject(hostname: str) -> dict[str, Any]:
-    pending_proxmox_agents.pop(hostname, None)
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    pending_proxmox_agents.pop(resolved_hostname, None)
     await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
     await _broadcast_proxmox_state()
-    return {"rejected": True, "hostname": hostname}
+    return {"rejected": True, "hostname": resolved_hostname}
 
 
 @app.delete("/api/proxmox/approved/{hostname}")
 async def proxmox_revoke(hostname: str) -> dict[str, Any]:
     """Revoke an approved agent's key."""
-    approved_proxmox_agents.pop(hostname, None)
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    approved_proxmox_agents.pop(resolved_hostname, None)
     settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
     _save_settings()
     await _broadcast_proxmox_state()
-    return {"revoked": True, "hostname": hostname}
+    return {"revoked": True, "hostname": resolved_hostname}
 
 
 @app.get("/api/proxmox/approved")
@@ -5264,7 +5390,34 @@ async def api_all_clients_control(overrides: dict[str, str]) -> dict[str, Any]:
 # ── Log viewer endpoints ──────────────────────────────────────────────────────
 
 JOURNAL_UNIT = "client-sim-dashboard"
-INSTALL_LOG_PATH = "/var/log/client-sim-dashboard-install.log"
+INSTALL_LOG_PATH = Path("/var/log/client-sim-dashboard-install.log")
+LOG_STREAM_KEEPALIVE_SECS = 15
+LOG_STREAM_POLL_SECS = 1
+
+
+def _normalize_log_source(source: str) -> str:
+    normalized = (source or "journal").strip().lower()
+    if normalized not in {"journal", "install", "agent"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported log source: {source}")
+    return normalized
+
+
+def _log_source_hint(source: str, detail: str | None = None) -> str:
+    detail_text = f": {detail}" if detail else ""
+    if source == "agent":
+        return "[INFO] No Proxmox agent logs yet — logs arrive on the next agent telemetry poll (≤60s after activity)."
+    if source == "install":
+        return f"[INFO] Install log {INSTALL_LOG_PATH} is not available on this spoke yet. Start an install or update to create it{detail_text}"
+    return f"[WARN] Live service journal for {JOURNAL_UNIT} is unavailable on this spoke{detail_text}"
+
+
+def _encode_sse_line(text: str) -> str:
+    return f"data: {json.dumps(text)}\n\n"
+
+
+async def _stream_keepalive() -> str:
+    await asyncio.sleep(LOG_STREAM_KEEPALIVE_SECS)
+    return ": keepalive\n\n"
 
 
 @app.get("/api/logs/history")
@@ -5272,11 +5425,20 @@ async def api_logs_history(
     lines: int = Query(default=300, ge=10, le=2000),
     source: str = Query(default="journal"),
 ):
-    """Return the last N lines from journalctl or the install log."""
+    """Return the last N lines from the selected log source."""
+    source = _normalize_log_source(source)
     try:
+        if source == "agent":
+            log_lines = proxmox_log_buffer[-lines:]
+            if not log_lines:
+                log_lines = [_log_source_hint("agent")]
+            return PlainTextResponse("\n".join(log_lines))
+
         if source == "install":
+            if not INSTALL_LOG_PATH.exists():
+                return PlainTextResponse(_log_source_hint("install"))
             proc = await asyncio.create_subprocess_exec(
-                "tail", "-n", str(lines), INSTALL_LOG_PATH,
+                "tail", "-n", str(lines), str(INSTALL_LOG_PATH),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -5285,39 +5447,92 @@ async def api_logs_history(
                 "journalctl", "-u", JOURNAL_UNIT, "--no-pager", "-n", str(lines),
                 "--output=short-iso",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        return PlainTextResponse(stdout.decode("utf-8", errors="replace"))
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        text = stdout.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0 and not text:
+            detail = stderr.decode("utf-8", errors="replace").strip() or None
+            return PlainTextResponse(_log_source_hint(source, detail))
+        return PlainTextResponse(text or _log_source_hint(source))
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        return PlainTextResponse(_log_source_hint(source, str(exc)))
 
 
 @app.get("/api/logs/stream")
-async def api_logs_stream():
-    """Server-Sent Events stream of live journalctl -f output."""
+async def api_logs_stream(source: str = Query(default="journal")):
+    """Server-Sent Events stream of live log output."""
+    source = _normalize_log_source(source)
+
     async def generate():
-        proc = await asyncio.create_subprocess_exec(
-            "journalctl", "-u", JOURNAL_UNIT, "-f", "--no-pager",
-            "--output=short-iso",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        yield "retry: 5000\n\n"
+
+        if source == "agent":
+            last_index = len(proxmox_log_buffer)
+            hinted_empty = False
+            while True:
+                current_len = len(proxmox_log_buffer)
+                if current_len < last_index:
+                    last_index = 0
+                if current_len > last_index:
+                    for line in proxmox_log_buffer[last_index:current_len]:
+                        yield _encode_sse_line(str(line))
+                    last_index = current_len
+                    hinted_empty = False
+                    continue
+                if current_len == 0 and not hinted_empty:
+                    hinted_empty = True
+                    yield _encode_sse_line(_log_source_hint("agent"))
+                yield await _stream_keepalive()
+                await asyncio.sleep(LOG_STREAM_POLL_SECS)
+
+        if source == "install" and not INSTALL_LOG_PATH.exists():
+            yield _encode_sse_line(_log_source_hint("install"))
+
+        proc = None
+        try:
+            if source == "install":
+                proc = await asyncio.create_subprocess_exec(
+                    "tail", "-n", "0", "-F", str(INSTALL_LOG_PATH),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    "journalctl", "-u", JOURNAL_UNIT, "-f", "--no-pager", "-n", "0",
+                    "--output=short-iso",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+        except Exception as exc:
+            yield _encode_sse_line(_log_source_hint(source, str(exc)))
+            while True:
+                yield await _stream_keepalive()
+
         try:
             while True:
                 try:
-                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=25)
-                    if not line:
-                        break
-                    text = line.decode("utf-8", errors="replace").rstrip("\n")
-                    yield f"data: {json.dumps(text)}\n\n"
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=LOG_STREAM_KEEPALIVE_SECS)
                 except asyncio.TimeoutError:
-                    yield "data: \"\"\n\n"  # keep-alive ping — stay in loop
-        except Exception:
-            pass
+                    yield ": keepalive\n\n"
+                    continue
+                if line:
+                    text = line.decode("utf-8", errors="replace").rstrip("\n")
+                    if text:
+                        yield _encode_sse_line(text)
+                    continue
+                detail = None
+                if source == "journal" and proc.stderr is not None:
+                    detail = (await proc.stderr.read()).decode("utf-8", errors="replace").strip() or None
+                yield _encode_sse_line(_log_source_hint(source, detail))
+                while True:
+                    yield await _stream_keepalive()
         finally:
-            with contextlib.suppress(Exception):
-                proc.kill()
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(Exception):
+                    proc.kill()
 
     return StreamingResponse(generate(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
@@ -5649,9 +5864,10 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
     if not hostname:
         raise HTTPException(status_code=422, detail="hostname is required")
-    if hostname in approved_proxmox_agents:
+    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+    if approved_hostname is not None:
         api_key = request.headers.get("X-API-Key", "")
-        if api_key != approved_proxmox_agents[hostname]:
+        if api_key != approved_proxmox_agents[approved_hostname]:
             raise HTTPException(status_code=401, detail="invalid key")
 
     async with state_lock:
@@ -5660,7 +5876,8 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
             c for c in commands
             if c["status"] == "pending" and (
                 c["target"] == hostname or
-                (c["target"] == "proxmox" and hostname in approved_proxmox_agents)
+                (approved_hostname is not None and _proxmox_hostnames_match(c["target"], approved_hostname)) or
+                (c["target"] == "proxmox" and approved_hostname is not None)
             )
         ]
         now = time.time()
