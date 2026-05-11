@@ -5158,6 +5158,7 @@ async def api_central_status() -> dict[str, Any]:
         "client_count_status": _client_count_payload(),
         "site_mappings": settings.get("site_mappings", {}),
         "monitored_checks": settings.get("monitored_checks", []),
+        "central_api": _public_central_api_settings(),
         "token_valid": bool(central_token.get("access_token") and time.time() < central_token["expires_at"]),
         "token_state": _central_token_state(),
     }
