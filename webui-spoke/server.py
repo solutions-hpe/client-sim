@@ -2621,24 +2621,34 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     """Re-POST registration to check if spoke has been approved.
     Hub returns 'approved' with api_key and tenant_id once superadmin has approved."""
     hostname = socket.gethostname()
+    spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
+    tenant_hint = (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip()
     _relay_diag_append("check_approval", spoke_id=spoke_id)
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/spokes/register", json={
                 "hostname": hostname,
                 "label": hostname,
-                "config": {},
+                "spoke_name": spoke_name,
+                "tenant_id_hint": tenant_hint,
+                "config": _build_registration_config(),
             })
             resp.raise_for_status()
             data = resp.json()
         status = data.get("status", "pending")
+        updated = False
+        returned_spoke_id = data.get("spoke_id", "")
+        if returned_spoke_id and returned_spoke_id != settings.get("relay_spoke_id", ""):
+            settings["relay_spoke_id"] = returned_spoke_id
+            spoke_id = returned_spoke_id
+            updated = True
         if status == "approved":
             tenant_id = data.get("tenant_id", "")
             settings["relay_api_key"] = data.get("api_key", "")
             settings["relay_tenant_id"] = tenant_id
             settings["relay_tenant_hint"] = tenant_id
             relay_state["registration_status"] = "approved"
-            _save_settings()
+            updated = True
             _relay_diag_append("approval_received", spoke_id=spoke_id,
                                tenant_id=data.get("tenant_id"))
             logger.info("Hub approval received: spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
@@ -2646,9 +2656,18 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
             relay_state["registration_status"] = "pending"
             _relay_diag_append("still_pending", spoke_id=spoke_id)
             logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
+        if updated:
+            _save_settings()
     except Exception as exc:
         _relay_diag_append("check_approval_error", error=str(exc))
         logger.warning("Hub approval check failed: %s", exc)
+
+
+def _relay_hub_base_url(server_url: str, tenant_id: str) -> str:
+    url = server_url.rstrip("/")
+    if tenant_id:
+        url = re.sub(rf"/api/{re.escape(tenant_id)}$", "", url)
+    return url.rstrip("/")
 
 
 async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2729,24 +2748,50 @@ async def relay_sync_once() -> None:
     if not api_key or not tenant_id:
         relay_state["registration_status"] = relay_state.get("registration_status", "pending")
         await _hub_check_approval(server_url, spoke_id)
-        await broadcast({"type": "relay_status", **relay_state})
-        return
+        spoke_id = settings.get("relay_spoke_id", spoke_id)
+        api_key = settings.get("relay_api_key", "")
+        tenant_id = settings.get("relay_tenant_id", "")
+        if not api_key or not tenant_id:
+            await broadcast({"type": "relay_status", **relay_state})
+            return
 
     # ── Phase 3: Approved — full relay cycle ───────────────────────────────────
     relay_state["registration_status"] = "approved"
     headers = {"X-API-Key": api_key}
-    base = f"{server_url}/api/{tenant_id}/islands/{spoke_id}"
+    hub_base = _relay_hub_base_url(server_url, tenant_id)
+    base = f"{hub_base}/api/{tenant_id}/spokes/{spoke_id}"
 
     try:
         async with state_lock:
+            proxmox_vms = list(proxmox_state.get("vms", []))
             telemetry = {
                 "spoke_id": spoke_id,
                 "clients": [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)],
                 "timestamp": time.time(),
+                "proxmox": {
+                    "connected": bool(proxmox_state.get("connected", False)),
+                    "last_seen": proxmox_state.get("last_seen"),
+                    "node": dict(proxmox_state.get("node") or {}),
+                    "vm_count": len(proxmox_vms),
+                    "running_count": sum(1 for vm in proxmox_vms if vm.get("status") == "running"),
+                    "vms": [
+                        {
+                            "vmid": vm.get("vmid"),
+                            "name": vm.get("name", ""),
+                            "status": vm.get("status", ""),
+                            "type": vm.get("type", ""),
+                        }
+                        for vm in proxmox_vms
+                    ],
+                    "usb_count": len(proxmox_state.get("usb_state", [])),
+                    "agent_version": proxmox_state.get("agent_version"),
+                    "pve_version": proxmox_state.get("pve_version"),
+                },
             }
 
         async with httpx.AsyncClient(timeout=10, verify=False) as hc:
-            await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
+            telemetry_resp = await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
+            telemetry_resp.raise_for_status()
             resp = await hc.get(f"{base}/inbox", headers=headers)
             resp.raise_for_status()
             remote_cmds = resp.json()
