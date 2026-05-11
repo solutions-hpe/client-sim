@@ -95,8 +95,16 @@ EOF
     if [[ -f "$src_dir/VERSION" ]]; then
         sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
     fi
-    # update.sh copied last — avoids bash re-read errors if this script is running
-    [[ -f "$src_dir/update.sh" ]] && sudo cp "$src_dir/update.sh" /usr/local/scripts/update.sh
+    # update.sh: atomic inode swap (install to .new + mv) instead of cp.
+    # cp truncates the existing file in place (same inode); bash has that inode
+    # open and reads garbled content as the new bytes stream in.  mv replaces
+    # the directory entry atomically — bash keeps the old fd and finishes reading
+    # the old content cleanly, then the next `source update.sh` gets the new file.
+    if [[ -f "$src_dir/update.sh" ]]; then
+        sudo install -m 755 "$src_dir/update.sh" /usr/local/scripts/update.sh.new \
+            && sudo mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+            || true
+    fi
     sudo chmod 755 /usr/local/scripts
     sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
     sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
@@ -429,8 +437,12 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 echo "WARNING: configs directory not found" | tee -a "$debug"
             fi
 
-            # update.sh copied last
-            [[ -f "linux/update.sh" ]] && sudo cp linux/update.sh /usr/local/scripts/update.sh
+            # update.sh: atomic mv to avoid bash re-read corruption (same fix as copy_local_files)
+            if [[ -f "linux/update.sh" ]]; then
+                sudo install -m 755 linux/update.sh /usr/local/scripts/update.sh.new \
+                    && sudo mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+                    || true
+            fi
             sudo chmod 755 /usr/local/scripts
             sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
             sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
