@@ -1848,6 +1848,21 @@ def _relay_diag_append(event: str, **kwargs: Any) -> None:
     relay_diag_log.append(entry)
     if len(relay_diag_log) > _RELAY_DIAG_MAX:
         del relay_diag_log[:-_RELAY_DIAG_MAX]
+
+
+def _default_provision_run_state() -> dict[str, Any]:
+    return {
+        "running": False,
+        "started_at": None,
+        "updated_at": None,
+        "completed_at": None,
+        "total": 0,
+        "completed": 0,
+        "failed": 0,
+        "items": [],
+    }
+
+
 proxmox_state: dict[str, Any] = {
     "connected": False,
     "last_seen": None,
@@ -1860,6 +1875,7 @@ proxmox_state: dict[str, Any] = {
     "agent_version": None,
     "pve_version": None,
     "prov_summary": None,   # {"action": "provisioned"|"deleted", "count": N, "at": <unix ts>}
+    "prov_run": _default_provision_run_state(),
 }
 # Previous usb_state vmid→prov_status snapshot for transition detection
 _prev_usb_by_vmid: dict[str, str] = {}
@@ -2476,6 +2492,128 @@ def _normalize_proxmox_usb_state(
         normalized.append(entry)
     return normalized
 
+
+def _derive_provision_run_item_status(
+    usb_entry: dict[str, Any],
+    vm_by_vmid: dict[str, dict[str, Any]],
+) -> str:
+    if str(usb_entry.get("prov_status") or "").strip().lower() != "provisioning":
+        return "done"
+    vm = vm_by_vmid.get(str(usb_entry.get("vmid"))) or {}
+    vm_status = str(vm.get("status") or "").strip().lower()
+    return "configuring" if vm_status == "running" else "cloning"
+
+
+def _update_provision_run_state(vms: list[dict[str, Any]], usb_state: list[dict[str, Any]], now: int) -> None:
+    run = _default_provision_run_state()
+    current = proxmox_state.get("prov_run")
+    if isinstance(current, dict):
+        for key in ("running", "started_at", "updated_at", "completed_at", "total", "completed", "failed"):
+            run[key] = current.get(key)
+        run["items"] = [
+            dict(item)
+            for item in current.get("items", [])
+            if isinstance(item, dict) and item.get("vmid") is not None
+        ]
+
+    vm_by_vmid = {
+        str(vm.get("vmid")): dict(vm)
+        for vm in (vms if isinstance(vms, list) else [])
+        if isinstance(vm, dict) and vm.get("vmid") is not None
+    }
+    usb_by_vmid = {
+        str(entry.get("vmid")): dict(entry)
+        for entry in (usb_state if isinstance(usb_state, list) else [])
+        if isinstance(entry, dict) and entry.get("vmid") is not None
+    }
+    provisioning_vmids = [
+        vmid
+        for vmid, entry in usb_by_vmid.items()
+        if str(entry.get("prov_status") or "").strip().lower() == "provisioning"
+    ]
+    provisioning_vmids.sort(key=lambda value: int(value) if str(value).isdigit() else value)
+
+    if not run.get("running") and provisioning_vmids:
+        run = _default_provision_run_state()
+        run["running"] = True
+        run["started_at"] = now
+        run["updated_at"] = now
+
+    items = run["items"]
+    item_by_vmid = {str(item.get("vmid")): item for item in items if item.get("vmid") is not None}
+
+    if run.get("running"):
+        for vmid in provisioning_vmids:
+            entry = usb_by_vmid[vmid]
+            item = item_by_vmid.get(vmid)
+            if item is None:
+                vm = vm_by_vmid.get(vmid) or {}
+                item = {
+                    "vmid": entry.get("vmid"),
+                    "vm_name": str(vm.get("name") or "").strip() or None,
+                    "usb_name": str(entry.get("name") or "").strip() or None,
+                    "bus_path": str(entry.get("bus_path") or "").strip() or None,
+                    "vidpid": str(entry.get("vidpid") or "").strip() or None,
+                    "status": _derive_provision_run_item_status(entry, vm_by_vmid),
+                    "started_at": now,
+                    "updated_at": now,
+                    "completed_at": None,
+                }
+                items.append(item)
+                item_by_vmid[vmid] = item
+            elif item.get("status") in {"done", "failed"}:
+                item.update({
+                    "status": _derive_provision_run_item_status(entry, vm_by_vmid),
+                    "started_at": now,
+                    "updated_at": now,
+                    "completed_at": None,
+                })
+
+    for item in items:
+        vmid_key = str(item.get("vmid"))
+        entry = usb_by_vmid.get(vmid_key)
+        vm = vm_by_vmid.get(vmid_key) or {}
+        if vm.get("name"):
+            item["vm_name"] = str(vm.get("name"))
+        if entry:
+            if entry.get("name"):
+                item["usb_name"] = str(entry.get("name"))
+            if entry.get("bus_path"):
+                item["bus_path"] = str(entry.get("bus_path"))
+            if entry.get("vidpid"):
+                item["vidpid"] = str(entry.get("vidpid"))
+
+        previous_status = str(item.get("status") or "pending")
+        next_status = previous_status
+        if entry and str(entry.get("prov_status") or "").strip().lower() == "provisioning":
+            next_status = _derive_provision_run_item_status(entry, vm_by_vmid)
+            item["completed_at"] = None
+        elif entry and str(entry.get("prov_status") or "").strip().lower() == "active":
+            if previous_status != "failed":
+                next_status = "done"
+                item["completed_at"] = item.get("completed_at") or now
+        elif run.get("running") and previous_status not in {"done", "failed"}:
+            if _prev_usb_by_vmid.get(vmid_key) == "provisioning":
+                next_status = "failed"
+                item["completed_at"] = item.get("completed_at") or now
+
+        if next_status != previous_status or (entry and str(entry.get("prov_status") or "").strip().lower() == "provisioning"):
+            item["updated_at"] = now
+        item["status"] = next_status
+
+    run["total"] = len(items)
+    run["completed"] = sum(1 for item in items if item.get("status") == "done")
+    run["failed"] = sum(1 for item in items if item.get("status") == "failed")
+
+    active_items = [item for item in items if item.get("status") not in {"done", "failed"}]
+    if run.get("running") and items and not active_items:
+        run["running"] = False
+        run["completed_at"] = now
+        run["updated_at"] = now
+    elif run.get("running"):
+        run["updated_at"] = now
+
+    proxmox_state["prov_run"] = run
 
 
 def _guest_supports_reclone(vm: dict[str, Any]) -> bool:
@@ -4370,6 +4508,7 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
             proxmox_state["prov_summary"] = {"action": "provisioned", "count": len(newly_provisioned), "at": now}
         elif torn_down:
             proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
+    _update_provision_run_state(enriched_vms, new_usb, now)
     _prev_usb_by_vmid = new_by_vmid
 
     # Append new log lines to ring buffer and broadcast if any arrived
@@ -5901,6 +6040,7 @@ async def api_server_clear_cache() -> dict[str, Any]:
             "connected": False, "last_seen": None, "node": {}, "vms": [],
             "unknown_usb": [], "usb_state": [], "present_usb": [],
             "agent_version": None, "pve_version": None,
+            "prov_summary": None, "prov_run": _default_provision_run_state(),
         })
         proxmox_log_buffer.clear()
         pending_proxmox_agents.clear()
