@@ -92,6 +92,17 @@ EOF
         sudo mkdir -p /etc/polkit-1/rules.d
         sudo cp "$src_dir/50-client-sim-nm.rules" /etc/polkit-1/rules.d/50-client-sim-nm.rules
     fi
+    # Suppress nm-applet in lxsession autostart
+    _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
+    _lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
+    if [ -f "$_lxsession_sys" ]; then
+      mkdir -p "$(dirname "$_lxsession_user")"
+      if [ ! -f "$_lxsession_user" ]; then
+        grep -v 'nm-applet' "$_lxsession_sys" > "$_lxsession_user" || true
+      elif grep -q 'nm-applet' "$_lxsession_user"; then
+        sed -i '/nm-applet/d' "$_lxsession_user"
+      fi
+    fi
     if [[ -f "$src_dir/VERSION" ]]; then
         sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
     fi

@@ -46,13 +46,30 @@ xset -dpms
 xset s off
 sudo rfkill unblock wifi; sudo rfkill unblock all
 # Kill nm-applet so it never pops up auth dialogs — WiFi is managed by scripts
-pkill -x nm-applet 2>/dev/null || true
+pkill -f nm-applet 2>/dev/null || true
 # Suppress nm-applet autostart for this user session
 mkdir -p "$HOME/.config/autostart"
 cat > "$HOME/.config/autostart/nm-applet.desktop" <<'NMEOF'
 [Desktop Entry]
 Hidden=true
 NMEOF
+# Suppress nm-applet in lxsession autostart (Raspberry Pi OS / LXDE-pi)
+# lxsession reads its own autostart files directly — XDG Hidden=true doesn't apply.
+# Copy the system autostart to user override and strip nm-applet from it.
+_lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
+_lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
+if [ -f "$_lxsession_sys" ] && [ ! -f "$_lxsession_user" ]; then
+  mkdir -p "$(dirname "$_lxsession_user")"
+  grep -v 'nm-applet' "$_lxsession_sys" > "$_lxsession_user" || true
+elif [ -f "$_lxsession_user" ] && grep -q 'nm-applet' "$_lxsession_user"; then
+  sed -i '/nm-applet/d' "$_lxsession_user"
+fi
+# Also kill any auth agents that may show WiFi password popups
+pkill -f nm-applet 2>/dev/null || true
+pkill -f lxpolkit 2>/dev/null || true
+pkill -f 'polkit-gnome-authentication-agent' 2>/dev/null || true
+# Kill any pending nmcli secret agents that are waiting for interactive input
+pkill -f 'nm-applet.*--sm-disable' 2>/dev/null || true
 # NOTE: xrandr / display setup is handled exclusively by launch-terminals.sh,
 # which runs before this script and owns the resolution.  Do NOT call xrandr
 # here — a mode-switch event after terminals are placed causes the window

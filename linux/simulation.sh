@@ -367,7 +367,7 @@ sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 wait_for_ssid() {
   local target_ssid="$1"
-  local timeout=60
+  local timeout=120
   local interval=3
   local elapsed=0
   echo "Scanning for SSID: $target_ssid" | tee -a "$debug"
@@ -435,11 +435,11 @@ connect_wifi() {
     return 1
   fi
   echo "Attempting to connect to $target_ssid" | tee -a "$debug"
-  # --wait 120: extend association timeout beyond the 90s default.
+  # --wait 180: extend association timeout beyond the 90s default.
   # WHY: Slow APs or busy channels can take >90s to complete the 4-way
   # handshake. A timeout causes NM to fall back to interactive auth and
   # trigger graphical password popups.
-  if ! nmcli --wait 120 device wifi connect "$target_ssid" password "$ssidpw"; then
+  if ! nmcli --wait 180 device wifi connect "$target_ssid" password "$ssidpw"; then
     report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
     return 1
   fi
