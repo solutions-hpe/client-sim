@@ -1686,6 +1686,7 @@ relay_state: dict[str, Any] = {
 # Capped registration diagnostic log — last 50 attempts
 _RELAY_DIAG_MAX = 50
 relay_diag_log: list[dict[str, Any]] = []
+_repo_ver: str | None = None
 
 
 def _relay_diag_append(event: str, **kwargs: Any) -> None:
@@ -5790,6 +5791,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.error("WS on-connect full_state error: %s", exc)
     try:
+        global _repo_ver
         _repo_ver = await asyncio.to_thread(_get_repo_version)
         await websocket.send_text(json.dumps({"type": "repo_status", "synced": repo_state["synced"], "error": repo_state["error"], "last_sync": repo_state["last_sync"], "repo_version": _repo_ver}, default=str))
     except Exception as exc:  # noqa: BLE001
