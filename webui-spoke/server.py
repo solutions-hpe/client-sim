@@ -3877,7 +3877,9 @@ def _get_repo_version() -> str | None:
 
 
 async def check_for_update() -> None:
-    """Background task: check for a new installer version every 24 hours."""
+    """Background task: check for a new installer version every 24 hours.
+    Only detects and broadcasts — never auto-applies. Updates are applied
+    explicitly via /api/self-update or /api/update-all."""
     while True:
         try:
             available = await asyncio.to_thread(_get_repo_version)
@@ -3896,9 +3898,6 @@ async def check_for_update() -> None:
             )
             _update_service_health("update_checker", ok=True)
             await _broadcast_update_state()
-            if update_state["update_available"]:
-                logger.info("New version %s available — triggering self-update", available)
-                await _run_self_update()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
