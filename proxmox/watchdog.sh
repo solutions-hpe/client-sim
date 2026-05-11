@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-SERVICE_NAME="proxmox-agent.service"
+SERVICE_NAME="client-sim-proxmox-agent.service"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
 STATE_DIR="/var/lib/proxmox-watchdog"
@@ -112,8 +112,8 @@ service_ok=false
 health_ok=false
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     service_ok=true
-fi
-if curl -sf --max-time 5 "http://localhost:${AGENT_PORT}/health" >/dev/null 2>&1; then
+    # The proxmox agent is a bash script, not an HTTP server — health is
+    # confirmed by the service being active (systemctl is sufficient).
     health_ok=true
 fi
 

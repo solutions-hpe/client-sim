@@ -2149,7 +2149,7 @@ def _cleanup_commands_locked(now: float | None = None) -> tuple[int, int]:
     commands[:] = [
         cmd for cmd in commands
         if cmd.get("status") not in {"completed", "failed", "expired"}
-        or now < float(cmd.get("purge_after", cmd.get("updated_at", cmd.get("created_at", now)) + COMMAND_RESULT_RETENTION_SECS))
+        or now < float(cmd.get("purge_after") or cmd.get("updated_at", cmd.get("created_at", now)) + COMMAND_RESULT_RETENTION_SECS)
     ]
     purged = before - len(commands)
     _trim_commands_locked()

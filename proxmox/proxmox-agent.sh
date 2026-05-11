@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.44"
+AGENT_VERSION="2.45"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -440,11 +440,11 @@ prune_stale_state_vmids() {
     for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
         [[ -n "${existing_vmids[$vmid]:-}" ]] && continue
         bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
-        unset 'STATE_VMID_TO_BUS[$vmid]'
-        unset 'STATE_VMID_TO_IMAGE[$vmid]'
+        unset "STATE_VMID_TO_BUS[$vmid]"
+        unset "STATE_VMID_TO_IMAGE[$vmid]"
         if [[ -n "$bus_path" ]]; then
-            unset 'STATE_BUS_TO_VMID[$bus_path]'
-            unset 'STATE_MISSING_BY_BUS[$bus_path]'
+            unset "STATE_BUS_TO_VMID[$bus_path]"
+            unset "STATE_MISSING_BY_BUS[$bus_path]"
         fi
         ((stale_count++))
         log "Removed stale VM state for VM $vmid${bus_path:+ (bus $bus_path)}"
@@ -800,10 +800,10 @@ clone_vm_for_usb() {
         _wait_vm_stopped "$vmid" 60 || true
         timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
         _wait_vmid_gone "$vmid" 60 || true
-        unset 'STATE_VMID_TO_BUS[$vmid]'
-        unset 'STATE_VMID_TO_IMAGE[$vmid]'
-        unset 'STATE_BUS_TO_VMID[$bus_path]'
-        unset 'STATE_MISSING_BY_BUS[$bus_path]'
+        unset "STATE_VMID_TO_BUS[$vmid]"
+        unset "STATE_VMID_TO_IMAGE[$vmid]"
+        unset "STATE_BUS_TO_VMID[$bus_path]"
+        unset "STATE_MISSING_BY_BUS[$bus_path]"
         save_state_file
     }
 
@@ -968,11 +968,11 @@ destroy_vm() {
         return 1
     fi
     if [[ -n "$bus_path" ]]; then
-        unset 'STATE_MISSING_BY_BUS[$bus_path]'
-        unset 'STATE_BUS_TO_VMID[$bus_path]'
+        unset "STATE_MISSING_BY_BUS[$bus_path]"
+        unset "STATE_BUS_TO_VMID[$bus_path]"
     fi
-    unset 'STATE_VMID_TO_BUS[$vmid]'
-    unset 'STATE_VMID_TO_IMAGE[$vmid]'
+    unset "STATE_VMID_TO_BUS[$vmid]"
+    unset "STATE_VMID_TO_IMAGE[$vmid]"
     save_state_file
     log "Destroyed ${guest_type^^} $vmid"
 }
@@ -1224,10 +1224,10 @@ usb_provision_loop() {
         for _i in "${!_all_pids[@]}"; do
             if ! wait "${_all_pids[$_i]}" 2>/dev/null; then
                 log "WARNING: A parallel provision job failed for VM ${_prov_vmids[$_i]}"
-                unset 'STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]'
-                unset 'STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]'
-                unset 'STATE_BUS_TO_VMID[${_prov_buses[$_i]}]'
-                unset 'STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]'
+                unset "STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]"
+                unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]"
+                unset "STATE_BUS_TO_VMID[${_prov_buses[$_i]}]"
+                unset "STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]"
             fi
         done
         _state_changed=1
