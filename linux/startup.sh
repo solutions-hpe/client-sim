@@ -15,12 +15,15 @@ sudo touch "$log" "$debug" 2>/dev/null && sudo chmod a+w "$log" "$debug" 2>/dev/
 # here or the terminal window will be permanently lost after the first run.
 _LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
+    simdebug="/usr/local/scripts/debug-simulation.log"
+    sudo touch "$simdebug" 2>/dev/null || true
     echo "$(date): startup.sh already running — this window is a duplicate." >> "$debug"
     # DO NOT exit here. The parent shell is: bash -c "startup.sh ; systemctl reboot"
     # Exiting would trigger the reboot even though the real simulation is still healthy.
-    # Instead, tail the debug log so this window shows live output rather than blank.
-    echo "=== startup.sh is running in another window — showing live debug log ==="
-    exec tail -f "$debug"
+    # Follow debug-simulation.log so this window shows the live simulation output
+    # (what the user wants to watch) instead of the startup debug log.
+    echo "=== Simulation running in another session — following simulation output ==="
+    exec tail -f "$simdebug"
 fi
 trap 'rmdir "$_LOCK_FILE" 2>/dev/null || true' EXIT INT TERM
 
