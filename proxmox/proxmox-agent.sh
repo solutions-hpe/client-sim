@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.72"
+AGENT_VERSION="2.73"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1197,6 +1197,16 @@ usb_provision_loop() {
     done
 
     if [[ ${#_prov_buses[@]} -gt 0 ]]; then
+        # Create sentinel files NOW (before forking) so build_usb_state_json
+        # immediately reflects prov_status="provisioning" for all queued VMs.
+        # Without this the USB state cache is stale during the entire clone
+        # (which blocks the main loop) and the UI never shows "provisioning".
+        for _i in "${!_prov_vmids[@]}"; do
+            echo "$(date +%s)" > "${PROV_DIR}/${_prov_vmids[$_i]}"
+        done
+        build_usb_state_json
+        post_telemetry || true
+
         local _active_pids=() _all_pids=()
         for _i in "${!_prov_buses[@]}"; do
             while [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]]; do
