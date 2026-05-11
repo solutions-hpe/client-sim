@@ -2729,8 +2729,20 @@ def _update_provision_run_state(vms: list[dict[str, Any]], usb_state: list[dict[
             item["completed_at"] = None
         elif entry and str(entry.get("prov_status") or "").strip().lower() == "active":
             if previous_status != "failed":
-                next_status = "done"
-                item["completed_at"] = item.get("completed_at") or now
+                # Clone finished — keep as "pending_checkin" until the VM's client
+                # actually contacts the API (pending_checkin flag on the enriched VM).
+                # This keeps run.running=True and the live panel visible through the
+                # boot-up gap between clone-complete and first API check-in.
+                enriched = next(
+                    (v for v in vms if str(v.get("vmid")) == vmid_key),
+                    None,
+                )
+                if enriched and enriched.get("pending_checkin"):
+                    next_status = "pending_checkin"
+                    item["completed_at"] = None
+                else:
+                    next_status = "done"
+                    item["completed_at"] = item.get("completed_at") or now
         elif run.get("running") and previous_status not in {"done", "failed"}:
             if _prev_usb_by_vmid.get(vmid_key) == "provisioning":
                 next_status = "failed"
@@ -2744,6 +2756,7 @@ def _update_provision_run_state(vms: list[dict[str, Any]], usb_state: list[dict[
     run["completed"] = sum(1 for item in items if item.get("status") == "done")
     run["failed"] = sum(1 for item in items if item.get("status") == "failed")
 
+    # "pending_checkin" is an active (non-terminal) status — keep run alive
     active_items = [item for item in items if item.get("status") not in {"done", "failed"}]
     if run.get("running") and items and not active_items:
         run["running"] = False
