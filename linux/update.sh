@@ -21,6 +21,14 @@ repo_branch=$(get_value 'simulation' 'repo_branch')
 
 source_found=false
 
+_return_or_exit() {
+    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+        return "${1:-0}"
+    else
+        exit "${1:-0}"
+    fi
+}
+
 #------------------------------------------------------------
 # Helper: copy files from a local directory into /usr/local/scripts
 # Called after a successful web or SMB sync
@@ -307,7 +315,7 @@ fi
 #============================================================
 if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
     echo "Tier 3: Trying GitHub ($repo_location)..." | tee -a "$debug"
-    cd ~ || { echo "WARNING: Failed to cd to home directory" | tee -a "$debug"; exit 1; }
+    cd ~ || { echo "WARNING: Failed to cd to home directory" | tee -a "$debug"; _return_or_exit 1; }
     repo_dir="client-sim"
     shopt -s nullglob
 

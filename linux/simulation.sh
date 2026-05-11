@@ -811,7 +811,7 @@ if [ "$kill_switch" != "on" ] && [ "$gkill_switch" != "on" ]; then
    # rapid_update=on  → update every iteration (dev/testing; version check keeps it lightweight)
    # rapid_update=off → update only at exec-restart every 100 iterations (production default;
    #                    avoids hammering update services during normal operation)
-   if [ "$rapid_update" == "on" ]; then source '/usr/local/scripts/update.sh'; fi
+   if [ "$rapid_update" == "on" ]; then bash '/usr/local/scripts/update.sh'; fi
    echo "Sleeping 5 seconds" | tee -a "$debug"
    sleep 5
   fi
