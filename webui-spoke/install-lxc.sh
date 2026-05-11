@@ -24,6 +24,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Flags
 ###############################################################################
 REINSTALL=0
+UNATTENDED=0
 CLI_BRANCH=""
 CLI_PORT=""
 
@@ -35,6 +36,7 @@ Options:
   --branch <name>     Git branch to sync from (overrides REPO_BRANCH env var)
   --port   <number>   TCP port to serve on    (overrides PORT env var)
   --reinstall         Full wipe and fresh install (default: safe in-place update)
+  --unattended        Non-interactive mode (accepted for automation/watchdog)
   --help              Show this message
 
 Examples:
@@ -48,6 +50,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reinstall|-r)   REINSTALL=1;              shift ;;
+    --unattended)     UNATTENDED=1;             shift ;;
     --branch=*)       CLI_BRANCH="${1#*=}";     shift ;;
     --branch|-b)      CLI_BRANCH="${2:-}";      shift 2 ;;
     --port=*)         CLI_PORT="${1#*=}";       shift ;;
@@ -125,11 +128,12 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
+  [[ "$UNATTENDED" -eq 1 ]] && _bs_args+=(--unattended)
   bash <(curl -fsSL "$_bs_url") "${_bs_args[@]}"
   exit $?
 fi
 
-VERSION="2.38"
+VERSION="2.39"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -602,9 +606,18 @@ SyslogIdentifier=client-sim-dashboard
 WantedBy=multi-user.target
 EOF
 
+info "Installing WebUI watchdog..."
+install -d -m 755 /usr/local/bin /etc/systemd/system /var/lib/webui-watchdog
+install -m 755 "$INSTALL_DIR/watchdog.sh" /usr/local/bin/webui-watchdog.sh
+install -m 644 "$INSTALL_DIR/webui-watchdog.service" /etc/systemd/system/webui-watchdog.service
+install -m 644 "$INSTALL_DIR/webui-watchdog.timer" /etc/systemd/system/webui-watchdog.timer
+
 systemctl daemon-reload
 systemctl enable client-sim-dashboard >>"$LOG" 2>&1
+systemctl enable webui-watchdog.timer >>"$LOG" 2>&1
+systemctl restart webui-watchdog.timer >>"$LOG" 2>&1
 ok "systemd service installed and enabled"
+ok "WebUI watchdog installed and timer enabled"
 
 ###############################################################################
 # STEP 9 — Permissions
