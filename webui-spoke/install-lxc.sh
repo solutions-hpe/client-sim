@@ -133,7 +133,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.40"
+VERSION="2.41"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -469,6 +469,12 @@ if curl -sSf --max-time 30 "${_cw_raw}/templates/index.html" -o "${_idx}" >>"$LO
   ok "Downloaded index.html from cs-webui:${REPO_BRANCH} (WEBUI_MODE=spoke injected)"
 else
   warn "Could not fetch index.html from cs-webui — keeping existing file if present"
+fi
+# Fetch VERSION file so APP_VERSION reflects the cs-webui version, not the installer version
+if curl -sSf --max-time 30 "${_cw_raw}/VERSION" -o "${INSTALL_DIR}/VERSION" >>"$LOG" 2>&1; then
+  ok "Downloaded cs-webui VERSION ($(cat "${INSTALL_DIR}/VERSION")) from cs-webui:${REPO_BRANCH}"
+else
+  warn "Could not fetch VERSION from cs-webui — version display may fall back to installer version"
 fi
 unset _cw_raw _sf _dest _idx
 
