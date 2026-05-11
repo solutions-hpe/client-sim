@@ -1842,6 +1842,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
     background_tasks["central_poller"] = asyncio.create_task(central_poller())
     background_tasks["update_checker"] = asyncio.create_task(check_for_update())
+    background_tasks["webui_refresh"] = asyncio.create_task(periodic_webui_refresh())
     background_tasks["relay"] = asyncio.create_task(relay_loop())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
@@ -3983,6 +3984,21 @@ async def refresh_webui_frontend() -> None:
     logger.info("webui refresh: cs-webui updated %s → %s — browser reload required", local_ver, remote_ver)
 
 
+async def periodic_webui_refresh() -> None:
+    """Background task: re-run refresh_webui_frontend() every 30 minutes so
+    frontend fixes are picked up automatically without a service restart."""
+    INTERVAL = 1800  # 30 minutes
+    await asyncio.sleep(INTERVAL)  # skip first run — startup already did it
+    while True:
+        try:
+            await asyncio.wait_for(refresh_webui_frontend(), timeout=60)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("periodic webui refresh error: %s", exc)
+        await asyncio.sleep(INTERVAL)
+
+
 async def check_for_update() -> None:
     """Background task: check for a new installer version every 24 hours.
     Only detects and broadcasts — never auto-applies. Updates are applied
@@ -5795,6 +5811,25 @@ async def api_self_update() -> dict[str, Any]:
         return {"status": "ok", "message": f"Already up to date (v{update_state['current_version']})"}
     asyncio.create_task(_run_self_update())
     return {"status": "ok", "message": f"Update to v{available} started — service will restart shortly"}
+
+
+@app.post("/api/refresh-webui")
+async def api_refresh_webui() -> dict[str, Any]:
+    """Download and apply the latest cs-webui frontend files (app.js, style.css, index.html)
+    without a full reinstall or service restart.  The browser just needs a hard-refresh
+    (Ctrl+Shift+R) after this returns to pick up the new files."""
+    try:
+        await asyncio.wait_for(refresh_webui_frontend(), timeout=60)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Frontend refresh timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    local_ver: str | None = None
+    try:
+        local_ver = (STATIC_DIR / "VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return {"status": "ok", "version": local_ver, "message": f"Frontend updated to v{local_ver} — do a hard-refresh (Ctrl+Shift+R)"}
 
 
 
