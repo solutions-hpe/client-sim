@@ -693,7 +693,7 @@
       <button class="setup-subtab" data-subtab="setup-github" role="tab">GitHub</button>
       <button class="setup-subtab" data-subtab="setup-proxmox" role="tab">Proxmox</button>
       <button class="setup-subtab" data-subtab="setup-relay" role="tab">Hub</button>
-      <button class="setup-subtab" data-subtab="setup-central" role="tab">Central</button>
+      <button class="setup-subtab" data-subtab="setup-central" role="tab">Central API</button>
       <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
       <button class="setup-subtab" data-subtab="setup-tls" role="tab">TLS Certificate</button>
       <button class="setup-subtab" data-subtab="setup-troubleshoot" role="tab">Troubleshooting</button>
@@ -1098,87 +1098,77 @@
     <div id="setup-central" class="setup-subpanel hidden">
       <div class="setup-card setup-section-gap">
             <div class="setup-card-header">
-              <h2>Aruba Central Connection</h2>
-              <p>Connect to your Aruba Central instance to monitor alerts and AI Insights.</p>
+              <h2>Central API</h2>
+              <p>Configure the active Central API connection mode for this spoke.</p>
             </div>
 
             <div class="setup-form">
-              <!-- API Version toggle -->
               <div class="form-group">
-                <label class="form-label">API Version</label>
-                <div class="segmented-control" id="central-api-version-control">
-                  <button type="button" class="active" data-value="classic" id="central-api-classic">Classic Central</button>
-                  <button type="button" data-value="new_central" id="central-api-new">New Central (CNX)</button>
+                <label class="form-label">Mode</label>
+                <div class="segmented-control central-mode-toggle" id="central-api-mode-toggle">
+                  <button type="button" class="active" data-mode="classic" id="central-api-classic">Classic</button>
+                  <button type="button" data-mode="central" id="central-api-central">Central</button>
                 </div>
               </div>
 
-              <!-- Cluster URL — shared by both but hint changes -->
-              <div class="form-group">
-                <label class="form-label" for="central-cluster-url">Cluster URL</label>
-                <input id="central-cluster-url" class="form-input" type="text"
-                       placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
-                <span class="form-hint" id="central-cluster-url-hint">
-                  Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>
-                </span>
-              </div>
-
-              <!-- Classic-only fields -->
               <div id="central-classic-fields">
                 <div class="form-group">
-                  <label class="form-label" for="central-access-token">Access Token <span class="token-required-badge">required</span></label>
-                  <input id="central-access-token" class="form-input" type="password"
-                         placeholder="Paste your bearer token — leave blank to keep current" autocomplete="new-password">
-                  <span class="form-hint" id="central-access-token-status"></span>
+                  <label class="form-label" for="central-classic-url">URL</label>
+                  <input id="central-classic-url" class="form-input" type="text"
+                         placeholder="https://classic-central.example.com" autocomplete="off" spellcheck="false">
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label" for="central-refresh-token">Refresh Token <span class="token-optional-badge">optional — enables auto-renewal</span></label>
-                  <input id="central-refresh-token" class="form-input" type="password"
-                         placeholder="Paste your refresh token — leave blank to keep current" autocomplete="new-password">
-                  <span class="form-hint" id="central-refresh-token-status"></span>
+                  <label class="form-label" for="central-classic-username">Username</label>
+                  <input id="central-classic-username" class="form-input" type="text" autocomplete="off" spellcheck="false">
                 </div>
 
-                <hr class="setup-divider">
-                <p class="form-hint" style="margin:0 0 8px">The fields below are only needed for automatic token renewal via the OAuth refresh flow.</p>
-
                 <div class="form-group">
-                  <label class="form-label" for="central-customer-id">Customer ID</label>
-                  <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
-                  <span class="form-hint">Required for MSP/multi-customer accounts only.</span>
+                  <label class="form-label" for="central-classic-password">Password</label>
+                  <input id="central-classic-password" class="form-input" type="password"
+                         placeholder="Leave blank to keep current" autocomplete="new-password">
+                  <span class="form-hint" id="central-classic-password-status"></span>
                 </div>
               </div>
 
-              <!-- New Central (CNX) fields -->
               <div id="central-new-fields" class="hidden">
                 <p class="form-hint" style="margin:0 0 12px">
-                  New Central uses HPE GreenLake client credentials. Go to <strong>Manage Workspace → Personal API clients</strong>
+                  Central uses HPE GreenLake client credentials. Go to <strong>Manage Workspace → Personal API clients</strong>
                   and create a credential scoped to your Central instance.
-                  Tokens are fetched and renewed automatically using your Client ID and Secret — no manual token pasting needed.
                 </p>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-central-url">URL</label>
+                  <input id="central-central-url" class="form-input" type="text"
+                         placeholder="https://apigw-prod2.central.arubanetworks.com" autocomplete="off" spellcheck="false">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-client-id">Client ID</label>
+                  <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-client-secret">Client Secret</label>
+                  <input id="central-client-secret" class="form-input" type="password"
+                         placeholder="Leave blank to keep current" autocomplete="new-password">
+                  <span class="form-hint" id="central-client-secret-status"></span>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="central-customer-id">Customer ID <span class="token-optional-badge">optional</span></label>
+                  <input id="central-customer-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+                  <span class="form-hint">Only needed when your Central API client requires a customer identifier.</span>
+                </div>
               </div>
 
-              <!-- Client ID + Secret — shown for both (Classic: optional refresh; New Central: required) -->
-              <div class="form-group">
-                <label class="form-label" for="central-client-id">
-                  Client ID <span id="central-client-id-badge" class="token-optional-badge">optional — for auto-renewal</span>
-                </label>
-                <input id="central-client-id" class="form-input" type="text" autocomplete="off" spellcheck="false">
+              <div class="form-actions central-config-actions">
+                <button id="central-test-btn" class="btn btn-secondary" type="button">Test Connection</button>
+                <button id="central-save-btn" class="btn btn-primary" type="button">Save</button>
+                <button id="central-clear-btn" class="btn btn-danger" type="button">Clear Config</button>
               </div>
 
-              <div class="form-group">
-                <label class="form-label" for="central-client-secret">
-                  Client Secret <span id="central-client-secret-badge" class="token-optional-badge">optional — for auto-renewal</span>
-                </label>
-                <input id="central-client-secret" class="form-input" type="password"
-                       placeholder="Leave blank to keep current" autocomplete="new-password">
-                <span class="form-hint" id="central-client-secret-status"></span>
-              </div>
-
-              <div class="form-actions">
-                <button id="central-test-btn" class="btn btn-primary" type="button">Test Connection</button>
-              </div>
-
-              <div id="central-test-msg" class="settings-message hidden" role="alert"></div>
+              <div id="central-config-msg" class="settings-message hidden" role="alert"></div>
             </div>
           </div>
 

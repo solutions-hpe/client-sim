@@ -456,6 +456,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
   box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 .segmented-control button:hover:not(.active) { background: rgba(255,255,255,0.6); color: var(--text); }
+.central-mode-toggle button { min-width: 96px; }
 
 /* ── Panel actions ──────────────────────────────────────────────── */
 .panel-actions {
@@ -780,6 +781,7 @@ tbody tr.updated { animation: row-update 1.4s ease-out; }
 .form-static.muted { color: var(--muted); font-family: inherit; }
 
 .form-actions { padding-top: 4px; }
+.central-config-actions { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .form-row { display:flex; gap:16px; flex-wrap:wrap; }
 .form-row .form-group { flex:1; }
 .settings-section { border:1px solid var(--border); border-radius:6px; padding:16px; background:#fafafa; overflow-x:auto; }

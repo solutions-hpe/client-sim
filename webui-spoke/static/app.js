@@ -60,7 +60,11 @@ let currentSettings = {
   repo_url: '',
   repo_branch: '',
   github_token_configured: false,
-  central_config: { cluster_url: '', client_id: '', customer_id: '' },
+  central_api: {
+    mode: 'classic',
+    classic: { url: '', username: '', password_configured: false },
+    central: { url: '', client_id: '', customer_id: '', client_secret_configured: false }
+  },
   site_mappings: {},
   monitored_checks: [],
   hardware_checks: [],
@@ -426,19 +430,20 @@ const centralSiteChecks = document.getElementById('central-site-checks');
 const centralSiteHistory = document.getElementById('central-site-history');
 const centralSiteAlerts = document.getElementById('central-site-alerts');
 const centralSiteAlertsCount = document.getElementById('central-site-alerts-count');
-const centralClusterUrlInput = document.getElementById('central-cluster-url');
-const centralClusterUrlHint = document.getElementById('central-cluster-url-hint');
-const centralAccessTokenInput = document.getElementById('central-access-token');
-const centralRefreshTokenInput = document.getElementById('central-refresh-token');
+const centralClassicUrlInput = document.getElementById('central-classic-url');
+const centralClassicUsernameInput = document.getElementById('central-classic-username');
+const centralClassicPasswordInput = document.getElementById('central-classic-password');
+const centralClassicPasswordStatus = document.getElementById('central-classic-password-status');
+const centralCentralUrlInput = document.getElementById('central-central-url');
 const centralClientIdInput = document.getElementById('central-client-id');
 const centralClientSecretInput = document.getElementById('central-client-secret');
 const centralCustomerIdInput = document.getElementById('central-customer-id');
 const centralTestBtn = document.getElementById('central-test-btn');
-const centralTestMsg = document.getElementById('central-test-msg');
+const centralSaveBtn = document.getElementById('central-save-btn');
+const centralClearBtn = document.getElementById('central-clear-btn');
+const centralConfigMsg = document.getElementById('central-config-msg');
 const centralClassicFields = document.getElementById('central-classic-fields');
 const centralNewFields = document.getElementById('central-new-fields');
-const centralClientIdBadge = document.getElementById('central-client-id-badge');
-const centralClientSecretBadge = document.getElementById('central-client-secret-badge');
 const relayEnabledSelect = document.getElementById('relay-enabled-select');
 const relaySpokeName = document.getElementById('relay-spoke-name-input');
 const relayServerUrlInput = document.getElementById('relay-server-url-input');
@@ -511,36 +516,55 @@ if (unknownUsbTbody) {
   });
 }
 
-function getCentralApiVersion() {
-  const active = document.querySelector('#central-api-version-control button.active');
-  return active ? active.dataset.value : 'classic';
+function defaultCentralApiSettings() {
+  return {
+    mode: 'classic',
+    classic: { url: '', username: '', password_configured: false },
+    central: { url: '', client_id: '', customer_id: '', client_secret_configured: false }
+  };
 }
 
-function applyCentralVersionUI(version) {
-  // Update segmented control active state
-  document.querySelectorAll('#central-api-version-control button').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.value === version);
+function normalizeCentralApiSettings(source = {}, fallback = null) {
+  const defaults = defaultCentralApiSettings();
+  const fallbackConfig = fallback || defaults;
+  const raw = source.central_api || {};
+  const legacy = source.central_config || {};
+  const rawClassic = raw.classic || {};
+  const rawCentral = raw.central || {};
+  const legacyIsCentral = legacy.api_version === 'new_central';
+  const mode = raw.mode || fallbackConfig.mode || (legacyIsCentral ? 'central' : 'classic');
+  return {
+    mode: mode === 'central' ? 'central' : 'classic',
+    classic: {
+      url: rawClassic.url ?? fallbackConfig.classic?.url ?? defaults.classic.url,
+      username: rawClassic.username ?? fallbackConfig.classic?.username ?? defaults.classic.username,
+      password_configured: rawClassic.password_configured ?? fallbackConfig.classic?.password_configured ?? defaults.classic.password_configured,
+    },
+    central: {
+      url: rawCentral.url ?? (legacyIsCentral ? (legacy.cluster_url || '') : (fallbackConfig.central?.url ?? defaults.central.url)),
+      client_id: rawCentral.client_id ?? (legacyIsCentral ? (legacy.client_id || '') : (fallbackConfig.central?.client_id ?? defaults.central.client_id)),
+      customer_id: rawCentral.customer_id ?? (legacyIsCentral ? (legacy.customer_id || '') : (fallbackConfig.central?.customer_id ?? defaults.central.customer_id)),
+      client_secret_configured: rawCentral.client_secret_configured ?? (legacyIsCentral ? Boolean(legacy.client_secret_configured) : (fallbackConfig.central?.client_secret_configured ?? defaults.central.client_secret_configured)),
+    }
+  };
+}
+
+function getCentralApiMode() {
+  const active = document.querySelector('#central-api-mode-toggle button.active');
+  return active ? active.dataset.mode : 'classic';
+}
+
+function applyCentralModeUI(mode) {
+  document.querySelectorAll('#central-api-mode-toggle button').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
   });
-  const isNew = version === 'new_central';
-  if (centralClassicFields) centralClassicFields.classList.toggle('hidden', isNew);
-  if (centralNewFields) centralNewFields.classList.toggle('hidden', !isNew);
-  if (centralClusterUrlHint) {
-    centralClusterUrlHint.innerHTML = isNew
-      ? 'New Central: found in <strong>Menu → API Gateway → REST API</strong>. e.g. <code>us1.api.central.arubanetworks.com</code>'
-      : 'Classic: found in Central → API Gateway. e.g. <code>https://internal-apigw.central.arubanetworks.com</code>';
-  }
-  if (centralClientIdBadge) {
-    centralClientIdBadge.textContent = isNew ? 'required' : 'optional — for auto-renewal';
-    centralClientIdBadge.className = isNew ? 'token-required-badge' : 'token-optional-badge';
-  }
-  if (centralClientSecretBadge) {
-    centralClientSecretBadge.textContent = isNew ? 'required' : 'optional — for auto-renewal';
-    centralClientSecretBadge.className = isNew ? 'token-required-badge' : 'token-optional-badge';
-  }
+  const isCentral = mode === 'central';
+  if (centralClassicFields) centralClassicFields.classList.toggle('hidden', isCentral);
+  if (centralNewFields) centralNewFields.classList.toggle('hidden', !isCentral);
 }
 
-document.querySelectorAll('#central-api-version-control button').forEach((btn) => {
-  btn.addEventListener('click', () => applyCentralVersionUI(btn.dataset.value));
+document.querySelectorAll('#central-api-mode-toggle button').forEach((btn) => {
+  btn.addEventListener('click', () => applyCentralModeUI(btn.dataset.mode));
 });
 const siteMappingsBody = document.getElementById('site-mappings-body');
 const addMappingBtn = document.getElementById('add-mapping-btn');
@@ -562,17 +586,12 @@ const configBucketsContainer = document.getElementById('config-buckets-container
 const configBucketsMsg = document.getElementById('config-buckets-message');
 
 function mergeSettings(next = {}) {
+  const mergedCentralApi = normalizeCentralApiSettings(next, currentSettings.central_api);
   const merged = {
     repo_url: next.repo_url ?? currentSettings.repo_url ?? repoUrlInput?.value ?? '',
     repo_branch: next.repo_branch ?? currentSettings.repo_branch ?? '',
     github_token_configured: next.github_token_configured ?? currentSettings.github_token_configured ?? false,
-    central_config: {
-      cluster_url: '',
-      client_id: '',
-      customer_id: '',
-      ...(currentSettings.central_config || {}),
-      ...(next.central_config || {})
-    },
+    central_api: mergedCentralApi,
     site_mappings: next.site_mappings ?? currentSettings.site_mappings ?? {},
     monitored_checks: Array.isArray(next.monitored_checks)
       ? next.monitored_checks
@@ -1035,21 +1054,17 @@ function applySettingsToUI(s) {
   if (branchInput && !branchInput.matches(':focus')) branchInput.value = settings.repo_branch || '';
   if (setupActiveBranch) setupActiveBranch.textContent = settings.repo_branch || '—';
   if (githubTokenStatus) githubTokenStatus.textContent = settings.github_token_configured ? '✓ Token configured' : 'Not configured';
-  setInputValueIfIdle(centralClusterUrlInput, settings.central_config.cluster_url);
-  setInputValueIfIdle(centralClientIdInput, settings.central_config.client_id);
-  setInputValueIfIdle(centralCustomerIdInput, settings.central_config.customer_id);
+  const centralApi = settings.central_api || defaultCentralApiSettings();
+  setInputValueIfIdle(centralClassicUrlInput, centralApi.classic.url || '');
+  setInputValueIfIdle(centralClassicUsernameInput, centralApi.classic.username || '');
+  setInputValueIfIdle(centralCentralUrlInput, centralApi.central.url || '');
+  setInputValueIfIdle(centralClientIdInput, centralApi.central.client_id || '');
+  setInputValueIfIdle(centralCustomerIdInput, centralApi.central.customer_id || '');
+  applyCentralModeUI(centralApi.mode || 'classic');
 
-  // Set API version segmented control + toggle UI
-  const version = settings.central_config.api_version || 'classic';
-  applyCentralVersionUI(version);
-
-  // Show "configured" hint for secrets without revealing values
-  const atStatus = document.getElementById('central-access-token-status');
-  const rtStatus = document.getElementById('central-refresh-token-status');
   const csStatus = document.getElementById('central-client-secret-status');
-  if (atStatus) atStatus.textContent = settings.central_config.access_token_configured ? '✓ Token configured — paste new value to replace.' : 'No token saved yet.';
-  if (rtStatus) rtStatus.textContent = settings.central_config.refresh_token_configured ? '✓ Refresh token configured — paste new value to replace.' : 'Optional — enables automatic renewal when the access token expires.';
-  if (csStatus) csStatus.textContent = settings.central_config.client_secret_configured ? '✓ Secret configured — paste new value to replace.' : '';
+  if (centralClassicPasswordStatus) centralClassicPasswordStatus.textContent = centralApi.classic.password_configured ? '✓ Password configured — leave blank to keep current.' : '';
+  if (csStatus) csStatus.textContent = centralApi.central.client_secret_configured ? '✓ Secret configured — leave blank to keep current.' : '';
   if (relayEnabledSelect && !relayEnabledSelect.matches(':focus')) relayEnabledSelect.value = settings.relay_enabled || 'off';
   setInputValueIfIdle(relayServerUrlInput, settings.relay_server_url || '');
   setInputValueIfIdle(relaySpokeName, settings.relay_spoke_name || '');
@@ -2184,40 +2199,41 @@ function buildCheckBadge(label, kind) {
   return badge;
 }
 
-function buildCentralConfigPayload() {
-  const version = getCentralApiVersion();
+function buildCentralApiPayload() {
   const payload = {
-    api_version: version,
-    cluster_url: centralClusterUrlInput?.value.trim() || '',
-    client_id: centralClientIdInput?.value.trim() || '',
+    mode: getCentralApiMode(),
+    classic: {
+      url: centralClassicUrlInput?.value.trim() || '',
+      username: centralClassicUsernameInput?.value.trim() || '',
+    },
+    central: {
+      url: centralCentralUrlInput?.value.trim() || '',
+      client_id: centralClientIdInput?.value.trim() || '',
+      customer_id: centralCustomerIdInput?.value.trim() || '',
+    }
   };
-  if (version === 'classic') {
-    payload.customer_id = centralCustomerIdInput?.value.trim() || '';
-    // Only send secrets when typed — blank = keep existing
-    const accessToken = centralAccessTokenInput?.value.trim();
-    if (accessToken) payload.access_token = accessToken;
-    const refreshToken = centralRefreshTokenInput?.value.trim();
-    if (refreshToken) payload.refresh_token = refreshToken;
-  }
-  const secret = centralClientSecretInput?.value.trim();
-  if (secret) payload.client_secret = secret;
+  const classicPassword = centralClassicPasswordInput?.value ?? '';
+  if (classicPassword) payload.classic.password = classicPassword;
+  const clientSecret = centralClientSecretInput?.value ?? '';
+  if (clientSecret) payload.central.client_secret = clientSecret;
   return payload;
 }
 
-function updateLocalCentralConfig(payload) {
-  currentSettings = {
-    ...currentSettings,
-    central_config: {
-      ...(currentSettings.central_config || {}),
-      cluster_url: payload.cluster_url || '',
-      client_id: payload.client_id || '',
-      customer_id: payload.customer_id || '',
-      // Update presence flags optimistically
-      access_token_configured: payload.access_token ? true : (currentSettings.central_config?.access_token_configured || false),
-      refresh_token_configured: payload.refresh_token ? true : (currentSettings.central_config?.refresh_token_configured || false),
-      client_secret_configured: payload.client_secret ? true : (currentSettings.central_config?.client_secret_configured || false),
-    }
-  };
+function resetCentralSecretInputs() {
+  if (centralClassicPasswordInput) centralClassicPasswordInput.value = '';
+  if (centralClientSecretInput) centralClientSecretInput.value = '';
+}
+
+async function persistCentralApiConfig() {
+  const configPayload = buildCentralApiPayload();
+  const response = await requestJson('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ central_api: configPayload })
+  });
+  applySettingsToUI(response.settings || { central_api: configPayload });
+  resetCentralSecretInputs();
+  return response;
 }
 
 // Site mapping source lists (populated by Load Sites)
@@ -4966,39 +4982,72 @@ if (centralRefreshBtn) {
   });
 }
 
+if (centralSaveBtn) {
+  centralSaveBtn.addEventListener('click', async () => {
+    const originalLabel = centralSaveBtn.textContent;
+    centralSaveBtn.disabled = true;
+    centralSaveBtn.textContent = 'Saving…';
+    showInlineMessage(centralConfigMsg, '', false, 0);
+    try {
+      await persistCentralApiConfig();
+      showInlineMessage(centralConfigMsg, 'Saved.', false, 2000);
+    } catch (error) {
+      showInlineMessage(centralConfigMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      centralSaveBtn.disabled = false;
+      centralSaveBtn.textContent = originalLabel;
+    }
+  });
+}
+
 if (centralTestBtn) {
   centralTestBtn.addEventListener('click', async () => {
     const originalLabel = centralTestBtn.textContent;
-    const configPayload = buildCentralConfigPayload();
-    updateLocalCentralConfig(configPayload);
     centralTestBtn.disabled = true;
     centralTestBtn.textContent = 'Testing…';
-    showInlineMessage(centralTestMsg, '', false, 0);
+    showInlineMessage(centralConfigMsg, '', false, 0);
     try {
-      await requestJson('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ central_config: configPayload })
-      });
+      await persistCentralApiConfig();
       const result = await requestJson('/api/central/test-connection', { method: 'POST' });
       centralTokenValid = true;
       setCentralApiStatus(true);
       updateCentralToolbar();
-      showInlineMessage(centralTestMsg, result.message || 'Connected to Aruba Central successfully.', false);
-      // Clear secret fields — status hints show "configured" instead
-      if (centralClientSecretInput) centralClientSecretInput.value = '';
-      if (centralAccessTokenInput) centralAccessTokenInput.value = '';
-      if (centralRefreshTokenInput) centralRefreshTokenInput.value = '';
-      // Refresh status hints
-      applySettingsToUI(currentSettings);
+      showInlineMessage(centralConfigMsg, result.message || 'Connected to Central API successfully.', false);
     } catch (error) {
       centralTokenValid = false;
       setCentralApiStatus(false);
       updateCentralToolbar();
-      showInlineMessage(centralTestMsg, `Error: ${error.message}`, true, 7000);
+      showInlineMessage(centralConfigMsg, `Error: ${error.message}`, true, 7000);
     } finally {
       centralTestBtn.disabled = false;
       centralTestBtn.textContent = originalLabel;
+    }
+  });
+}
+
+if (centralClearBtn) {
+  centralClearBtn.addEventListener('click', async () => {
+    const originalLabel = centralClearBtn.textContent;
+    centralClearBtn.disabled = true;
+    centralClearBtn.textContent = 'Clearing…';
+    showInlineMessage(centralConfigMsg, '', false, 0);
+    try {
+      const response = await requestJson('/api/settings/clear/central', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: getCentralApiMode() })
+      });
+      applySettingsToUI(response.settings || {});
+      resetCentralSecretInputs();
+      centralTokenValid = false;
+      setCentralApiStatus(false);
+      updateCentralToolbar();
+      showInlineMessage(centralConfigMsg, 'Config cleared', false, 3000);
+    } catch (error) {
+      showInlineMessage(centralConfigMsg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      centralClearBtn.disabled = false;
+      centralClearBtn.textContent = originalLabel;
     }
   });
 }

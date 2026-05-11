@@ -74,6 +74,8 @@ WEBUI_VMID: int | None = _detect_own_vmid()
 # Falls back to plaintext if key file or cryptography package is unavailable.
 _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
+_SENSITIVE_CLASSIC_API_KEYS = {"password"}
+_SENSITIVE_CENTRAL_API_KEYS = {"client_secret"}
 _SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
 _SENSITIVE_TOP_DICT_KEYS = {"proxmox_approved_agents"}
 _SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
@@ -125,6 +127,12 @@ def _encrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _encrypt_secret(out["central_config"][key])
+    for key in _SENSITIVE_CLASSIC_API_KEYS:
+        if out.get("central_api", {}).get("classic", {}).get(key):
+            out["central_api"]["classic"][key] = _encrypt_secret(out["central_api"]["classic"][key])
+    for key in _SENSITIVE_CENTRAL_API_KEYS:
+        if out.get("central_api", {}).get("central", {}).get(key):
+            out["central_api"]["central"][key] = _encrypt_secret(out["central_api"]["central"][key])
     for key in _SENSITIVE_NOTIF_KEYS:
         if out.get("notifications", {}).get(key):
             out["notifications"][key] = _encrypt_secret(out["notifications"][key])
@@ -147,6 +155,12 @@ def _decrypt_settings(raw: dict) -> dict:
     for key in _SENSITIVE_CFG_KEYS:
         if out.get("central_config", {}).get(key):
             out["central_config"][key] = _decrypt_secret(out["central_config"][key])
+    for key in _SENSITIVE_CLASSIC_API_KEYS:
+        if out.get("central_api", {}).get("classic", {}).get(key):
+            out["central_api"]["classic"][key] = _decrypt_secret(out["central_api"]["classic"][key])
+    for key in _SENSITIVE_CENTRAL_API_KEYS:
+        if out.get("central_api", {}).get("central", {}).get(key):
+            out["central_api"]["central"][key] = _decrypt_secret(out["central_api"]["central"][key])
     for key in _SENSITIVE_NOTIF_KEYS:
         if out.get("notifications", {}).get(key):
             out["notifications"][key] = _decrypt_secret(out["notifications"][key])
@@ -271,19 +285,96 @@ def _clamp_relay_interval(value: Any) -> int:
     return max(60, min(86400, interval))
 
 
-_persisted = _load_persisted_settings()
-settings: dict[str, Any] = {
-    "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
-    "github_token": _persisted.get("github_token", ""),
-    "central_config": _persisted.get("central_config", {
-        "api_version": "classic",   # "classic" | "new_central"
+def _default_central_api_settings() -> dict[str, Any]:
+    return {
+        "mode": "classic",
+        "classic": {
+            "url": "",
+            "username": "",
+            "password": "",
+        },
+        "central": {
+            "url": "",
+            "client_id": "",
+            "client_secret": "",
+            "customer_id": "",
+        },
+    }
+
+
+def _central_runtime_defaults() -> dict[str, str]:
+    return {
+        "api_version": "classic",
         "cluster_url": "",
         "access_token": "",
         "refresh_token": "",
         "client_id": "",
         "client_secret": "",
         "customer_id": "",
-    }),
+    }
+
+
+def _normalize_central_api_settings(raw: Any, legacy: Any = None) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    legacy_cfg = legacy if isinstance(legacy, dict) else {}
+    defaults = _default_central_api_settings()
+    raw_classic = data.get("classic") if isinstance(data.get("classic"), dict) else {}
+    raw_central = data.get("central") if isinstance(data.get("central"), dict) else {}
+
+    mode = str(data.get("mode") or ("central" if legacy_cfg.get("api_version") == "new_central" else "classic")).strip().lower()
+    if mode not in {"classic", "central"}:
+        mode = "classic"
+
+    legacy_central = legacy_cfg if legacy_cfg.get("api_version") == "new_central" else {}
+    return {
+        "mode": mode,
+        "classic": {
+            "url": str(raw_classic.get("url", defaults["classic"]["url"])).strip(),
+            "username": str(raw_classic.get("username", defaults["classic"]["username"])).strip(),
+            "password": str(raw_classic.get("password", defaults["classic"]["password"])),
+        },
+        "central": {
+            "url": str(raw_central.get("url", legacy_central.get("cluster_url", defaults["central"]["url"]))).strip(),
+            "client_id": str(raw_central.get("client_id", legacy_central.get("client_id", defaults["central"]["client_id"]))).strip(),
+            "client_secret": str(raw_central.get("client_secret", legacy_central.get("client_secret", defaults["central"]["client_secret"]))),
+            "customer_id": str(raw_central.get("customer_id", legacy_central.get("customer_id", defaults["central"]["customer_id"]))).strip(),
+        },
+    }
+
+
+def _build_runtime_central_config(central_api_cfg: dict[str, Any], legacy_cfg: Any = None) -> dict[str, str]:
+    legacy = {**_central_runtime_defaults(), **(legacy_cfg if isinstance(legacy_cfg, dict) else {})}
+    mode = str(central_api_cfg.get("mode", "classic")).strip().lower()
+    if mode == "central":
+        central_cfg = central_api_cfg.get("central", {}) if isinstance(central_api_cfg.get("central"), dict) else {}
+        return {
+            **_central_runtime_defaults(),
+            "api_version": "new_central",
+            "cluster_url": str(central_cfg.get("url", "")).strip(),
+            "client_id": str(central_cfg.get("client_id", "")).strip(),
+            "client_secret": str(central_cfg.get("client_secret", "")),
+            "customer_id": str(central_cfg.get("customer_id", "")).strip(),
+        }
+
+    classic_cfg = central_api_cfg.get("classic", {}) if isinstance(central_api_cfg.get("classic"), dict) else {}
+    classic_has_explicit_values = any(str(classic_cfg.get(key, "")).strip() for key in ("url", "username")) or bool(classic_cfg.get("password"))
+    if legacy.get("api_version") == "classic" and not classic_has_explicit_values and (legacy.get("access_token") or legacy.get("refresh_token")):
+        return legacy
+
+    return {
+        **_central_runtime_defaults(),
+        "api_version": "classic",
+        "cluster_url": str(classic_cfg.get("url", "")).strip(),
+    }
+
+
+_persisted = _load_persisted_settings()
+_persisted_central_api = _normalize_central_api_settings(_persisted.get("central_api", {}), _persisted.get("central_config", {}))
+settings: dict[str, Any] = {
+    "repo_branch": _persisted.get("repo_branch", REPO_BRANCH),
+    "github_token": _persisted.get("github_token", ""),
+    "central_api": _persisted_central_api,
+    "central_config": _build_runtime_central_config(_persisted_central_api, _persisted.get("central_config", {})),
     # {wsite_value: central_site_name}
     "site_mappings": _persisted.get("site_mappings", {}),
     # [{type: "alert"|"insight", id: "...", name: "..."}]  — sim check monitors
@@ -347,6 +438,31 @@ else:
         "refresh_token": None,
         "expires_at": 0.0,
     }
+
+
+def _reset_central_runtime_tokens() -> None:
+    global central_auth_error
+    central_token["access_token"] = None
+    central_token["refresh_token"] = None
+    central_token["expires_at"] = 0.0
+    central_auth_error = None
+
+
+def _public_central_api_settings() -> dict[str, Any]:
+    cfg = copy.deepcopy(settings.get("central_api", _default_central_api_settings()))
+    cfg.setdefault("classic", {})
+    cfg.setdefault("central", {})
+    cfg["classic"].pop("password", None)
+    cfg["central"].pop("client_secret", None)
+    cfg["classic"]["password_configured"] = bool(settings.get("central_api", {}).get("classic", {}).get("password"))
+    cfg["central"]["client_secret_configured"] = bool(settings.get("central_api", {}).get("central", {}).get("client_secret"))
+    return cfg
+
+
+def _sync_central_runtime_config() -> None:
+    settings["central_config"] = _build_runtime_central_config(settings.get("central_api", _default_central_api_settings()), settings.get("central_config", {}))
+    _reset_central_runtime_tokens()
+
 
 ALLOWED_PLATFORMS = {"linux", "windows"}
 SIMULATION_SECTION_KEYS = {
@@ -644,9 +760,11 @@ def _central_token_state() -> dict[str, str]:
         return {"state": "not_configured", "detail": "No cluster URL — configure in Setup tab"}
     if _is_new_central_api():
         if not cfg.get("client_id") or not cfg.get("client_secret"):
-            return {"state": "not_configured", "detail": "client_id / client_secret required for New Central"}
+            return {"state": "not_configured", "detail": "Client ID / Client Secret required for Central mode"}
     else:
         if not cfg.get("access_token") and not central_token.get("access_token"):
+            if settings.get("central_api", {}).get("mode") == "classic":
+                return {"state": "not_configured", "detail": "Classic mode is saved separately — use Test Connection in Setup to validate credentials."}
             return {"state": "not_configured", "detail": "No access token — configure in Setup tab"}
     tok = central_token.get("access_token")
     if not tok:
@@ -834,6 +952,24 @@ async def _refresh_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         return True, "Token refreshed successfully."
     except Exception as exc:
         return False, f"Refresh request failed: {exc}"
+
+
+async def _test_classic_central_connection(client: httpx.AsyncClient) -> tuple[bool, str]:
+    classic_cfg = settings.get("central_api", {}).get("classic", {})
+    base_url = str(classic_cfg.get("url", "")).strip().rstrip("/")
+    username = str(classic_cfg.get("username", "")).strip()
+    password = str(classic_cfg.get("password", ""))
+    if not base_url or not username or not password:
+        return False, "Central API not configured — enter URL, Username, and Password in Setup."
+    try:
+        resp = await client.get(base_url, auth=(username, password), timeout=15, follow_redirects=True)
+    except Exception as exc:
+        return False, f"Connection error reaching {base_url}: {exc}"
+    if resp.status_code in (401, 403):
+        return False, f"Classic credentials rejected (HTTP {resp.status_code})."
+    if resp.status_code >= 500:
+        return False, f"Classic endpoint returned HTTP {resp.status_code}: {resp.text[:300]}"
+    return True, "Connected to Classic API successfully."
 
 
 def _central_headers() -> dict[str, str]:
@@ -1560,6 +1696,7 @@ class ClientControlResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     repo_branch: str | None = None
     github_token: str | None = None
+    central_api: dict[str, Any] | None = None
     central_config: dict[str, str] | None = None
     site_mappings: dict[str, str] | None = None
     monitored_checks: list[dict[str, str]] | None = None
@@ -3190,6 +3327,7 @@ async def api_settings_get() -> dict[str, Any]:
         "repo_branch": settings.get("repo_branch", ""),
         "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
         "github_token_configured": bool(settings.get("github_token")),
+        "central_api": _public_central_api_settings(),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
         "monitored_checks": settings["monitored_checks"],
@@ -3282,6 +3420,36 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             "error": None,
         })
 
+    if update.central_api is not None:
+        merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
+        mode = str(update.central_api.get("mode", merged_api.get("mode", "classic"))).strip().lower()
+        if mode not in {"classic", "central"}:
+            raise HTTPException(status_code=422, detail="central_api.mode must be 'classic' or 'central'")
+        merged_api["mode"] = mode
+
+        classic_update = update.central_api.get("classic")
+        if isinstance(classic_update, dict):
+            for key in ("url", "username"):
+                if key in classic_update:
+                    merged_api["classic"][key] = str(classic_update.get(key, "")).strip()
+            if "password" in classic_update:
+                password = str(classic_update.get("password", ""))
+                if password:
+                    merged_api["classic"]["password"] = password
+
+        central_update = update.central_api.get("central")
+        if isinstance(central_update, dict):
+            for key in ("url", "client_id", "customer_id"):
+                if key in central_update:
+                    merged_api["central"][key] = str(central_update.get(key, "")).strip()
+            if "client_secret" in central_update:
+                client_secret = str(central_update.get("client_secret", ""))
+                if client_secret:
+                    merged_api["central"]["client_secret"] = client_secret
+
+        settings["central_api"] = merged_api
+        _sync_central_runtime_config()
+
     if update.central_config is not None:
         merged = dict(settings["central_config"])
         # Only update keys that are explicitly provided and non-empty for secrets
@@ -3298,6 +3466,16 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
             central_token["refresh_token"] = None
             central_token["expires_at"] = 0.0
         settings["central_config"] = merged
+        merged_api = _normalize_central_api_settings(settings.get("central_api", {}), merged)
+        if merged.get("api_version") == "new_central":
+            merged_api["mode"] = "central"
+            merged_api["central"].update({
+                "url": merged.get("cluster_url", "").strip(),
+                "client_id": merged.get("client_id", "").strip(),
+                "client_secret": merged.get("client_secret", ""),
+                "customer_id": merged.get("customer_id", "").strip(),
+            })
+        settings["central_api"] = merged_api
         # Classic: load new tokens into runtime state immediately
         if merged.get("api_version", "classic") == "classic":
             if merged.get("access_token"):
@@ -3427,7 +3605,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
 
 @app.post("/api/settings/clear/{provider}")
-async def api_settings_clear(provider: str) -> dict[str, Any]:
+async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
     provider_key = provider.strip().lower()
     changed_branch = False
     relay_config_changed = False
@@ -3457,6 +3635,18 @@ async def api_settings_clear(provider: str) -> dict[str, Any]:
         })
         relay_config_changed = True
         relay_payload = _relay_status_payload()
+    elif provider_key == "central":
+        requested_mode = str((payload or {}).get("mode") or settings.get("central_api", {}).get("mode", "classic")).strip().lower()
+        if requested_mode not in {"classic", "central"}:
+            raise HTTPException(status_code=422, detail="mode must be 'classic' or 'central'")
+        central_api_cfg = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
+        central_api_cfg["mode"] = requested_mode
+        if requested_mode == "classic":
+            central_api_cfg["classic"] = {"url": "", "username": "", "password": ""}
+        else:
+            central_api_cfg["central"] = {"url": "", "client_id": "", "client_secret": "", "customer_id": ""}
+        settings["central_api"] = central_api_cfg
+        _sync_central_runtime_config()
     else:
         raise HTTPException(status_code=404, detail=f"Unknown settings provider: {provider}")
 
@@ -3876,23 +4066,24 @@ async def proxmox_approved_list() -> list[dict[str, Any]]:
 # ── Aruba Central API endpoints ───────────────────────────────────────────────
 @app.post("/api/central/test-connection")
 async def api_central_test() -> dict[str, Any]:
-    if not _central_ready():
-        raise HTTPException(
-            status_code=422,
-            detail="Aruba Central not configured — enter your Cluster URL and Access Token in Setup.",
-        )
+    mode = settings.get("central_api", {}).get("mode", "classic")
     async with httpx.AsyncClient() as client:
+        if mode == "classic":
+            ok, detail_msg = await _test_classic_central_connection(client)
+            if ok:
+                return {"status": "ok", "message": detail_msg}
+            raise HTTPException(status_code=502 if "HTTP" in detail_msg or "rejected" in detail_msg else 422, detail=detail_msg)
+
+        if not _central_ready():
+            raise HTTPException(
+                status_code=422,
+                detail="Central API not configured — enter URL, Client ID, and Client Secret in Setup.",
+            )
         ok, detail_msg = await _fetch_central_token(client)
     if ok:
-        can_rf = _can_refresh()
         return {
             "status": "ok",
-            "message": (
-                "Connected to Aruba Central successfully. "
-                + ("Auto-refresh enabled (refresh token + client credentials present)."
-                   if can_rf else
-                   "Auto-refresh not configured — add Refresh Token, Client ID, and Client Secret to enable it.")
-            ),
+            "message": "Connected to Central API successfully.",
         }
     raise HTTPException(status_code=502, detail=detail_msg)
 
@@ -4062,7 +4253,7 @@ async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
     if not _central_ready() or not central_token.get("access_token"):
         return {"alerts": [], "warning": "Central not configured or no valid token."}
     if _is_new_central_api():
-        return {"alerts": [], "warning": "Alert detail not available in New Central v1alpha1 yet."}
+        return {"alerts": [], "warning": "Alert detail not available in Central mode yet."}
 
     headers = _central_headers()
     base_url = _central_cfg()["cluster_url"].rstrip("/")
@@ -5020,6 +5211,10 @@ async def api_init() -> dict[str, Any]:
     cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
     return {
         "proxmox": _proxmox_status_payload(),
+        "settings": {
+            "central_api": _public_central_api_settings(),
+            "central_config": cfg,
+        },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),
         "central": {
