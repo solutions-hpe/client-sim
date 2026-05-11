@@ -10,6 +10,7 @@ from dataclasses import asdict
 import acme as spoke_acme
 import logging
 import os
+import random
 import re
 import socket
 import subprocess
@@ -185,7 +186,7 @@ OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
 MAX_CLIENT_ERRORS = 50
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
-RELAY_INTERVAL_DEFAULT = 60   # 1 minute
+RELAY_INTERVAL_DEFAULT = 30   # base interval; jitter adds 0–30s
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
 HISTORY_HOURS = 24
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
@@ -538,7 +539,7 @@ def _clamp_relay_interval(value: Any) -> int:
         interval = int(value)
     except (TypeError, ValueError):
         interval = RELAY_INTERVAL_DEFAULT
-    return max(60, min(86400, interval))
+    return max(30, min(86400, interval))
 
 
 def _relay_registration_status_from_settings() -> str:
@@ -3699,6 +3700,7 @@ async def relay_sync_once() -> None:
 async def relay_loop() -> None:
     while True:
         interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
+        jitter = random.randint(0, 30)
         try:
             await relay_sync_once()
             _update_service_health("relay", ok=True)
@@ -3707,7 +3709,7 @@ async def relay_loop() -> None:
         except Exception as exc:
             _update_service_health("relay", ok=False, error=str(exc))
             logger.exception("Relay loop error: %s", exc)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(interval + jitter)
 
 
 
