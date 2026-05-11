@@ -55,7 +55,11 @@ copy_local_files() {
         filtered_txt+=("$_t")
     done
     (( ${#filtered_txt[@]} ))  && sudo cp "${filtered_txt[@]}"  /usr/local/scripts/
-    (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
+    # .desktop files are NOT deployed by update.sh — the installer owns them.
+    # Deploying them here caused a double-invocation bug: if dex or a session
+    # manager processes /etc/xdg/autostart/ while the simulation is already
+    # running (via launch-terminals.sh / openbox autostart), a second startup.sh
+    # process would launch, hit the lock guard, and trigger "; systemctl reboot".
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then

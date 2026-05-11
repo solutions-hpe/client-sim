@@ -10,8 +10,11 @@ debug="/usr/local/scripts/debug-startup.log"
 # this process (voiding the EXIT trap), the lock vanishes on the next reboot.
 _LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
-    echo "$(date): startup.sh already running (lock held), exiting" >> "$debug"
-    exit 0
+    echo "$(date): startup.sh already running (lock held) — parking to prevent spurious reboot" >> "$debug"
+    # DO NOT exit here. The parent shell is: bash -c "startup.sh ; systemctl reboot"
+    # Exiting would trigger the reboot even though the real simulation is still healthy.
+    # Instead, park this duplicate invocation by sleeping until killed or rebooted.
+    exec tail -f /dev/null
 fi
 trap 'rmdir "$_LOCK_FILE" 2>/dev/null || true' EXIT INT TERM
 
