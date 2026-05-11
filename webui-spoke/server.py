@@ -653,6 +653,7 @@ settings: dict[str, Any] = {
     "repo_sync_interval": _persisted.get("repo_sync_interval", SYNC_INTERVAL),
     "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
+    "hub_tls_verify": _normalize_relay_enabled(_persisted.get("hub_tls_verify", "off")),
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_tenant_hint": _persisted.get("relay_tenant_hint", _persisted.get("relay_tenant_id", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
@@ -2012,6 +2013,7 @@ class SettingsUpdate(BaseModel):
     repo_sync_interval: int | None = None
     relay_enabled: str | None = None
     relay_server_url: str | None = None
+    hub_tls_verify: str | None = None
     relay_spoke_name: str | None = None
     relay_tenant_hint: str | None = None
     relay_api_key: str | None = None
@@ -3205,6 +3207,7 @@ def _build_registration_config() -> dict[str, Any]:
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
         "l1_vlan_start": settings.get("l1_vlan_start", "100"),
         "l1_vlan_end": settings.get("l1_vlan_end", "199"),
+        "hub_tls_verify": settings.get("hub_tls_verify", "off"),
     }
 
 
@@ -3226,7 +3229,7 @@ async def _hub_self_register(server_url: str) -> None:
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
                        hostname=hostname, spoke_name=spoke_name, spoke_id=spoke_id)
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as hc:
+        async with httpx.AsyncClient(timeout=15, verify=_hub_tls_verify()) as hc:
             resp = await hc.post(f"{server_url}/api/spokes/register", json=payload)
             if resp.status_code == 409:
                 data = resp.json()
@@ -3291,7 +3294,7 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     tenant_hint = (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip()
     _relay_diag_append("check_approval", spoke_id=spoke_id)
     try:
-        async with httpx.AsyncClient(timeout=10, verify=False) as hc:
+        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc:
             resp = await hc.post(f"{server_url}/api/spokes/register", json={
                 "spoke_id": spoke_id,
                 "hostname": hostname,
@@ -3351,6 +3354,10 @@ def _relay_hub_base_url(server_url: str, tenant_id: str) -> str:
     return url.rstrip("/")
 
 
+def _hub_tls_verify() -> bool:
+    return _normalize_relay_enabled(settings.get("hub_tls_verify", "off")) == "on"
+
+
 async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply a config_update command payload pushed from hub.
     Returns an ack result dict."""
@@ -3372,6 +3379,10 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
         settings["relay_tenant_hint"] = tenant_id
         relay_config_changed = True
         changed.append("relay_tenant_id")
+    if "hub_tls_verify" in payload:
+        settings["hub_tls_verify"] = _normalize_relay_enabled(payload["hub_tls_verify"])
+        relay_config_changed = True
+        changed.append("hub_tls_verify")
     if "relay_spoke_id" in payload:
         settings["relay_spoke_id"] = payload["relay_spoke_id"].strip()
         relay_config_changed = True
@@ -3513,7 +3524,7 @@ async def relay_sync_once() -> None:
                 },
             }
 
-        async with httpx.AsyncClient(timeout=10, verify=False) as hc:
+        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc:
             telemetry_resp = await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
             telemetry_resp.raise_for_status()
             resp = await hc.get(f"{base}/inbox", headers=headers)
@@ -3536,7 +3547,7 @@ async def relay_sync_once() -> None:
                 if cmd_type == "config_update":
                     result = await _apply_hub_config(payload_data)
                     if cmd_id:
-                        async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
                             ack_resp = await hc_ack.post(f"{base}/ack", json={
                                 "command_id": cmd_id,
                                 "status": "executed",
@@ -3553,7 +3564,7 @@ async def relay_sync_once() -> None:
                         await broadcast({"type": "gkill_switch", "value": new_val})
                         logger.info("gkill_switch set to %s by hub", new_val)
                     if cmd_id:
-                        async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
                             ack_resp = await hc_ack.post(f"{base}/ack", json={
                                 "command_id": cmd_id,
                                 "status": "executed",
@@ -3578,7 +3589,7 @@ async def relay_sync_once() -> None:
 
                 # Ack each queued command
                 if cmd_id:
-                    async with httpx.AsyncClient(timeout=10, verify=False) as hc_ack:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
                         ack_resp = await hc_ack.post(f"{base}/ack", json={
                             "command_id": cmd_id,
                             "status": "queued",
@@ -4240,6 +4251,7 @@ async def api_settings_get() -> dict[str, Any]:
         "notifications": _public_notification_settings(),
         "relay_enabled": settings.get("relay_enabled", "off"),
         "relay_server_url": settings.get("relay_server_url", ""),
+        "hub_tls_verify": settings.get("hub_tls_verify", "off"),
         "relay_spoke_name": settings.get("relay_spoke_name", ""),
         "relay_tenant_hint": settings.get("relay_tenant_hint", settings.get("relay_tenant_id", "")),
         "relay_spoke_id": settings.get("relay_spoke_id", ""),
@@ -4268,6 +4280,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.relay_server_url is not None:
         settings["relay_server_url"] = update.relay_server_url.strip()
+        relay_config_changed = True
+
+    if update.hub_tls_verify is not None:
+        settings["hub_tls_verify"] = _normalize_relay_enabled(update.hub_tls_verify)
         relay_config_changed = True
 
     if update.relay_spoke_name is not None:
@@ -4504,6 +4520,7 @@ async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Bod
         settings.update({
             "relay_enabled": "off",
             "relay_server_url": "",
+            "hub_tls_verify": "off",
             "relay_spoke_name": "",
             "relay_tenant_hint": "",
             "relay_api_key": "",
@@ -4631,7 +4648,7 @@ async def api_relay_diag() -> dict[str, Any]:
     reachability: dict[str, Any] = {"tested_url": server_url or "(not set)", "ok": False, "detail": ""}
     if server_url:
         try:
-            async with httpx.AsyncClient(timeout=8, verify=False) as hc:
+            async with httpx.AsyncClient(timeout=8, verify=_hub_tls_verify()) as hc:
                 r = await hc.get(f"{server_url}/api/health")
                 reachability = {
                     "tested_url": f"{server_url}/api/health",
@@ -4650,6 +4667,7 @@ async def api_relay_diag() -> dict[str, Any]:
 
     config_check = {
         "relay_enabled": settings.get("relay_enabled", "off"),
+        "hub_tls_verify": settings.get("hub_tls_verify", "off"),
         "server_url": server_url or "(not set)",
         "spoke_name": settings.get("relay_spoke_name", "") or "(not set — will use hostname)",
         "hostname": hostname,
@@ -6263,6 +6281,7 @@ async def api_init() -> dict[str, Any]:
             "central_config": cfg,
             "relay_enabled": settings.get("relay_enabled", "off"),
             "relay_server_url": settings.get("relay_server_url", ""),
+            "hub_tls_verify": settings.get("hub_tls_verify", "off"),
         },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),
