@@ -1897,8 +1897,10 @@ def _read_local_kill_switch() -> str:
 
 
 def _proxmox_status_payload() -> dict[str, Any]:
+    node = proxmox_state.get("node") or {}
     return {
         **proxmox_state,
+        "hostname": str(node.get("hostname") or "").strip(),
         "pending_proxmox": _pending_proxmox_payload(),
         "approved_proxmox": _approved_proxmox_payload(),
         "reclone_state": dict(reclone_state),
