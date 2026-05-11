@@ -6806,6 +6806,7 @@ async def api_service_control(action: str) -> dict[str, Any]:
 async def api_server_clear_cache() -> dict[str, Any]:
     """Reset all server-side in-memory state (Proxmox, reclone, commands, update-all).
     Does not restart the service — the UI will receive fresh empty state via WS broadcast."""
+    global _prev_usb_by_vmid
     async with state_lock:
         proxmox_state.update({
             "connected": False, "last_seen": None, "node": {}, "vms": [],
@@ -6813,6 +6814,7 @@ async def api_server_clear_cache() -> dict[str, Any]:
             "agent_version": None, "pve_version": None,
             "prov_summary": None, "prov_run": _default_provision_run_state(),
         })
+        _prev_usb_by_vmid = {}  # clear transition-detection snapshot so no phantom "failed" on next telemetry
         proxmox_log_buffer.clear()
         pending_proxmox_agents.clear()
         commands.clear()

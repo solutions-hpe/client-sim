@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.81"
+AGENT_VERSION="2.82"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1352,8 +1352,8 @@ def reclone_info(kind, vmid):
     if kind == 'qemu':
         m = re.search(r'^usb\\d+:\\s.*?host=([^,\\s]+)', text, re.M)
         bus_path = m.group(1) if m else None
-        supported = bool(bus_path)
-        reason = None if supported else 'No USB passthrough mapping found'
+        supported = bool(bus_path) or (source_vmid is not None)
+        reason = None if supported else 'No USB passthrough mapping or reclone-source metadata found'
         is_template = bool(re.search(r'^template:\\s*1\\s*$', text, re.M))
         return bus_path, source_vmid, supported, reason, is_template
     supported = source_vmid is not None
