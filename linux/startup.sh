@@ -188,6 +188,41 @@ echo -----------------------------| tee -a "$debug"
 echo Updating Simulation from repo | tee -a "$debug"
 source '/usr/local/scripts/update.sh'
 #------------------------------------------------------------
+# Pre-store WiFi credentials into NetworkManager after update.sh has run.
+# WHY: update.sh may have deployed a newer simulation.conf with updated
+# credentials. Re-reading the conf here and registering the NM keyfile
+# profile ensures NM can connect silently — no graphical agent, no popup —
+# even before simulation.sh's connect_wifi() is called.
+# This closes the race where nm-applet (via lxsession) pops up because NM
+# has no stored profile during the startup phase.
+process_ini_file '/usr/local/scripts/simulation.conf'
+if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
+  process_ini_file '/usr/local/scripts/user-overrides.conf'
+fi
+_nm_sim_id="s$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)"
+_nm_target_ssid=$(get_value "$_nm_sim_id" 'ssid')
+_nm_ssidpw=$(get_value "$_nm_sim_id" 'ssidpw')
+_nm_site_based=$(get_value 'simulation' 'site_based_ssid')
+_nm_wsite=$(get_value 'address' 'wsite')
+[[ "$_nm_site_based" == "on" ]] && _nm_target_ssid="${_nm_wsite}-${_nm_target_ssid}"
+_nm_wladapter=$(ip -br a | grep "wlx\|wlan" | awk '{print $1}' | head -n1)
+if [[ -n "$_nm_target_ssid" && -n "$_nm_ssidpw" && -n "$_nm_wladapter" ]]; then
+  nmcli connection delete "$_nm_target_ssid" >/dev/null 2>&1 || true
+  if nmcli connection add type wifi \
+      con-name "$_nm_target_ssid" \
+      ssid "$_nm_target_ssid" \
+      wifi-sec.key-mgmt wpa-psk \
+      wifi-sec.psk "$_nm_ssidpw" \
+      ifname "$_nm_wladapter" >/dev/null 2>&1; then
+    echo "WiFi profile pre-stored for '$_nm_target_ssid' ($wladapter)" | tee -a "$debug"
+  else
+    echo "WARNING: WiFi profile pre-store failed — check ssid/ssidpw in simulation.conf" | tee -a "$debug"
+  fi
+else
+  echo "Skipping WiFi pre-store: ssid='$_nm_target_ssid' pw=$([ -n "$_nm_ssidpw" ] && echo set || echo missing) adapter='$_nm_wladapter'" | tee -a "$debug"
+fi
+unset _nm_sim_id _nm_target_ssid _nm_ssidpw _nm_site_based _nm_wsite _nm_wladapter
+#------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
 if [ $vh_server == "on" ]; then
