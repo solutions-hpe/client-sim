@@ -47,7 +47,8 @@ echo
 echo "[1/5] Downloading agent script..."
 curl -sSL "${REPO_RAW}/proxmox/proxmox-agent.sh" -o "$AGENT_BIN"
 chmod +x "$AGENT_BIN"
-echo "  OK: $AGENT_BIN"
+AGENT_VERSION=$(grep -oP '(?<=^AGENT_VERSION=")[^"]+' "$AGENT_BIN" 2>/dev/null || true)
+echo "  OK: $AGENT_BIN${AGENT_VERSION:+ (agent v${AGENT_VERSION})}"
 
 echo "[2/5] Writing environment file..."
 # Preserve existing API key if --key was not provided
@@ -104,5 +105,6 @@ fi
 
 echo
 echo "=== Installation complete ==="
+echo "  Agent : v${AGENT_VERSION:-unknown}"
 echo "  Logs  : journalctl -u $SERVICE_NAME -f"
 echo "  Status: systemctl status $SERVICE_NAME"
