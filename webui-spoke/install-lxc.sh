@@ -133,7 +133,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.68"
+VERSION="2.69"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -579,6 +579,7 @@ CS_WEBUI_REPO_RAW=$CS_WEBUI_REPO_RAW
 REPO_DIR=$REPO_CACHE
 OFFLINE_TIMEOUT=$OFFLINE_TIMEOUT
 SPOKE_ID=$SPOKE_ID
+INSTALLER_VERSION=$VERSION
 EOF
   ok "Environment file written"
 else
@@ -589,6 +590,7 @@ else
   write_env_key "REPO_DIR"             "$REPO_CACHE"
   write_env_key "OFFLINE_TIMEOUT"      "$OFFLINE_TIMEOUT"
   update_env_key "SPOKE_ID"            "$SPOKE_ID"
+  update_env_key "INSTALLER_VERSION"   "$VERSION"
   ok "Environment file checked — existing values preserved"
 fi
 chmod 640 "$INSTALL_DIR/.env"

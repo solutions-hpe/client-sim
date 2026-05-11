@@ -13,13 +13,14 @@ HEALTH_PATH="${HEALTH_PATH:-/api/health}"
 PORT="${PORT:-8000}"
 REPO_BRANCH="${REPO_BRANCH:-lrb}"
 FAILURE_COUNT=0
+INSTALLED_VERSION=""
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE"
 }
 
 load_port() {
-  local env_port env_branch
+  local env_port env_branch env_inst_ver
 
   if [[ ! -f "$ENV_FILE" ]]; then
     return
@@ -33,6 +34,11 @@ load_port() {
   env_branch=$(awk -F= '/^REPO_BRANCH=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
   if [[ -n "$env_branch" ]]; then
     REPO_BRANCH="$env_branch"
+  fi
+
+  env_inst_ver=$(awk -F= '/^INSTALLER_VERSION=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
+  if [[ -n "$env_inst_ver" ]]; then
+    INSTALLED_VERSION="$env_inst_ver"
   fi
 }
 
@@ -98,6 +104,16 @@ main() {
       log "recovered service=${WEBUI_SERVICE} port=${PORT} previous_failures=${FAILURE_COUNT}"
     fi
     save_failure_count 0
+
+    # Proactive update check: fetch the remote INSTALLER_VERSION and reinstall if newer.
+    remote_ver=$(curl -sSf --max-time 10 \
+      "https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/INSTALLER_VERSION" \
+      2>/dev/null | tr -d '[:space:]')
+    if [[ -n "$remote_ver" && -n "$INSTALLED_VERSION" && "$remote_ver" != "$INSTALLED_VERSION" ]]; then
+      log "update_available installed=${INSTALLED_VERSION} remote=${remote_ver} — running installer"
+      rerun_installer
+    fi
+
     exit 0
   fi
 
