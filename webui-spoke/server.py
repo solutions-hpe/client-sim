@@ -2381,7 +2381,7 @@ def _relay_status_payload() -> dict[str, Any]:
 def _build_registration_config() -> dict[str, Any]:
     """Build the seed config payload sent to hub on first registration."""
     return {
-        "repo_branch": settings.get("repo_branch", "main"),
+        "repo_branch": settings.get("repo_branch") or REPO_BRANCH,
         "repo_url": REPO_URL,
         "site_mappings": settings.get("site_mappings", {}),
         "monitored_checks": settings.get("monitored_checks", []),
@@ -2888,7 +2888,7 @@ def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
 
 
 def sync_repo_once() -> None:
-    branch = settings["repo_branch"]
+    branch = str(settings.get("repo_branch") or REPO_BRANCH).strip()
     REPO_DIR.parent.mkdir(parents=True, exist_ok=True)
 
     if not REPO_DIR.exists() or not any(REPO_DIR.iterdir()):
@@ -3187,7 +3187,7 @@ async def api_settings_get() -> dict[str, Any]:
     cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
     return {
         "repo_url": REPO_URL,
-        "repo_branch": settings["repo_branch"],
+        "repo_branch": settings.get("repo_branch", ""),
         "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
         "github_token_configured": bool(settings.get("github_token")),
         "central_config": cfg,
@@ -3424,6 +3424,60 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if relay_config_changed:
         await broadcast({"type": "relay_status", **_relay_status_payload()})
     return {"status": "ok", "settings": payload}
+
+
+@app.post("/api/settings/clear/{provider}")
+async def api_settings_clear(provider: str) -> dict[str, Any]:
+    provider_key = provider.strip().lower()
+    changed_branch = False
+    relay_config_changed = False
+    relay_payload: dict[str, Any] | None = None
+
+    if provider_key == "github":
+        changed_branch = bool(settings.get("repo_branch"))
+        settings["repo_branch"] = ""
+        settings["github_token"] = ""
+    elif provider_key == "relay":
+        settings.update({
+            "relay_enabled": "off",
+            "relay_server_url": "",
+            "relay_spoke_name": "",
+            "relay_tenant_hint": "",
+            "relay_api_key": "",
+            "relay_spoke_id": "",
+            "relay_tenant_id": "",
+            "relay_poll_interval": RELAY_INTERVAL_DEFAULT,
+        })
+        relay_state.update({
+            "enabled": False,
+            "connected": False,
+            "last_sync": None,
+            "error": None,
+            "registration_status": "unregistered",
+        })
+        relay_config_changed = True
+        relay_payload = _relay_status_payload()
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown settings provider: {provider}")
+
+    _save_settings()
+
+    if changed_branch:
+        if "sync_repo" in background_tasks:
+            background_tasks["sync_repo"].cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await background_tasks["sync_repo"]
+        background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
+
+    payload = await api_settings_get()
+    await broadcast({"type": "settings_update", "settings": payload})
+    if relay_config_changed and relay_payload is not None:
+        await broadcast({"type": "relay_status", **relay_payload})
+
+    response: dict[str, Any] = {"status": "ok", "provider": provider_key, "settings": payload}
+    if relay_payload is not None:
+        response["relay_status"] = relay_payload
+    return response
 
 
 @app.post("/api/relay/trigger")
