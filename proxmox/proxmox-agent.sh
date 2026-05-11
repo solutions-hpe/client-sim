@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.80"
+AGENT_VERSION="2.81"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1826,6 +1826,7 @@ PY
             if [[ -n "$_dbus" ]]; then
                 unset "STATE_MISSING_BY_BUS[$_dbus]"
                 unset "STATE_BUS_TO_VMID[$_dbus]"
+                unset "STATE_VIDPID_BY_BUS[$_dbus]"
             fi
             unset "STATE_VMID_TO_BUS[$_dvmid]"
             unset "STATE_VMID_TO_IMAGE[$_dvmid]"
