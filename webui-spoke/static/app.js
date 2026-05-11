@@ -74,6 +74,7 @@ let currentSettings = {
   relay_spoke_id: '',
   relay_poll_interval: 60,
   relay_api_key_configured: false,
+  repo_sync_interval: 300,
   usb_vidpids: '[]',
   usb_missing_timeout: '60',
   vm_image_1_template_id: '100',
@@ -605,6 +606,7 @@ function mergeSettings(next = {}) {
     relay_spoke_id: next.relay_spoke_id ?? currentSettings.relay_spoke_id ?? '',
     relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
+    repo_sync_interval: next.repo_sync_interval ?? currentSettings.repo_sync_interval ?? 300,
     usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
     usb_missing_timeout: next.usb_missing_timeout ?? currentSettings.usb_missing_timeout ?? '60',
     vm_image_1_template_id: next.vm_image_1_template_id ?? currentSettings.vm_image_1_template_id ?? '100',
@@ -5279,11 +5281,12 @@ if (syncIntervalInput) {
       return;
     }
     try {
-      await requestJson('/api/settings', {
+      const response = await requestJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repo_sync_interval: val })
       });
+      applySettingsToUI(response.settings || { repo_sync_interval: val });
       showInlineMessage(syncIntervalMsg, `Sync interval set to ${val}s.`, false);
     } catch (err) {
       showInlineMessage(syncIntervalMsg, `Error: ${err.message}`, true);
