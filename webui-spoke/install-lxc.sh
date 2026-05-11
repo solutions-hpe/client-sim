@@ -133,7 +133,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.42"
+VERSION="2.43"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -411,11 +411,18 @@ fi
 # Sync webui files from repo cache.
 # rsync --delete removes files in INSTALL_DIR that no longer exist in the repo.
 # venv/, .env, settings.json, and .secret_key are excluded so user data is never wiped.
+# static/app.js, style.css, index.html, and VERSION are excluded because they are
+# managed exclusively by step 5c (downloaded fresh from cs-webui) — the copies in
+# webui-spoke/static/ are stale and must not overwrite the freshly-fetched files.
 rsync -a --delete \
   --exclude='venv/' \
   --exclude='.env' \
   --exclude='settings.json' \
   --exclude='.secret_key' \
+  --exclude='static/app.js' \
+  --exclude='static/style.css' \
+  --exclude='static/index.html' \
+  --exclude='VERSION' \
   "$REPO_CACHE/webui-spoke/" "$INSTALL_DIR/" >>"$LOG" 2>&1
 
 # Restore settings.json if it existed before sync
