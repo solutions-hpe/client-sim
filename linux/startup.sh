@@ -9,17 +9,10 @@ sudo touch "$log" "$debug" 2>/dev/null && sudo chmod a+w "$log" "$debug" 2>/dev/
 # locks from the previous session are physically impossible. This is safer
 # than a persistent-path lock + rmdir approach: even if exec bash replaces
 # this process (voiding the EXIT trap), the lock vanishes on the next reboot.
-# Self-remove from XDG autostart — launch-terminals.sh is the authoritative
-# launcher.  Older update.sh versions incorrectly deployed startup.desktop to
-# /etc/xdg/autostart/, creating a second invocation that competed with the
-# launch-terminals.sh window.  Remove it once on first run so it never fires again.
-sudo rm -f /etc/xdg/autostart/startup.desktop 2>/dev/null || true
-
-# Instance guard — prevent multiple concurrent startups from racing.
-# Lock lives in /run/ (tmpfs) which is cleared on every boot, so stale
-# locks from the previous session are physically impossible. This is safer
-# than a persistent-path lock + rmdir approach: even if exec bash replaces
-# this process (voiding the EXIT trap), the lock vanishes on the next reboot.
+# NOTE: startup.desktop in /etc/xdg/autostart/ is intentional — it is the
+# authoritative launcher for this terminal window.  update.sh was previously
+# redeploying it on every update (fixed in v2.48), but we must NOT remove it
+# here or the terminal window will be permanently lost after the first run.
 _LOCK_FILE="/run/client-sim-startup.lock"
 if ! mkdir "$_LOCK_FILE" 2>/dev/null; then
     echo "$(date): startup.sh already running — this window is a duplicate." >> "$debug"

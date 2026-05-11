@@ -64,6 +64,20 @@ copy_local_files() {
     # manager processes /etc/xdg/autostart/ while the simulation is already
     # running (via launch-terminals.sh / openbox autostart), a second startup.sh
     # process would launch, hit the lock guard, and trigger "; systemctl reboot".
+    #
+    # EXCEPTION — self-heal: if startup.desktop was accidentally removed (e.g. by
+    # a v2.50-2.54 bug that called `sudo rm -f /etc/xdg/autostart/startup.desktop`),
+    # restore it here so the simulation terminal reappears on next reboot.
+    if [[ ! -f /etc/xdg/autostart/startup.desktop ]]; then
+        echo "$(date): update.sh: startup.desktop missing — restoring" | tee -a "$debug"
+        sudo tee /etc/xdg/autostart/startup.desktop >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=StartUp
+Comment=Simulation Script Startup
+Exec=gnome-terminal --geometry=80x15+1180+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
+EOF
+    fi
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
