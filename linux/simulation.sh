@@ -435,11 +435,24 @@ connect_wifi() {
     return 1
   fi
   echo "Attempting to connect to $target_ssid" | tee -a "$debug"
-  # --wait 180: extend association timeout beyond the 90s default.
-  # WHY: Slow APs or busy channels can take >90s to complete the 4-way
-  # handshake. A timeout causes NM to fall back to interactive auth and
-  # trigger graphical password popups.
-  if ! nmcli --wait 180 device wifi connect "$target_ssid" password "$ssidpw"; then
+  # Pre-store the connection profile with credentials so NetworkManager never
+  # needs to prompt via a graphical agent (prevents the desktop auth dialog).
+  # WHY: `nmcli device wifi connect --password` can still fall back to the
+  # graphical secret agent if NM loses the key or retries internally.
+  # Pre-registering via `nmcli connection add` + `connection up` keeps all
+  # credentials in the NM keyfile — no agent interaction required.
+  # Delete any stale profile first so the password is always current.
+  nmcli connection delete "$target_ssid" >/dev/null 2>&1 || true
+  if ! nmcli connection add type wifi \
+      con-name "$target_ssid" \
+      ssid "$target_ssid" \
+      wifi-sec.key-mgmt wpa-psk \
+      wifi-sec.psk "$ssidpw" \
+      ifname "$wladapter" >/dev/null 2>&1; then
+    report_error "nmcli failed to create connection profile for '$target_ssid'" "error"
+    return 1
+  fi
+  if ! nmcli --wait 180 connection up "$target_ssid" ifname "$wladapter"; then
     report_error "nmcli failed to connect to '$target_ssid' (bad password or AP rejected)" "error"
     return 1
   fi
