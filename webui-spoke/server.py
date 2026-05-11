@@ -5594,6 +5594,8 @@ async def api_init() -> dict[str, Any]:
         "settings": {
             "central_api": _public_central_api_settings(),
             "central_config": cfg,
+            "relay_enabled": settings.get("relay_enabled", "off"),
+            "relay_server_url": settings.get("relay_server_url", ""),
         },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),
