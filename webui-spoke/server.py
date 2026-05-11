@@ -2516,6 +2516,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
     for vm in proxmox_state.get("vms", []):
         enriched_vm = dict(vm)
         enriched_vm["pending_checkin"] = _vm_pending_checkin(enriched_vm, client_seen)
+        enriched_vm["watchdog_tracked"] = bool(_vm_watchdog_key(vm.get("vmid")) and vm_watchdog.get(_vm_watchdog_key(vm.get("vmid"))))
         usb_entry = usb_by_vmid.get(str(vm.get("vmid")), {})
         enriched_vm["prov_status"] = usb_entry.get("prov_status") or "active"
         vms.append(enriched_vm)
@@ -2781,8 +2782,18 @@ def _update_provision_run_state(vms: list[dict[str, Any]], usb_state: list[dict[
         previous_status = str(item.get("status") or "pending")
         next_status = previous_status
         if entry and str(entry.get("prov_status") or "").strip().lower() == "provisioning":
-            next_status = _derive_provision_run_item_status(entry, vm_by_vmid)
-            item["completed_at"] = None
+            enriched = next((v for v in vms if str(v.get("vmid")) == vmid_key), None)
+            # If the watchdog confirms the client has already checked in, the USB state
+            # is just lagging — treat as done rather than staying stuck at "configuring".
+            if (enriched
+                    and enriched.get("watchdog_tracked")
+                    and not enriched.get("pending_checkin")
+                    and str(enriched.get("status", "")).lower() == "running"):
+                next_status = "done"
+                item["completed_at"] = item.get("completed_at") or now
+            else:
+                next_status = _derive_provision_run_item_status(entry, vm_by_vmid)
+                item["completed_at"] = None
         elif entry and str(entry.get("prov_status") or "").strip().lower() == "active":
             if previous_status != "failed":
                 # Clone finished — keep as "pending_checkin" until the VM's client
