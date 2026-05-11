@@ -8,8 +8,10 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/client-sim-dashboard}"
 ENV_FILE="${ENV_FILE:-${INSTALL_DIR}/.env}"
 WEBUI_SERVICE="${WEBUI_SERVICE:-client-sim-dashboard}"
 INSTALLER_PATH="${INSTALLER_PATH:-/opt/client-sim-repo/webui-spoke/install-lxc.sh}"
+INSTALLER_TMP_PATH="${INSTALLER_TMP_PATH:-/tmp/install-lxc-latest.sh}"
 HEALTH_PATH="${HEALTH_PATH:-/api/health}"
 PORT="${PORT:-8000}"
+REPO_BRANCH="${REPO_BRANCH:-lrb}"
 FAILURE_COUNT=0
 
 log() {
@@ -17,7 +19,7 @@ log() {
 }
 
 load_port() {
-  local env_port
+  local env_port env_branch
 
   if [[ ! -f "$ENV_FILE" ]]; then
     return
@@ -26,6 +28,11 @@ load_port() {
   env_port=$(awk -F= '/^PORT=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
   if [[ "$env_port" =~ ^[0-9]+$ ]]; then
     PORT="$env_port"
+  fi
+
+  env_branch=$(awk -F= '/^REPO_BRANCH=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
+  if [[ -n "$env_branch" ]]; then
+    REPO_BRANCH="$env_branch"
   fi
 }
 
@@ -41,6 +48,31 @@ load_failure_count() {
 
 save_failure_count() {
   printf '%s\n' "$1" >"$STATE_FILE"
+}
+
+rerun_installer() {
+  local latest_installer_url installer_to_run installer_label
+
+  latest_installer_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/install-lxc.sh"
+  installer_to_run="$INSTALLER_PATH"
+  installer_label="$INSTALLER_PATH"
+
+  if curl -fsSL "$latest_installer_url" -o "$INSTALLER_TMP_PATH"; then
+    installer_to_run="$INSTALLER_TMP_PATH"
+    installer_label="$latest_installer_url"
+  else
+    log "installer_rerun_download_warning url=${latest_installer_url} fallback=${INSTALLER_PATH} after=5_failures"
+  fi
+
+  if [[ -f "$installer_to_run" ]]; then
+    if bash "$installer_to_run" --unattended >>"$LOG_FILE" 2>&1; then
+      log "installer_rerun_complete path=${installer_label}"
+    else
+      log "installer_rerun_failed path=${installer_label}"
+    fi
+  else
+    log "installer_rerun_missing path=${INSTALLER_PATH}"
+  fi
 }
 
 main() {
@@ -83,12 +115,8 @@ main() {
   fi
 
   if (( failure_count_after >= 5 )); then
-    log "installer_rerun_start path=${INSTALLER_PATH} after=5_failures"
-    if bash "$INSTALLER_PATH" --unattended >>"$LOG_FILE" 2>&1; then
-      log "installer_rerun_complete path=${INSTALLER_PATH}"
-    else
-      log "installer_rerun_failed path=${INSTALLER_PATH}"
-    fi
+    log "installer_rerun_start path=${INSTALLER_PATH} repo_branch=${REPO_BRANCH} after=5_failures"
+    rerun_installer
     save_failure_count 0
   fi
 }

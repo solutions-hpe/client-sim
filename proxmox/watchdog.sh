@@ -8,6 +8,8 @@ STATE_DIR="/var/lib/proxmox-watchdog"
 STATE_FILE="${STATE_DIR}/state"
 LOG_FILE="/var/log/proxmox-watchdog.log"
 INSTALLER_PATH="/opt/proxmox-agent-installer/install-proxmox-agent.sh"
+INSTALLER_TMP_PATH="/tmp/install-proxmox-agent-latest.sh"
+REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-lrb}"
 
 log_event() {
     local timestamp message
@@ -68,6 +70,31 @@ PY
     curl "${curl_args[@]}" >/dev/null 2>&1 || true
 }
 
+reinstall_agent() {
+    local latest_installer_url installer_to_run installer_label
+
+    latest_installer_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/proxmox/install-proxmox-agent.sh"
+    installer_to_run="$INSTALLER_PATH"
+    installer_label="$INSTALLER_PATH"
+
+    if curl -fsSL "$latest_installer_url" -o "$INSTALLER_TMP_PATH"; then
+        installer_to_run="$INSTALLER_TMP_PATH"
+        installer_label="$latest_installer_url"
+    else
+        log_event "REINSTALL_DOWNLOAD_WARNING service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} url=${latest_installer_url} fallback=${INSTALLER_PATH}"
+    fi
+
+    if [[ -f "$installer_to_run" ]]; then
+        if bash "$installer_to_run" --unattended; then
+            log_event "REINSTALL service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${installer_label}"
+        else
+            log_event "REINSTALL_FAILED service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${installer_label}"
+        fi
+    else
+        log_event "REINSTALL_MISSING service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${INSTALLER_PATH}"
+    fi
+}
+
 mkdir -p "$STATE_DIR"
 touch "$LOG_FILE"
 
@@ -75,6 +102,7 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
 fi
+REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-$REPO_BRANCH}"
 
 load_state
 AGENT_PORT="$(read_agent_port)"
@@ -112,15 +140,7 @@ if (( FAILURE_COUNT == 2 )); then
     fi
     report_event "restart"
 elif (( FAILURE_COUNT >= 5 )); then
-    if [[ -x "$INSTALLER_PATH" ]]; then
-        if bash "$INSTALLER_PATH" --unattended; then
-            log_event "REINSTALL service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${INSTALLER_PATH}"
-        else
-            log_event "REINSTALL_FAILED service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${INSTALLER_PATH}"
-        fi
-    else
-        log_event "REINSTALL_MISSING service=${SERVICE_NAME} failure_count=${FAILURE_COUNT} installer=${INSTALLER_PATH}"
-    fi
+    reinstall_agent
     report_event "reinstall"
     FAILURE_COUNT=0
     save_state
