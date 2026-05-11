@@ -4413,6 +4413,11 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         })
         relay_registration_refresh_needed = bool(relay_state["enabled"])
         _save_relay_state()
+        # Kick the relay loop immediately instead of waiting for the next poll interval
+        task = background_tasks.get("relay")
+        if task and not task.done():
+            task.cancel()
+        background_tasks["relay"] = asyncio.get_event_loop().create_task(relay_loop())
 
     if update.central_api is not None:
         merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
