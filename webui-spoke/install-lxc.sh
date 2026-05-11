@@ -129,7 +129,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="2.24"
+VERSION="2.25"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -507,6 +507,52 @@ write_env_key() {
   fi
 }
 
+update_env_key() {
+  local key="$1" value="$2"
+  python3 - "$INSTALL_DIR/.env" "$key" "$value" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+prefix = f"{key}="
+lines = path.read_text().splitlines() if path.exists() else []
+for idx, line in enumerate(lines):
+    if line.startswith(prefix):
+        lines[idx] = prefix + value
+        break
+else:
+    lines.append(prefix + value)
+path.write_text("\n".join(lines) + "\n")
+PY
+}
+
+is_valid_uuid() {
+  python3 - "$1" <<'PY'
+import sys
+import uuid
+
+candidate = (sys.argv[1] or "").strip()
+try:
+    print(str(uuid.UUID(candidate)) == candidate.lower())
+except ValueError:
+    print(False)
+PY
+}
+
+existing_spoke_id=""
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+  existing_spoke_id=$(grep '^SPOKE_ID=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d ' ')
+fi
+if [[ "$(is_valid_uuid "$existing_spoke_id")" == "True" ]]; then
+  SPOKE_ID="$existing_spoke_id"
+  ok "Preserving existing SPOKE_ID"
+else
+  SPOKE_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  ok "Generated unique SPOKE_ID"
+fi
+
 if [[ "$REINSTALL" -eq 1 || ! -f "$INSTALL_DIR/.env" ]]; then
   info "Writing fresh environment config..."
   cat >"$INSTALL_DIR/.env" <<EOF
@@ -515,6 +561,7 @@ REPO_BRANCH=$REPO_BRANCH
 CS_WEBUI_REPO_RAW=$CS_WEBUI_REPO_RAW
 REPO_DIR=$REPO_CACHE
 OFFLINE_TIMEOUT=$OFFLINE_TIMEOUT
+SPOKE_ID=$SPOKE_ID
 EOF
   ok "Environment file written"
 else
@@ -524,6 +571,7 @@ else
   write_env_key "CS_WEBUI_REPO_RAW"    "$CS_WEBUI_REPO_RAW"
   write_env_key "REPO_DIR"             "$REPO_CACHE"
   write_env_key "OFFLINE_TIMEOUT"      "$OFFLINE_TIMEOUT"
+  update_env_key "SPOKE_ID"            "$SPOKE_ID"
   ok "Environment file checked — existing values preserved"
 fi
 chmod 640 "$INSTALL_DIR/.env"

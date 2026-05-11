@@ -215,6 +215,62 @@ def _save_settings() -> None:
         logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
 
 
+def _candidate_relay_spoke_id(persisted: dict[str, Any]) -> str:
+    return str(
+        persisted.get("relay_spoke_id")
+        or persisted.get("relay_island_id")
+        or persisted.get("relay_site_id")
+        or os.getenv("SPOKE_ID", "")
+        or ""
+    ).strip()
+
+
+def _is_uuid(value: str) -> bool:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return False
+    try:
+        return str(uuid.UUID(candidate)) == candidate
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _relay_spoke_id_needs_rotation(value: str, persisted: dict[str, Any] | None = None) -> bool:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return True
+    if _is_uuid(candidate):
+        return False
+
+    persisted = persisted or _persisted
+    bad_values = {"main", "master"}
+    repo_branch = str(persisted.get("repo_branch") or REPO_BRANCH or "").strip().lower()
+    if repo_branch:
+        bad_values.add(repo_branch)
+    version_values = {str(APP_VERSION).strip().lower(), str(INSTALLER_VERSION).strip().lower()}
+    lowered = candidate.lower()
+    if lowered in bad_values:
+        logger.warning("Rotating invalid relay_spoke_id '%s' that matched a branch name", candidate)
+    elif lowered in version_values or re.fullmatch(r"\d+(?:\.\d+)+", candidate):
+        logger.warning("Rotating invalid relay_spoke_id '%s' that matched a version string", candidate)
+    else:
+        logger.warning("Rotating invalid non-UUID relay_spoke_id '%s'", candidate)
+    return True
+
+
+def _ensure_relay_spoke_id(persisted: dict[str, Any] | None = None) -> str:
+    persisted = persisted or _persisted
+    candidate = str(settings.get("relay_spoke_id") or _candidate_relay_spoke_id(persisted)).strip()
+    if _relay_spoke_id_needs_rotation(candidate, persisted):
+        candidate = str(uuid.uuid4())
+    if settings.get("relay_spoke_id") != candidate or _candidate_relay_spoke_id(persisted) != candidate:
+        settings["relay_spoke_id"] = candidate
+        _save_settings()
+    else:
+        settings["relay_spoke_id"] = candidate
+    return candidate
+
+
 # ── State snapshot cache (JSON file, no DB) ──────────────────────────────────
 _state_cache_last_save: float = 0.0
 STATE_CACHE_MIN_INTERVAL = 10.0  # max one write per 10 s
@@ -399,7 +455,7 @@ settings: dict[str, Any] = {
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_tenant_hint": _persisted.get("relay_tenant_hint", _persisted.get("relay_tenant_id", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
-    "relay_spoke_id": _persisted.get("relay_spoke_id", _persisted.get("relay_island_id", _persisted.get("relay_site_id", ""))),
+    "relay_spoke_id": _candidate_relay_spoke_id(_persisted),
     "relay_tenant_id": _persisted.get("relay_tenant_id", _persisted.get("relay_tenant_hint", "")),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
@@ -419,6 +475,7 @@ settings: dict[str, Any] = {
     "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
     "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
 }
+_ensure_relay_spoke_id(_persisted)
 
 # Initialise in-memory token from persisted values so a restart
 # doesn't require the user to re-enter credentials.
@@ -2565,7 +2622,9 @@ async def _hub_self_register(server_url: str) -> None:
     Stores the returned spoke_id. If already approved, also stores api_key and tenant_id."""
     hostname = socket.gethostname()
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
+    spoke_id = _ensure_relay_spoke_id()
     payload = {
+        "spoke_id": spoke_id,
         "hostname": hostname,
         "label": hostname,
         "spoke_name": spoke_name,
@@ -2573,7 +2632,7 @@ async def _hub_self_register(server_url: str) -> None:
         "config": _build_registration_config(),
     }
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
-                       hostname=hostname, spoke_name=spoke_name)
+                       hostname=hostname, spoke_name=spoke_name, spoke_id=spoke_id)
     try:
         async with httpx.AsyncClient(timeout=15, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/spokes/register", json=payload)
@@ -2592,10 +2651,12 @@ async def _hub_self_register(server_url: str) -> None:
                 return
             resp.raise_for_status()
             data = resp.json()
-        spoke_id = data.get("spoke_id", "")
+        spoke_id = str(data.get("spoke_id", "")).strip()
         status = data.get("status", "pending")
-        if spoke_id:
+        if spoke_id and not _relay_spoke_id_needs_rotation(spoke_id):
             settings["relay_spoke_id"] = spoke_id
+        else:
+            spoke_id = _ensure_relay_spoke_id()
         if status == "approved":
             tenant_id = data.get("tenant_id", "")
             settings["relay_api_key"] = data.get("api_key", "")
@@ -2627,6 +2688,7 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as hc:
             resp = await hc.post(f"{server_url}/api/spokes/register", json={
+                "spoke_id": spoke_id,
                 "hostname": hostname,
                 "label": hostname,
                 "spoke_name": spoke_name,
@@ -2637,8 +2699,8 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
             data = resp.json()
         status = data.get("status", "pending")
         updated = False
-        returned_spoke_id = data.get("spoke_id", "")
-        if returned_spoke_id and returned_spoke_id != settings.get("relay_spoke_id", ""):
+        returned_spoke_id = str(data.get("spoke_id", "")).strip()
+        if returned_spoke_id and not _relay_spoke_id_needs_rotation(returned_spoke_id) and returned_spoke_id != settings.get("relay_spoke_id", ""):
             settings["relay_spoke_id"] = returned_spoke_id
             spoke_id = returned_spoke_id
             updated = True
@@ -2734,7 +2796,7 @@ async def relay_sync_once() -> None:
 
     relay_state["enabled"] = True
     server_url = settings["relay_server_url"].rstrip("/")
-    spoke_id = settings.get("relay_spoke_id", "")
+    spoke_id = _ensure_relay_spoke_id()
     api_key = settings.get("relay_api_key", "")
     tenant_id = settings.get("relay_tenant_id", "")
 
@@ -2766,6 +2828,8 @@ async def relay_sync_once() -> None:
             proxmox_vms = list(proxmox_state.get("vms", []))
             telemetry = {
                 "spoke_id": spoke_id,
+                "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
+                "hostname": socket.gethostname(),
                 "clients": [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)],
                 "timestamp": time.time(),
                 "proxmox": {
