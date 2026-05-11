@@ -5289,8 +5289,92 @@ async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
     """Fetch current alerts from Central for a specific site name. Always returns 200."""
     if not _central_ready() or not central_token.get("access_token"):
         return {"alerts": [], "warning": "Central not configured or no valid token."}
+
     if _is_new_central_api():
-        return {"alerts": [], "warning": "Alert detail not available in Central mode yet."}
+        # New Central has no alerts endpoint — derive device-status alerts from /sites-health + /devices
+        headers = _central_headers()
+        base_url = _central_cfg()["cluster_url"].rstrip("/")
+        alerts: list[dict[str, Any]] = []
+        warning: str | None = None
+        ts_now = int(time.time())
+
+        async with httpx.AsyncClient() as client:
+            # 1. Find site_id from sites-health so we can filter devices by site
+            site_id: str | None = None
+            health_score: int | None = None
+            try:
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/sites-health",
+                    headers=headers, timeout=20,
+                )
+                if resp.status_code == 200:
+                    for item in resp.json().get("items", []):
+                        sname = item.get("siteName") or item.get("site_name") or ""
+                        if sname.lower() == site.lower():
+                            site_id = item.get("siteId") or item.get("site_id")
+                            health_score = int(item.get("healthScore", item.get("health_score", 100)))
+                            break
+                elif resp.status_code == 401:
+                    warning = "Token rejected (401) — re-save settings."
+            except Exception as exc:
+                warning = f"Network error fetching site health: {exc}"
+
+            if warning:
+                return {"alerts": alerts, "count": 0, "warning": warning}
+
+            # 2. Add site health alert if score is degraded
+            if health_score is not None and health_score < 100:
+                severity = "CRITICAL" if health_score < 50 else "MAJOR" if health_score < 80 else "MINOR"
+                alerts.append({
+                    "type": "SITE_HEALTH",
+                    "name": "Site Health Score",
+                    "severity": severity,
+                    "state": "active",
+                    "site": site,
+                    "device": site,
+                    "ts": ts_now,
+                    "message": f"Site health score is {health_score}/100",
+                })
+
+            # 3. Fetch devices for this site and add down devices as alerts
+            try:
+                params: dict[str, Any] = {"limit": 500}
+                if site_id:
+                    params["filter"] = f"siteId eq '{site_id}'"
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/devices",
+                    headers=headers, params=params, timeout=20,
+                )
+                if resp.status_code == 200:
+                    _TYPE_MAP = {
+                        "ACCESS_POINT": ("AP_DOWN", "AP Down"),
+                        "SWITCH": ("SWITCH_DOWN", "Switch Down"),
+                        "GATEWAY": ("GATEWAY_DOWN", "Gateway Down"),
+                    }
+                    for dev in resp.json().get("items", []):
+                        status = (dev.get("status") or "").upper()
+                        if status in ("UP", "ONLINE"):
+                            continue
+                        dtype = (dev.get("deviceType") or "").upper()
+                        atype, aname = _TYPE_MAP.get(dtype, ("DEVICE_DOWN", "Device Down"))
+                        alerts.append({
+                            "type": atype,
+                            "name": aname,
+                            "severity": "CRITICAL",
+                            "state": "active",
+                            "site": site,
+                            "device": dev.get("deviceName") or dev.get("id") or "—",
+                            "ts": ts_now,
+                            "message": f"{dev.get('model', dtype)} — status: {dev.get('status', 'Unknown')} | IP: {dev.get('ipv4') or dev.get('ip', '—')}",
+                        })
+            except Exception as exc:
+                logger.warning("CNX devices fetch failed for site-alerts: %s", exc)
+                warning = f"Could not fetch device status: {exc}"
+
+        if not alerts and not warning:
+            warning = "All devices are up and site health is 100% — no issues detected."
+
+        return {"alerts": alerts, "count": len(alerts), "warning": warning}
 
     headers = _central_headers()
     base_url = _central_cfg()["cluster_url"].rstrip("/")
@@ -5431,6 +5515,204 @@ async def api_central_sites() -> dict[str, Any]:
                 warning = f"No sites found — tried {', '.join(tried)} (last HTTP {last_status}). Your cluster may not expose a sites list API."
 
     return {"sites": sorted(set(sites)), "warning": warning}
+
+
+@app.get("/api/central/devices")
+async def api_central_devices(site: str | None = Query(default=None)) -> dict[str, Any]:
+    """Return device inventory from New Central v1alpha1. Always returns 200.
+    Optional ?site= filters to a specific Central site name.
+    Classic Central: returns empty (use monitoring/v1/devices instead).
+    """
+    if not _central_ready() or not central_token.get("access_token"):
+        return {"devices": [], "count": 0, "warning": "Central not configured or no valid token."}
+    if not _is_new_central_api():
+        return {"devices": [], "count": 0, "warning": "Device inventory endpoint only available in Central (CNX) mode."}
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    devices: list[dict[str, Any]] = []
+    warning: str | None = None
+
+    async with httpx.AsyncClient() as client:
+        # Resolve site_id if a site name was provided
+        site_id: str | None = None
+        if site:
+            try:
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/sites-health",
+                    headers=headers, timeout=20,
+                )
+                if resp.status_code == 200:
+                    for item in resp.json().get("items", []):
+                        sname = item.get("siteName") or item.get("site_name") or ""
+                        if sname.lower() == site.lower():
+                            site_id = item.get("siteId") or item.get("site_id")
+                            break
+            except Exception as exc:
+                logger.warning("CNX devices: sites-health lookup failed: %s", exc)
+
+        # Fetch devices, optionally filtered by site
+        try:
+            params: dict[str, Any] = {"limit": 500}
+            if site_id:
+                params["filter"] = f"siteId eq '{site_id}'"
+            resp = await client.get(
+                f"{base_url}/network-monitoring/v1alpha1/devices",
+                headers=headers, params=params, timeout=30,
+            )
+            if resp.status_code == 401 and _can_refresh():
+                ok, _ = await _refresh_central_token(client)
+                if ok:
+                    headers = _central_headers()
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/devices",
+                    headers=headers, params=params, timeout=30,
+                )
+            if resp.status_code == 200:
+                for dev in resp.json().get("items", []):
+                    devices.append({
+                        "id":         dev.get("id") or dev.get("deviceId") or dev.get("serialNumber", ""),
+                        "name":       dev.get("deviceName") or dev.get("name", "—"),
+                        "type":       dev.get("deviceType") or dev.get("type", "—"),
+                        "model":      dev.get("model", "—"),
+                        "serial":     dev.get("serialNumber", "—"),
+                        "mac":        dev.get("macAddress", "—"),
+                        "ip":         dev.get("ipv4") or dev.get("ip") or dev.get("ipAddress", "—"),
+                        "status":     dev.get("status", "—"),
+                        "site":       dev.get("siteId", "—"),
+                        "version":    dev.get("softwareVersion") or dev.get("firmwareVersion", "—"),
+                        "uptime_ms":  dev.get("uptimeInMillis"),
+                        "deployment": dev.get("deployment", "—"),
+                    })
+            elif resp.status_code == 401:
+                warning = "Token rejected (401) — re-save settings to refresh."
+            else:
+                warning = f"Devices endpoint returned HTTP {resp.status_code}."
+        except Exception as exc:
+            logger.warning("CNX devices fetch failed: %s", exc)
+            warning = f"Network error fetching devices: {exc}"
+
+    return {"devices": devices, "count": len(devices), "warning": warning}
+
+
+@app.get("/api/central/wlans")
+async def api_central_wlans() -> dict[str, Any]:
+    """Return WLAN/SSID list from New Central v1alpha1. Always returns 200."""
+    if not _central_ready() or not central_token.get("access_token"):
+        return {"wlans": [], "count": 0, "warning": "Central not configured or no valid token."}
+    if not _is_new_central_api():
+        return {"wlans": [], "count": 0, "warning": "WLAN endpoint only available in Central (CNX) mode."}
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    wlans: list[dict[str, Any]] = []
+    warning: str | None = None
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"{base_url}/network-monitoring/v1alpha1/wlans",
+                headers=headers, params={"limit": 500}, timeout=20,
+            )
+            if resp.status_code == 401 and _can_refresh():
+                ok, _ = await _refresh_central_token(client)
+                if ok:
+                    headers = _central_headers()
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/wlans",
+                    headers=headers, params={"limit": 500}, timeout=20,
+                )
+            if resp.status_code == 200:
+                for w in resp.json().get("items", []):
+                    wlans.append({
+                        "id":       w.get("wlanId") or w.get("id", ""),
+                        "ssid":     w.get("ssid", "—"),
+                        "type":     w.get("type", "—"),
+                        "security": w.get("security", "—"),
+                        "enabled":  w.get("enabled", True),
+                        "band":     w.get("band") or w.get("radioType", "—"),
+                    })
+            elif resp.status_code == 401:
+                warning = "Token rejected (401) — re-save settings to refresh."
+            else:
+                warning = f"WLANs endpoint returned HTTP {resp.status_code}."
+        except Exception as exc:
+            logger.warning("CNX wlans fetch failed: %s", exc)
+            warning = f"Network error fetching WLANs: {exc}"
+
+    return {"wlans": wlans, "count": len(wlans), "warning": warning}
+
+
+@app.get("/api/central/clients-detail")
+async def api_central_clients_detail(site: str | None = Query(default=None)) -> dict[str, Any]:
+    """Return connected client list from New Central v1alpha1. Always returns 200.
+    Optional ?site= filters to a specific Central site name.
+    """
+    if not _central_ready() or not central_token.get("access_token"):
+        return {"clients": [], "count": 0, "warning": "Central not configured or no valid token."}
+    if not _is_new_central_api():
+        return {"clients": [], "count": 0, "warning": "Client detail endpoint only available in Central (CNX) mode."}
+
+    headers = _central_headers()
+    base_url = _central_cfg()["cluster_url"].rstrip("/")
+    result_clients: list[dict[str, Any]] = []
+    warning: str | None = None
+
+    async with httpx.AsyncClient() as client:
+        site_id: str | None = None
+        if site:
+            try:
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/sites-health",
+                    headers=headers, timeout=20,
+                )
+                if resp.status_code == 200:
+                    for item in resp.json().get("items", []):
+                        sname = item.get("siteName") or item.get("site_name") or ""
+                        if sname.lower() == site.lower():
+                            site_id = item.get("siteId") or item.get("site_id")
+                            break
+            except Exception as exc:
+                logger.warning("CNX clients-detail: sites-health lookup failed: %s", exc)
+
+        try:
+            params: dict[str, Any] = {}
+            if site_id:
+                params["site-id"] = site_id
+            resp = await client.get(
+                f"{base_url}/network-monitoring/v1alpha1/clients",
+                headers=headers, params=params, timeout=20,
+            )
+            if resp.status_code == 401 and _can_refresh():
+                ok, _ = await _refresh_central_token(client)
+                if ok:
+                    headers = _central_headers()
+                resp = await client.get(
+                    f"{base_url}/network-monitoring/v1alpha1/clients",
+                    headers=headers, params=params, timeout=20,
+                )
+            if resp.status_code == 200:
+                for c in resp.json().get("items", []):
+                    result_clients.append({
+                        "mac":             c.get("macAddress", "—"),
+                        "ip":              c.get("ipAddress", "—"),
+                        "username":        c.get("username") or c.get("name", "—"),
+                        "device":          c.get("deviceName") or c.get("hostname", "—"),
+                        "connection_type": c.get("connectionType", "—"),
+                        "ssid":            c.get("ssid", "—"),
+                        "ap":              c.get("apName") or c.get("accessPoint", "—"),
+                        "connected":       c.get("connected", True),
+                        "signal":          c.get("signalStrength") or c.get("signal"),
+                    })
+            elif resp.status_code == 401:
+                warning = "Token rejected (401) — re-save settings to refresh."
+            else:
+                warning = f"Clients endpoint returned HTTP {resp.status_code}."
+        except Exception as exc:
+            logger.warning("CNX clients-detail fetch failed: %s", exc)
+            warning = f"Network error fetching clients: {exc}"
+
+    return {"clients": result_clients, "count": len(result_clients), "warning": warning}
 
 
 @app.get("/api/local-wsites")
