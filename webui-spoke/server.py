@@ -1833,6 +1833,9 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     _load_relay_state()
     _load_update_state()
     _load_vm_watchdog()
+    # Refresh cs-webui frontend files before accepting requests (non-blocking,
+    # awaited once so the fix is in place before the first page load).
+    await asyncio.wait_for(refresh_webui_frontend(), timeout=60)
     background_tasks["sync_repo"] = asyncio.create_task(sync_repo())
     background_tasks["heartbeat"] = asyncio.create_task(heartbeat_check())
     background_tasks["central_token"] = asyncio.create_task(central_token_manager())
@@ -3874,6 +3877,77 @@ def _get_repo_version() -> str | None:
     except Exception:
         pass
     return None
+
+
+def _cs_webui_branch() -> str:
+    branch = str(settings.get("repo_branch", REPO_BRANCH) or REPO_BRANCH).strip()
+    return branch or REPO_BRANCH
+
+
+async def refresh_webui_frontend() -> None:
+    """On startup: compare the deployed cs-webui VERSION to the repo and
+    download fresh frontend files (app.js, style.css, index.html) if stale.
+
+    This self-heals spoke installs that were created before a cs-webui fix
+    was committed — e.g. a broken app.js with a SyntaxError would cause all
+    JavaScript to fail, breaking the entire UI.  Running the full installer
+    is not required; we only need to swap the three static files."""
+    branch = _cs_webui_branch()
+    raw_base = f"{CS_WEBUI_REPO_RAW}/{branch}"
+
+    # Read deployed version
+    local_ver: str | None = None
+    try:
+        local_ver = (STATIC_DIR / "VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    # Fetch remote version (lightweight — just a few bytes)
+    remote_ver: str | None = None
+    try:
+        import urllib.request as _urllib_req
+        with _urllib_req.urlopen(f"{raw_base}/VERSION", timeout=10) as resp:
+            remote_ver = resp.read().decode(errors="replace").strip()
+    except Exception as exc:
+        logger.warning("webui refresh: could not fetch remote VERSION: %s", exc)
+        return
+
+    if remote_ver == local_ver:
+        logger.info("webui refresh: deployed cs-webui %s is current — no update needed", local_ver)
+        return
+
+    logger.info("webui refresh: deployed=%s  remote=%s — downloading updated files", local_ver, remote_ver)
+
+    # Download app.js and style.css
+    for rel_path in ("static/app.js", "static/style.css"):
+        url = f"{raw_base}/{rel_path}"
+        dest = STATIC_DIR / Path(rel_path).name
+        try:
+            with _urllib_req.urlopen(url, timeout=30) as resp:
+                dest.write_bytes(resp.read())
+            logger.info("webui refresh: updated %s", dest.name)
+        except Exception as exc:
+            logger.error("webui refresh: failed to download %s: %s", rel_path, exc)
+            return  # abort — partial update is worse than stale
+
+    # Download index.html template and inject WEBUI_MODE=spoke
+    try:
+        with _urllib_req.urlopen(f"{raw_base}/templates/index.html", timeout=30) as resp:
+            html = resp.read().decode(errors="replace")
+        html = html.replace("{{WEBUI_MODE}}", "spoke")
+        (STATIC_DIR / "index.html").write_text(html, encoding="utf-8")
+        logger.info("webui refresh: updated index.html (WEBUI_MODE=spoke injected)")
+    except Exception as exc:
+        logger.error("webui refresh: failed to download index.html: %s", exc)
+        return
+
+    # Write updated VERSION so next restart is a no-op
+    try:
+        (STATIC_DIR / "VERSION").write_text(remote_ver + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+    logger.info("webui refresh: cs-webui updated %s → %s — browser reload required", local_ver, remote_ver)
 
 
 async def check_for_update() -> None:
