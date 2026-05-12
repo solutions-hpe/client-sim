@@ -7060,6 +7060,17 @@ async def api_server_clear_cache() -> dict[str, Any]:
     return {"status": "ok", "message": "Server cache cleared"}
 
 
+@app.post("/api/proxmox/autoprov/reset")
+async def api_autoprov_reset() -> dict[str, Any]:
+    """Reset auto-provisioning run state and summary without clearing all server state.
+    Use when the provisioning panel is stuck showing in-progress after completion."""
+    async with state_lock:
+        proxmox_state["prov_run"] = _default_provision_run_state()
+        proxmox_state["prov_summary"] = None
+    logger.info("Auto-provisioning status manually reset via API")
+    return {"ok": True}
+
+
 @app.post("/api/setup/clear-cache")
 async def api_setup_clear_cache() -> dict[str, Any]:
     """Wipe all cached files, re-clone the repo, clear in-memory client/central state,
