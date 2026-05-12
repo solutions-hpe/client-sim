@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.95"
+AGENT_VERSION="2.96"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -304,6 +304,57 @@ device_name_from_sysfs() {
     printf '%s' "$name"
 }
 
+VH_VIDPID_HASH_FILE="/var/lib/client-sim/vh-vidpid.hash"
+VH_CONFIG_FILE="/root/.config/virtualhere/client.conf"
+
+# Write the VirtualHere client Qt-INI config and restart the service.
+# Called only when the VID:PID list has actually changed.
+_apply_vh_auto_use() {
+    local -a vidpids=("$@")
+    log "VH auto-use: applying ${#vidpids[@]} VID:PID entries — restarting virtualhereclient"
+
+    systemctl stop virtualhereclient 2>/dev/null || true
+    sleep 1
+
+    mkdir -p "$(dirname "$VH_CONFIG_FILE")"
+    # Write Qt INI format: [AutoUse] with 1\VidPid=vid:pid ... size=N
+    {
+        printf '[AutoUse]\n'
+        local idx=1
+        for vp in "${vidpids[@]}"; do
+            printf '%d\\VidPid=%s\n' "$idx" "$vp"
+            (( idx++ ))
+        done
+        printf 'size=%d\n' "${#vidpids[@]}"
+    } > "$VH_CONFIG_FILE"
+
+    systemctl start virtualhereclient 2>/dev/null || \
+        log "WARNING: virtualhereclient failed to start after VID:PID update"
+    log "VH auto-use: config written to $VH_CONFIG_FILE, service restarted"
+}
+
+# Compare current VH_AUTO_USE_VIDPIDS against the stored hash; restart VH only if changed.
+_sync_vh_auto_use() {
+    # Only act if virtualhereclient is installed
+    if ! systemctl list-unit-files virtualhereclient.service &>/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Build a stable string from the sorted list and hash it
+    local new_hash
+    new_hash=$(printf '%s\n' "${VH_AUTO_USE_VIDPIDS[@]}" | sort | sha256sum | awk '{print $1}')
+
+    local stored_hash=""
+    [[ -f "$VH_VIDPID_HASH_FILE" ]] && stored_hash=$(cat "$VH_VIDPID_HASH_FILE" 2>/dev/null || true)
+
+    if [[ "$new_hash" == "$stored_hash" ]]; then
+        return 0  # No change — nothing to do
+    fi
+
+    _apply_vh_auto_use "${VH_AUTO_USE_VIDPIDS[@]}"
+    printf '%s' "$new_hash" > "$VH_VIDPID_HASH_FILE"
+}
+
 refresh_usb_config() {
     local response parsed kind a b c
     response=$(curl_api GET /api/proxmox/usb-config "" 2>/dev/null || echo '{}')
@@ -341,12 +392,17 @@ for vidpid in data.get("ignored_vidpids", []) or []:
     value = str(vidpid).strip().lower()
     if value:
         print(f"IGN\t{value}")
+for vidpid in sorted(data.get("vh_auto_use_vidpids", []) or []):
+    value = str(vidpid).strip().lower()
+    if value:
+        print(f"VH\t{value}")
 PY
 )
 
     CERTIFIED_TYPES=()
     CERTIFIED_LABELS=()
     IGNORED_VIDPIDS=()
+    VH_AUTO_USE_VIDPIDS=()
     AUTO_PROVISION="off"
     MISSING_TIMEOUT=60
     IMAGE1_TEMPLATE_ID=100
@@ -378,8 +434,14 @@ PY
             IGN)
                 IGNORED_VIDPIDS["$a"]=1
                 ;;
+            VH)
+                VH_AUTO_USE_VIDPIDS+=("$a")
+                ;;
         esac
     done <<< "$parsed"
+
+    # Sync VirtualHere client auto-use config if the approved VID:PID list has changed.
+    _sync_vh_auto_use
 }
 
 load_state_file() {

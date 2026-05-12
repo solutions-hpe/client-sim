@@ -1983,7 +1983,7 @@ proxmox_state: dict[str, Any] = {
     "connected": False,
     "last_seen": None,
     "node": {},
-    "vms": [],
+    "vms": None,  # None = never received telemetry; [] = received but empty (all deleted)
     "unknown_usb": [],
     "usb_state": [],
     "present_usb": [],
@@ -1995,6 +1995,9 @@ proxmox_state: dict[str, Any] = {
 }
 # Previous usb_state vmid→prov_status snapshot for transition detection
 _prev_usb_by_vmid: dict[str, str] = {}
+# VMIDs for which a delete command has been queued but not yet confirmed by telemetry.
+# Kept as a set so the UI can show "deleting…" immediately instead of the row vanishing.
+_pending_delete_vmids: set[int] = set()
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
@@ -2417,6 +2420,13 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
         "l1_vlan_start": max(1, min(4094, int(str(settings.get("l1_vlan_start", "100")).strip() or "100"))),
         "l1_vlan_end": max(1, min(4094, int(str(settings.get("l1_vlan_end", "199")).strip() or "199"))),
+        # Flat list of "vid:pid" strings for the VirtualHere client auto-use config.
+        # The agent compares this against its stored hash and restarts VH if it changes.
+        "vh_auto_use_vidpids": sorted({
+            str(item.get("vidpid", "")).strip().lower()
+            for item in _parse_json_list(settings.get("usb_vidpids", "[]"))
+            if isinstance(item, dict) and str(item.get("vidpid", "")).strip()
+        }),
     }
 
 
@@ -2514,13 +2524,34 @@ def _proxmox_status_payload() -> dict[str, Any]:
         if entry.get("vmid") is not None
     }
     vms = []
+    current_vmids: set[int] = set()
     for vm in proxmox_state.get("vms", []):
         enriched_vm = dict(vm)
         enriched_vm["pending_checkin"] = _vm_pending_checkin(enriched_vm, client_seen)
         enriched_vm["watchdog_tracked"] = bool(_vm_watchdog_key(vm.get("vmid")) and vm_watchdog.get(_vm_watchdog_key(vm.get("vmid"))))
         usb_entry = usb_by_vmid.get(str(vm.get("vmid")), {})
         enriched_vm["prov_status"] = usb_entry.get("prov_status") or "active"
+        try:
+            vmid_int = int(vm.get("vmid"))
+            current_vmids.add(vmid_int)
+            if vmid_int in _pending_delete_vmids:
+                enriched_vm["status"] = "deleting"
+        except (TypeError, ValueError):
+            pass
         vms.append(enriched_vm)
+    # Include any pending-delete VMIDs that have already been removed from agent telemetry
+    # so the UI keeps showing them as "deleting…" until the next full render cycle.
+    for pending_vmid in _pending_delete_vmids:
+        if pending_vmid not in current_vmids:
+            vms.append({
+                "vmid": pending_vmid,
+                "name": f"VM {pending_vmid}",
+                "status": "deleting",
+                "type": "qemu",
+                "prov_status": "active",
+                "pending_checkin": False,
+                "watchdog_tracked": False,
+            })
     return {
         **proxmox_state,
         "vms": vms,
@@ -2555,7 +2586,12 @@ def _prepare_delete_vm_args(args: dict[str, Any] | None) -> dict[str, Any]:
 
     vm = _find_proxmox_vm(vmid)
     if vm is None:
-        if not proxmox_state.get("vms"):
+        # Allow re-delete of a VM that's already in pending-delete state (idempotent)
+        if vmid in _pending_delete_vmids:
+            return {"vmid": vmid, "vm_type": "qemu", "status": "deleting"}
+        # 503 only when the inventory has never been received (None), not when it's empty
+        # after a batch delete (which would be an empty list []).
+        if proxmox_state.get("vms") is None:
             raise HTTPException(status_code=503, detail="No Proxmox VM inventory is available yet")
         raise HTTPException(status_code=404, detail=f"VM {vmid} was not found in Proxmox inventory")
     if vm.get("is_template"):
@@ -4916,6 +4952,13 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
 
+    # Clear pending-delete VMIDs that the agent has confirmed are gone.
+    # intersection_update keeps only IDs still in the telemetry report;
+    # any VMID that has disappeared from the agent has been successfully deleted.
+    if _pending_delete_vmids:
+        telemetry_vmids = {int(v.get("vmid")) for v in enriched_vms if v.get("vmid") is not None}
+        _pending_delete_vmids.intersection_update(telemetry_vmids)
+
     # Detect provisioning/teardown completions for summary tracking
     global _prev_usb_by_vmid
     new_usb: list[dict] = proxmox_state["usb_state"]
@@ -5024,6 +5067,8 @@ async def api_proxmox_update_agent() -> dict[str, Any]:
 async def api_proxmox_delete_vm(vmid: int) -> dict[str, Any]:
     args = _prepare_delete_vm_args({"vmid": vmid})
     cmd = await _queue_proxmox_command("delete_vm", args)
+    _pending_delete_vmids.add(vmid)
+    await _broadcast_proxmox_state()
     return {
         "queued": 1,
         "ids": [cmd["id"]],
