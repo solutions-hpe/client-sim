@@ -2152,6 +2152,38 @@ def compute_online(last_seen: datetime) -> bool:
     return (utcnow() - last_seen).total_seconds() <= OFFLINE_TIMEOUT
 
 
+def _hostname_has_usb(hostname: str) -> bool:
+    """Return True if the VM for this hostname has an active USB dongle assigned."""
+    vms: list[dict[str, Any]] = proxmox_state.get("vms") or []
+    usb_state: list[dict[str, Any]] = proxmox_state.get("usb_state") or []
+    if not usb_state:
+        return False
+    norm = hostname.strip().lower()
+    # Build vmid from vms list by matching on name
+    vmid: str | None = None
+    for vm in vms:
+        if str(vm.get("name") or "").strip().lower() == norm:
+            raw = vm.get("vmid")
+            if raw is not None:
+                vmid = str(raw).strip()
+            break
+    usb_vmids = {
+        str(d.get("vmid")).strip()
+        for d in usb_state
+        if isinstance(d, dict) and d.get("vmid") is not None and str(d.get("vmid")).strip()
+    }
+    if vmid and vmid in usb_vmids:
+        return True
+    # Fallback: match by hostname field on USB entry
+    usb_hostnames = {
+        str(d.get("hostname") or d.get("vm_name") or "").strip().lower()
+        for d in usb_state
+        if isinstance(d, dict)
+    }
+    usb_hostnames.discard("")
+    return norm in usb_hostnames
+
+
 def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
     config = {key: str(value) for key, value in client.get("config", {}).items()}
     overrides = {key: str(value) for key, value in client.get("overrides", {}).items()}
@@ -2161,6 +2193,7 @@ def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "hostname": hostname,
+        "has_usb": _hostname_has_usb(hostname),
         "simulation_id": client.get("simulation_id", ""),
         "platform": client.get("platform", ""),
         "hw_type": client.get("hw_type") or "",
