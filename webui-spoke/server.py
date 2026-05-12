@@ -180,7 +180,7 @@ INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exis
 _app_version_file = BASE_DIR / "VERSION"
 APP_VERSION: str = _app_version_file.read_text().strip() if _app_version_file.exists() else INSTALLER_VERSION
 REPO_BRANCH = os.getenv("REPO_BRANCH", "lrb")
-OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "60"))
+OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "300"))
 # Max error entries kept per client in memory.
 # WHY: errors accumulate over a long run; capping prevents unbounded memory growth.
 MAX_CLIENT_ERRORS = 50
