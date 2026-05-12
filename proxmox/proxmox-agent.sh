@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.07"
+AGENT_VERSION="3.08"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1298,6 +1298,86 @@ print(json.dumps(lines[-200:]))
 " 2>/dev/null || echo "[]"
 }
 
+
+# Find the vhclient binary in common install locations.
+_find_vhclient() {
+    local found
+    while IFS= read -r found; do
+        [[ -x "$found" ]] && echo "$found" && return 0
+    done < <(find /root/.local /opt /home -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
+    local c
+    for c in /usr/sbin/vhclient /usr/bin/vhclient /usr/local/bin/vhclient; do
+        [[ -x "$c" ]] && echo "$c" && return 0
+    done
+    return 1
+}
+
+collect_vh_devices() {
+    local vhbin
+    vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
+
+    python3 - "$vhbin" <<'PY'
+import subprocess, re, json, sys
+
+vhbin = sys.argv[1] if len(sys.argv) > 1 else ""
+
+def run(cmd, timeout=5):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.stdout, r.returncode == 0
+    except Exception:
+        return "", False
+
+vh_out, vh_ok = ("", False)
+svc_active = False
+
+if vhbin:
+    vh_out, vh_ok = run([vhbin, "-t", "list"])
+    svc_r = subprocess.run(
+        ["systemctl", "is-active", "virtualhereclient"],
+        capture_output=True, text=True
+    )
+    svc_active = svc_r.stdout.strip() == "active"
+
+devices = []
+current_server = None
+auto_use_all = "Auto-Use All currently on" in vh_out
+
+for line in vh_out.splitlines():
+    srv_m = re.match(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$', line)
+    if srv_m and '-->' not in line:
+        current_server = srv_m.group(2)
+        continue
+    dev_m = re.match(r'^(\*?)\s*-->\s+(.+?)\s+\((\S+)\)\s*$', line)
+    if dev_m:
+        auto_use = bool(dev_m.group(1)) or auto_use_all
+        devices.append({
+            "name":     dev_m.group(2).strip(),
+            "address":  dev_m.group(3).strip(),
+            "server":   current_server,
+            "auto_use": auto_use,
+        })
+
+lsusb_out, _ = run(["lsusb"])
+phys = []
+for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s+(.*)', lsusb_out):
+    phys.append({
+        "vidpid": f"{m.group(1).lower()}:{m.group(2).lower()}",
+        "name":   m.group(3).strip(),
+        "source": "physical",
+    })
+
+print(json.dumps({
+    "vh_service_active": svc_active,
+    "vh_connected":      vh_ok and bool(devices),
+    "auto_use_all":      auto_use_all,
+    "count":             len(devices),
+    "devices":           devices,
+    "physical_usb":      phys,
+}))
+PY
+}
+
 collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json
     cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
@@ -1457,6 +1537,7 @@ print(json.dumps(out))
   "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
   "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
+  "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "log_lines": $(collect_log_lines)
 }
 JSON
