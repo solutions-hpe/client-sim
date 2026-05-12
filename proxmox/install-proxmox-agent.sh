@@ -1,9 +1,9 @@
 #!/bin/bash
 # install-proxmox-agent.sh — Install the Client-Sim Proxmox agent on this host.
-# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--key apikey] [--interval 60]
+# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--key apikey] [--interval 60] [--skip-vh]
 # Or run directly: bash install-proxmox-agent.sh --server http://... --key ...
 
-SCRIPT_VERSION="0.04"
+SCRIPT_VERSION="0.05"
 
 set -euo pipefail
 
@@ -34,9 +34,11 @@ while [[ $# -gt 0 ]]; do
         --interval)    POLL_INTERVAL="$2"; INTERVAL_SET=1; shift 2 ;;
         --branch)      REPO_BRANCH="$2"; BRANCH_SET=1; shift 2 ;;
         --unattended)  UNATTENDED=1; shift ;;
+        --skip-vh)     SKIP_VH=1; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+SKIP_VH="${SKIP_VH:-0}"
 
 if [[ -f "$ENV_FILE" ]]; then
     existing_server=$(grep -oP '(?<=CLIENT_SIM_SERVER_URL=).*' "$ENV_FILE" || true)
@@ -103,11 +105,70 @@ ENV
 chmod 600 "$ENV_FILE"
 echo "  OK: $ENV_FILE"
 
-echo "[4/6] Preparing watchdog state..."
+echo "[4/7] Installing VirtualHere USB client..."
+if [[ "$SKIP_VH" -eq 1 ]]; then
+    echo "  SKIP: --skip-vh passed"
+else
+    VH_ARCH="$(uname -m)"
+    case "$VH_ARCH" in
+        x86_64)       VH_BIN="vhclientx86_64" ;;
+        aarch64)      VH_BIN="vhclientarm64"  ;;
+        armv7l|armhf) VH_BIN="vhclientarm"   ;;
+        *)            VH_BIN="" ; echo "  WARNING: unsupported arch '$VH_ARCH' — skipping VirtualHere" ;;
+    esac
+
+    if [[ -n "${VH_BIN:-}" ]]; then
+        VH_TMP="$(mktemp)"
+        if curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
+                -o "$VH_TMP" 2>/dev/null; then
+            install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
+            ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
+            echo "  OK: /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
+
+            VH_SVC_TMP="$(mktemp)"
+            if curl -fsSL \
+                "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
+                -o "$VH_SVC_TMP" 2>/dev/null; then
+                sed -e "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" \
+                    -e '/\[Service\]/a TimeoutStartSec=15' \
+                    "$VH_SVC_TMP" >/etc/systemd/system/virtualhereclient.service
+                rm -f "$VH_SVC_TMP"
+            else
+                rm -f "$VH_SVC_TMP"
+                cat >/etc/systemd/system/virtualhereclient.service <<VHSVC
+[Unit]
+Description=VirtualHere USB Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/$VH_BIN
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=15
+User=root
+
+[Install]
+WantedBy=multi-user.target
+VHSVC
+            fi
+            systemctl daemon-reload
+            systemctl enable virtualhereclient
+            systemctl start virtualhereclient 2>/dev/null || \
+                echo "  NOTE: VirtualHere service did not start (needs server on network) — enabled for boot"
+            echo "  OK: virtualhereclient service enabled"
+        else
+            echo "  WARNING: Failed to download VirtualHere binary — skipping"
+        fi
+        rm -f "$VH_TMP"
+    fi
+fi
+
+echo "[5/7] Preparing watchdog state..."
 install -d -m 0755 "$WATCHDOG_STATE_DIR"
 echo "  OK: $WATCHDOG_STATE_DIR"
 
-echo "[5/6] Enabling and (re)starting service + timer..."
+echo "[6/7] Enabling and (re)starting service + timer..."
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
@@ -125,7 +186,7 @@ else
     echo "  WARNING: watchdog timer failed to start — check: systemctl status proxmox-watchdog.timer"
 fi
 
-echo "[6/6] Testing connection to WebUI..."
+echo "[7/7] Testing connection to WebUI..."
 if curl -sSf --max-time 5 "${SERVER_URL}/api/health" | grep -q '"status".*"ok"'; then
     echo "  OK: WebUI reachable at $SERVER_URL"
 else
