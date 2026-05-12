@@ -188,6 +188,24 @@ SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
 RELAY_INTERVAL_DEFAULT = 30   # base interval; jitter adds 0–30s
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
+HUB_RELAY_KEYS = {
+    "relay_server_url",
+    "relay_api_key",
+    "relay_tenant_id",
+    "hub_tls_verify",
+    "relay_spoke_id",
+    "relay_spoke_name",
+}
+HUB_LOCAL_ALLOWED_KEYS = HUB_RELAY_KEYS | {"relay_tenant_hint"}
+HUB_NOTIFICATION_KEY_MAP = {
+    "teams_webhook_url": "teams_webhook_url",
+    "smtp_host": "smtp_host",
+    "smtp_port": "smtp_port",
+    "smtp_user": "smtp_user",
+    "smtp_password": "smtp_password",
+    "smtp_from": "smtp_from",
+    "smtp_to": "smtp_to",
+}
 HISTORY_HOURS = 24
 UPDATE_CHECK_INTERVAL = 86400  # 24 hours
 VM_WATCHDOG_TIMEOUT_SECS = 86400
@@ -665,6 +683,7 @@ settings: dict[str, Any] = {
     "relay_enabled": _normalize_relay_enabled(_persisted.get("relay_enabled", "off")),
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
     "hub_tls_verify": _normalize_relay_enabled(_persisted.get("hub_tls_verify", "off")),
+    "hub_managed": bool(_persisted.get("hub_managed", False)),
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_tenant_hint": _persisted.get("relay_tenant_hint", _persisted.get("relay_tenant_id", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
@@ -3458,59 +3477,127 @@ def _hub_tls_verify() -> bool:
 async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply a config_update command payload pushed from hub.
     Returns an ack result dict."""
-    global relay_registration_refresh_needed
+    raw_config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    config_payload = raw_config if isinstance(raw_config, dict) else {}
+    config_version = int(payload.get("config_version") or payload.get("__config_version") or 0)
     changed: list[str] = []
-    relay_config_changed = False
+    settings["hub_managed"] = True
 
-    if "relay_server_url" in payload:
-        settings["relay_server_url"] = payload["relay_server_url"].strip()
-        relay_config_changed = True
-        changed.append("relay_server_url")
-    if "relay_api_key" in payload:
-        settings["relay_api_key"] = payload["relay_api_key"].strip()
-        relay_config_changed = True
-        changed.append("relay_api_key")
-    if "relay_tenant_id" in payload:
-        tenant_id = payload["relay_tenant_id"].strip()
-        settings["relay_tenant_id"] = tenant_id
-        settings["relay_tenant_hint"] = tenant_id
-        relay_config_changed = True
-        changed.append("relay_tenant_id")
-    if "hub_tls_verify" in payload:
-        settings["hub_tls_verify"] = _normalize_relay_enabled(payload["hub_tls_verify"])
-        relay_config_changed = True
-        changed.append("hub_tls_verify")
-    if "relay_spoke_id" in payload:
-        settings["relay_spoke_id"] = payload["relay_spoke_id"].strip()
-        relay_config_changed = True
-        changed.append("relay_spoke_id")
+    central_changed = False
+    central_api_payload = config_payload.get("central_api") if "central_api" in config_payload else ...
+    if central_api_payload is not ...:
+        if central_api_payload is None:
+            settings["central_api"] = _default_central_api_settings()
+        elif isinstance(central_api_payload, dict):
+            merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
+            mode = str(central_api_payload.get("mode", merged_api.get("mode", "classic"))).strip().lower()
+            merged_api["mode"] = mode if mode in {"classic", "central"} else "classic"
+            classic_update = central_api_payload.get("classic")
+            if isinstance(classic_update, dict):
+                for key in ("url", "username"):
+                    if key in classic_update:
+                        merged_api["classic"][key] = "" if classic_update.get(key) is None else str(classic_update.get(key, "")).strip()
+                if "password" in classic_update:
+                    merged_api["classic"]["password"] = "" if classic_update.get("password") is None else str(classic_update.get("password", ""))
+            central_update = central_api_payload.get("central")
+            if isinstance(central_update, dict):
+                for key in ("url", "client_id", "customer_id"):
+                    if key in central_update:
+                        merged_api["central"][key] = "" if central_update.get(key) is None else str(central_update.get(key, "")).strip()
+                if "client_secret" in central_update:
+                    merged_api["central"]["client_secret"] = "" if central_update.get("client_secret") is None else str(central_update.get("client_secret", ""))
+            settings["central_api"] = merged_api
+        changed.append("central_api")
+        central_changed = True
 
-    for key in (
-        "repo_branch", "reclone_schedule_enabled", "reclone_schedule_cron",
-        "reclone_concurrency", "vm_silent_timeout", "usb_auto_provision",
-        "ignored_hostnames", "l1_vlan_start", "l1_vlan_end",
-        "vm_image_1_template_id", "vm_image_2_template_id", "vm_image_1_pct",
-    ):
-        if key in payload:
-            settings[key] = payload[key]
+    central_config_payload = config_payload.get("central_config") if "central_config" in config_payload else ...
+    if central_config_payload is not ...:
+        if central_config_payload is None:
+            settings["central_config"] = {
+                **_central_runtime_defaults(),
+                "api_version": "classic",
+                "cluster_url": "",
+                "client_id": "",
+                "client_secret": "",
+                "customer_id": "",
+                "access_token": "",
+                "refresh_token": "",
+            }
+        elif isinstance(central_config_payload, dict):
+            merged = dict(settings.get("central_config", {}))
+            for key in ("cluster_url", "client_id", "customer_id", "api_version"):
+                if key in central_config_payload:
+                    value = central_config_payload.get(key)
+                    merged[key] = "" if value is None else str(value).strip()
+            for secret_key in ("client_secret", "access_token", "refresh_token"):
+                if secret_key in central_config_payload:
+                    value = central_config_payload.get(secret_key)
+                    merged[secret_key] = "" if value is None else str(value).strip()
+            settings["central_config"] = merged
+        changed.append("central_config")
+        central_changed = True
+
+    if central_changed:
+        merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
+        merged_cfg = dict(settings.get("central_config", {}))
+        if merged_cfg.get("api_version") == "new_central":
+            merged_api["mode"] = "central"
+            merged_api["central"].update({
+                "url": str(merged_cfg.get("cluster_url", "")).strip(),
+                "client_id": str(merged_cfg.get("client_id", "")).strip(),
+                "client_secret": str(merged_cfg.get("client_secret", "")),
+                "customer_id": str(merged_cfg.get("customer_id", "")).strip(),
+            })
+            central_token["access_token"] = None
+            central_token["refresh_token"] = None
+            central_token["expires_at"] = 0.0
+        else:
+            merged_api["mode"] = "classic"
+            merged_api["classic"].update({
+                "url": str(merged_cfg.get("cluster_url", "")).strip(),
+            })
+            central_token["access_token"] = merged_cfg.get("access_token") or None
+            central_token["refresh_token"] = merged_cfg.get("refresh_token") or None
+            central_token["expires_at"] = time.time() + 7200 if merged_cfg.get("access_token") else 0.0
+        settings["central_api"] = merged_api
+        settings["central_config"] = merged_cfg
+
+    notifications = copy.deepcopy(settings.get("notifications", {}))
+    notification_changed = False
+    if isinstance(config_payload.get("notifications"), dict):
+        for key, value in config_payload["notifications"].items():
+            if key not in HUB_NOTIFICATION_KEY_MAP:
+                continue
+            notifications[key] = [] if key == "smtp_to" and value is None else ("" if value is None else value)
             changed.append(key)
+            notification_changed = True
+    for key in HUB_NOTIFICATION_KEY_MAP:
+        if key in config_payload:
+            value = config_payload.get(key)
+            notifications[HUB_NOTIFICATION_KEY_MAP[key]] = [] if key == "smtp_to" and value is None else ("" if value is None else value)
+            changed.append(key)
+            notification_changed = True
+    if notification_changed:
+        settings["notifications"] = notifications
 
-    if relay_config_changed:
-        relay_state.update({
-            "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
-            "connected": False,
-            "error": None,
-            "registration_status": _relay_registration_status_from_settings(),
-        })
-        relay_registration_refresh_needed = False
-        _save_relay_state()
+    for key, value in config_payload.items():
+        if key in HUB_RELAY_KEYS or key in {"command", "config", "config_version", "__config_version", "central_api", "central_config", "notifications", *HUB_NOTIFICATION_KEY_MAP.keys()}:
+            continue
+        if key in {"usb_auto_provision", "reclone_schedule_enabled", "spoke_tls"}:
+            settings[key] = _normalize_relay_enabled(value)
+        elif value is None:
+            settings[key] = ""
+        else:
+            settings[key] = value
+        changed.append(key)
+
     _save_settings()
     await broadcast({"type": "settings_update", "settings": await api_settings_get()})
-    logger.info("Applied hub config_update: %s", changed)
+    logger.info("Applied hub config_update v%s: %s", config_version or "?", changed)
     return {
         "success": True,
         "task_type": "config_update",
-        "detail": f"Applied: {', '.join(changed) if changed else 'no changes'}",
+        "detail": f"Applied config version {config_version}: {', '.join(changed) if changed else 'no changes'}",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -3649,6 +3736,26 @@ async def relay_sync_once() -> None:
                                 "command_id": cmd_id,
                                 "status": "executed",
                                 "result": result,
+                            }, headers=headers)
+                            ack_resp.raise_for_status()
+                    continue
+
+                if cmd_type == "config_clear":
+                    settings["hub_managed"] = False
+                    _save_settings()
+                    await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+                    logger.info("Hub config cleared — spoke is now self-managed")
+                    if cmd_id:
+                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                            ack_resp = await hc_ack.post(f"{base}/ack", json={
+                                "command_id": cmd_id,
+                                "status": "executed",
+                                "result": {
+                                    "success": True,
+                                    "task_type": "config_clear",
+                                    "detail": "Hub config cleared — spoke is now self-managed",
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                },
                             }, headers=headers)
                             ack_resp.raise_for_status()
                     continue
@@ -4346,6 +4453,7 @@ async def api_settings_get() -> dict[str, Any]:
         "repo_branch": settings.get("repo_branch", ""),
         "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
         "github_token_configured": bool(settings.get("github_token")),
+        "hub_managed": bool(settings.get("hub_managed", False)),
         "central_api": _public_central_api_settings(),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
@@ -4385,6 +4493,12 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     global relay_registration_refresh_needed
     changed_branch = False
     relay_config_changed = False
+    update_data = update.model_dump(exclude_none=True)
+
+    if settings.get("hub_managed"):
+        non_relay = set(update_data.keys()) - HUB_LOCAL_ALLOWED_KEYS
+        if non_relay:
+            raise HTTPException(status_code=403, detail="Settings are hub-managed. Only relay settings can be changed locally.")
 
     if update.repo_branch is not None:
         branch = update.repo_branch.strip()
@@ -6772,6 +6886,7 @@ async def api_init() -> dict[str, Any]:
             "relay_enabled": settings.get("relay_enabled", "off"),
             "relay_server_url": settings.get("relay_server_url", ""),
             "hub_tls_verify": settings.get("hub_tls_verify", "off"),
+            "hub_managed": bool(settings.get("hub_managed", False)),
         },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),
