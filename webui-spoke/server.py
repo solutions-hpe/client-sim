@@ -2525,7 +2525,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
     }
     vms = []
     current_vmids: set[int] = set()
-    for vm in proxmox_state.get("vms", []):
+    for vm in proxmox_state.get("vms") or []:
         enriched_vm = dict(vm)
         enriched_vm["pending_checkin"] = _vm_pending_checkin(enriched_vm, client_seen)
         enriched_vm["watchdog_tracked"] = bool(_vm_watchdog_key(vm.get("vmid")) and vm_watchdog.get(_vm_watchdog_key(vm.get("vmid"))))
@@ -2567,7 +2567,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
 
 
 def _find_proxmox_vm(vmid: int) -> dict[str, Any] | None:
-    for vm in proxmox_state.get("vms", []):
+    for vm in proxmox_state.get("vms") or []:
         try:
             if int(vm.get("vmid")) == vmid:
                 return dict(vm)
@@ -2889,7 +2889,7 @@ def _reclone_targets_for_run() -> list[dict[str, Any]]:
     return sorted(
         [
             dict(vm)
-            for vm in proxmox_state.get("vms", [])
+            for vm in proxmox_state.get("vms") or []
             if vm.get("vmid") is not None and _guest_supports_reclone(vm)
         ],
         key=lambda vm: int(vm.get("vmid", 0)),
@@ -3066,7 +3066,7 @@ async def auto_recovery_check() -> None:
             timeout_hours = _setting_int("vm_silent_timeout", 24, 1)
             now = time.time()
             triggered: list[int] = []
-            for vm in list(proxmox_state.get("vms", [])):
+            for vm in list(proxmox_state.get("vms") or []):
                 vmid = vm.get("vmid")
                 if vmid is None:
                     continue
@@ -3084,7 +3084,7 @@ async def auto_recovery_check() -> None:
                 vmid_list = ", ".join(str(v) for v in triggered)
                 for vmid_int in triggered:
                     name = next(
-                        (vm.get("name") or f"VM {vmid_int}" for vm in proxmox_state.get("vms", []) if int(vm.get("vmid", -1)) == vmid_int),
+                        (vm.get("name") or f"VM {vmid_int}" for vm in proxmox_state.get("vms") or [] if int(vm.get("vmid", -1)) == vmid_int),
                         f"VM {vmid_int}",
                     )
                     reclone_state["auto_recovery_log"].append({
@@ -3120,7 +3120,7 @@ async def vm_watchdog_loop() -> None:
             client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
             vm_names = {
                 str(int(vm.get("vmid"))): str(vm.get("name") or "").strip()
-                for vm in proxmox_state.get("vms", [])
+                for vm in proxmox_state.get("vms") or []
                 if vm.get("vmid") is not None
             }
             changed = False
@@ -3573,7 +3573,7 @@ async def relay_sync_once() -> None:
 
     try:
         async with state_lock:
-            proxmox_vms = list(proxmox_state.get("vms", []))
+            proxmox_vms = list(proxmox_state.get("vms") or [])
             usb_state = list(proxmox_state.get("usb_state", []))
             unknown_usb = list(proxmox_state.get("unknown_usb", []))
             clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
