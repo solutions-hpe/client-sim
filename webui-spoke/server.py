@@ -5442,6 +5442,9 @@ async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
                         "GATEWAY": ("GATEWAY_DOWN", "Gateway Down"),
                     }
                     for dev in resp.json().get("items", []):
+                        # Post-filter by siteId in case the API ignored the OData filter param
+                        if site_id and dev.get("siteId") and dev.get("siteId") != site_id:
+                            continue
                         status = (dev.get("status") or "").upper()
                         if status in ("UP", "ONLINE"):
                             continue
@@ -5674,6 +5677,9 @@ async def api_central_devices(site: str | None = Query(default=None)) -> dict[st
                         "uptime_ms":  dev.get("uptimeInMillis"),
                         "deployment": dev.get("deployment", "—"),
                     })
+                # Post-filter by siteId in case the API ignored the OData filter param
+                if site_id:
+                    devices = [d for d in devices if d["site"] == site_id]
             elif resp.status_code == 401:
                 warning = "Token rejected (401) — re-save settings to refresh."
             else:
