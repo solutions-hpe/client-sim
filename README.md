@@ -89,9 +89,10 @@ The Proxmox agent installer:
 1. downloads the latest agent, watchdog, and installer scripts from GitHub
 2. installs the systemd service and timer units
 3. writes `/etc/client-sim-proxmox-agent.env`
-4. prepares watchdog state
-5. enables and starts the service and watchdog timer
-6. checks spoke API reachability
+4. installs the VirtualHere USB client (`vhclientX`) and enables `virtualhereclient.service`
+5. prepares watchdog state
+6. enables and starts the service and watchdog timer
+7. checks spoke API reachability
 
 #### Step-by-step install
 
@@ -134,6 +135,34 @@ curl http://169.253.1.1:8000/api/proxmox/status
 | `--interval <seconds>` | Override poll interval |
 | `--branch <name>` | Branch to pull scripts from |
 | `--unattended` | Automation-friendly mode |
+| `--skip-vh` | Skip VirtualHere client installation |
+
+### VirtualHere auto-use sync
+
+Once the Proxmox agent is approved and polling, it automatically syncs the VirtualHere client auto-use list from the hub's approved USB device list.
+
+**How it works:**
+
+1. The hub includes a `vh_auto_use_vidpids` list (sorted `vid:pid` strings) in the `/api/proxmox/usb-config` payload.
+2. On each config poll, the agent computes a SHA-256 of the current list and compares it to the stored hash at `/var/lib/client-sim/vh-vidpid.hash`.
+3. If the list changed, the agent:
+   - stops `virtualhereclient.service`
+   - writes `/root/.config/virtualhere/client.conf` with the new auto-use entries in Qt INI format
+   - restarts `virtualhereclient.service`
+   - saves the new hash
+
+**Config file format** (`/root/.config/virtualhere/client.conf`):
+
+```ini
+[AutoUse]
+1\VidPid=0451:16b6
+2\VidPid=0451:16b7
+size=2
+```
+
+To add VID:PID pairs, add them to the approved USB device list in the spoke UI under **VM Server → USB Config**. The agent picks up the change on its next config poll (default: 60 seconds).
+
+To skip VH installation entirely, pass `--skip-vh` to the installer. The auto-use sync is a no-op if `virtualhereclient.service` is not installed.
 
 ### Configuration files
 

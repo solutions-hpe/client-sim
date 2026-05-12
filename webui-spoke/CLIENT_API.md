@@ -281,6 +281,39 @@ Overrides are in-memory only — they are cleared when the spoke restarts, or wh
 
 ---
 
+## Proxmox Agent Endpoints
+
+These endpoints are used by `proxmox-agent.sh` running on the Proxmox host. They are not called by simulation clients.
+
+### USB Config
+
+```
+GET /api/proxmox/usb-config
+X-API-Key: <agent_key>
+```
+
+**Response:**
+
+```json
+{
+  "approved_devices": [
+    { "vid": "0451", "pid": "16b6", "label": "USB Hub" }
+  ],
+  "missing_timeout": 60,
+  "vh_auto_use_vidpids": ["0451:16b6", "0451:16b7"]
+}
+```
+
+| Field | Description |
+|---|---|
+| `approved_devices` | List of USB devices the agent may provision to VMs |
+| `missing_timeout` | Seconds before a missing USB device triggers an alert |
+| `vh_auto_use_vidpids` | Sorted list of `vid:pid` strings to configure as VirtualHere auto-use |
+
+The agent uses `vh_auto_use_vidpids` to keep the VirtualHere client auto-use config in sync. See the VirtualHere auto-use section in the main README for details.
+
+---
+
 ## WebSocket (Real-Time)
 
 The spoke streams live updates over WebSocket at `ws://<host>:<port>/ws`. Clients do not need to use this — it is intended for the browser UI.
