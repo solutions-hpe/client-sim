@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="2.98"
+AGENT_VERSION="2.99"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1351,6 +1351,51 @@ print(json.dumps(lines[-200:]))
 " 2>/dev/null || echo "[]"
 }
 
+collect_vh_devices() {
+    python3 - <<'PY'
+import subprocess, re, json, sys
+
+def run(cmd, timeout=5):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.stdout, r.returncode == 0
+    except Exception:
+        return "", False
+
+# VH client: try GET CLIENT STATE (shows acquired/in-use devices)
+vh_out, vh_ok = run(["vhclient", "-t", "GET CLIENT STATE"])
+if not vh_ok or not vh_out.strip():
+    vh_out, vh_ok = run(["vhclient", "-t", "LIST"])
+
+# Parse VID:PID from VH output — VH uses hex like 04b4/6572 or 0x04b4/0x6572
+vh_vidpids = set()
+for m in re.finditer(r'(?:0x)?([0-9a-fA-F]{4})[/:](?:0x)?([0-9a-fA-F]{4})', vh_out):
+    vh_vidpids.add(f"{m.group(1).lower()}:{m.group(2).lower()}")
+
+# lsusb: physical USB visible to the host ("ID xxxx:xxxx")
+lsusb_out, _ = run(["lsusb"])
+phys_vidpids = set()
+for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})', lsusb_out):
+    phys_vidpids.add(f"{m.group(1).lower()}:{m.group(2).lower()}")
+
+# Cross-reference
+all_vidpids = vh_vidpids | phys_vidpids
+devices = []
+for vp in sorted(all_vidpids):
+    in_vh   = vp in vh_vidpids
+    in_phys = vp in phys_vidpids
+    source  = "both" if (in_vh and in_phys) else ("vh" if in_vh else "physical")
+    devices.append({"vidpid": vp, "source": source})
+
+print(json.dumps({
+    "vh_connected": vh_ok and bool(vh_vidpids),
+    "vh_service_active": vh_ok,
+    "count": len(devices),
+    "devices": devices,
+}))
+PY
+}
+
 collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json
     cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
@@ -1510,6 +1555,7 @@ print(json.dumps(out))
   "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
   "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
+  "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "log_lines": $(collect_log_lines)
 }
 JSON
