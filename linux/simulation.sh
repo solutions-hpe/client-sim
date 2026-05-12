@@ -881,13 +881,6 @@ if [ "$allow_offline" == "on" ]; then
   if [[ -n "${wladapter}" ]]; then sudo ip link set dev "$wladapter" up; fi
 fi
 #------------------------------------------------------------
-# Restart via exec — replaces this process without growing the call stack.
-# WHY: The original code used 'source simulation.sh' which adds a new bash
-# call frame every 100 iterations. Over long runtimes (hours/days) this
-# exhausts bash's recursion limit and crashes the simulation silently.
-# 'exec bash simulation.sh' replaces the current process entirely:
-#   - same PID stays visible in the terminal / dashboard
-#   - zero stack growth
-#   - fresh variable state including re-reading simulation.conf
+#Looping Script
 #------------------------------------------------------------
-exec bash /usr/local/scripts/simulation.sh
+source /usr/local/scripts/simulation.sh
