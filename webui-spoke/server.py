@@ -3718,90 +3718,115 @@ async def relay_sync_once() -> None:
         if not isinstance(remote_cmds, list):
             remote_cmds = []
 
-        async with state_lock:
-            for rc in remote_cmds:
-                cmd_id = rc.get("id", "")
-                cmd_type = rc.get("type", "")
-                payload_data = rc.get("payload", {})
-                target = rc.get("target", "")
-                action = rc.get("action", "")
-                args = rc.get("args", {})
+        commands_changed = False
+        serialized_commands: list[dict[str, Any]] | None = None
+        for rc in remote_cmds:
+            cmd_id = rc.get("id", "")
+            cmd_type = rc.get("type", "")
+            payload_data = rc.get("payload", {})
+            target = rc.get("target", "")
+            action = rc.get("action", "")
+            args = rc.get("args", {})
 
-                # ── config_update: apply hub-pushed config and ack ─────────────
-                if cmd_type == "config_update":
-                    result = await _apply_hub_config(payload_data)
-                    if cmd_id:
-                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
-                            ack_resp = await hc_ack.post(f"{base}/ack", json={
-                                "command_id": cmd_id,
-                                "status": "executed",
-                                "result": result,
-                            }, headers=headers)
-                            ack_resp.raise_for_status()
-                    continue
+            # ── config_update: apply hub-pushed config and ack ─────────────
+            if cmd_type == "config_update":
+                result = await _apply_hub_config(payload_data)
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
 
-                if cmd_type == "config_clear":
-                    settings["hub_managed"] = False
-                    _save_settings()
-                    await broadcast({"type": "settings_update", "settings": await api_settings_get()})
-                    logger.info("Hub config cleared — spoke is now self-managed")
-                    if cmd_id:
-                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
-                            ack_resp = await hc_ack.post(f"{base}/ack", json={
-                                "command_id": cmd_id,
-                                "status": "executed",
-                                "result": {
-                                    "success": True,
-                                    "task_type": "config_clear",
-                                    "detail": "Hub config cleared — spoke is now self-managed",
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                },
-                            }, headers=headers)
-                            ack_resp.raise_for_status()
-                    continue
+            if cmd_type == "config_clear":
+                settings["hub_managed"] = False
+                _save_settings()
+                await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+                logger.info("Hub config cleared — spoke is now self-managed")
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": {
+                                "success": True,
+                                "task_type": "config_clear",
+                                "detail": "Hub config cleared — spoke is now self-managed",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
 
-                # ── gkill_switch: update local gkill state ─────────────────────
-                if cmd_type == "gkill_switch":
-                    new_val = (payload_data.get("value") or action or "").strip()
-                    if new_val in ("on", "off"):
-                        gkill_switch_state["value"] = new_val
-                        await broadcast({"type": "gkill_switch", "value": new_val})
-                        logger.info("gkill_switch set to %s by hub", new_val)
-                    if cmd_id:
-                        async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
-                            ack_resp = await hc_ack.post(f"{base}/ack", json={
-                                "command_id": cmd_id,
-                                "status": "executed",
-                                "result": {
-                                    "success": True,
-                                    "task_type": "gkill_switch",
-                                    "detail": f"gkill set to {gkill_switch_state['value']}",
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                },
-                            }, headers=headers)
-                            ack_resp.raise_for_status()
-                    continue
+            # ── gkill_switch: update local gkill state ─────────────────────
+            if cmd_type == "gkill_switch":
+                new_val = (payload_data.get("value") or action or "").strip()
+                if new_val in ("on", "off"):
+                    gkill_switch_state["value"] = new_val
+                    await broadcast({"type": "gkill_switch", "value": new_val})
+                    logger.info("gkill_switch set to %s by hub", new_val)
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": {
+                                "success": True,
+                                "task_type": "gkill_switch",
+                                "detail": f"gkill set to {gkill_switch_state['value']}",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
 
-                # ── regular client/proxmox commands ────────────────────────────
-                if not target or not action:
-                    continue
+            if cmd_type == "repo_sync":
+                try:
+                    result = await _run_hub_repo_sync()
+                except Exception as exc:
+                    logger.exception("Hub repo_sync failed")
+                    result = {
+                        "success": False,
+                        "task_type": "repo_sync",
+                        "detail": f"Repo Sync failed: {exc}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
+
+            # ── regular client/proxmox commands ────────────────────────────
+            if not target or not action:
+                continue
+            async with state_lock:
                 if target == "all":
                     for hostname in list(clients.keys()):
                         _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
                 else:
                     _enqueue_command_locked(target, action, args, command_type=cmd_type)
+                serialized_commands = _serialize_commands()
+            commands_changed = True
 
-                # Ack each queued command
-                if cmd_id:
-                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
-                        ack_resp = await hc_ack.post(f"{base}/ack", json={
-                            "command_id": cmd_id,
-                            "status": "queued",
-                        }, headers=headers)
-                        ack_resp.raise_for_status()
+            # Ack each queued command
+            if cmd_id:
+                async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                    ack_resp = await hc_ack.post(f"{base}/ack", json={
+                        "command_id": cmd_id,
+                        "status": "queued",
+                    }, headers=headers)
+                    ack_resp.raise_for_status()
 
-        if remote_cmds:
-            await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+        if commands_changed and serialized_commands is not None:
+            await broadcast({"type": "commands_update", "commands": serialized_commands})
 
         relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
     except httpx.HTTPStatusError as exc:
@@ -4081,24 +4106,64 @@ def sync_repo_once() -> None:
     _git("reset", "--hard", f"origin/{branch}")
 
 
+async def _sync_repo_now() -> str | None:
+    try:
+        async with _git_lock:
+            await asyncio.to_thread(sync_repo_once)
+        repo_state["synced"] = True
+        repo_state["error"] = None
+        repo_state["last_sync"] = time.time()
+        repo_version = await asyncio.to_thread(_get_repo_version)
+        _update_service_health("sync_repo", ok=True)
+        await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"], "repo_version": repo_version})
+        return repo_version
+    except Exception as exc:
+        repo_state["error"] = str(exc)
+        _update_service_health("sync_repo", ok=False, error=str(exc))
+        await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc), "last_sync": repo_state["last_sync"]})
+        raise
+
+
+async def _run_hub_repo_sync() -> dict[str, Any]:
+    repo_version = await _sync_repo_now()
+    output: dict[str, Any] = {"repo_version": repo_version}
+    detail = f"Client-Sim repo synced{f' ({repo_version})' if repo_version else ''}"
+
+    if approved_proxmox_agents:
+        try:
+            cmd = await _queue_proxmox_agent_update()
+            output.update({
+                "agent_command_id": cmd["id"],
+                "agent_target": cmd["target"],
+                "agent_branch": cmd.get("args", {}).get("branch"),
+            })
+            detail += f"; queued Proxmox agent update for {cmd['target']}"
+        except HTTPException as exc:
+            detail_msg = str(exc.detail or exc)
+            if exc.status_code == 409 and "already queued" in detail_msg.lower():
+                detail += f"; {detail_msg}"
+            else:
+                raise RuntimeError(detail_msg) from exc
+    else:
+        detail += "; no approved Proxmox agent available"
+
+    return {
+        "success": True,
+        "task_type": "repo_sync",
+        "detail": detail,
+        "output": output,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def sync_repo() -> None:
     while True:
         try:
-            async with _git_lock:
-                await asyncio.to_thread(sync_repo_once)
-            repo_state["synced"] = True
-            repo_state["error"] = None
-            repo_state["last_sync"] = time.time()
-            repo_version = await asyncio.to_thread(_get_repo_version)
-            _update_service_health("sync_repo", ok=True)
-            await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"], "repo_version": repo_version})
+            await _sync_repo_now()
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            repo_state["error"] = str(exc)
-            _update_service_health("sync_repo", ok=False, error=str(exc))
+        except Exception:
             logger.exception("Repository sync failed")
-            await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc), "last_sync": repo_state["last_sync"]})
         await asyncio.sleep(settings.get("repo_sync_interval", SYNC_INTERVAL))
 
 
@@ -6352,15 +6417,8 @@ async def api_self_update() -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="Update already in progress")
     # Sync from GitHub first so version check reflects the latest repo state
     try:
-        async with _git_lock:
-            await asyncio.to_thread(sync_repo_once)
-        repo_state["synced"] = True
-        repo_state["error"] = None
-        repo_state["last_sync"] = time.time()
-        await broadcast({"type": "repo_status", "synced": True, "error": None, "last_sync": repo_state["last_sync"]})
+        await _sync_repo_now()
     except Exception as exc:
-        repo_state["error"] = str(exc)
-        await broadcast({"type": "repo_status", "synced": repo_state["synced"], "error": str(exc)})
         raise HTTPException(status_code=502, detail=f"GitHub sync failed: {exc}") from exc
     # Now check version against freshly synced repo
     available = await asyncio.to_thread(_get_repo_version)
