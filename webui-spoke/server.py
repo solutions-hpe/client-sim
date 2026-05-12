@@ -2163,8 +2163,8 @@ def _hostname_has_usb(hostname: str) -> bool:
             raw = vm.get("vmid")
             if raw is not None:
                 vmid = str(raw).strip()
-            # reclone_bus_path is set when the Proxmox VM config has a usb passthrough line
-            if vm.get("reclone_bus_path"):
+            # has_usb_config is True if the Proxmox VM config has any USB passthrough line
+            if vm.get("has_usb_config") or vm.get("reclone_bus_path"):
                 return True
             break
     if not usb_state:

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.15"
+AGENT_VERSION="3.16"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1441,14 +1441,16 @@ def reclone_info(kind, vmid):
     if kind == 'qemu':
         m = re.search(r'^usb\\d+:\\s.*?host=([^,\\s]+)', text, re.M)
         bus_path = m.group(1) if m else None
+        # has_usb_config: True if any USB passthrough line exists (host= or mapping= or any format)
+        has_usb_config = bool(re.search(r'^usb\\d+:', text, re.M))
         supported = bool(bus_path) or (source_vmid is not None)
         reason = None if supported else 'No USB passthrough mapping or reclone-source metadata found'
         is_template = bool(re.search(r'^template:\\s*1\\s*$', text, re.M))
-        return bus_path, source_vmid, supported, reason, is_template
+        return bus_path, has_usb_config, source_vmid, supported, reason, is_template
     supported = source_vmid is not None
     reason = None if supported else 'Set tags/description with reclone-source=<template CTID>'
     is_template = bool(re.search(r'^template:\\s*1\\s*$', text, re.M))
-    return None, source_vmid, supported, reason, is_template
+    return None, False, source_vmid, supported, reason, is_template
 
 
 node = subprocess.run(['hostname', '-s'], capture_output=True, text=True).stdout.strip()
@@ -1458,7 +1460,7 @@ lxc  = fetch(f'/nodes/{node}/lxc')
 out = []
 for v in qemu:
     vmid = v.get('vmid')
-    bus_path, source_vmid, supported, reason, is_template = reclone_info('qemu', vmid)
+    bus_path, has_usb_config, source_vmid, supported, reason, is_template = reclone_info('qemu', vmid)
     out.append({
         'vmid':                vmid,
         'name':                v.get('name', ''),
@@ -1468,6 +1470,7 @@ for v in qemu:
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         bool(v.get('template', 0)) or is_template,
         'type':                'qemu',
+        'has_usb_config':      has_usb_config,
         'reclone_bus_path':    bus_path,
         'reclone_source_vmid': source_vmid,
         'reclone_supported':   supported,
@@ -1475,7 +1478,7 @@ for v in qemu:
     })
 for v in lxc:
     vmid = v.get('vmid')
-    _bus_path, source_vmid, supported, reason, is_template = reclone_info('lxc', vmid)
+    _bus_path, _has_usb, source_vmid, supported, reason, is_template = reclone_info('lxc', vmid)
     out.append({
         'vmid':                vmid,
         'name':                v.get('name', ''),
