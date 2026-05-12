@@ -35,7 +35,6 @@ rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
 github_repo=$(get_value 'simulation' 'github_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
-vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
@@ -64,7 +63,7 @@ apply_override() {
   val=$(get_value "$username" "$var")
   [[ -n "${val}" ]] && declare -g "$var=$val"
 }
-override_keys=(kill_switch sim_load github_repo repo_location vh_server site_based_ssid iperf_bw \
+override_keys=(kill_switch sim_load github_repo repo_location site_based_ssid iperf_bw \
   wsite sim_phy ssid dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail)
 for key in "${override_keys[@]}"; do
@@ -103,13 +102,12 @@ send_heartbeat() {
   [[ "$web_server" != "on" ]] && return 0
   [[ -z "$server_url" ]] && return 0
 
-  local connected_ssid gateway_reachable=false vh_connected=false
+  local connected_ssid gateway_reachable=false
   local active_sims_json="[]"
   connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
   local dfgw
   dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
   [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1 && gateway_reachable=true
-  pgrep -f "vhclientx86_64" >/dev/null 2>&1 && vh_connected=true
 
   # Build active simulations list from flags
   local active_sims=()
@@ -140,7 +138,6 @@ send_heartbeat() {
       \"iteration\": 0,
       \"connected_ssid\": $ssid_json,
       \"gateway_reachable\": $gateway_reachable,
-      \"vh_connected\": $vh_connected,
       \"active_simulations\": $active_sims_json,
       \"config\": {
         \"kill_switch\": \"$kill_switch\",
@@ -183,7 +180,7 @@ get_gateway_status() {
 # Excluded scripts are infrastructure — we only show simulation workers.
 #------------------------------------------------------------
 get_sim_status() {
-  local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh" "launch-terminals.sh" "vhconnect.sh")
+  local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
   printf "  %s%-12s %-22s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
   printf "  %-12s %-22s %-10s\n" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
@@ -208,7 +205,7 @@ get_sim_status() {
 #------------------------------------------------------------
 while true; do
   clear
-  # Re-detect the WiFi adapter each refresh — it can appear/disappear with VH
+  # Re-detect the WiFi adapter each refresh.
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   # Global kill switch comes from kill_switch.txt, synced from the GitHub repo by update.sh.
   # To kill all simulations globally, set linux/kill_switch.txt = "on" in the repo.
@@ -235,8 +232,8 @@ while true; do
   # WHY: Bash associative arrays have no guaranteed iteration order so the
   # flags would appear in a different sequence every refresh. Parallel arrays
   # give consistent ordering so the operator can scan quickly.
-  flag_labels=("Kill Switch" "VH Server"  "DHCP Fail" "DNS Fail"  "WWW Traffic" "iPerf" "Download" "Port Flap" "Bad SSID PW" "Auth Fail")
-  flag_values=("$kill_switch" "$vh_server" "$dhcp_fail" "$dns_fail" "$www_traffic" "$iperf" "$download" "$port_flap" "$ssidpw_fail" "$auth_fail")
+  flag_labels=("Kill Switch" "DHCP Fail" "DNS Fail" "WWW Traffic" "iPerf" "Download" "Port Flap" "Bad SSID PW" "Auth Fail")
+  flag_values=("$kill_switch" "$dhcp_fail" "$dns_fail" "$www_traffic" "$iperf" "$download" "$port_flap" "$ssidpw_fail" "$auth_fail")
   flags_on=()
   for i in "${!flag_labels[@]}"; do
     [[ "${flag_values[$i]}" == "on" ]] && flags_on+=("${flag_labels[$i]}")

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.04"
+AGENT_VERSION="3.05"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -307,57 +307,6 @@ device_name_from_sysfs() {
     printf '%s' "$name"
 }
 
-VH_VIDPID_HASH_FILE="/var/lib/client-sim/vh-vidpid.hash"
-
-# Find the vhclient binary in common install locations.
-_find_vhclient() {
-    local found
-    while IFS= read -r found; do
-        [[ -x "$found" ]] && echo "$found" && return 0
-    done < <(find /root/.local /opt /home -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
-    local c
-    for c in /usr/sbin/vhclient /usr/bin/vhclient /usr/local/bin/vhclient; do
-        [[ -x "$c" ]] && echo "$c" && return 0
-    done
-    return 1
-}
-
-# Ensure service is running with the correct binary, then send AUTO USE ALL.
-# Server-side VH configuration controls which devices are actually shared.
-_apply_vh_auto_use() {
-    local vhbin
-    vhbin=$(_find_vhclient 2>/dev/null) || { log "VH auto-use: vhclient not found"; return 0; }
-
-    if systemctl list-unit-files virtualhereclient.service &>/dev/null 2>&1 \
-       && systemctl list-unit-files virtualhereclient.service | grep -q virtualhereclient; then
-        local svc_exec
-        svc_exec=$(systemctl cat virtualhereclient.service 2>/dev/null \
-                   | grep '^ExecStart=' | head -1 | cut -d= -f2-)
-        if [[ "$svc_exec" != "$vhbin" ]]; then
-            log "VH: updating service ExecStart -> $vhbin"
-            mkdir -p /etc/systemd/system/virtualhereclient.service.d
-            printf '[Service]\nExecStart=\nExecStart=%s\n' "$vhbin" \
-                > /etc/systemd/system/virtualhereclient.service.d/override.conf
-            systemctl daemon-reload
-        fi
-        systemctl is-active --quiet virtualhereclient 2>/dev/null \
-            || systemctl start virtualhereclient 2>/dev/null || true
-        sleep 5
-    fi
-
-    if "$vhbin" -t "AUTO USE ALL" 2>/dev/null; then
-        log "VH auto-use: AUTO USE ALL sent successfully"
-    else
-        log "VH auto-use: WARNING — AUTO USE ALL IPC failed (service may not be ready)"
-    fi
-}
-
-# Re-apply only when service is not active — AUTO USE ALL is idempotent.
-_sync_vh_auto_use() {
-    _find_vhclient &>/dev/null || return 0
-    systemctl is-active --quiet virtualhereclient 2>/dev/null && return 0
-    _apply_vh_auto_use
-}
 refresh_usb_config() {
     local response parsed kind a b c
     response=$(curl_api GET /api/proxmox/usb-config "" 2>/dev/null || echo '{}')
@@ -396,17 +345,12 @@ for vidpid in data.get("ignored_vidpids", []) or []:
     value = str(vidpid).strip().lower()
     if value:
         print(f"IGN\t{value}")
-for vidpid in sorted(data.get("vh_auto_use_vidpids", []) or []):
-    value = str(vidpid).strip().lower()
-    if value:
-        print(f"VH\t{value}")
 PY
 )
 
     CERTIFIED_TYPES=()
     CERTIFIED_LABELS=()
     IGNORED_VIDPIDS=()
-    VH_AUTO_USE_VIDPIDS=()
     AUTO_PROVISION="off"
     MISSING_TIMEOUT=60
     IMAGE1_TEMPLATE_ID=100
@@ -442,14 +386,9 @@ PY
             IGN)
                 IGNORED_VIDPIDS["$a"]=1
                 ;;
-            VH)
-                VH_AUTO_USE_VIDPIDS+=("$a")
-                ;;
         esac
     done <<< "$parsed"
 
-    # Sync VirtualHere client auto-use config if the approved VID:PID list has changed.
-    _sync_vh_auto_use
 }
 
 load_state_file() {
@@ -1359,81 +1298,6 @@ print(json.dumps(lines[-200:]))
 " 2>/dev/null || echo "[]"
 }
 
-collect_vh_devices() {
-    local vhbin
-    vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
-
-    python3 - "$vhbin" <<'PY'
-import subprocess, re, json, sys
-
-vhbin = sys.argv[1] if len(sys.argv) > 1 else ""
-
-def run(cmd, timeout=5):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return r.stdout, r.returncode == 0
-    except Exception:
-        return "", False
-
-# --- VH client LIST output ---
-# Format:
-#   QNAP Hub (QNAP:7575)
-#      --> 802.11ac NIC (QNAP.5134)      <- available
-#   *  --> 802.11ac NIC (QNAP.5133)      <- auto-use active
-vh_out, vh_ok = ("", False)
-svc_active = False
-
-if vhbin:
-    vh_out, vh_ok = run([vhbin, "-t", "list"])
-    # Check if service is active
-    svc_r = subprocess.run(
-        ["systemctl", "is-active", "virtualhereclient"],
-        capture_output=True, text=True
-    )
-    svc_active = svc_r.stdout.strip() == "active"
-
-devices = []
-current_server = None
-auto_use_all = "Auto-Use All currently on" in vh_out
-
-for line in vh_out.splitlines():
-    # Server line: "NAME (SERVER:PORT)"
-    srv_m = re.match(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$', line)
-    if srv_m and '-->' not in line:
-        current_server = srv_m.group(2)
-        continue
-    # Device line: "   [*] --> NAME (ADDRESS)"
-    dev_m = re.match(r'^(\*?)\s*-->\s+(.+?)\s+\((\S+)\)\s*$', line)
-    if dev_m:
-        auto_use = bool(dev_m.group(1)) or auto_use_all
-        devices.append({
-            "name":    dev_m.group(2).strip(),
-            "address": dev_m.group(3).strip(),
-            "server":  current_server,
-            "auto_use": auto_use,
-        })
-
-# --- lsusb: physical USB on the host ---
-lsusb_out, _ = run(["lsusb"])
-phys = []
-for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s+(.*)', lsusb_out):
-    phys.append({
-        "vidpid": f"{m.group(1).lower()}:{m.group(2).lower()}",
-        "name":   m.group(3).strip(),
-        "source": "physical",
-    })
-
-print(json.dumps({
-    "vh_service_active": svc_active,
-    "vh_connected":      vh_ok and bool(devices),
-    "auto_use_all":      auto_use_all,
-    "count":             len(devices),
-    "devices":           devices,
-    "physical_usb":      phys,
-}))
-PY
-}
-
 collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json
     cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
@@ -1593,7 +1457,6 @@ print(json.dumps(out))
   "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
   "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
-  "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "log_lines": $(collect_log_lines)
 }
 JSON
