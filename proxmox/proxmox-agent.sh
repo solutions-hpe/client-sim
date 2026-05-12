@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.06"
+AGENT_VERSION="3.07"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1755,14 +1755,17 @@ PY
             done
 
             _RECLONE_CMD_IDS["$_vmid"]="$_cmd_id"
+            local _rj=$(( RANDOM % 31 ))
             if [[ "$_guest_type" == "lxc" ]]; then
-                log "Parallel reclone starting: CT $_vmid (source=$_source_vmid)"
+                log "Parallel reclone starting: CT $_vmid (source=$_source_vmid, jitter=${_rj}s)"
                 (
+                    [[ $_rj -gt 0 ]] && sleep "$_rj"
                     clone_lxc_instance "$_vmid" "$_source_vmid"
                 ) &
             else
-                log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image)"
+                log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image, jitter=${_rj}s)"
                 (
+                    [[ $_rj -gt 0 ]] && sleep "$_rj"
                     _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
                 ) &
             fi
