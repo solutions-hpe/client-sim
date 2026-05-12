@@ -337,7 +337,7 @@ PACKAGES=(
   "dnsutils"
   "network-manager"
   "lightdm"
-  "openbox"
+  "lxde-core"
   "xorg"
 )
 
@@ -404,42 +404,11 @@ cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
 [Seat:*]
 autologin-user=$SIM_USER
 autologin-user-timeout=0
-autologin-session=openbox
-user-session=openbox
+autologin-session=LXDE
+user-session=LXDE
 greeter-session=lightdm-greeter
 LIGHTDM_EOF
-ok "LightDM autologin → $SIM_USER (session: openbox)"
-
-# ── Openbox autostart — launch gnome-terminal on login ───────────────────────
-# Openbox is the window manager only (no taskbar/panels/icons).
-# gnome-terminal requires dbus-launch in a minimal session or it silently fails.
-info "Configuring Openbox autostart"
-OPENBOX_CFG="/home/$SIM_USER/.config/openbox"
-mkdir -p "$OPENBOX_CFG"
-cat >"$OPENBOX_CFG/autostart" <<'OB_EOF'
-# Ensure dbus session bus is running — gnome-terminal requires it
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
-  eval $(dbus-launch --sh-syntax --exit-with-session)
-fi
-
-# Disable screen blanking and DPMS
-xset s noblank &
-xset -dpms &
-xset s off &
-
-# Set resolution for VM/QEMU display (safe no-op on physical hardware)
-xrandr --output Virtual-1 --mode 1440x900 2>/dev/null || true &
-
-# Launch gnome-terminal — the primary UI for client-sim
-# Retry loop handles the race where dbus isn't fully ready yet
-sleep 1
-for attempt in 1 2 3; do
-  gnome-terminal && break
-  sleep 1
-done &
-OB_EOF
-chown -R "$SIM_USER":"$SIM_USER" "/home/$SIM_USER/.config"
-ok "Openbox autostart configured (dbus + gnome-terminal)"
+ok "LightDM autologin → $SIM_USER (session: LXDE)"
 
 if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   info "Applying screen power settings to current session"
@@ -964,9 +933,6 @@ systemctl is-active --quiet lightdm \
   && grep -q "autologin-user=$SIM_USER" /etc/lightdm/lightdm.conf.d/50-autologin.conf \
   && _hc_ok   "LightDM autologin" \
   || _hc_fail "LightDM autologin" "NOT CONFIGURED"
-[[ -f /home/$SIM_USER/.config/openbox/autostart ]] \
-  && _hc_ok   "Openbox autostart" \
-  || _hc_warn "Openbox autostart" "MISSING"
 systemctl is-active --quiet NetworkManager \
   && _hc_ok   "NetworkManager" \
   || _hc_fail "NetworkManager" "NOT ACTIVE"
