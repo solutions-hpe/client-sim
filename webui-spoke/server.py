@@ -2153,20 +2153,22 @@ def compute_online(last_seen: datetime) -> bool:
 
 
 def _hostname_has_usb(hostname: str) -> bool:
-    """Return True if the VM for this hostname has an active USB dongle assigned."""
+    """Return True if the VM for this hostname has a USB dongle assigned in Proxmox config or usb_state."""
     vms: list[dict[str, Any]] = proxmox_state.get("vms") or []
     usb_state: list[dict[str, Any]] = proxmox_state.get("usb_state") or []
-    if not usb_state:
-        return False
     norm = hostname.strip().lower()
-    # Build vmid from vms list by matching on name
     vmid: str | None = None
     for vm in vms:
         if str(vm.get("name") or "").strip().lower() == norm:
             raw = vm.get("vmid")
             if raw is not None:
                 vmid = str(raw).strip()
+            # reclone_bus_path is set when the Proxmox VM config has a usb passthrough line
+            if vm.get("reclone_bus_path"):
+                return True
             break
+    if not usb_state:
+        return False
     usb_vmids = {
         str(d.get("vmid")).strip()
         for d in usb_state
