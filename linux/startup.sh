@@ -70,7 +70,7 @@ pkill -f lxpolkit 2>/dev/null || true
 pkill -f 'polkit-gnome-authentication-agent' 2>/dev/null || true
 # Kill any pending nmcli secret agents that are waiting for interactive input
 pkill -f 'nm-applet.*--sm-disable' 2>/dev/null || true
-# NOTE: xrandr / display setup is handled exclusively by launch-terminals.sh,
+# NOTE: xrandr / display setup is not handled here.
 # which runs before this script and owns the resolution.  Do NOT call xrandr
 # here — a mode-switch event after terminals are placed causes the window
 # manager to reposition every window.

@@ -62,7 +62,7 @@ copy_local_files() {
     # .desktop files are NOT deployed by update.sh — the installer owns them.
     # Deploying them here caused a double-invocation bug: if dex or a session
     # manager processes /etc/xdg/autostart/ while the simulation is already
-    # running (via launch-terminals.sh / openbox autostart), a second startup.sh
+    # running (via startup.desktop / lxsession autostart), a second startup.sh
     # process would launch, hit the lock guard, and trigger "; systemctl reboot".
     #
     # EXCEPTION — self-heal: if startup.desktop was accidentally removed (e.g. by

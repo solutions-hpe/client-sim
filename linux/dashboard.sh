@@ -1,7 +1,7 @@
 #!/bin/bash
 version=.03
 # WHY: dashboard.sh is a read-only live monitor. It runs in its own terminal
-# window (launched by launch-terminals.sh) so the operator can always see
+# window (launched by startup.desktop) so the operator can always see
 # what's happening without interrupting the simulation loop in the other pane.
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'

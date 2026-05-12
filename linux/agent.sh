@@ -43,7 +43,7 @@ for c in cmds:
   case "$action" in
     restart_sim)
       # Send SIGUSR1 to simulation.sh so it exits its loop and re-execs cleanly.
-      # DO NOT use pkill — pkill kills the managed process that launch-terminals.sh
+      # DO NOT use pkill — pkill kills the managed process that startup.desktop
       # is watching, which causes "; systemctl reboot" to fire immediately.
       _sim_pid=$(pgrep -f '[/]simulation.sh' | head -1)
       if [[ -n "$_sim_pid" ]]; then

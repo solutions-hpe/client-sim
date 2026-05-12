@@ -7,7 +7,7 @@ echo Simulation Script Version $version | tee "$debug"
 
 # SIGUSR1 trap — used by agent.sh restart_sim / kill_switch commands for graceful restart.
 # Instead of pkill (which kills the managed process and triggers the ; systemctl reboot in
-# launch-terminals.sh), agent.sh sends USR1 to this PID. The flag breaks the main loop or
+# startup.desktop), agent.sh sends USR1 to this PID. The flag breaks the main loop or
 # the kill-switch sleep so simulation.sh exits naturally and re-execs itself cleanly.
 _restart_requested=0
 trap '_restart_requested=1' USR1
