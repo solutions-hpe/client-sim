@@ -308,9 +308,48 @@ X-API-Key: <agent_key>
 |---|---|
 | `approved_devices` | List of USB devices the agent may provision to VMs |
 | `missing_timeout` | Seconds before a missing USB device triggers an alert |
-| `vh_auto_use_vidpids` | Sorted list of `vid:pid` strings to configure as VirtualHere auto-use |
+| `vh_auto_use_vidpids` | Approved VirtualHere `vid:pid` inventory exposed by the spoke for policy/visibility; the current agent no longer filters locally and instead uses `AUTO USE ALL` |
 
-The agent uses `vh_auto_use_vidpids` to keep the VirtualHere client auto-use config in sync. See the VirtualHere auto-use section in the main README for details.
+The current VirtualHere flow relies on server-side sharing/filtering and the agent's `AUTO USE ALL` IPC call, not client-side VID:PID filtering. See the main README for the operational details.
+
+### Proxmox Telemetry
+
+```
+POST /api/proxmox/telemetry
+X-API-Key: <agent_key>
+Content-Type: application/json
+```
+
+Along with node, VM, and USB telemetry, the agent now includes a `vh_devices` object generated from `vhclient -t list`.
+
+**`vh_devices` example:**
+
+```json
+{
+  "vh_devices": {
+    "vh_service_active": true,
+    "vh_connected": true,
+    "auto_use_all": true,
+    "count": 2,
+    "devices": [
+      {
+        "name": "802.11ac NIC",
+        "address": "QNAP.5134",
+        "server": "QNAP:7575",
+        "auto_use": true
+      }
+    ]
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `vh_service_active` | Whether `virtualhereclient.service` is currently active on the Proxmox host |
+| `vh_connected` | Whether `vhclient -t list` returned one or more VirtualHere devices |
+| `auto_use_all` | Whether the VirtualHere client reports global auto-use mode is on |
+| `count` | Number of devices returned in the VirtualHere device list |
+| `devices[]` | Per-device details used by the spoke UI tile: hub/server name, device name/address, and `auto_use` state |
 
 ---
 

@@ -89,7 +89,7 @@ The Proxmox agent installer:
 1. downloads the latest agent, watchdog, and installer scripts from GitHub
 2. installs the systemd service and timer units
 3. writes `/etc/client-sim-proxmox-agent.env`
-4. installs the VirtualHere USB client (`vhclientX`) and enables `virtualhereclient.service`
+4. installs the VirtualHere USB client, first reusing any existing binary found under root's `~/.local`, `/opt`, or `/home`, symlinking it to `/usr/sbin/vhclient`, rebuilding `virtualhereclient.service` with the real binary path, and clearing any stale `override.conf` on reinstall
 5. prepares watchdog state
 6. enables and starts the service and watchdog timer
 7. checks spoke API reachability
@@ -139,28 +139,16 @@ curl http://169.253.1.1:8000/api/proxmox/status
 
 ### VirtualHere auto-use sync
 
-Once the Proxmox agent is approved and polling, it automatically syncs the VirtualHere client auto-use list from the hub's approved USB device list.
+Once the Proxmox agent is approved and polling, it keeps the local VirtualHere client aligned by sending `AUTO USE ALL` over the VirtualHere IPC interface.
 
-**How it works:**
+**How it works now:**
 
-1. The hub includes a `vh_auto_use_vidpids` list (sorted `vid:pid` strings) in the `/api/proxmox/usb-config` payload.
-2. On each config poll, the agent computes a SHA-256 of the current list and compares it to the stored hash at `/var/lib/client-sim/vh-vidpid.hash`.
-3. If the list changed, the agent:
-   - stops `virtualhereclient.service`
-   - writes `/root/.config/virtualhere/client.conf` with the new auto-use entries in Qt INI format
-   - restarts `virtualhereclient.service`
-   - saves the new hash
+1. `_find_vhclient()` searches root's `~/.local`, `/opt`, and `/home` recursively before falling back to canonical locations such as `/usr/sbin/vhclient`.
+2. `_apply_vh_auto_use()` makes sure `virtualhereclient.service` is pointed at the discovered binary, starts the service if needed, then sends `AUTO USE ALL`.
+3. `_sync_vh_auto_use()` runs every agent cycle and only re-applies when the VirtualHere service is not active.
+4. There is no client-side VID:PID filtering anymore; device filtering is done on the VirtualHere server side (for example on the QNAP that is sharing devices).
 
-**Config file format** (`/root/.config/virtualhere/client.conf`):
-
-```ini
-[AutoUse]
-1\VidPid=0451:16b6
-2\VidPid=0451:16b7
-size=2
-```
-
-To add VID:PID pairs, add them to the approved USB device list in the spoke UI under **VM Server → USB Config**. The agent picks up the change on its next config poll (default: 60 seconds).
+Operationally, this means the spoke-side agent claims every device the VH server exposes, while the VH server remains the source of truth for which devices are actually shared.
 
 To skip VH installation entirely, pass `--skip-vh` to the installer. The auto-use sync is a no-op if `virtualhereclient.service` is not installed.
 
@@ -338,9 +326,12 @@ cat /var/log/proxmox-watchdog.log
 
 Behavior:
 
+- every 5 minutes, independently checks `virtualhereclient.service`; if it is not active, restarts it and reports a `vh_restart` event to the spoke API
 - failure 1: log/report failure
 - failure 2: restart `client-sim-proxmox-agent`
 - failure 5+: rerun the Proxmox agent installer
+
+The VirtualHere restart path is separate from the Proxmox agent failure counter.
 
 ### Spoke WebUI and operator-useful API endpoints
 
@@ -535,6 +526,7 @@ startup.sh
 `simulation.sh`:
 
 - re-parses config on each exec restart
+- writes its local runtime log to `/tmp/sim.log` so the LXDE autologin user always has a writable log target
 - fetches global kill switch live
 - runs up to 100 iterations per cycle
 - posts status/errors to `/api/status`
