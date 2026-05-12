@@ -4634,6 +4634,31 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     return {"status": "ok", "settings": payload}
 
 
+@app.get("/api/test-github")
+async def api_test_github() -> dict[str, Any]:
+    """Validate the stored GitHub token against the GitHub API."""
+    token = settings.get("github_token", "").strip()
+    if not token:
+        return {"valid": False, "error": "No GitHub token configured"}
+    if httpx is None:
+        return {"valid": False, "error": "httpx not available on server"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            return {"valid": True, "username": data.get("login", ""), "error": None}
+        elif resp.status_code == 401:
+            return {"valid": False, "error": "Token is invalid or expired"}
+        else:
+            return {"valid": False, "error": f"GitHub returned HTTP {resp.status_code}"}
+    except Exception as exc:
+        return {"valid": False, "error": f"Request failed: {exc}"}
+
+
 @app.post("/api/settings/clear/{provider}")
 async def api_settings_clear(provider: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
     provider_key = provider.strip().lower()
