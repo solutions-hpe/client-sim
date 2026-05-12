@@ -274,7 +274,7 @@ These are the main local endpoints exposed by `webui-spoke`.
 | `GET` | `/api/health` | Basic health check, including installer version |
 | `GET` | `/api/settings` | Current spoke settings |
 | `POST` | `/api/settings` | Update spoke settings |
-| `GET` | `/api/clients` | Current client inventory/state |
+| `GET` | `/api/clients` | Current client inventory/state. Each client includes `has_usb: bool` for T1/T2 classification |
 | `GET` | `/api/simulations` | Grouped simulation view |
 | `GET` | `/api/simulations/{sim_id}/clients` | Client list for one simulation/site bucket |
 | `GET` | `/api/hardware-alerts` | Current hardware alert summary |
