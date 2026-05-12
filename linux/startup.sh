@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.34
+version=.33
 echo ------------------------------| tee /usr/local/scripts/sim.log
 echo Startup Script Version $version | tee -a /usr/local/scripts/sim.log
 echo $(date) | tee -a /usr/local/scripts/sim.log
@@ -103,7 +103,7 @@ echo Bringing up all interfaces online | tee -a /usr/local/scripts/sim.log
 #Finding adapter names and setting usable variables for interfaces
 #------------------------------------------------------------
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens\|end0" | cut -d ' ' -f '1')
+eadapter=$(ip -br a | grep "enp\|eno\|eth0\|eth1\|eth2\|eth3\|eth4\|eth5\|eth6\|ens" | cut -d ' ' -f '1')
 if [[ -n ${wladapter} ]]; then echo WLAN Adapter name $wladapter | tee -a /usr/local/scripts/sim.log; fi
 if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/local/scripts/sim.log; fi
 #------------------------------------------------------------
@@ -117,8 +117,13 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
 #------------------------------------------------------------
-echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
-source '/usr/local/scripts/update.sh'
+if [ $rapid_update != "on" ]; then
+ echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
+ source '/usr/local/scripts/update.sh'
+else
+ echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
+ echo Skipping update | tee -a /usr/local/scripts/sim.log
+fi
 #------------------------------------------------------------
 #Setting VirtualHere Server as a Daemon
 #------------------------------------------------------------
