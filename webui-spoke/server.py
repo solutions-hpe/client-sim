@@ -5666,6 +5666,9 @@ async def api_central_site_alerts(site: str = Query(...)) -> dict[str, Any]:
                 logger.info("site-alerts %s for '%s' → %s", path, site, resp.status_code)
                 if resp.status_code == 200:
                     for alert in resp.json().get("alerts", []):
+                        alert_site = alert.get("site_name") or alert.get("site") or ""
+                        if alert_site and site and alert_site.lower() != site.lower():
+                            continue
                         alerts.append({
                             "type":     alert.get("alert_type") or alert.get("type", ""),
                             "name":     alert.get("alert_type_name") or alert.get("alert_type", ""),
