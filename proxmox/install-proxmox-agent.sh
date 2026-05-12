@@ -118,18 +118,42 @@ else
     esac
 
     if [[ -n "${VH_BIN:-}" ]]; then
-        VH_TMP="$(mktemp)"
-        if curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
-                -o "$VH_TMP" 2>/dev/null; then
-            install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
-            ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
-            echo "  OK: /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
+        # Check for an existing VH binary at alternate locations before downloading
+        EXISTING_VH=""
+        while IFS= read -r candidate; do
+            if [[ -x "$candidate" ]]; then
+                EXISTING_VH="$candidate"
+                break
+            fi
+        done < <(find /root/.local /opt /home -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
 
+        if [[ -n "$EXISTING_VH" ]]; then
+            echo "  FOUND: existing VirtualHere binary at $EXISTING_VH"
+            # Symlink to canonical path so agent can find it
+            ln -sf "$EXISTING_VH" /usr/sbin/vhclient
+            echo "  OK: symlinked /usr/sbin/vhclient -> $EXISTING_VH"
+            VH_EXEC="$EXISTING_VH"
+        else
+            VH_TMP="$(mktemp)"
+            if curl -fsSL "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
+                    -o "$VH_TMP" 2>/dev/null; then
+                install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
+                ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
+                echo "  OK: /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
+                VH_EXEC="/usr/sbin/$VH_BIN"
+            else
+                echo "  WARNING: Failed to download VirtualHere binary — skipping"
+                VH_EXEC=""
+            fi
+            rm -f "$VH_TMP"
+        fi
+
+        if [[ -n "$VH_EXEC" ]]; then
             VH_SVC_TMP="$(mktemp)"
             if curl -fsSL \
                 "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
                 -o "$VH_SVC_TMP" 2>/dev/null; then
-                sed -e "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" \
+                sed -e "s|ExecStart=.*|ExecStart=$VH_EXEC|" \
                     -e '/\[Service\]/a TimeoutStartSec=15' \
                     "$VH_SVC_TMP" >/etc/systemd/system/virtualhereclient.service
                 rm -f "$VH_SVC_TMP"
@@ -142,7 +166,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/sbin/$VH_BIN
+ExecStart=$VH_EXEC
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=15
@@ -152,15 +176,14 @@ User=root
 WantedBy=multi-user.target
 VHSVC
             fi
+            # Remove any stale override so the new ExecStart takes effect
+            rm -f /etc/systemd/system/virtualhereclient.service.d/override.conf
             systemctl daemon-reload
             systemctl enable virtualhereclient
             systemctl start virtualhereclient 2>/dev/null || \
                 echo "  NOTE: VirtualHere service did not start (needs server on network) — enabled for boot"
-            echo "  OK: virtualhereclient service enabled"
-        else
-            echo "  WARNING: Failed to download VirtualHere binary — skipping"
+            echo "  OK: virtualhereclient service enabled (ExecStart=$VH_EXEC)"
         fi
-        rm -f "$VH_TMP"
     fi
 fi
 

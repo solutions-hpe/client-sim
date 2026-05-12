@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.00"
+AGENT_VERSION="3.01"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -305,56 +305,56 @@ device_name_from_sysfs() {
 }
 
 VH_VIDPID_HASH_FILE="/var/lib/client-sim/vh-vidpid.hash"
-VH_CONFIG_FILE="/root/.config/virtualhere/client.conf"
 
-# Write the VirtualHere client Qt-INI config and restart the service.
-# Called only when the VID:PID list has actually changed.
+# Find the vhclient binary in common install locations.
+_find_vhclient() {
+    local found
+    while IFS= read -r found; do
+        [[ -x "$found" ]] && echo "$found" && return 0
+    done < <(find /root/.local /opt /home -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
+    local c
+    for c in /usr/sbin/vhclient /usr/bin/vhclient /usr/local/bin/vhclient; do
+        [[ -x "$c" ]] && echo "$c" && return 0
+    done
+    return 1
+}
+
+# Ensure service is running with the correct binary, then send AUTO USE ALL.
+# Server-side VH configuration controls which devices are actually shared.
 _apply_vh_auto_use() {
-    local -a vidpids=("$@")
-    log "VH auto-use: applying ${#vidpids[@]} VID:PID entries — restarting virtualhereclient"
+    local vhbin
+    vhbin=$(_find_vhclient 2>/dev/null) || { log "VH auto-use: vhclient not found"; return 0; }
 
-    systemctl stop virtualhereclient 2>/dev/null || true
-    sleep 1
+    if systemctl list-unit-files virtualhereclient.service &>/dev/null 2>&1 \
+       && systemctl list-unit-files virtualhereclient.service | grep -q virtualhereclient; then
+        local svc_exec
+        svc_exec=$(systemctl cat virtualhereclient.service 2>/dev/null \
+                   | grep '^ExecStart=' | head -1 | cut -d= -f2-)
+        if [[ "$svc_exec" != "$vhbin" ]]; then
+            log "VH: updating service ExecStart -> $vhbin"
+            mkdir -p /etc/systemd/system/virtualhereclient.service.d
+            printf '[Service]\nExecStart=\nExecStart=%s\n' "$vhbin" \
+                > /etc/systemd/system/virtualhereclient.service.d/override.conf
+            systemctl daemon-reload
+        fi
+        systemctl is-active --quiet virtualhereclient 2>/dev/null \
+            || systemctl start virtualhereclient 2>/dev/null || true
+        sleep 5
+    fi
 
-    mkdir -p "$(dirname "$VH_CONFIG_FILE")"
-    # Write Qt INI format: [AutoUse] with 1\VidPid=vid:pid ... size=N
-    {
-        printf '[AutoUse]\n'
-        local idx=1
-        for vp in "${vidpids[@]}"; do
-            printf '%d\\VidPid=%s\n' "$idx" "$vp"
-            (( idx++ ))
-        done
-        printf 'size=%d\n' "${#vidpids[@]}"
-    } > "$VH_CONFIG_FILE"
-
-    systemctl start virtualhereclient 2>/dev/null || \
-        log "WARNING: virtualhereclient failed to start after VID:PID update"
-    log "VH auto-use: config written to $VH_CONFIG_FILE, service restarted"
+    if "$vhbin" -t "AUTO USE ALL" 2>/dev/null; then
+        log "VH auto-use: AUTO USE ALL sent successfully"
+    else
+        log "VH auto-use: WARNING — AUTO USE ALL IPC failed (service may not be ready)"
+    fi
 }
 
-# Compare current VH_AUTO_USE_VIDPIDS against the stored hash; restart VH only if changed.
+# Re-apply only when service is not active — AUTO USE ALL is idempotent.
 _sync_vh_auto_use() {
-    # Only act if virtualhereclient is installed
-    if ! systemctl list-unit-files virtualhereclient.service &>/dev/null 2>&1; then
-        return 0
-    fi
-
-    # Build a stable string from the sorted list and hash it
-    local new_hash
-    new_hash=$(printf '%s\n' "${VH_AUTO_USE_VIDPIDS[@]}" | sort | sha256sum | awk '{print $1}')
-
-    local stored_hash=""
-    [[ -f "$VH_VIDPID_HASH_FILE" ]] && stored_hash=$(cat "$VH_VIDPID_HASH_FILE" 2>/dev/null || true)
-
-    if [[ "$new_hash" == "$stored_hash" ]]; then
-        return 0  # No change — nothing to do
-    fi
-
-    _apply_vh_auto_use "${VH_AUTO_USE_VIDPIDS[@]}"
-    printf '%s' "$new_hash" > "$VH_VIDPID_HASH_FILE"
+    _find_vhclient &>/dev/null || return 0
+    systemctl is-active --quiet virtualhereclient 2>/dev/null && return 0
+    _apply_vh_auto_use
 }
-
 refresh_usb_config() {
     local response parsed kind a b c
     response=$(curl_api GET /api/proxmox/usb-config "" 2>/dev/null || echo '{}')
@@ -1352,8 +1352,13 @@ print(json.dumps(lines[-200:]))
 }
 
 collect_vh_devices() {
-    python3 - <<'PY'
+    local vhbin
+    vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
+
+    python3 - "$vhbin" <<'PY'
 import subprocess, re, json, sys
+
+vhbin = sys.argv[1] if len(sys.argv) > 1 else ""
 
 def run(cmd, timeout=5):
     try:
@@ -1362,36 +1367,61 @@ def run(cmd, timeout=5):
     except Exception:
         return "", False
 
-# VH client: try GET CLIENT STATE (shows acquired/in-use devices)
-vh_out, vh_ok = run(["vhclient", "-t", "GET CLIENT STATE"])
-if not vh_ok or not vh_out.strip():
-    vh_out, vh_ok = run(["vhclient", "-t", "LIST"])
+# --- VH client LIST output ---
+# Format:
+#   QNAP Hub (QNAP:7575)
+#      --> 802.11ac NIC (QNAP.5134)      <- available
+#   *  --> 802.11ac NIC (QNAP.5133)      <- auto-use active
+vh_out, vh_ok = ("", False)
+svc_active = False
 
-# Parse VID:PID from VH output — VH uses hex like 04b4/6572 or 0x04b4/0x6572
-vh_vidpids = set()
-for m in re.finditer(r'(?:0x)?([0-9a-fA-F]{4})[/:](?:0x)?([0-9a-fA-F]{4})', vh_out):
-    vh_vidpids.add(f"{m.group(1).lower()}:{m.group(2).lower()}")
+if vhbin:
+    vh_out, vh_ok = run([vhbin, "-t", "list"])
+    # Check if service is active
+    svc_r = subprocess.run(
+        ["systemctl", "is-active", "virtualhereclient"],
+        capture_output=True, text=True
+    )
+    svc_active = svc_r.stdout.strip() == "active"
 
-# lsusb: physical USB visible to the host ("ID xxxx:xxxx")
-lsusb_out, _ = run(["lsusb"])
-phys_vidpids = set()
-for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})', lsusb_out):
-    phys_vidpids.add(f"{m.group(1).lower()}:{m.group(2).lower()}")
-
-# Cross-reference
-all_vidpids = vh_vidpids | phys_vidpids
 devices = []
-for vp in sorted(all_vidpids):
-    in_vh   = vp in vh_vidpids
-    in_phys = vp in phys_vidpids
-    source  = "both" if (in_vh and in_phys) else ("vh" if in_vh else "physical")
-    devices.append({"vidpid": vp, "source": source})
+current_server = None
+auto_use_all = "Auto-Use All currently on" in vh_out
+
+for line in vh_out.splitlines():
+    # Server line: "NAME (SERVER:PORT)"
+    srv_m = re.match(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$', line)
+    if srv_m and '-->' not in line:
+        current_server = srv_m.group(2)
+        continue
+    # Device line: "   [*] --> NAME (ADDRESS)"
+    dev_m = re.match(r'^(\*?)\s*-->\s+(.+?)\s+\((\S+)\)\s*$', line)
+    if dev_m:
+        auto_use = bool(dev_m.group(1)) or auto_use_all
+        devices.append({
+            "name":    dev_m.group(2).strip(),
+            "address": dev_m.group(3).strip(),
+            "server":  current_server,
+            "auto_use": auto_use,
+        })
+
+# --- lsusb: physical USB on the host ---
+lsusb_out, _ = run(["lsusb"])
+phys = []
+for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s+(.*)', lsusb_out):
+    phys.append({
+        "vidpid": f"{m.group(1).lower()}:{m.group(2).lower()}",
+        "name":   m.group(3).strip(),
+        "source": "physical",
+    })
 
 print(json.dumps({
-    "vh_connected": vh_ok and bool(vh_vidpids),
-    "vh_service_active": vh_ok,
-    "count": len(devices),
-    "devices": devices,
+    "vh_service_active": svc_active,
+    "vh_connected":      vh_ok and bool(devices),
+    "auto_use_all":      auto_use_all,
+    "count":             len(devices),
+    "devices":           devices,
+    "physical_usb":      phys,
 }))
 PY
 }
