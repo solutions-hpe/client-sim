@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.03"
+AGENT_VERSION="3.04"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -43,6 +43,7 @@ IMAGE1_PCT=50
 RECLONE_CONCURRENCY=1
 L1_VLAN_START=100
 L1_VLAN_END=199
+MAX_USB_SLOTS=24
 UNKNOWN_USB_JSON="[]"
 USB_STATE_JSON="[]"
 PRESENT_USB_JSON="[]"
@@ -51,8 +52,10 @@ h=$(hostname)
 last3="${h: -3}"
 [[ "$last3" =~ ^[0-9]{3}$ ]] && host_id="$last3" || host_id="001"
 id_num=$((10#$host_id))
-start_vmid=$((90000 + (id_num - 1) * 24 + 1))
-end_vmid=$((start_vmid + 23))
+# MAX_USB_SLOTS is updated from usb-config at runtime; default 24 per host.
+MAX_USB_SLOTS=24
+start_vmid=$((90000 + (id_num - 1) * MAX_USB_SLOTS + 1))
+end_vmid=$((start_vmid + MAX_USB_SLOTS - 1))
 
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
@@ -368,7 +371,7 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
@@ -378,6 +381,7 @@ print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     max(1, int(data.get("reclone_concurrency", 1) or 1)),
     max(1, min(4094, int(data.get("l1_vlan_start", 100) or 100))),
     max(1, min(4094, int(data.get("l1_vlan_end", 199) or 199))),
+    max(1, min(256, int(data.get("max_slots", 24) or 24))),
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -412,8 +416,9 @@ PY
     RECLONE_CONCURRENCY=1
     L1_VLAN_START=100
     L1_VLAN_END=199
+    MAX_USB_SLOTS=24
 
-    while IFS=$'\t' read -r kind a b c d e f g h i; do
+    while IFS=$'\t' read -r kind a b c d e f g h i j; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -426,6 +431,9 @@ PY
                 RECLONE_CONCURRENCY="${g:-1}"
                 L1_VLAN_START="${h:-100}"
                 L1_VLAN_END="${i:-199}"
+                MAX_USB_SLOTS="${j:-24}"
+                start_vmid=$(( 90000 + (id_num - 1) * MAX_USB_SLOTS + 1 ))
+                end_vmid=$(( start_vmid + MAX_USB_SLOTS - 1 ))
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"

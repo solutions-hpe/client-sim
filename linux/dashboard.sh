@@ -183,7 +183,7 @@ get_gateway_status() {
 # Excluded scripts are infrastructure — we only show simulation workers.
 #------------------------------------------------------------
 get_sim_status() {
-  local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
+  local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh" "launch-terminals.sh" "vhconnect.sh")
   printf "  %s%-12s %-22s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
   printf "  %-12s %-22s %-10s\n" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
