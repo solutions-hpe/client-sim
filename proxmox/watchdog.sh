@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SERVICE_NAME="client-sim-proxmox-agent.service"
-VH_SERVICE_NAME="virtualhereclient.service"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
 STATE_DIR="/var/lib/proxmox-watchdog"
@@ -108,18 +107,6 @@ REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-$REPO_BRANCH}"
 load_state
 AGENT_PORT="$(read_agent_port)"
 TIMESTAMP="$(iso_timestamp)"
-
-# --- VirtualHere service check (independent of agent failure tracking) ---
-if systemctl list-unit-files --quiet "$VH_SERVICE_NAME" &>/dev/null \
-   && systemctl list-unit-files "$VH_SERVICE_NAME" | grep -q "$VH_SERVICE_NAME"; then
-    if ! systemctl is-active --quiet "$VH_SERVICE_NAME"; then
-        log_event "VH_RESTART service=${VH_SERVICE_NAME} reason=not-active timestamp=${TIMESTAMP}"
-        systemctl start "$VH_SERVICE_NAME" 2>/dev/null \
-            && log_event "VH_RESTART_OK service=${VH_SERVICE_NAME}" \
-            || log_event "VH_RESTART_FAILED service=${VH_SERVICE_NAME}"
-        report_event "vh_restart"
-    fi
-fi
 
 service_ok=false
 health_ok=false

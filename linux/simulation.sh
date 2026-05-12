@@ -43,7 +43,6 @@ rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
 github_repo=$(get_value 'simulation' 'github_repo')
 repo_location=$(get_value 'simulation' 'repo_location')
-vh_server=$(get_value 'simulation' 'vh_server')
 site_based_ssid=$(get_value 'simulation' 'site_based_ssid')
 iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
@@ -80,7 +79,6 @@ dns_bad_ip_3=$(get_value 'address' 'dns_bad_ip_3')
 dns_bad_record_1=$(get_value 'address' 'dns_bad_record_1')
 dns_bad_record_2=$(get_value 'address' 'dns_bad_record_2')
 dns_bad_record_3=$(get_value 'address' 'dns_bad_record_3')
-vh_server_address=$(get_value 'address' 'vh_server_addr')
 iperf_server=$(get_value 'address' 'iperf_server')
 #------------------------------------------------------------
 #User/Device Specific Overrides
@@ -90,11 +88,11 @@ apply_override() {
   local val=$(get_value $username "$var")
   [[ -n ${val} ]] && declare -g "$var=$val"
 }
-override_keys=(kill_switch sim_load github_repo repo_location vh_server site_based_ssid iperf_bw \
+override_keys=(kill_switch sim_load github_repo repo_location site_based_ssid iperf_bw \
   wsite sim_phy ssid ssidpw dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
   www_traffic ssidpw_fail auth_fail smb_address ping_address dns_latency_1 dns_latency_2 \
   dns_latency_3 dns_bad_ip_1 dns_bad_ip_2 dns_bad_ip_3 dns_bad_record_1 dns_bad_record_2 \
-  dns_bad_record_3 vh_server_addr iperf_server)
+  dns_bad_record_3 iperf_server)
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
@@ -107,8 +105,7 @@ echo Simulation Details: | tee -a ${LOG_FILE}
 echo Hostname: $HOSTNAME | tee -a ${LOG_FILE}
 echo Site: $wsite | tee -a ${LOG_FILE}
 echo Site Based SSID: $site_based_ssid | tee -a ${LOG_FILE}
-echo VHServer: $vh_server | tee -a ${LOG_FILE}
-if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a ${LOG_FILE}; fi
+echo Phy: $sim_phy | tee -a ${LOG_FILE}
 if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a ${LOG_FILE}; fi
 echo Simulation Load: $sim_load | tee -a ${LOG_FILE}
 echo Kill Switch: $kill_switch | tee -a ${LOG_FILE}
@@ -255,7 +252,7 @@ connect_wifi 30
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a ${LOG_FILE}
 if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ $sim_phy == "wireless" ] && [ $vh_server == "off" ]; then ea_down; fi
+if [ $sim_phy == "wireless" ]; then ea_down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
@@ -269,13 +266,6 @@ if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a ${LOG_FILE}
 else
   echo Network connection failed | tee -a ${LOG_FILE}
-  #------------------------------------------------------------
-  #If VH is enabled then attempt to connect to VHServer
-  #------------------------------------------------------------
-  if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
-  #------------------------------------------------------------
-  #End Connecting to VHServer
-  #------------------------------------------------------------
   sleep 15
   wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
   connect_wifi 180
@@ -345,7 +335,6 @@ if [ $kill_switch == "off" ]; then
     else
      echo Network connection failed | tee -a ${LOG_FILE}
      echo Attempting to reset adapter | tee -a ${LOG_FILE}
-     if [ $vh_server == "on" ]; then source '/usr/local/scripts/vhconnect.sh'; fi
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
@@ -360,20 +349,6 @@ if [ $kill_switch == "off" ]; then
     else
     echo Connection failed muiltiple times | tee -a ${LOG_FILE}
     echo Resetting configuration | tee -a ${LOG_FILE}
-    echo Purging VHConfig | tee -a ${LOG_FILE}
-    #------------------------------------------------------------
-    #Running API to VHClient to disconnect all clients this device is connecting to
-    #When a device ID changes on VH the client can think it should connect to multiple devices
-    #------------------------------------------------------------
-    /usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-    /usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-    #------------------------------------------------------------
-    #VHCached.txt will hold the server and device ID from VH so we use the same device every time
-    #In the case when a device ID Changes, puring this setting will make sure a new device is captured
-    #Device IDs on VH do not happen often, this is mostly when initial turn up happens, or significant
-    #changes occur in the environment. This is a workaround just for when the IDs change.
-    #------------------------------------------------------------
-    rm /usr/local/scripts/vhcached.txt
     #------------------------------------------------------------
     #Cleaning up old network connection profiles
     #------------------------------------------------------------
@@ -395,7 +370,7 @@ if [ $kill_switch == "off" ]; then
      url="${wwwfile[$rn_www]}"
      echo $(date) | tee -a ${LOG_FILE}
      echo ------------------------------| tee -a ${LOG_FILE}
-     if [ $vh_server == "off" ]; then echo Phy: $sim_phy | tee -a ${LOG_FILE}; fi
+     echo Phy: $sim_phy | tee -a ${LOG_FILE}
      echo Simulation Load: $sim_load | tee -a ${LOG_FILE}
      echo Website: $url | tee -a ${LOG_FILE}
      echo ------------------------------| tee -a ${LOG_FILE}

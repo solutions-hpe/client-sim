@@ -49,7 +49,6 @@ simulation_id=s
 simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
-vh_server=$(get_value 'simulation' 'vh_server')
 sim_phy=$(get_value $simulation_id 'sim_phy')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 syslog=$(get_value 'simulation' 'syslog')
@@ -59,8 +58,6 @@ tempvar=$(get_value $username 'repo_location')
 #Checking to see if this device/user has an override
 #------------------------------------------------------------
 if [[ -n ${tempvar} ]]; then repo_location=$tempvar; fi
-tempvar=$(get_value $username 'vh_server')
-if [[ -n ${tempvar} ]]; then vh_server=$tempvar; fi
 tempvar=$(get_value $username 'sim_phy')
 if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 #------------------------------------------------------------
@@ -123,15 +120,6 @@ if [ $rapid_update != "on" ]; then
 else
  echo Rapid Update is $rapid_update | tee -a /usr/local/scripts/sim.log
  echo Skipping update | tee -a /usr/local/scripts/sim.log
-fi
-#------------------------------------------------------------
-#Setting VirtualHere Server as a Daemon
-#------------------------------------------------------------
-if [ $vh_server == "on" ]; then
-  echo Setting VH to autostart | tee -a /usr/local/scripts/sim.log
-  echo Waiting for VH Client to start | tee -a /usr/local/scripts/sim.log
-  sudo /usr/sbin/vhclientx86_64 -n
-  sleep 5
 fi
 #------------------------------------------------------------
 echo Setting Script Permissions | tee -a /usr/local/scripts/sim.log

@@ -79,7 +79,6 @@ PHASE_NAMES=(
   "Client-Sim Repo"
   "SMB Config Sync"
   "rsyslog Config"
-  "VirtualHere Install"
   "WLAN Drivers"
   "Health Check"
 )
@@ -630,89 +629,6 @@ fi
 end_phase
 
 ###############################################################################
-# PHASE 8 — VIRTUALHERE INSTALL
-###############################################################################
-begin_phase
-info "Installing VirtualHere"
-
-ARCH="$(uname -m)"
-VH_BIN=""
-
-case "$ARCH" in
-  x86_64)       VH_BIN="vhclientx86_64" ;;
-  aarch64)      VH_BIN="vhclientarm64"  ;;
-  armv7l|armhf) VH_BIN="vhclientarm"   ;;
-  *)            warn "Unsupported architecture '$ARCH' for VirtualHere — skipping" ;;
-esac
-
-if [[ -n "$VH_BIN" ]]; then
-  VH_TMP="$(mktemp)"
-
-  info "Downloading VirtualHere ($VH_BIN)"
-  if retry curl -fsSL \
-      "https://www.virtualhere.com/sites/default/files/usbclient/$VH_BIN" \
-      -o "$VH_TMP" >>"$LOG" 2>&1; then
-
-    # Install binary — keep arch-specific name AND create generic symlink
-    install -o root -g root -m 0755 "$VH_TMP" "/usr/sbin/$VH_BIN"
-    ln -sf "/usr/sbin/$VH_BIN" /usr/sbin/vhclient
-    ok "VirtualHere binary installed as /usr/sbin/$VH_BIN (symlinked to /usr/sbin/vhclient)"
-
-    info "Downloading VirtualHere systemd service"
-    VH_SVC_TMP="$(mktemp)"
-    if retry curl -fsSL \
-        "https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service" \
-        -o "$VH_SVC_TMP" >>"$LOG" 2>&1; then
-      # Patch ExecStart and add start timeout so install never blocks
-      sed -e "s|ExecStart=.*|ExecStart=/usr/sbin/$VH_BIN|" \
-          -e '/\[Service\]/a TimeoutStartSec=15' \
-          "$VH_SVC_TMP" >/etc/systemd/system/virtualhereclient.service
-      rm -f "$VH_SVC_TMP"
-      ok "VirtualHere service file installed"
-    else
-      warn "Could not download official service file — writing fallback"
-      rm -f "$VH_SVC_TMP"
-      cat >/etc/systemd/system/virtualhereclient.service <<EOF
-[Unit]
-Description=VirtualHere USB Client
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/usr/sbin/$VH_BIN
-Restart=on-failure
-RestartSec=5
-TimeoutStartSec=15
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    fi
-
-    info "Enabling VirtualHere service"
-    systemctl daemon-reload
-    systemctl enable virtualhereclient >>"$LOG" 2>&1
-    # Start non-blocking — VH client needs a server to connect to which may
-    # not be present at install time; failure here is non-fatal.
-    systemctl start virtualhereclient >>"$LOG" 2>&1 || \
-      warn "VirtualHere service did not start (no server reachable yet) — will start on boot"
-
-    sleep 2
-    rm -f /usr/local/scripts/vhcached.txt || true
-    "/usr/sbin/$VH_BIN" -t "AUTO USE CLEAR ALL"   >>"$LOG" 2>&1 || true
-    "/usr/sbin/$VH_BIN" -t "STOP USING ALL LOCAL"  >>"$LOG" 2>&1 || true
-
-    ok "VirtualHere installed and initialized"
-  else
-    warn "Failed to download VirtualHere binary — skipping"
-  fi
-  rm -f "$VH_TMP"
-fi
-
-end_phase
-
-###############################################################################
 # PHASE 9 — WLAN DRIVERS INSTALL
 ###############################################################################
 begin_phase
@@ -936,12 +852,6 @@ systemctl is-active --quiet lightdm \
 systemctl is-active --quiet NetworkManager \
   && _hc_ok   "NetworkManager" \
   || _hc_fail "NetworkManager" "NOT ACTIVE"
-systemctl is-enabled --quiet virtualhereclient 2>/dev/null \
-  && _hc_ok   "VirtualHere (enabled)" \
-  || _hc_warn "VirtualHere" "NOT ENABLED"
-systemctl is-active --quiet virtualhereclient 2>/dev/null \
-  && _hc_ok   "VirtualHere (running)" \
-  || _hc_warn "VirtualHere (running)" "NOT ACTIVE — needs server on boot"
 lsmod | grep -qE '^(88|rtw|rtl)' \
   && _hc_ok   "WLAN modules" \
   || _hc_warn "WLAN modules" "NOT LOADED (reboot may be needed)"

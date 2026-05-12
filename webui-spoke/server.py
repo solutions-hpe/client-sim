@@ -678,6 +678,7 @@ settings: dict[str, Any] = {
     "vm_image_2_template_id": str(_persisted.get("vm_image_2_template_id", _persisted.get("usb_windows_template_id", "200"))),
     "vm_image_1_pct": str(_persisted.get("vm_image_1_pct", "50")),
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
+    "usb_max_slots": str(_persisted.get("usb_max_slots", "24")),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "ignored_hostnames": _persisted.get("ignored_hostnames", '["sim-rpi-0000"]'),
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
@@ -777,7 +778,6 @@ GLOBAL_SECTION_KEYS = {
     "github_repo",
     "repo_location",
     "repo_branch",
-    "vh_server",
     "site_based_ssid",
     "site_based_num",
     "reboot_schedule",
@@ -803,7 +803,6 @@ ADDRESS_SECTION_KEYS = {
     "dns_bad_record_3",
     "iperf_server",
     "syslog_server",
-    "vh_server_addr",
 }
 ALLOWED_CONFIG_SECTIONS = {"simulation", "address", "server", *(f"s{i}" for i in range(10))}
 
@@ -2043,7 +2042,6 @@ class ClientStatus(BaseModel):
     iteration: int
     connected_ssid: str | None = None
     gateway_reachable: bool
-    vh_connected: bool = False
     active_simulations: list[str] = Field(default_factory=list)
     config: dict[str, str] = Field(default_factory=dict)
     # errors: list of human-readable error strings that occurred since the last
@@ -2085,6 +2083,7 @@ class SettingsUpdate(BaseModel):
     vm_image_2_template_id: str | None = None
     vm_image_1_pct: str | None = None
     usb_auto_provision: str | None = None
+    usb_max_slots: str | None = None
     usb_ignored_vidpids: str | None = None
     ignored_hostnames: str | None = None
     vm_silent_timeout: str | None = None
@@ -2149,7 +2148,6 @@ def serialize_client(hostname: str, client: dict[str, Any]) -> dict[str, Any]:
         "iteration": client.get("iteration", 0),
         "connected_ssid": client.get("connected_ssid") or "",
         "gateway_reachable": bool(client.get("gateway_reachable", False)),
-        "vh_connected": bool(client.get("vh_connected", False)),
         "active_simulations": list(client.get("active_simulations", [])),
         "config": config,
         "effective_config": effective_config,
@@ -2415,18 +2413,12 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "image2_template_id": _setting_int("vm_image_2_template_id", _setting_int("usb_windows_template_id", 200, 1), 1),
         "image1_pct": max(0, min(100, int(str(settings.get("vm_image_1_pct", "50")).strip() or "50"))),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
+        "max_slots": max(1, min(256, int(str(settings.get("usb_max_slots", "24")).strip() or "24"))),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
         "l1_vlan_start": max(1, min(4094, int(str(settings.get("l1_vlan_start", "100")).strip() or "100"))),
         "l1_vlan_end": max(1, min(4094, int(str(settings.get("l1_vlan_end", "199")).strip() or "199"))),
-        # Flat list of "vid:pid" strings for the VirtualHere client auto-use config.
-        # The agent compares this against its stored hash and restarts VH if it changes.
-        "vh_auto_use_vidpids": sorted({
-            str(item.get("vidpid", "")).strip().lower()
-            for item in _parse_json_list(settings.get("usb_vidpids", "[]"))
-            if isinstance(item, dict) and str(item.get("vidpid", "")).strip()
-        }),
     }
 
 
@@ -3303,6 +3295,7 @@ def _build_registration_config() -> dict[str, Any]:
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", "200"),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "usb_max_slots": settings.get("usb_max_slots", "24"),
         "usb_vidpids": settings.get("usb_vidpids", "[]"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
@@ -4364,6 +4357,7 @@ async def api_settings_get() -> dict[str, Any]:
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "usb_max_slots": settings.get("usb_max_slots", "24"),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
@@ -4567,6 +4561,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.usb_auto_provision is not None:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
+
+    if update.usb_max_slots is not None:
+        settings["usb_max_slots"] = str(max(1, min(256, int(update.usb_max_slots.strip() or "24"))))
 
     if update.usb_ignored_vidpids is not None:
         settings["usb_ignored_vidpids"] = _ensure_json_list(update.usb_ignored_vidpids.strip(), "usb_ignored_vidpids")
@@ -4976,7 +4973,6 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
-    proxmox_state["vh_devices"] = body.get("vh_devices") or {"vh_connected": False, "vh_service_active": False, "count": 0, "devices": []}
 
     # Clear pending-delete VMIDs that the agent has confirmed are gone.
     # intersection_update keeps only IDs still in the telemetry report;
@@ -6518,7 +6514,6 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
             "iteration": status.iteration,
             "connected_ssid": status.connected_ssid,
             "gateway_reachable": status.gateway_reachable,
-            "vh_connected": status.vh_connected,
             "active_simulations": list(status.active_simulations),
             "config": {key: str(value) for key, value in status.config.items()},
             "overrides": existing.get("overrides", {}),
