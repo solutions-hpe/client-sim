@@ -1961,6 +1961,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     logger.info("=" * 60)
     logger.info("Client Simulator  v%s  starting up", INSTALLER_VERSION)
     logger.info("=" * 60)
+    _debug_event("server_start", f"v{INSTALLER_VERSION} ui:v{APP_VERSION}")
     central_history = await asyncio.to_thread(_load_history)
     _load_state_cache()
     _load_commands()
@@ -2083,6 +2084,18 @@ proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
 proxmox_watchdog_log: list[dict[str, Any]] = []
 PROXMOX_WATCHDOG_LOG_MAX = 100
+# Server-side debug event ring buffer — captures connectivity and state events
+_debug_log: list[dict[str, Any]] = []
+_DEBUG_LOG_MAX = 100
+_server_start_time: float = time.time()
+
+
+def _debug_event(event: str, detail: str = "", **extra: Any) -> None:
+    """Append a timestamped debug event to the ring buffer."""
+    entry: dict[str, Any] = {"ts": time.time(), "event": event, "detail": detail, **extra}
+    _debug_log.append(entry)
+    if len(_debug_log) > _DEBUG_LOG_MAX:
+        del _debug_log[:len(_debug_log) - _DEBUG_LOG_MAX]
 # Pending/approved Proxmox agent registry
 pending_proxmox_agents: dict[str, dict[str, Any]] = {}
 approved_proxmox_agents: dict[str, str] = dict(settings.get("proxmox_approved_agents", {}))
@@ -3905,6 +3918,64 @@ async def relay_sync_once() -> None:
                         "success": False,
                         "task_type": "repo_sync",
                         "detail": f"Repo Sync failed: {exc}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
+
+            if cmd_type == "proxmox_reclone_all":
+                try:
+                    concurrency = int(payload_data.get("concurrency", 0) or 0)
+                    if concurrency > 0:
+                        settings["reclone_concurrency"] = str(concurrency)
+                    if reclone_state.get("status") == "running":
+                        result = {
+                            "success": True,
+                            "started": False,
+                            "task_type": "proxmox_reclone_all",
+                            "detail": "A reclone run is already in progress",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                    else:
+                        eligible = _reclone_targets_for_run()
+                        unassigned_dongles = _proxmox_unassigned_present_usb()
+                        if not eligible and not unassigned_dongles:
+                            result = {
+                                "success": False,
+                                "started": False,
+                                "task_type": "proxmox_reclone_all",
+                                "detail": (
+                                    "No reclone-capable guests or unassigned certified USB devices were found. "
+                                    "Guests without a USB mapping or LXC template source are skipped."
+                                ),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+                        else:
+                            asyncio.create_task(_run_rolling_reclone("fleet"))
+                            result = {
+                                "success": True,
+                                "started": True,
+                                "task_type": "proxmox_reclone_all",
+                                "detail": "Fleet reclone started",
+                                "vm_count": len(eligible),
+                                "unassigned_dongles": len(unassigned_dongles),
+                                "concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+                except Exception as exc:
+                    logger.exception("Hub proxmox_reclone_all failed")
+                    result = {
+                        "success": False,
+                        "started": False,
+                        "task_type": "proxmox_reclone_all",
+                        "detail": f"Fleet reclone failed: {exc}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                 if cmd_id:
