@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.19"
+AGENT_VERSION="3.20"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1304,9 +1304,9 @@ _find_vhclient() {
     local found
     while IFS= read -r found; do
         [[ -x "$found" ]] && echo "$found" && return 0
-    done < <(find /root/.local /opt /home -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
+    done < <(find /root/.local /opt /home /usr/local/lib /usr/lib -maxdepth 6 -name 'vhclient*' -type f 2>/dev/null)
     local c
-    for c in /usr/sbin/vhclient /usr/bin/vhclient /usr/local/bin/vhclient; do
+    for c in /usr/sbin/vhclient /usr/bin/vhclient /usr/local/bin/vhclient /opt/virtualhere/vhclient; do
         [[ -x "$c" ]] && echo "$c" && return 0
     done
     return 1
@@ -1329,15 +1329,24 @@ def run(cmd, timeout=5):
         return "", False
 
 vh_out, vh_ok = ("", False)
+
+# Check service status independently of binary discovery —
+# try multiple common service names used by VirtualHere.
 svc_active = False
+for svc_name in ("virtualhereclient", "vhclient", "vhclientd", "virtualhere"):
+try:
+    svc_r = subprocess.run(
+        ["systemctl", "is-active", svc_name],
+        capture_output=True, text=True, timeout=5
+    )
+    if svc_r.stdout.strip() == "active":
+        svc_active = True
+        break
+except Exception:
+    pass
 
 if vhbin:
-    vh_out, vh_ok = run([vhbin, "-t", "list"])
-    svc_r = subprocess.run(
-        ["systemctl", "is-active", "virtualhereclient"],
-        capture_output=True, text=True
-    )
-    svc_active = svc_r.stdout.strip() == "active"
+vh_out, vh_ok = run([vhbin, "-t", "list"])
 
 devices = []
 current_server = None
