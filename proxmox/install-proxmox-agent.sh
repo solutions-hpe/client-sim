@@ -101,6 +101,101 @@ _restore_template_from_azure() {
     rm -f "$local_file"
 }
 
+_restore_spoke_from_azure() {
+    local blob_manifest_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}?restype=container&comp=list"
+    local blob_manifest
+    if ! blob_manifest=$(curl -sf "$blob_manifest_url"); then
+        echo "[WARN] Unable to query Azure spoke backups (${blob_manifest_url}). Skipping spoke restore."
+        return 0
+    fi
+
+    local blob_list
+    blob_list=$(printf '%s\n' "$blob_manifest" | grep -oP '(?<=<Name>)[^<]+\.vma\.zst' | sort || true)
+
+    if [ -z "$blob_list" ]; then
+        echo "[WARN] No spoke backups found in Azure (https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}). Skipping spoke VM restore."
+        return 0
+    fi
+
+    local blob_count
+    blob_count=$(echo "$blob_list" | wc -l)
+    local selected_blob
+
+    if [ "$blob_count" -eq 1 ]; then
+        selected_blob=$(echo "$blob_list" | head -1)
+        echo "[INFO] Found spoke backup: $selected_blob"
+    else
+        echo "[INFO] Available backups in Azure:"
+        local i=1
+        while IFS= read -r blob; do
+            echo "  $i) $(basename "$blob")"
+            i=$((i+1))
+        done <<< "$blob_list"
+        printf "Select backup for spoke VM 1001 [1-${blob_count}]: "
+        if ! read -r selection; then
+            echo "[WARN] No spoke backup selection received. Skipping spoke restore."
+            return 0
+        fi
+        if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+            echo "[WARN] Invalid selection. Skipping spoke restore."
+            return 0
+        fi
+        selected_blob=$(echo "$blob_list" | sed -n "${selection}p")
+        if [ -z "$selected_blob" ]; then
+            echo "[WARN] Invalid selection. Skipping spoke restore."
+            return 0
+        fi
+    fi
+
+    local blob_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}/${selected_blob}"
+    local local_file="${INSTALLER_DIR}/$(basename "$selected_blob")"
+    echo "[INFO] Downloading spoke backup from Azure: $blob_url"
+    if ! curl -L --progress-bar -o "$local_file" "$blob_url"; then
+        echo "[ERROR] Download failed. Skipping spoke restore."
+        rm -f "$local_file"
+        return 0
+    fi
+
+    echo "[INFO] Restoring spoke VM to ID 1001..."
+    local restore_cmd
+    if echo "$selected_blob" | grep -q "lxc"; then
+        restore_cmd="pct restore 1001 $local_file --force"
+    else
+        restore_cmd="qmrestore $local_file 1001 --force"
+    fi
+    if ! $restore_cmd; then
+        echo "[ERROR] Restore failed. Skipping rename and start."
+        rm -f "$local_file"
+        return 0
+    fi
+
+    local pxmx_hostname
+    pxmx_hostname=$(hostname)
+    local svr_num
+    svr_num=$(echo "$pxmx_hostname" | grep -oP '\d+$' || true)
+    if [ -n "$svr_num" ]; then
+        local spoke_name="spoke-svr-${svr_num}"
+        echo "[INFO] Renaming VM 1001 to ${spoke_name}..."
+        if qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
+            qm set 1001 --name "$spoke_name" 2>/dev/null || true
+        else
+            pct set 1001 --hostname "$spoke_name" 2>/dev/null || true
+        fi
+    else
+        echo "[WARN] Could not extract server number from hostname '$pxmx_hostname' — skipping rename."
+    fi
+
+    echo "[INFO] Starting spoke VM 1001..."
+    if qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
+        qm start 1001 || echo "[WARN] qm start 1001 failed — start it manually."
+    else
+        pct start 1001 || echo "[WARN] pct start 1001 failed — start it manually."
+    fi
+
+    rm -f "$local_file"
+    echo "[INFO] Spoke VM 1001 restore complete."
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --server)      SERVER_URL="$2"; SERVER_SET=1; shift 2 ;;
@@ -212,6 +307,15 @@ if qm list 2>/dev/null | awk '{print $1}' | grep -q '^100$'; then
 else
     echo "[INFO] VM 100 not found — checking Azure for template backup..."
     _restore_template_from_azure
+fi
+
+echo "[INFO] Checking for spoke VM (ID 1001)..."
+if qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$' || \
+   pct list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
+    echo "[INFO] Spoke VM 1001 already exists — skipping restore."
+else
+    echo "[INFO] VM 1001 not found — checking Azure for spoke backup..."
+    _restore_spoke_from_azure
 fi
 
 echo
