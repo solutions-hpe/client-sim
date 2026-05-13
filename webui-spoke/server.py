@@ -3741,6 +3741,9 @@ async def relay_sync_once() -> None:
                     "token_valid": bool(central_token.get("access_token") and time.time() < central_token.get("expires_at", 0)),
                     "token_state": _central_token_state(),
                 },
+                "reclone_state": {
+                    k: v for k, v in reclone_state.items() if k != "log" and k != "auto_recovery_log"
+                },
             }
 
         async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc:
@@ -3760,8 +3763,8 @@ async def relay_sync_once() -> None:
             cmd_type = rc.get("type", "")
             payload_data = rc.get("payload", {})
             target = rc.get("target", "")
-            action = rc.get("action", "")
-            args = rc.get("args", {})
+            action = rc.get("action", "") or payload_data.get("action", "")
+            args = rc.get("args", {}) or payload_data.get("args", {})
 
             # ── config_update: apply hub-pushed config and ack ─────────────
             if cmd_type == "config_update":
