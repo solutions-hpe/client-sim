@@ -4886,7 +4886,6 @@ def sync_repo_once() -> None:
         raise RuntimeError(f"{REPO_DIR} exists but is not a git repository")
 
     logger.info("Pulling latest repo state from %s branch %s", REPO_URL, branch)
-    _git("remote", "set-url", "origin", REPO_URL)  # ensure no stale authed URL
     _git("fetch", "--prune", "origin")
     # -B creates the local branch if missing, or resets it if it exists
     _git("checkout", "-B", branch, f"origin/{branch}")
