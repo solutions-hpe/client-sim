@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.26"
+AGENT_VERSION="3.27"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -67,13 +67,44 @@ declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+sed_escape() {
+    printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'
+}
+
+atomic_write_file() {
+    local target="$1" content="${2:-}" tmp_file="${target}.tmp"
+    {
+        printf '%s\n' "$content"
+    } > "$tmp_file" && mv "$tmp_file" "$target"
+}
+
+valid_json_file() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    python3 -c "import json,sys; json.load(sys.stdin)" < "$file" >/dev/null 2>&1
+}
+
+read_json_cache_or_default() {
+    local file="$1" default_payload="${2:-[]}"
+    if valid_json_file "$file"; then
+        cat "$file"
+        return 0
+    fi
+    if [[ -f "$file" ]]; then
+        printf '[%s] WARNING: Ignoring malformed JSON cache %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$file" >&2
+    fi
+    printf '%s' "$default_payload"
+}
+
 write_reclone_state_cache() {
     local status="$1" vmids_json="${2:-[]}" phase="${3:-}"
-    local phase_field=""
+    local phase_field="" payload
     [[ -n "$phase" ]] && phase_field=",\"phase\":\"${phase}\""
-    cat >"$RECLONE_STATE_CACHE" <<JSON
+    payload=$(cat <<JSON
 {"status":"${status}","active_vmids":${vmids_json}${phase_field},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
+)
+    atomic_write_file "$RECLONE_STATE_CACHE" "$payload"
 }
 
 if [[ -z "$SERVER_URL" ]]; then
@@ -95,9 +126,10 @@ json_field() {
 }
 
 save_api_key() {
-    local key="$1"
+    local key="$1" escaped_key
+    escaped_key=$(sed_escape "$key")
     if grep -q '^CLIENT_SIM_API_KEY=' "$ENV_FILE" 2>/dev/null; then
-        sed -i "s/^CLIENT_SIM_API_KEY=.*/CLIENT_SIM_API_KEY=${key}/" "$ENV_FILE"
+        sed -i "s/^CLIENT_SIM_API_KEY=.*/CLIENT_SIM_API_KEY=${escaped_key}/" "$ENV_FILE"
     else
         echo "CLIENT_SIM_API_KEY=${key}" >> "$ENV_FILE"
     fi
@@ -105,9 +137,10 @@ save_api_key() {
 }
 
 save_repo_branch() {
-    local branch="$1"
+    local branch="$1" escaped_branch
+    escaped_branch=$(sed_escape "$branch")
     if grep -q '^CLIENT_SIM_REPO_BRANCH=' "$ENV_FILE" 2>/dev/null; then
-        sed -i "s/^CLIENT_SIM_REPO_BRANCH=.*/CLIENT_SIM_REPO_BRANCH=${branch}/" "$ENV_FILE"
+        sed -i "s/^CLIENT_SIM_REPO_BRANCH=.*/CLIENT_SIM_REPO_BRANCH=${escaped_branch}/" "$ENV_FILE"
     else
         echo "CLIENT_SIM_REPO_BRANCH=${branch}" >> "$ENV_FILE"
     fi
@@ -533,7 +566,7 @@ guest_is_template() {
 
 reconcile_present_usb_state() {
     local _current_bus vmid missing_since _present_vidpid _state_vidpid _reconnected_bus _assigned_vmid
-    local _changed=1
+    local _changed=0
 
     for _current_bus in "${!STATE_BUS_TO_VMID[@]}"; do
         vmid="${STATE_BUS_TO_VMID[$_current_bus]}"
@@ -543,13 +576,13 @@ reconcile_present_usb_state() {
 
         if [[ -n "$_state_vidpid" && "${STATE_VIDPID_BY_BUS[$_current_bus]:-}" != "$_state_vidpid" ]]; then
             STATE_VIDPID_BY_BUS["$_current_bus"]="$_state_vidpid"
-            _changed=0
+            _changed=1
         fi
 
         if [[ -n "$_present_vidpid" ]]; then
             if [[ -n "$missing_since" ]]; then
                 unset "STATE_MISSING_BY_BUS[$_current_bus]"
-                _changed=0
+                _changed=1
                 log "USB $_current_bus present again, clearing missing state for VM $vmid"
             fi
             continue
@@ -571,7 +604,7 @@ reconcile_present_usb_state() {
         STATE_BUS_TO_VMID["$_reconnected_bus"]="$vmid"
         STATE_VIDPID_BY_BUS["$_reconnected_bus"]="$_state_vidpid"
         unset "STATE_MISSING_BY_BUS[$_reconnected_bus]"
-        _changed=0
+        _changed=1
         log "USB dongle vidpid $_state_vidpid moved from $_current_bus to $_reconnected_bus, clearing missing state for VM $vmid"
     done
 
@@ -631,9 +664,9 @@ build_usb_state_json() {
         PRESENT_USB_JSON="[]"
     fi
     # Persist to cache files so the background telemetry sender can read them
-    echo "$USB_STATE_JSON"  > "$USB_STATE_CACHE"
-    echo "$PRESENT_USB_JSON" > "$USB_PRESENT_CACHE"
-    echo "$UNKNOWN_USB_JSON" > "$USB_UNKNOWN_CACHE"
+    atomic_write_file "$USB_STATE_CACHE" "$USB_STATE_JSON"
+    atomic_write_file "$USB_PRESENT_CACHE" "$PRESENT_USB_JSON"
+    atomic_write_file "$USB_UNKNOWN_CACHE" "$UNKNOWN_USB_JSON"
 }
 
 # Wait until a VM is fully stopped, with a timeout.
@@ -1117,7 +1150,7 @@ usb_provision_loop() {
 
     now=$(date +%s)
     timeout_seconds=$(usb_missing_timeout_seconds)
-    if reconcile_present_usb_state; then
+    if ! reconcile_present_usb_state; then
         _state_changed=1
     fi
     for _current_bus in "${!STATE_BUS_TO_VMID[@]}"; do
@@ -1259,7 +1292,7 @@ refresh_usb_telemetry_only() {
     refresh_usb_config
     scan_usb_devices
     load_state_file
-    if reconcile_present_usb_state; then
+    if ! reconcile_present_usb_state; then
         save_state_file
     fi
     build_usb_state_json
@@ -1617,10 +1650,10 @@ print(json.dumps(out))
   "pve_version": "${pve_version}",
   "missing_timeout_mins": ${MISSING_TIMEOUT},
   "vms": ${vms_json:-[]},
-  "reclone_state": $(cat "$RECLONE_STATE_CACHE" 2>/dev/null || echo '{"status":"idle","active_vmids":[]}'),
-  "unknown_usb": $(cat "$USB_UNKNOWN_CACHE" 2>/dev/null || echo "${UNKNOWN_USB_JSON:-[]}"),
-  "usb_state": $(cat "$USB_STATE_CACHE"   2>/dev/null || echo "${USB_STATE_JSON:-[]}"),
-  "present_usb": $(cat "$USB_PRESENT_CACHE" 2>/dev/null || echo "${PRESENT_USB_JSON:-[]}"),
+  "reclone_state": $(read_json_cache_or_default "$RECLONE_STATE_CACHE" '{"status":"idle","active_vmids":[]}'),
+  "unknown_usb": $(read_json_cache_or_default "$USB_UNKNOWN_CACHE" "${UNKNOWN_USB_JSON:-[]}"),
+  "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
+  "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
   "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "log_lines": $(collect_log_lines)
 }
@@ -1842,6 +1875,7 @@ async def collect_telemetry():
     try:
         return json.loads(raw)
     except Exception:
+        print(f"[WARN] Malformed payload (truncated): {raw[:200]}", file=sys.stderr)
         return None
 async def run_command(command):
     proc = await asyncio.create_subprocess_exec(
@@ -1868,6 +1902,7 @@ async def main():
                         try:
                             payload = json.loads(message)
                         except Exception:
+                            print(f"[WARN] Malformed payload (truncated): {message[:200]}", file=sys.stderr)
                             continue
                         msg_type = str(payload.get('type') or '').lower()
                         if msg_type == 'commands':

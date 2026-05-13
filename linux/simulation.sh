@@ -8,6 +8,39 @@ echo Simulation Script Version $version | tee -a ${LOG_FILE}
 #------------------------------------------------------------
 #DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU ARE DOING
 #------------------------------------------------------------
+source '/usr/local/scripts/ini-parser.sh'
+
+require_config_value() {
+  local name="$1" value="${2:-}"
+  if [[ -z "$value" ]]; then
+    echo "Missing required config value: $name" | tee -a ${LOG_FILE}
+    exit 1
+  fi
+}
+
+sed_escape() {
+  printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'
+}
+
+delete_matching_connections() {
+  while IFS= read -r conn; do
+    [[ -n "$conn" ]] && sudo nmcli con del "$conn"
+  done < <(nmcli -t -f NAME con show 2>/dev/null | grep 'PSK' || true)
+}
+
+init_simulation_context() {
+  process_ini_file '/usr/local/scripts/simulation.conf'
+  username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
+  site_based_num=$(get_value 'simulation' 'site_based_num')
+  require_config_value "simulation.site_based_num" "$site_based_num"
+  simulation_id=s
+  simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
+  require_config_value "username" "$username"
+  require_config_value "simulation_id" "$simulation_id"
+}
+
+while true; do
+  init_simulation_context
 #------------------------------------------------------------
 #Finding adapter names and setting usable variables for interfaces
 #When using a physical piece of hardware we want to diable the
@@ -144,7 +177,7 @@ rn_sim_load=$((1 + RANDOM % 99))
 #changing DHCP Client configuration to send the username as the hostname
 #Pure aesthetics so the usernames in Central look good
 #------------------------------------------------------------
-sudo sed -i "s/gethostname()/\"$username\"/g" /etc/dhcp/dhclient.conf
+sudo sed -i "s/gethostname()/\"$(sed_escape "$username")\"/g" /etc/dhcp/dhclient.conf
 #------------------------------------------------------------
 # WebUI dashboard reporting
 #------------------------------------------------------------
@@ -295,13 +328,13 @@ if [ $kill_switch == "off" ]; then
   #has a bad PSK and others have a blocked mac or invalud username/password combo
   #both need to be constantly connecting so we trigger insights
   #------------------------------------------------------------
-  if [ $ssidpw_fail == "on" ] || [ $auth_fail == "on" ] && [[ -n ${wladapter} ]]; then
+  if [[ ($ssidpw_fail == "on" || $auth_fail == "on") && -n ${wladapter} ]]; then
     if [ $ssidpw_fail == "on" ]; then
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a ${LOG_FILE}
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
       echo Iteration $i of 100 | tee -a ${LOG_FILE}
-      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+      delete_matching_connections
       connect_wifi 5
      done
     fi
@@ -310,7 +343,7 @@ if [ $kill_switch == "off" ]; then
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a ${LOG_FILE}
       echo Iteration $i of 100 | tee -a ${LOG_FILE}
-      sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+      delete_matching_connections
       manage_connection up 5
       sleep 5
       manage_connection down 5
@@ -337,7 +370,7 @@ if [ $kill_switch == "off" ]; then
      echo Attempting to reset adapter | tee -a ${LOG_FILE}
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
-     sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+     delete_matching_connections
      connect_wifi 180
      echo WLAN Adapter name $wladapter | tee -a ${LOG_FILE}
      sleep 15
@@ -352,11 +385,11 @@ if [ $kill_switch == "off" ]; then
     #------------------------------------------------------------
     #Cleaning up old network connection profiles
     #------------------------------------------------------------
-    sudo nmcli con del $(nmcli -t -f NAME con | grep PSK)
+    delete_matching_connections
     #------------------------------------------------------------
     #Looping Script - Network Connectivity Failed
     #------------------------------------------------------------
-    source /usr/local/scripts/simulation.sh
+    continue 2
    fi
    #------------------------------------------------------------
    #End Connecting to Network
@@ -476,4 +509,4 @@ fi
 #------------------------------------------------------------
 #Looping Script
 #------------------------------------------------------------
-source /usr/local/scripts/simulation.sh
+done

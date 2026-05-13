@@ -16,6 +16,11 @@ debug="/usr/local/scripts/debug-agent.log"
 
 echo "Agent Script $(date)" | tee -a "$debug"
 
+log_warning() {
+  local payload="${1:-}"
+  echo "[WARN] Malformed payload (truncated): ${payload:0:200}" | tee -a "$debug" "$log" >&2
+}
+
 source '/usr/local/scripts/ini-parser.sh'
 process_ini_file '/usr/local/scripts/simulation.conf'
 
@@ -37,9 +42,16 @@ PY
 
 run_command() {
   local raw_cmd="${1:-}"
-  local cmd_id action args_json arg_value status message reboot_now
-  IFS=$'\t' read -r cmd_id action args_json < <(handle_command "$raw_cmd")
-  arg_value=$(printf '%s' "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null || true)
+  local cmd_id action args_json arg_value status message reboot_now parsed_cmd
+  if ! parsed_cmd=$(handle_command "$raw_cmd" 2>/dev/null); then
+    log_warning "$raw_cmd"
+    parsed_cmd=$'\t\t'
+  fi
+  IFS=$'\t' read -r cmd_id action args_json <<< "$parsed_cmd"
+  if ! arg_value=$(printf '%s' "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null); then
+    log_warning "$raw_cmd"
+    arg_value=""
+  fi
   status="completed"
   message=""
   reboot_now="false"
@@ -121,10 +133,20 @@ trap 'rm -f "$PID_FILE"' EXIT
 
 echo $$ > "$PID_FILE"
 
-python3 - "$0" "$server_url" "$hostname_val" "$platform" "$STATUS_FILE" <<'PY'
+python3 - "$0" "$server_url" "$hostname_val" "$platform" "$STATUS_FILE" "$debug" "$log" <<'PY'
 import asyncio, json, os, pathlib, subprocess, sys
 
-script_path, server_url, hostname, platform, status_file = sys.argv[1:6]
+script_path, server_url, hostname, platform, status_file, debug_log, main_log = sys.argv[1:8]
+
+
+def warn(raw):
+    message = f"[WARN] Malformed payload (truncated): {str(raw)[:200]}"
+    for path in (debug_log, main_log):
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(message + "\n")
+        except Exception:
+            pass
 try:
     import websockets
 except ImportError:
@@ -180,6 +202,7 @@ async def handle_command(ws, command):
     try:
         ack = json.loads(raw[-1])
     except Exception:
+        warn(raw[-1])
         return
     await ws.send(json.dumps({"type": "ack", "payload": ack}))
     if ack.get("reboot") == "true":
@@ -205,6 +228,7 @@ async def main():
                         try:
                             payload = json.loads(message)
                         except Exception:
+                            warn(message)
                             continue
                         msg_type = str(payload.get("type") or "").lower()
                         if msg_type == "commands":
