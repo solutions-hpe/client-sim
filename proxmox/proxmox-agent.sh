@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.23"
+AGENT_VERSION="3.24"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1740,12 +1740,12 @@ mkdir -p /var/lib/client-sim
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
 _LAST_SELF_UPDATE=0
-log "Host block $host_id → VM range $start_vmid-$end_vmid"
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
 fi
 ensure_state_file
 refresh_usb_telemetry_only || true
+log "Host block $host_id → VM range $start_vmid-$end_vmid (max_slots=$MAX_USB_SLOTS)"
 
 # Helper: collect and POST telemetry immediately
 post_telemetry() {
