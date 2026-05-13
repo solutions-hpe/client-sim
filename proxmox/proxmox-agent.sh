@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.32"
+AGENT_VERSION="3.33"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -73,7 +73,9 @@ sed_escape() {
 }
 
 atomic_write_file() {
-    local target="$1" content="${2:-}" tmp_file="${target}.tmp"
+    local target="$1"
+    local content="${2:-}"
+    local tmp_file="${target}.tmp"
     {
         printf '%s\n' "$content"
     } > "$tmp_file" && mv "$tmp_file" "$target"
