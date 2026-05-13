@@ -205,7 +205,7 @@ _restore_spoke_from_azure() {
 
     # Wait for IP then configure hub settings
     if _wait_for_spoke_ip; then
-        _configure_spoke_hub "$SPOKE_IP"
+        _configure_spoke_hub
     fi
 }
 
@@ -252,22 +252,40 @@ for iface in ifaces:
     return 1
 }
 
-# Configures hub URL and tenant ID on the spoke via its settings API.
-# Called after VM 1001 is up and we have its IP.
+# Bootstraps hub URL and tenant ID on the spoke from inside VM 1001 via localhost-only API.
 _configure_spoke_hub() {
-    local spoke_ip="$1"
-    local spoke_base="http://${spoke_ip}:${SPOKE_PORT}"
-
     if [ -z "$HUB_URL" ] && [ -z "$TENANT_ID" ]; then
-        echo "[INFO] No --hub-url or --tenant-id provided — skipping spoke hub configuration."
+        echo "[INFO] No --hub-url or --tenant-id provided — skipping spoke hub bootstrap."
         return 0
     fi
 
-    echo "[INFO] Waiting for spoke API to be ready at ${spoke_base}..."
-    local attempts=0 max_attempts=24  # 24 × 5s = 2 minutes
+    local is_qemu=0
+    qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$' && is_qemu=1
+
+    echo "[INFO] Waiting for spoke API to be ready inside VM 1001..."
+    local attempts=0 max_attempts=24 api_ready=0  # 24 × 5s = 2 minutes
     while [ "$attempts" -lt "$max_attempts" ]; do
-        if curl -sf --max-time 3 "${spoke_base}/api/health" >/dev/null 2>&1; then
-            break
+        if [ "$is_qemu" -eq 1 ]; then
+            local health_result health_exit
+            health_result=$(qm guest exec 1001 --timeout 10 -- curl -sf "http://127.0.0.1:${SPOKE_PORT}/api/health" 2>/dev/null || true)
+            health_exit=$(printf '%s' "$health_result" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(1)
+    raise SystemExit(0)
+print(data.get('exitcode', 1))
+" 2>/dev/null || echo "1")
+            if [ "$health_exit" = "0" ]; then
+                api_ready=1
+                break
+            fi
+        else
+            if pct exec 1001 -- curl -sf "http://127.0.0.1:${SPOKE_PORT}/api/health" >/dev/null 2>&1; then
+                api_ready=1
+                break
+            fi
         fi
         attempts=$((attempts + 1))
         printf "\r[INFO] Waiting for spoke API... (%ds)" "$((attempts * 5))"
@@ -275,42 +293,85 @@ _configure_spoke_hub() {
     done
     echo ""
 
-    if ! curl -sf --max-time 3 "${spoke_base}/api/health" >/dev/null 2>&1; then
-        echo "[WARN] Spoke API not reachable at ${spoke_base} — configure hub settings manually."
+    if [ "$api_ready" -ne 1 ]; then
+        echo "[WARN] Spoke API not reachable inside VM 1001 — configure hub settings manually."
         return 0
     fi
 
-    echo "[INFO] Configuring hub settings on spoke..."
+    echo "[INFO] Bootstrapping spoke hub settings via localhost inside VM 1001..."
 
-    # Build JSON payload with only the fields that were provided
-    local payload
+    local payload payload_quoted
     payload=$(python3 -c "
 import json, sys
 d = {}
-hub_url   = sys.argv[1]
+hub_url = sys.argv[1]
 tenant_id = sys.argv[2]
 if hub_url:
     d['relay_server_url'] = hub_url
-    d['relay_enabled']    = 'on'
+    d['relay_enabled'] = 'on'
 if tenant_id:
-    d['relay_tenant_id']   = tenant_id
+    d['relay_tenant_id'] = tenant_id
     d['relay_tenant_hint'] = tenant_id
 print(json.dumps(d))
 " "$HUB_URL" "$TENANT_ID")
+    payload_quoted=$(python3 -c "
+import shlex, sys
+print(shlex.quote(sys.argv[1]))
+" "$payload")
 
-    local http_status
-    http_status=$(curl -sf --max-time 10 \
-        -X POST "${spoke_base}/api/settings" \
-        -H "Content-Type: application/json" \
-        -d "$payload" \
-        -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+    local bootstrap_cmd
+    bootstrap_cmd="http_status=\$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:${SPOKE_PORT}/api/bootstrap -H 'Content-Type: application/json' -d ${payload_quoted} 2>/dev/null || echo 000); echo \"\$http_status\"; [ \"\$http_status\" = \"200\" ] || [ \"\$http_status\" = \"201\" ] || [ \"\$http_status\" = \"409\" ]"
 
-    if [ "$http_status" = "200" ]; then
-        echo "[INFO] Spoke hub settings configured successfully."
-        [ -n "$HUB_URL" ]    && echo "  Hub URL   : $HUB_URL"
-        [ -n "$TENANT_ID" ]  && echo "  Tenant ID : $TENANT_ID"
+    local bootstrap_status="000" bootstrap_exit=1 bootstrap_output=""
+    if [ "$is_qemu" -eq 1 ]; then
+        local bootstrap_result
+        bootstrap_result=$(qm guest exec 1001 --timeout 30 -- /bin/bash -c "$bootstrap_cmd" 2>/dev/null || true)
+        bootstrap_exit=$(printf '%s' "$bootstrap_result" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(1)
+    raise SystemExit(0)
+print(data.get('exitcode', 1))
+" 2>/dev/null || echo "1")
+        bootstrap_status=$(printf '%s' "$bootstrap_result" | python3 -c "
+import base64, json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print('000')
+    raise SystemExit(0)
+out = data.get('out-data', '')
+text = out.strip()
+if text:
+    try:
+        decoded = base64.b64decode(text, validate=True).decode('utf-8', 'ignore').strip()
+        if decoded:
+            text = decoded
+    except Exception:
+        pass
+lines = text.splitlines()
+print(lines[-1].strip() if lines else '000')
+" 2>/dev/null || echo "000")
     else
-        echo "[WARN] Failed to configure spoke hub settings (HTTP ${http_status}) — configure manually in the spoke UI."
+        if bootstrap_output=$(pct exec 1001 -- /bin/bash -c "$bootstrap_cmd" 2>/dev/null); then
+            bootstrap_exit=0
+        fi
+        bootstrap_status=$(printf '%s' "$bootstrap_output" | tail -n 1 | tr -d '\r')
+        [ -n "$bootstrap_status" ] || bootstrap_status="000"
+    fi
+
+    if [ "$bootstrap_exit" = "0" ]; then
+        if [ "$bootstrap_status" = "409" ]; then
+            echo "[INFO] Spoke hub bootstrap already configured."
+        else
+            echo "[INFO] Spoke hub bootstrap completed successfully."
+        fi
+        [ -n "$HUB_URL" ]   && echo "  Hub URL   : $HUB_URL"
+        [ -n "$TENANT_ID" ] && echo "  Tenant ID : $TENANT_ID"
+    else
+        echo "[WARN] Failed to bootstrap spoke hub settings (HTTP ${bootstrap_status}) — configure manually in the spoke UI."
     fi
 }
 
