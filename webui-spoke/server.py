@@ -4888,8 +4888,8 @@ def sync_repo_once() -> None:
     logger.info("Pulling latest repo state from %s branch %s", REPO_URL, branch)
     _git("remote", "set-url", "origin", REPO_URL)  # ensure no stale authed URL
     _git("fetch", "--prune", "origin")
-    _git("checkout", branch)
-    _git("reset", "--hard", f"origin/{branch}")
+    # -B creates the local branch if missing, or resets it if it exists
+    _git("checkout", "-B", branch, f"origin/{branch}")
 
 
 async def _sync_repo_now() -> str | None:
