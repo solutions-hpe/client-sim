@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.20"
+AGENT_VERSION="3.21"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1313,44 +1313,44 @@ _find_vhclient() {
 }
 
 collect_vh_devices() {
-    local vhbin
-    vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
+    python3 - <<'PY'
+import subprocess, re, json, socket
 
-    python3 - "$vhbin" <<'PY'
-import subprocess, re, json, sys
-
-vhbin = sys.argv[1] if len(sys.argv) > 1 else ""
-
-def run(cmd, timeout=5):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return r.stdout, r.returncode == 0
-    except Exception:
-        return "", False
-
-vh_out, vh_ok = ("", False)
-
-# Check service status independently of binary discovery —
-# try multiple common service names used by VirtualHere.
+# ── Service status check ────────────────────────────────────────────────────
 svc_active = False
 for svc_name in ("virtualhereclient", "vhclient", "vhclientd", "virtualhere"):
+    try:
+        svc_r = subprocess.run(
+            ["systemctl", "is-active", svc_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if svc_r.stdout.strip() == "active":
+            svc_active = True
+            break
+    except Exception:
+        pass
+
+# ── Query VirtualHere client via TCP API (port 7575) ───────────────────────
+vh_out = ""
+vh_ok  = False
 try:
-    svc_r = subprocess.run(
-        ["systemctl", "is-active", svc_name],
-        capture_output=True, text=True, timeout=5
-    )
-    if svc_r.stdout.strip() == "active":
-        svc_active = True
-        break
+    with socket.create_connection(("127.0.0.1", 7575), timeout=5) as s:
+        s.sendall(b"LIST\n")
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        vh_out = buf.decode("utf-8", errors="replace")
+        vh_ok  = True
 except Exception:
     pass
 
-if vhbin:
-vh_out, vh_ok = run([vhbin, "-t", "list"])
-
-devices = []
+# ── Parse device list ───────────────────────────────────────────────────────
+devices        = []
 current_server = None
-auto_use_all = "Auto-Use All currently on" in vh_out
+auto_use_all   = "Auto-Use All currently on" in vh_out
 
 for line in vh_out.splitlines():
     srv_m = re.match(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$', line)
@@ -1367,22 +1367,12 @@ for line in vh_out.splitlines():
             "auto_use": auto_use,
         })
 
-lsusb_out, _ = run(["lsusb"])
-phys = []
-for m in re.finditer(r'ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s+(.*)', lsusb_out):
-    phys.append({
-        "vidpid": f"{m.group(1).lower()}:{m.group(2).lower()}",
-        "name":   m.group(3).strip(),
-        "source": "physical",
-    })
-
 print(json.dumps({
     "vh_service_active": svc_active,
-    "vh_connected":      vh_ok and bool(devices),
+    "vh_connected":      vh_ok,
     "auto_use_all":      auto_use_all,
     "count":             len(devices),
     "devices":           devices,
-    "physical_usb":      phys,
 }))
 PY
 }
