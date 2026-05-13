@@ -120,9 +120,10 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   export _CLIENT_SIM_BOOTSTRAPPED=1
   # If REPO_BRANCH is still the default "main", try reading from the installed
   # .env file — this happens when the WebUI calls the script without --branch.
+  # Only inherit the stored branch if it is not the legacy lrb value.
   if [[ "${REPO_BRANCH}" == "main" && -f "${INSTALL_DIR}/.env" ]]; then
     _env_br=$(grep '^REPO_BRANCH=' "${INSTALL_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"'"'"' ')
-    [[ -n "${_env_br}" ]] && REPO_BRANCH="${_env_br}"
+    [[ -n "${_env_br}" && "${_env_br}" != "lrb" ]] && REPO_BRANCH="${_env_br}"
   fi
   _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/install-lxc.sh"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
@@ -372,8 +373,9 @@ git config --system --add safe.directory "$REPO_CACHE" >>"$LOG" 2>&1 || true
 
 if [[ -d "$REPO_CACHE/.git" ]]; then
   git -C "$REPO_CACHE" fetch origin >>"$LOG" 2>&1
-  git -C "$REPO_CACHE" checkout "$REPO_BRANCH" >>"$LOG" 2>&1
-  git -C "$REPO_CACHE" reset --hard "origin/$REPO_BRANCH" >>"$LOG" 2>&1
+  # -B creates the local branch if missing, or resets it — handles repos
+  # previously cloned on a different branch (e.g. lrb → main migration)
+  git -C "$REPO_CACHE" checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH" >>"$LOG" 2>&1
   ok "Repo updated to latest $REPO_BRANCH"
 elif [[ -d "$REPO_CACHE" ]]; then
   warn "Directory exists but is not a git repo — removing and re-cloning"
