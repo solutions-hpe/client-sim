@@ -53,13 +53,13 @@ Aruba Central (AP/switch telemetry)
 2. **Enter the container and run the installer**:
 
    ```bash
-   sudo bash install-lxc.sh --branch lrb --port 8000
+   sudo bash install-lxc.sh --branch main --port 8000
    ```
 
    Common alternatives:
 
    ```bash
-   sudo bash install-lxc.sh --branch lrb --port 9000
+   sudo bash install-lxc.sh --branch main --port 9000
    sudo bash install-lxc.sh --reinstall
    ```
 
@@ -95,7 +95,7 @@ By default, DHCP serves `169.253.1.11`–`169.253.1.254` on the isolated client 
 
 - `install-lxc.sh` fetches `static/app.js`, `static/style.css`, and `templates/index.html` from `cs-webui` on the same branch selected for the spoke install.
 - `server.py` serves the shared HTML template and injects `WEBUI_MODE=spoke` at runtime.
-- Use `--branch <name>` to keep the spoke backend and shared frontend aligned (`lrb` for development, `main` for production).
+- Use `--branch <name>` to keep the spoke backend and shared frontend aligned (`main` for production).
 
 ---
 
@@ -317,7 +317,7 @@ This is the intended production deployment model.
 ```bash
 sudo bash install-lxc.sh
 sudo bash install-lxc.sh --branch main --port 8000
-sudo bash install-lxc.sh --branch lrb --port 9000
+sudo bash install-lxc.sh --branch main --port 9000
 sudo bash install-lxc.sh --reinstall
 ```
 

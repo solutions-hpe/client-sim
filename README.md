@@ -50,7 +50,6 @@ Before you run it, have:
 - root or `sudo` access
 - outbound access to GitHub
 - a Proxmox-attached second NIC if you want the isolated DHCP network
-- the target branch decided (`main` for production, `lrb` only for development/testing overrides)
 
 #### Install commands
 
@@ -154,7 +153,7 @@ curl http://169.253.1.1:8000/api/proxmox/status
 | `--installer-key <key>` | Optional shared secret sent as `X-Installer-Key` when requesting the installer SAS token from Hub |
 | `--key <api_key>` | Pre-seed an API key instead of waiting for approval |
 | `--interval <seconds>` | Override poll interval |
-| `--branch <name>` | Branch to pull scripts from (`main` for production, `lrb` for development) |
+| `--branch <name>` | Branch to pull scripts from (default: `main`) |
 | `--unattended` | Automation-friendly mode |
 | `--skip-vh` | Skip VirtualHere client installation |
 
@@ -171,7 +170,7 @@ In v1.0, the Proxmox agent can receive `backup` and `reseed` commands over its W
 
 At startup, `install-proxmox-agent.sh` tries to download `proxmox/installer-override.conf` from the selected branch and silently skips it on `404`. When present, that file can override values such as `AZURE_ACCOUNT`, `OVERRIDE_HUB_URL`, `OVERRIDE_TENANT_ID`, and `OVERRIDE_SERVER_URL`.
 
-On production `main`, `installer-override.conf` is intentionally **not** shipped. The override file is an `lrb`-only development convenience, so production installs should expect the download to be skipped with no effect.
+On production `main`, `installer-override.conf` is intentionally **not** shipped. Production installs will silently skip the override download with no effect.
 
 ### VirtualHere auto-use sync
 
@@ -213,7 +212,7 @@ Resolution order on a client VM is:
 | `[simulation]` | `sim_load` | `100` | Probability/CPU-style load gate for enabled simulations |
 | `[simulation]` | `github_repo` | `on` | Allow GitHub as an update source |
 | `[simulation]` | `repo_location` | `https://github.com/solutions-hpe/client-sim/` | Git repo used by update logic |
-| `[simulation]` | `repo_branch` | `lrb` | Branch used by client update logic |
+| `[simulation]` | `repo_branch` | `main` | Branch used by client update logic |
 | `[simulation]` | `smb_repo` | `off` | Enable SMB as a fallback update source |
 | `[simulation]` | `vh_server` | `off` | Start/use VirtualHere workflow |
 | `[simulation]` | `site_based_ssid` | `on` | Prefix `wsite-` to the SSID when connecting |
@@ -273,7 +272,7 @@ These keys are valid in `[s0]`-`[s9]` bucket sections and in `[username]` sectio
 | `sim_load` | `100` in user override examples | User-specific load override |
 | `github_repo` | `on` in user override examples | User-specific GitHub-source override |
 | `repo_location` | repo URL in examples | User-specific update source override |
-| `repo_branch` | `lrb` in examples | User-specific branch override |
+| `repo_branch` | `main` in examples | User-specific branch override |
 | `vh_server` | `off` in examples | User-specific VirtualHere override |
 | `site_based_ssid` | `on` in examples | User-specific SSID prefix override |
 | `site_based_num` | `2` in examples | User-specific bucket-digit override |

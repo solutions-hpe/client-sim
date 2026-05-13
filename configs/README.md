@@ -75,7 +75,7 @@ sim_load=100             # CPU throttle target for cpulimit (percentage)
 github_repo=on           # on = repo cloned without auth
 repo_location=https://github.com/solutions-hpe/client-sim/
 server_url=http://169.253.1.1:8000   # webUI heartbeat endpoint (set in [server] section)
-repo_branch=lrb          # which branch clients pull from
+repo_branch=main          # which branch clients pull from
 smb_repo=off             # on = enable Tier 2 SMB share as an update source (see [address] smb_address)
                          # Update priority: WebUI → SMB → GitHub (each tier only tried if previous fails)
 vh_server=off            # on = start VirtualHere USB server daemon
