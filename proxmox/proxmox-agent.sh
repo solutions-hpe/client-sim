@@ -24,7 +24,6 @@ USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
 USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
-WS_EVENT_DIR="/var/lib/client-sim/ws-events"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -1710,357 +1709,8 @@ self_update_agent() {
     fi
 }
 
-queue_proxmox_event() {
-    local payload="$1" event_file=""
-    [[ -n "$payload" ]] || return 0
-    if [[ -d "$WS_EVENT_DIR" ]]; then
-        event_file="${WS_EVENT_DIR}/event-$(date +%s%N)-$$-$RANDOM.json"
-        atomic_write_file "$event_file" "$payload"
-    fi
-    log "EVENT: $payload"
-}
-
-send_backup_progress_event() {
-    local vmid="${1:-}" status="${2:-}" pct="${3:-}" size="${4:-}" file="${5:-}" error="${6:-}"
-    local payload
-    payload=$(python3 - "$vmid" "$status" "$pct" "$size" "$file" "$error" <<'PY'
-import json, sys
-vmid, status, pct, size, file_name, error = sys.argv[1:7]
-payload = {"type": "backup_progress"}
-if vmid:
-    try:
-        payload["vm_id"] = int(vmid)
-    except ValueError:
-        payload["vm_id"] = vmid
-if status:
-    payload["status"] = status
-if pct:
-    try:
-        payload["pct"] = int(pct)
-    except ValueError:
-        payload["pct"] = pct
-if size:
-    try:
-        payload["size"] = int(size)
-    except ValueError:
-        payload["size"] = size
-if file_name:
-    payload["file"] = file_name
-if error:
-    payload["error"] = error
-print(json.dumps(payload, separators=(",", ":")))
-PY
-) || return 1
-    queue_proxmox_event "$payload"
-}
-
-send_reseed_progress_event() {
-    local vmid="${1:-}" status="${2:-}" step="${3:-}" error="${4:-}"
-    local payload
-    payload=$(python3 - "$vmid" "$status" "$step" "$error" <<'PY'
-import json, sys
-vmid, status, step, error = sys.argv[1:5]
-payload = {"type": "reseed_progress"}
-if vmid:
-    try:
-        payload["vm_id"] = int(vmid)
-    except ValueError:
-        payload["vm_id"] = vmid
-if status:
-    payload["status"] = status
-if step:
-    payload["step"] = step
-if error:
-    payload["error"] = error
-print(json.dumps(payload, separators=(",", ":")))
-PY
-) || return 1
-    queue_proxmox_event "$payload"
-}
-
-summarize_command_batch() {
-    local raw="${1:-[]}"
-    python3 - "$raw" <<'PY' 2>/dev/null || true
-import json, sys
-raw = sys.argv[1] if len(sys.argv) > 1 else '[]'
-try:
-    commands = json.loads(raw)
-except Exception:
-    commands = []
-summary = []
-for cmd in commands:
-    args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
-    action = str(cmd.get('action') or cmd.get('type') or '').replace('\t', ' ').replace('\n', ' ')
-    vmid = args.get('vmid', '')
-    vm_ids = args.get('vm_ids') if isinstance(args.get('vm_ids'), list) else []
-    if vm_ids:
-        vmid = ','.join(str(item) for item in vm_ids[:5])
-        if len(vm_ids) > 5:
-            vmid += ',...'
-    if vmid not in ('', None):
-        summary.append(f"{action}(vm={vmid})")
-    elif action:
-        summary.append(action)
-print(', '.join(summary))
-PY
-}
-
-azure_blob_prefix_for_vmid() {
-    local blob_prefix="${1#/}" vmid="$2"
-    blob_prefix="${blob_prefix%/}"
-    if [[ -n "$blob_prefix" ]]; then
-        printf '%s/%s' "$blob_prefix" "$vmid"
-    else
-        printf '%s' "$vmid"
-    fi
-}
-
-ensure_azcopy() {
-    if command -v azcopy >/dev/null 2>&1 || [[ -x /usr/local/bin/azcopy ]]; then
-        return 0
-    fi
-    (
-        cd /tmp || exit 1
-        rm -f azcopy azcopy.tar.gz
-        wget -q https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz
-        tar -xzf azcopy.tar.gz --wildcards '*/azcopy' --strip-components=1
-        chmod +x azcopy
-        mv azcopy /usr/local/bin/azcopy
-        rm -f azcopy.tar.gz
-    )
-}
-
-azcopy_copy_shared_key() {
-    local source_path="$1" dest_url="$2" azure_account="$3" azure_key="$4"
-    local rc=0
-    export AZURE_STORAGE_ACCOUNT="$azure_account"
-    export AZURE_STORAGE_KEY="$azure_key"
-    if azcopy copy "$source_path" "$dest_url" --block-size-mb 128; then
-        rc=0
-    else
-        rc=$?
-    fi
-    unset AZURE_STORAGE_KEY
-    unset AZURE_STORAGE_ACCOUNT
-    return "$rc"
-}
-
-azcopy_remove_shared_key() {
-    local dest_url="$1" azure_account="$2" azure_key="$3"
-    local rc=0
-    export AZURE_STORAGE_ACCOUNT="$azure_account"
-    export AZURE_STORAGE_KEY="$azure_key"
-    if azcopy remove "$dest_url"; then
-        rc=0
-    else
-        rc=$?
-    fi
-    unset AZURE_STORAGE_KEY
-    unset AZURE_STORAGE_ACCOUNT
-    return "$rc"
-}
-
-run_backup_command() {
-    local raw_cmd_b64="${1:-}"
-    local parsed vm_ids_csv azure_account azure_container azure_key retention spoke_id blob_prefix
-    local overall_rc=0 azcopy_ready=0
-    local -a vm_ids=()
-
-    parsed=$(python3 - "$raw_cmd_b64" <<'PY' 2>/dev/null || true
-import base64, json, sys
-raw_b64 = sys.argv[1] if len(sys.argv) > 1 else ''
-raw = '{}'
-if raw_b64:
-    try:
-        raw = base64.b64decode(raw_b64).decode()
-    except Exception:
-        raw = '{}'
-try:
-    cmd = json.loads(raw)
-except Exception:
-    cmd = {}
-args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
-vm_ids = args.get('vm_ids')
-if not isinstance(vm_ids, list):
-    vm_ids = [args.get('vmid')] if args.get('vmid') not in (None, '') else []
-normalized = []
-for item in vm_ids:
-    try:
-        normalized.append(str(int(item)))
-    except Exception:
-        continue
-retention = args.get('retention', 3)
-try:
-    retention = max(1, int(retention))
-except Exception:
-    retention = 3
-fields = [
-    ','.join(normalized),
-    str(args.get('azure_account') or '').replace('\t', ' ').replace('\n', ' '),
-    str(args.get('azure_container') or '').replace('\t', ' ').replace('\n', ' '),
-    str(args.get('azure_key') or '').replace('\t', ' ').replace('\n', ' '),
-    str(retention),
-    str(args.get('spoke_id') or '').replace('\t', ' ').replace('\n', ' '),
-    str(args.get('blob_prefix') or '').replace('\t', ' ').replace('\n', ' '),
-]
-print('\t'.join(fields))
-PY
-)
-    IFS=$'\t' read -r vm_ids_csv azure_account azure_container azure_key retention spoke_id blob_prefix <<< "$parsed"
-    [[ -n "$vm_ids_csv" && -n "$azure_account" && -n "$azure_container" && -n "$azure_key" ]] || return 1
-    IFS=',' read -r -a vm_ids <<< "$vm_ids_csv"
-    [[ ${#vm_ids[@]} -gt 0 ]] || return 1
-    [[ -n "$spoke_id" ]] && log "backup requested for spoke_id=${spoke_id} vm_ids=${vm_ids_csv}"
-
-    for vmid in "${vm_ids[@]}"; do
-        local backup_file="" blob_dir="" blob_name="" backup_size="0" blobs="" blob_count=0 to_delete=""
-        send_backup_progress_event "$vmid" "running" "0" "" "" "" || true
-        if ! mkdir -p /tmp/vzdump-backup; then
-            send_backup_progress_event "$vmid" "error" "0" "" "" "Failed to create backup temp dir" || true
-            overall_rc=1
-            continue
-        fi
-        if ! vzdump "$vmid" --compress zstd --mode snapshot --storage local --dumpdir /tmp/vzdump-backup 2>&1; then
-            send_backup_progress_event "$vmid" "error" "0" "" "" "vzdump failed" || true
-            overall_rc=1
-            continue
-        fi
-        backup_file=$(find /tmp/vzdump-backup -name "vzdump-qemu-${vmid}-*.vma.zst" | sort | tail -1)
-        if [[ -z "$backup_file" || ! -f "$backup_file" ]]; then
-            send_backup_progress_event "$vmid" "error" "0" "" "" "Backup file not found" || true
-            overall_rc=1
-            continue
-        fi
-        send_backup_progress_event "$vmid" "uploading" "50" "" "" "" || true
-        if [[ "$azcopy_ready" -ne 1 ]]; then
-            if ! ensure_azcopy; then
-                rm -f "$backup_file"
-                send_backup_progress_event "$vmid" "error" "50" "" "" "azcopy install failed" || true
-                overall_rc=1
-                continue
-            fi
-            azcopy_ready=1
-        fi
-        blob_dir=$(azure_blob_prefix_for_vmid "$blob_prefix" "$vmid")
-        blob_name="${blob_dir}/$(basename "$backup_file")"
-        if ! azcopy_copy_shared_key "$backup_file" "https://${azure_account}.blob.core.windows.net/${azure_container}/${blob_name}" "$azure_account" "$azure_key"; then
-            rm -f "$backup_file"
-            send_backup_progress_event "$vmid" "error" "50" "" "" "Azure upload failed" || true
-            overall_rc=1
-            continue
-        fi
-        backup_size=$(stat -c%s "$backup_file" 2>/dev/null || printf '0')
-        send_backup_progress_event "$vmid" "done" "100" "$backup_size" "$blob_name" "" || true
-        blobs=$(curl -s "https://${azure_account}.blob.core.windows.net/${azure_container}?restype=container&comp=list&prefix=${blob_dir}/" | grep -oP '(?<=<Name>)[^<]+' | sort || true)
-        blob_count=$(printf '%s\n' "$blobs" | grep -c . || true)
-        if [[ "$blob_count" -gt "$retention" ]]; then
-            to_delete=$(printf '%s\n' "$blobs" | head -n $((blob_count - retention)))
-            while IFS= read -r blob; do
-                [[ -n "$blob" ]] || continue
-                azcopy_remove_shared_key "https://${azure_account}.blob.core.windows.net/${azure_container}/${blob}" "$azure_account" "$azure_key" || true
-            done <<< "$to_delete"
-        fi
-        rm -f "$backup_file"
-    done
-    send_backup_progress_event "" "all_done" "" "" "" "" || true
-    return "$overall_rc"
-}
-
-run_reseed_command() {
-    local raw_cmd_b64="${1:-}"
-    local parsed vm_ids_csv azure_account azure_container blob_prefix
-    local overall_rc=0 restored_any=0
-    local -a vm_ids=()
-
-    parsed=$(python3 - "$raw_cmd_b64" <<'PY' 2>/dev/null || true
-import base64, json, sys
-raw_b64 = sys.argv[1] if len(sys.argv) > 1 else ''
-raw = '{}'
-if raw_b64:
-    try:
-        raw = base64.b64decode(raw_b64).decode()
-    except Exception:
-        raw = '{}'
-try:
-    cmd = json.loads(raw)
-except Exception:
-    cmd = {}
-args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
-vm_ids = args.get('vm_ids')
-if not isinstance(vm_ids, list):
-    vm_ids = [args.get('vmid')] if args.get('vmid') not in (None, '') else []
-normalized = []
-for item in vm_ids:
-    try:
-        normalized.append(str(int(item)))
-    except Exception:
-        continue
-fields = [
-    ','.join(normalized),
-    str(args.get('azure_account') or '').replace('\t', ' ').replace('\n', ' '),
-    str(args.get('azure_container') or '').replace('\t', ' ').replace('\n', ' '),
-    str(args.get('blob_prefix') or '').replace('\t', ' ').replace('\n', ' '),
-]
-print('\t'.join(fields))
-PY
-)
-    IFS=$'\t' read -r vm_ids_csv azure_account azure_container blob_prefix <<< "$parsed"
-    [[ -n "$vm_ids_csv" && -n "$azure_account" && -n "$azure_container" ]] || return 1
-    IFS=',' read -r -a vm_ids <<< "$vm_ids_csv"
-    [[ ${#vm_ids[@]} -gt 0 ]] || return 1
-
-    for vmid in "${vm_ids[@]}"; do
-        local blob_dir="" blobs="" latest_blob="" blob_url="" local_file=""
-        send_reseed_progress_event "$vmid" "running" "finding" "" || true
-        blob_dir=$(azure_blob_prefix_for_vmid "$blob_prefix" "$vmid")
-        blobs=$(curl -s "https://${azure_account}.blob.core.windows.net/${azure_container}?restype=container&comp=list&prefix=${blob_dir}/" | grep -oP '(?<=<Name>)[^<]+' | sort || true)
-        latest_blob=$(printf '%s\n' "$blobs" | tail -1)
-        if [[ -z "$latest_blob" ]]; then
-            send_reseed_progress_event "$vmid" "error" "" "No backup found in Azure" || true
-            overall_rc=1
-            continue
-        fi
-        blob_url="https://${azure_account}.blob.core.windows.net/${azure_container}/${latest_blob}"
-        local_file="/tmp/$(basename "$latest_blob")"
-        send_reseed_progress_event "$vmid" "running" "downloading" "" || true
-        if ! curl -L --progress-bar -o "$local_file" "$blob_url"; then
-            rm -f "$local_file"
-            send_reseed_progress_event "$vmid" "error" "" "Backup download failed" || true
-            overall_rc=1
-            continue
-        fi
-        send_reseed_progress_event "$vmid" "restoring" "" "" || true
-        if ! qmrestore "$local_file" 100 --force; then
-            rm -f "$local_file"
-            send_reseed_progress_event "$vmid" "error" "" "qmrestore failed" || true
-            overall_rc=1
-            continue
-        fi
-        if ! qm template 100; then
-            rm -f "$local_file"
-            send_reseed_progress_event "$vmid" "error" "" "qm template failed" || true
-            overall_rc=1
-            continue
-        fi
-        send_reseed_progress_event "$vmid" "done" "" "" || true
-        rm -f "$local_file"
-        restored_any=1
-    done
-
-    if [[ "$restored_any" -eq 1 ]]; then
-        local reclone_response reclone_status
-        reclone_response=$(curl_api_status POST /api/proxmox/reclone-all '{}' 2>/dev/null || true)
-        reclone_status="${reclone_response##*$'\n'}"
-        if [[ "$reclone_status" != "200" ]]; then
-            log "WARNING: Failed to trigger reclone-all after reseed (HTTP ${reclone_status:-unknown})"
-            overall_rc=1
-        fi
-    fi
-    return "$overall_rc"
-}
-
 execute_vm_command() {
-    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}" _raw_cmd_b64="${7:-}"
+    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}"
     local guest_type="${_type:-qemu}"
     if [[ -n "$vmid" && "$guest_type" != "lxc" ]]; then
         if pct status "$vmid" >/dev/null 2>&1 && ! qm status "$vmid" >/dev/null 2>&1; then
@@ -2112,12 +1762,6 @@ execute_vm_command() {
             ;;
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
-        backup)
-            run_backup_command "$_raw_cmd_b64"
-            ;;
-        reseed)
-            run_reseed_command "$_raw_cmd_b64"
-            ;;
         update_agent|update-agent)
             self_update_agent "$_branch" "$_repo_raw"
             ;;
@@ -2127,36 +1771,33 @@ execute_vm_command() {
 
 process_single_ws_command() {
     local raw="${1:-{}}"
-    local parsed cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type raw_cmd_b64 status message
+    local parsed cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type status message
     parsed=$(python3 - "$raw" <<'PY' 2>/dev/null || true
-import base64, json, sys
+import json, sys
 raw = sys.argv[1] if len(sys.argv) > 1 else '{}'
 try:
     cmd = json.loads(raw)
 except Exception:
     cmd = {}
 args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
-action = str(cmd.get('action') or cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
-raw_cmd_b64 = base64.b64encode(json.dumps(cmd, separators=(",", ":")).encode()).decode()
 print(
     str(cmd.get('id', '')).replace('\t', ' '),
-    action,
+    str(cmd.get('action', '')).replace('\t', ' ').replace('-', '_'),
     str(args.get('vmid', '')),
     str(args.get('type') or args.get('vm_type') or '').replace('\t', ' '),
     str(args.get('source_vmid', '')),
     str(args.get('branch', '')).replace('\t', ' '),
     str(args.get('repo_raw', '')).replace('\t', ' '),
     str(cmd.get('type', '')).replace('\t', ' ').replace('-', '_'),
-    raw_cmd_b64,
     sep='\t'
 )
 PY
 )
-    IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type raw_cmd_b64 <<< "$parsed"
+    IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type <<< "$parsed"
     [[ -z "$cmd_id" || -z "$action" ]] && return 0
     status="completed"
     message="${action} completed"
-    if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" "$raw_cmd_b64" 2>>"$AGENT_LOG"; then
+    if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" 2>>"$AGENT_LOG"; then
         status="failed"
         message="${action} failed — check $AGENT_LOG"
     fi
@@ -2212,11 +1853,9 @@ start_proxmox_ws_client() {
     local poll_hostname script_path
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
     script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    mkdir -p "$WS_EVENT_DIR"
-    find "$WS_EVENT_DIR" -maxdepth 1 -type f -name '*.json' -delete 2>/dev/null || true
-    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$WS_EVENT_DIR" <<'PY' &
-import asyncio, contextlib, json, os, sys
-script_path, server_url, api_key, hostname, telemetry_interval, event_dir = sys.argv[1:7]
+    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" <<'PY' &
+import asyncio, contextlib, json, sys
+script_path, server_url, api_key, hostname, telemetry_interval = sys.argv[1:6]
 telemetry_interval = max(1, int(float(telemetry_interval or 3)))
 try:
     import websockets
@@ -2244,39 +1883,12 @@ async def run_command(command):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     await proc.wait()
-async def send_pending_events(ws):
-    if not event_dir or not os.path.isdir(event_dir):
-        return
-    for name in sorted(os.listdir(event_dir)):
-        if not name.endswith('.json'):
-            continue
-        path = os.path.join(event_dir, name)
-        try:
-            with open(path, 'r', encoding='utf-8') as handle:
-                raw = handle.read().strip()
-            if not raw:
-                os.unlink(path)
-                continue
-            payload = json.loads(raw)
-            await ws.send(json.dumps(payload))
-            os.unlink(path)
-        except FileNotFoundError:
-            continue
-        except Exception:
-            with contextlib.suppress(Exception):
-                os.unlink(path)
 async def send_loop(ws):
-    loop = asyncio.get_running_loop()
-    last_telemetry = 0.0
     while True:
-        now = loop.time()
-        if (now - last_telemetry) >= telemetry_interval:
-            payload = await collect_telemetry()
-            if payload is not None:
-                await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
-            last_telemetry = now
-        await send_pending_events(ws)
-        await asyncio.sleep(1)
+        payload = await collect_telemetry()
+        if payload is not None:
+            await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
+        await asyncio.sleep(telemetry_interval)
 async def main():
     backoff = 1
     while True:
@@ -2333,7 +1945,7 @@ if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
 fi
 
 process_inbox() {
-    local response_with_status response status poll_hostname command_summary
+    local response_with_status response status poll_hostname
     local -a args
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
     args=(-sS --max-time 15 -G "${SERVER_URL}/api/inbox" --data-urlencode "hostname=${poll_hostname}" -w $'\n%{http_code}')
@@ -2355,11 +1967,9 @@ process_inbox() {
     esac
     [[ -z "$response" || "$response" == "[]" ]] && return 0
 
-    command_summary=$(summarize_command_batch "$response")
-    log "Commands received: ${command_summary:-<unparsed>}"
+    log "Commands received: $response"
     local parsed_commands
     parsed_commands=$(python3 - "$response" <<'PY' 2>/dev/null || true
-import base64
 import json
 import sys
 
@@ -2369,23 +1979,21 @@ try:
 except Exception:
     commands = []
 for cmd in commands:
-    args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
     cid = str(cmd.get('id', '')).replace('\t', ' ')
-    action = str(cmd.get('action') or cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
-    vmid = args.get('vmid', '')
-    guest_type = str(args.get('type') or args.get('vm_type') or '').replace('\t', ' ')
-    source_vmid = args.get('source_vmid', '')
-    branch = str(args.get('branch') or '').replace('\t', ' ')
-    repo_raw = str(args.get('repo_raw') or '').replace('\t', ' ')
+    action = str(cmd.get('action', '')).replace('\t', ' ').replace('-', '_')
+    vmid = cmd.get('args', {}).get('vmid', '')
+    guest_type = str(cmd.get('args', {}).get('type') or cmd.get('args', {}).get('vm_type') or '').replace('\t', ' ')
+    source_vmid = cmd.get('args', {}).get('source_vmid', '')
+    branch = str(cmd.get('args', {}).get('branch') or '').replace('\t', ' ')
+    repo_raw = str(cmd.get('args', {}).get('repo_raw') or '').replace('\t', ' ')
     ctype = str(cmd.get('type') or '').replace('\t', ' ').replace('-', '_')
-    raw_cmd_b64 = base64.b64encode(json.dumps(cmd, separators=(",", ":")).encode()).decode()
-    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{branch}\t{repo_raw}\t{ctype}\t{raw_cmd_b64}")
+    print(f"{cid}\t{action}\t{vmid}\t{guest_type}\t{source_vmid}\t{branch}\t{repo_raw}\t{ctype}")
 PY
 )
-    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=() _seq_branches=() _seq_repo_raws=() _seq_raw_cmds=()
+    local _seq_ids=() _seq_actions=() _seq_vmids=() _seq_types=() _seq_sources=() _seq_branches=() _seq_repo_raws=()
     local _rc_ids=() _rc_vmids=() _rc_types=() _rc_sources=()
     local _del_ids=() _del_vmids=()
-    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type raw_cmd_b64; do
+    while IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type; do
         [[ -z "$cmd_id" || -z "$action" ]] && continue
         if [[ "$action" == "reclone_vm" && -n "$vmid" ]]; then
             _rc_ids+=("$cmd_id")
@@ -2403,14 +2011,13 @@ PY
             _seq_sources+=("$source_vmid")
             _seq_branches+=("$branch")
             _seq_repo_raws+=("$repo_raw")
-            _seq_raw_cmds+=("$raw_cmd_b64")
         fi
     done <<< "$parsed_commands"
 
     for _si in "${!_seq_ids[@]}"; do
         log "Executing ${_seq_actions[$_si]} (vmid=${_seq_vmids[$_si]:-})"
         local status="completed" message=""
-        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" "${_seq_branches[$_si]}" "${_seq_repo_raws[$_si]}" "${_seq_raw_cmds[$_si]}" 2>>"$AGENT_LOG"; then
+        if execute_vm_command "${_seq_actions[$_si]}" "${_seq_vmids[$_si]}" "${_seq_types[$_si]}" "${_seq_sources[$_si]}" "${_seq_branches[$_si]}" "${_seq_repo_raws[$_si]}" 2>>"$AGENT_LOG"; then
             message="${_seq_actions[$_si]} completed"
         else
             status="failed"
