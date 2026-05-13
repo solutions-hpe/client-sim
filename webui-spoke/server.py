@@ -28,6 +28,15 @@ except ImportError:
     httpx = None
     _HTTPX_AVAILABLE = False
 
+try:
+    import websockets
+    from websockets.exceptions import InvalidStatus as WebSocketInvalidStatus
+    _WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    websockets = None
+    WebSocketInvalidStatus = Exception
+    _WEBSOCKETS_AVAILABLE = False
+
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -2018,6 +2027,11 @@ COMMAND_EXPIRE_SECS = 300         # pending/delivered commands expire after 5 mi
 COMMAND_RESULT_RETENTION_SECS = 60  # keep ACK'd/expired results briefly so the UI can show them
 
 ws_connections: list[WebSocket] = []
+client_ws_connections: dict[str, WebSocket] = {}
+proxmox_ws_connection: WebSocket | None = None
+proxmox_ws_hostname: str | None = None
+proxmox_ws_disconnect_task: asyncio.Task[Any] | None = None
+PROXMOX_WS_GRACE_SECS = 30
 _acme_challenges: dict[str, str] = {}
 _acme_status: dict[str, Any] = {"running": False, "last_result": None, "last_error": None}
 state_lock = asyncio.Lock()
@@ -2397,6 +2411,93 @@ def _make_command(target: str, action: str, args: dict | None = None, command_ty
         "result": None,
         "message": None,
     }
+
+
+def _serialize_command_for_agent(command: dict[str, Any]) -> dict[str, Any]:
+    return {"id": command["id"], "action": command["action"], "args": command["args"], "type": command.get("type")}
+
+
+def _command_matches_agent(command: dict[str, Any], hostname: str, approved_hostname: str | None = None) -> bool:
+    if command["target"] == hostname:
+        return True
+    if approved_hostname is None:
+        return False
+    return (
+        _proxmox_hostnames_match(command["target"], approved_hostname)
+        or command["target"] == "proxmox"
+    )
+
+
+def _peek_pending_agent_commands_locked(hostname: str, approved_hostname: str | None = None) -> tuple[list[dict[str, Any]], int, int]:
+    expired, purged = _cleanup_commands_locked()
+    pending = [
+        command for command in commands
+        if command["status"] == "pending" and _command_matches_agent(command, hostname, approved_hostname)
+    ]
+    return pending, expired, purged
+
+
+def _mark_commands_delivered_locked(command_ids: list[str]) -> bool:
+    if not command_ids:
+        return False
+    ids = set(command_ids)
+    now = time.time()
+    changed = False
+    for command in commands:
+        if command["id"] in ids and command["status"] == "pending":
+            command["status"] = "delivered"
+            command["updated_at"] = now
+            changed = True
+    if changed:
+        _save_commands()
+    return changed
+
+
+async def _push_pending_agent_commands(hostname: str, websocket: WebSocket, approved_hostname: str | None = None) -> bool:
+    async with state_lock:
+        pending, expired, purged = _peek_pending_agent_commands_locked(hostname, approved_hostname)
+        payload = [_serialize_command_for_agent(command) for command in pending]
+        serialized = _serialize_commands()
+    if not payload:
+        if expired or purged:
+            await broadcast({"type": "commands_update", "commands": serialized})
+        return True
+    try:
+        await websocket.send_json({"type": "commands", "commands": payload})
+    except Exception:
+        return False
+    async with state_lock:
+        changed = _mark_commands_delivered_locked([command["id"] for command in pending])
+        serialized = _serialize_commands()
+    if changed or expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return True
+
+
+async def _push_pending_commands_for_target(target: str) -> None:
+    normalized = str(target or "").strip()
+    if not normalized:
+        return
+    websocket = client_ws_connections.get(normalized)
+    if websocket is not None:
+        if not await _push_pending_agent_commands(normalized, websocket):
+            client_ws_connections.pop(normalized, None)
+    global proxmox_ws_connection, proxmox_ws_hostname
+    if proxmox_ws_connection is not None and proxmox_ws_hostname and (
+        normalized == "proxmox" or _proxmox_hostnames_match(normalized, proxmox_ws_hostname)
+    ):
+        if not await _push_pending_agent_commands(proxmox_ws_hostname, proxmox_ws_connection, proxmox_ws_hostname):
+            proxmox_ws_connection = None
+            proxmox_ws_hostname = None
+
+
+async def _push_pending_commands_for_targets(targets: list[str]) -> None:
+    seen: set[str] = set()
+    for target in targets:
+        normalized = str(target or "").strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            await _push_pending_commands_for_target(normalized)
 
 
 def _serialize_commands() -> list[dict[str, Any]]:
@@ -3036,6 +3137,8 @@ async def _queue_command(target: str, action: str, args: dict[str, Any] | None =
         serialized = _serialize_commands()
     if created or expired or purged:
         await broadcast({"type": "commands_update", "commands": serialized})
+    if created:
+        await _push_pending_commands_for_target(target)
     return cmd
 
 
@@ -3080,6 +3183,7 @@ async def _queue_proxmox_agent_update(target: str | None = None) -> dict[str, An
         raise HTTPException(status_code=409, detail=f"An agent update is already queued for {resolved_target}")
     if expired or purged or created:
         await broadcast({"type": "commands_update", "commands": serialized})
+    await _push_pending_commands_for_target(resolved_target)
     return cmd
 
 
@@ -3584,6 +3688,215 @@ def _hub_tls_verify() -> bool:
     return _normalize_relay_enabled(settings.get("hub_tls_verify", "off")) == "on"
 
 
+def _relay_ws_url(server_url: str, tenant_id: str, spoke_id: str, api_key: str) -> str:
+    hub_base = _relay_hub_base_url(server_url, tenant_id)
+    if hub_base.startswith("https://"):
+        hub_base = "wss://" + hub_base[len("https://"):]
+    elif hub_base.startswith("http://"):
+        hub_base = "ws://" + hub_base[len("http://"):]
+    return f"{hub_base}/api/{tenant_id}/spokes/{spoke_id}/ws?api_key={api_key}"
+
+
+async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
+    async with state_lock:
+        proxmox_vms = list(proxmox_state.get("vms") or [])
+        usb_state = list(proxmox_state.get("usb_state", []))
+        unknown_usb = list(proxmox_state.get("unknown_usb", []))
+        clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
+        return {
+            "spoke_id": spoke_id,
+            "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
+            "hostname": socket.gethostname(),
+            "clients": clients_snapshot,
+            "timestamp": time.time(),
+            "proxmox": {
+                "connected": bool(proxmox_state.get("connected", False)),
+                "last_seen": proxmox_state.get("last_seen"),
+                "node": dict(proxmox_state.get("node") or {}),
+                "vm_count": len(proxmox_vms),
+                "running_count": sum(1 for vm in proxmox_vms if vm.get("status") == "running"),
+                "vms": [
+                    {
+                        "vmid": vm.get("vmid"),
+                        "name": vm.get("name", ""),
+                        "status": vm.get("status", ""),
+                        "type": vm.get("type", ""),
+                    }
+                    for vm in proxmox_vms
+                ],
+                "usb_state": usb_state,
+                "unknown_usb": unknown_usb,
+                "usb_count": len(usb_state),
+                "agent_version": proxmox_state.get("agent_version"),
+                "pve_version": proxmox_state.get("pve_version"),
+            },
+            "proxmox_vms": proxmox_vms,
+            "usb_devices": usb_state,
+            "api_server": {
+                "health": {
+                    "status": "ok",
+                    "version": APP_VERSION,
+                    "clients": len(clients_snapshot),
+                    "repo_synced": repo_state["synced"],
+                    "repo_error": repo_state["error"],
+                    "installer_version": INSTALLER_VERSION,
+                },
+                "services": {name: dict(info) for name, info in service_health.items()},
+                "task_names": list(background_tasks.keys()),
+            },
+            "central": {
+                "status": _central_status_payload(),
+                "wireless_clients": dict(central_wireless_clients),
+                "hardware_alerts": _hw_alerts_payload(),
+                "client_count_status": _client_count_payload(),
+                "token_valid": bool(central_token.get("access_token") and time.time() < central_token.get("expires_at", 0)),
+                "token_state": _central_token_state(),
+                "site_mappings": dict(settings.get("site_mappings", {})),
+                "monitored_checks": list(settings.get("monitored_checks", [])),
+                "hardware_checks": list(settings.get("hardware_checks", [])),
+            },
+            "reclone_state": {
+                k: v for k, v in reclone_state.items() if k != "log" and k != "auto_recovery_log"
+            },
+        }
+
+
+async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) -> None:
+    commands_changed = False
+    serialized_commands: list[dict[str, Any]] | None = None
+    queued_targets: list[str] = []
+    for rc in remote_cmds:
+        cmd_id = rc.get("id", "")
+        cmd_type = rc.get("type", "")
+        payload_data = rc.get("payload", {})
+        target = rc.get("target", "")
+        action = rc.get("action", "") or payload_data.get("action", "")
+        args = rc.get("args", {}) or payload_data.get("args", {})
+
+        if cmd_type == "config_update":
+            result = await _apply_hub_config(payload_data)
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
+        if cmd_type == "config_clear":
+            settings["hub_managed"] = False
+            _save_settings()
+            await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+            logger.info("Hub config cleared — spoke is now self-managed")
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", {
+                    "success": True,
+                    "task_type": "config_clear",
+                    "detail": "Hub config cleared — spoke is now self-managed",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            continue
+
+        if cmd_type == "gkill_switch":
+            new_val = (payload_data.get("value") or action or "").strip()
+            if new_val in ("on", "off"):
+                gkill_switch_state["value"] = new_val
+                await broadcast({"type": "gkill_switch", "value": new_val})
+                logger.info("gkill_switch set to %s by hub", new_val)
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", {
+                    "success": True,
+                    "task_type": "gkill_switch",
+                    "detail": f"gkill set to {gkill_switch_state['value']}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            continue
+
+        if cmd_type == "repo_sync":
+            try:
+                result = await _run_hub_repo_sync()
+            except Exception as exc:
+                logger.exception("Hub repo_sync failed")
+                result = {
+                    "success": False,
+                    "task_type": "repo_sync",
+                    "detail": f"Repo Sync failed: {exc}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
+        if cmd_type == "proxmox_reclone_all":
+            try:
+                concurrency = int(payload_data.get("concurrency", 0) or 0)
+                if concurrency > 0:
+                    settings["reclone_concurrency"] = str(concurrency)
+                if reclone_state.get("status") == "running":
+                    result = {
+                        "success": True,
+                        "started": False,
+                        "task_type": "proxmox_reclone_all",
+                        "detail": "A reclone run is already in progress",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                else:
+                    eligible = _reclone_targets_for_run()
+                    unassigned_dongles = _proxmox_unassigned_present_usb()
+                    if not eligible and not unassigned_dongles:
+                        result = {
+                            "success": False,
+                            "started": False,
+                            "task_type": "proxmox_reclone_all",
+                            "detail": (
+                                "No reclone-capable guests or unassigned certified USB devices were found. "
+                                "Guests without a USB mapping or LXC template source are skipped."
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                    else:
+                        asyncio.create_task(_run_rolling_reclone("fleet"))
+                        result = {
+                            "success": True,
+                            "started": True,
+                            "task_type": "proxmox_reclone_all",
+                            "detail": "Fleet reclone started",
+                            "vm_count": len(eligible),
+                            "unassigned_dongles": len(unassigned_dongles),
+                            "concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+            except Exception as exc:
+                logger.exception("Hub proxmox_reclone_all failed")
+                result = {
+                    "success": False,
+                    "started": False,
+                    "task_type": "proxmox_reclone_all",
+                    "detail": f"Fleet reclone failed: {exc}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
+        if not target or not action:
+            continue
+        async with state_lock:
+            if target == "all":
+                target_hostnames = list(clients.keys())
+                queued_targets.extend(target_hostnames)
+                for hostname in target_hostnames:
+                    _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
+            else:
+                queued_targets.append(target)
+                _enqueue_command_locked(target, action, args, command_type=cmd_type)
+            serialized_commands = _serialize_commands()
+        commands_changed = True
+
+        if cmd_id:
+            await ack_fn(cmd_id, "queued", None)
+
+    if commands_changed and serialized_commands is not None:
+        await broadcast({"type": "commands_update", "commands": serialized_commands})
+        await _push_pending_commands_for_targets(queued_targets)
+
+
 async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply a config_update command payload pushed from hub.
     Returns an ack result dict."""
@@ -3846,6 +4159,7 @@ async def relay_sync_once() -> None:
 
         commands_changed = False
         serialized_commands: list[dict[str, Any]] | None = None
+        queued_targets: list[str] = []
         for rc in remote_cmds:
             cmd_id = rc.get("id", "")
             cmd_type = rc.get("type", "")
@@ -3993,9 +4307,12 @@ async def relay_sync_once() -> None:
                 continue
             async with state_lock:
                 if target == "all":
-                    for hostname in list(clients.keys()):
+                    target_hostnames = list(clients.keys())
+                    queued_targets.extend(target_hostnames)
+                    for hostname in target_hostnames:
                         _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
                 else:
+                    queued_targets.append(target)
                     _enqueue_command_locked(target, action, args, command_type=cmd_type)
                 serialized_commands = _serialize_commands()
             commands_changed = True
@@ -4011,8 +4328,10 @@ async def relay_sync_once() -> None:
 
         if commands_changed and serialized_commands is not None:
             await broadcast({"type": "commands_update", "commands": serialized_commands})
+            await _push_pending_commands_for_targets(queued_targets)
 
         relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+        _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(clients_snapshot)}")
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response else None
         if status_code in (401, 403, 404):
@@ -4035,11 +4354,134 @@ async def relay_sync_once() -> None:
         else:
             relay_state.update({"connected": False, "error": str(exc)})
         logger.warning("Relay sync failed: %s", exc)
+        _debug_event("relay_sync_fail", str(exc)[:200])
     except Exception as exc:
         relay_state.update({"connected": False, "error": str(exc)})
         logger.warning("Relay sync failed: %s", exc)
+        _debug_event("relay_sync_fail", str(exc)[:200])
 
     await _broadcast_relay_state()
+
+
+async def relay_ws_loop() -> None:
+    global relay_registration_refresh_needed
+    if not _WEBSOCKETS_AVAILABLE or websockets is None:
+        raise RuntimeError("websockets not installed")
+
+    backoff = 1
+    while True:
+        interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
+        try:
+            if settings.get("relay_enabled") != "on" or not settings.get("relay_server_url"):
+                relay_state["enabled"] = False
+                await _broadcast_relay_state()
+                return
+
+            relay_state["enabled"] = True
+            server_url = settings["relay_server_url"].rstrip("/")
+            spoke_id = _ensure_relay_spoke_id()
+            api_key = settings.get("relay_api_key", "")
+            tenant_id = settings.get("relay_tenant_id", "")
+
+            if not spoke_id:
+                await _hub_self_register(server_url)
+                await _broadcast_relay_state()
+                await asyncio.sleep(interval)
+                continue
+
+            if relay_registration_refresh_needed:
+                await _hub_check_approval(server_url, spoke_id)
+                spoke_id = settings.get("relay_spoke_id", spoke_id)
+                api_key = settings.get("relay_api_key", "")
+                tenant_id = settings.get("relay_tenant_id", "")
+
+            if not api_key or not tenant_id:
+                relay_state["registration_status"] = relay_state.get("registration_status", "pending")
+                await _hub_check_approval(server_url, spoke_id)
+                spoke_id = settings.get("relay_spoke_id", spoke_id)
+                api_key = settings.get("relay_api_key", "")
+                tenant_id = settings.get("relay_tenant_id", "")
+                if not api_key or not tenant_id:
+                    await _broadcast_relay_state()
+                    await asyncio.sleep(interval)
+                    continue
+
+            relay_state["registration_status"] = "approved"
+            ws_url = _relay_ws_url(server_url, tenant_id, spoke_id, api_key)
+            send_lock = asyncio.Lock()
+
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as websocket:
+                backoff = 1
+
+                async def send_json(payload: dict[str, Any]) -> None:
+                    async with send_lock:
+                        await websocket.send(json.dumps(payload, default=str))
+
+                async def ack_fn(command_id: str, status: str, result: dict[str, Any] | None) -> None:
+                    payload: dict[str, Any] = {"type": "ack", "payload": {"command_id": command_id, "status": status}}
+                    if result is not None:
+                        payload["payload"]["result"] = result
+                    await send_json(payload)
+
+                async def telemetry_loop() -> None:
+                    while True:
+                        telemetry = await _build_relay_telemetry_payload(spoke_id)
+                        await send_json({"type": "telemetry", "payload": telemetry})
+                        relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+                        _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
+                        await _broadcast_relay_state()
+                        await asyncio.sleep(interval)
+
+                sender = asyncio.create_task(telemetry_loop())
+                try:
+                    await send_json({"type": "sync"})
+                    async for raw_message in websocket:
+                        message = json.loads(raw_message)
+                        msg_type = str(message.get("type") or "").strip().lower()
+                        if msg_type == "commands":
+                            commands = message.get("commands") if isinstance(message.get("commands"), list) else []
+                            await _apply_relay_command_batch(commands, ack_fn)
+                        elif msg_type == "command":
+                            await _apply_relay_command_batch([message], ack_fn)
+                        elif msg_type == "central_feed":
+                            payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+                            await _apply_central_feed(payload)
+                        elif msg_type == "telemetry_ack":
+                            relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+                            await _broadcast_relay_state()
+                        elif msg_type == "pong":
+                            relay_state.update({"connected": True, "error": None})
+                finally:
+                    sender.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await sender
+        except asyncio.CancelledError:
+            raise
+        except WebSocketInvalidStatus as exc:
+            status_code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+            relay_state.update({"connected": False, "error": f"websocket handshake failed: {exc}"})
+            await _broadcast_relay_state()
+            if status_code in (401, 403):
+                relay_registration_refresh_needed = True
+                settings["relay_api_key"] = ""
+                settings["relay_tenant_id"] = ""
+                _save_settings()
+            if status_code == 404:
+                await relay_sync_once()
+                await asyncio.sleep(interval)
+            else:
+                await asyncio.sleep(min(backoff, 30))
+                backoff = min(backoff * 2, 30)
+        except Exception as exc:
+            relay_state.update({"connected": False, "error": str(exc)})
+            _debug_event("relay_sync_fail", str(exc)[:200])
+            await _broadcast_relay_state()
+            if any(token in str(exc).lower() for token in ["connection refused", "404", "not found"]):
+                await relay_sync_once()
+                await asyncio.sleep(interval)
+            else:
+                await asyncio.sleep(min(backoff, 30))
+                backoff = min(backoff * 2, 30)
 
 
 async def relay_loop() -> None:
@@ -4047,13 +4489,18 @@ async def relay_loop() -> None:
         interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
         jitter = random.randint(0, 30)
         try:
-            await relay_sync_once()
+            if _WEBSOCKETS_AVAILABLE and websockets is not None:
+                await relay_ws_loop()
+            else:
+                await relay_sync_once()
             _update_service_health("relay", ok=True)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _update_service_health("relay", ok=False, error=str(exc))
             logger.exception("Relay loop error: %s", exc)
+            await asyncio.sleep(interval + jitter)
+            continue
         await asyncio.sleep(interval + jitter)
 
 
@@ -4515,6 +4962,7 @@ async def _run_update_all() -> None:
         })
         await broadcast({"type": "update_all_progress", **update_all_state})
         await broadcast({"type": "commands_update", "commands": _serialize_commands()})
+        await _push_pending_commands_for_targets(approved)
 
         if agent_cmd_ids:
             deadline = time.time() + 300
@@ -5257,36 +5705,28 @@ async def api_proxmox_reclone_status() -> dict[str, Any]:
     return dict(reclone_state)
 
 
-@app.post("/api/proxmox/telemetry", response_model=None)
-async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[str, bool] | JSONResponse:
-    """Receive telemetry from the Proxmox host agent."""
-    node = body.get("node", {}) or {}
-    hostname = str(node.get("hostname", "") or "").strip()
-    api_key = request.headers.get("X-API-Key", "")
-    client_ip = request.client.host if request.client else "unknown"
-    now = time.time()
-
-    if not hostname:
-        return JSONResponse({"error": "hostname required"}, status_code=400)
-
+async def _authorize_proxmox_agent(hostname: str, api_key: str, client_ip: str, now: float) -> tuple[str | None, JSONResponse | None]:
     approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
     if approved_hostname is None:
         _upsert_pending_proxmox_agent(hostname, client_ip, now)
         await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
         if api_key:
-            return JSONResponse({"error": "agent not approved"}, status_code=401)
-        return JSONResponse({"pending": True}, status_code=202)
+            return None, JSONResponse({"error": "agent not approved"}, status_code=401)
+        return None, JSONResponse({"pending": True}, status_code=202)
 
     if api_key != approved_proxmox_agents[approved_hostname]:
-        return JSONResponse({"error": "invalid key"}, status_code=401)
+        return None, JSONResponse({"error": "invalid key"}, status_code=401)
 
     pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
     if pending_hostname is not None:
         pending_proxmox_agents.pop(pending_hostname, None)
         await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+    return approved_hostname, None
 
+
+async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, now: float) -> dict[str, bool]:
     async with state_lock:
-        client_seen = {hostname: client.get("last_seen") for hostname, client in clients.items()}
+        client_seen = {client_hostname: client.get("last_seen") for client_hostname, client in clients.items()}
 
     enriched_vms: list[dict[str, Any]] = []
     configured_template_ids: set[str] = {
@@ -5327,9 +5767,13 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     normalized_present_usb = body.get("present_usb", [])
     normalized_usb_state = _normalize_proxmox_usb_state(body.get("usb_state", []), normalized_present_usb)
 
+    was_connected = bool(proxmox_state.get("connected"))
     proxmox_state["connected"] = True
     proxmox_state["last_seen"] = now
-    proxmox_state["node"] = node
+    if not was_connected:
+        gap = now - (proxmox_state.get("last_seen") or now)
+        _debug_event("proxmox_reconnected", f"agent={hostname} gap={gap:.0f}s")
+    proxmox_state["node"] = body.get("node", {}) or {}
     proxmox_state["vms"] = enriched_vms
     proxmox_state["usb_state"] = normalized_usb_state
     proxmox_state["present_usb"] = normalized_present_usb
@@ -5379,6 +5823,25 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
 
     await _broadcast_proxmox_state()
     return {"ok": True}
+
+
+@app.post("/api/proxmox/telemetry", response_model=None)
+async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[str, bool] | JSONResponse:
+    """Receive telemetry from the Proxmox host agent."""
+    node = body.get("node", {}) or {}
+    hostname = str(node.get("hostname", "") or "").strip()
+    api_key = request.headers.get("X-API-Key", "")
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    if not hostname:
+        return JSONResponse({"error": "hostname required"}, status_code=400)
+
+    _approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, client_ip, now)
+    if response is not None:
+        return response
+    return await _apply_proxmox_telemetry_state(body, hostname, now)
+
 
 
 @app.get("/api/proxmox/logs")
@@ -6786,6 +7249,7 @@ async def api_config_simulation(update: SimulationConfigUpdate) -> dict[str, Any
                 _enqueue_command_locked(hostname, "kill_switch", {"value": "off"})
             serialized = _serialize_commands()
         await broadcast({"type": "commands_update", "commands": serialized})
+        await _push_pending_commands_for_targets(targets)
 
     return {"status": "ok", "pushed": pushed}
 
@@ -6837,13 +7301,12 @@ async def api_scripts_get(platform: str, filename: str) -> FileResponse:
     return FileResponse(candidate)
 
 
-@app.post("/api/status")
-async def api_status(status: ClientStatus) -> dict[str, Any]:
+async def _apply_client_status(status: ClientStatus) -> tuple[dict[str, Any], bool, dict[str, Any] | None]:
     # Ignore the Proxmox template VM — it uses the default hostname before
     # being cloned and renamed.  Registering it would pollute the dashboard.
     _IGNORED_HOSTNAMES = set(_parse_json_list(settings.get("ignored_hostnames", '["sim-rpi-0000"]')))
     if status.hostname in _IGNORED_HOSTNAMES:
-        return {"status": "ignored", "reason": "template hostname"}
+        return {}, False, {"status": "ignored", "reason": "template hostname"}
 
     now = utcnow()
     watchdog_changed = False
@@ -6901,6 +7364,14 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
             _save_vm_watchdog()
         payload = serialize_client(status.hostname, clients[status.hostname])
 
+    return payload, watchdog_changed, None
+
+
+@app.post("/api/status")
+async def api_status(status: ClientStatus) -> dict[str, Any]:
+    payload, watchdog_changed, ignored = await _apply_client_status(status)
+    if ignored is not None:
+        return ignored
     await broadcast({"type": "status_update", "client": payload})
     if watchdog_changed:
         await _broadcast_proxmox_state()
@@ -7155,6 +7626,22 @@ async def api_init() -> dict[str, Any]:
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     return await _api_health_payload()
+
+
+@app.get("/api/debug")
+async def api_debug() -> dict[str, Any]:
+    """Server-side debug event log for diagnosing connectivity issues."""
+    import datetime as _dt
+    return {
+        "server_start": _server_start_time,
+        "server_uptime_s": round(time.time() - _server_start_time),
+        "proxmox_connected": proxmox_state.get("connected"),
+        "proxmox_last_seen": proxmox_state.get("last_seen"),
+        "relay_connected": relay_state.get("connected"),
+        "relay_last_sync": relay_state.get("last_sync"),
+        "relay_error": relay_state.get("error"),
+        "events": list(reversed(_debug_log)),
+    }
 
 
 @app.get("/api/services/status")
@@ -7449,6 +7936,8 @@ async def create_command(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
     if new_cmds or expired or purged:
         await broadcast({"type": "commands_update", "commands": serialized})
+    if new_cmds:
+        await _push_pending_commands_for_targets([cmd["target"] for cmd in new_cmds])
     return {"queued": len(new_cmds), "deduped": deduped, "ids": [c["id"] for c in new_cmds]}
 
 
@@ -7463,6 +7952,19 @@ async def list_commands() -> list[dict[str, Any]]:
     return serialized
 
 
+async def _poll_agent_inbox(hostname: str, approved_hostname: str | None = None) -> list[dict[str, Any]]:
+    async with state_lock:
+        pending, expired, purged = _peek_pending_agent_commands_locked(hostname, approved_hostname)
+        if pending:
+            _mark_commands_delivered_locked([command["id"] for command in pending])
+        serialized = _serialize_commands()
+        payload = [_serialize_command_for_agent(command) for command in pending]
+
+    if pending or expired or purged:
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return payload
+
+
 @app.get("/api/inbox")
 async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
@@ -7473,29 +7975,7 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
         api_key = request.headers.get("X-API-Key", "")
         if api_key != approved_proxmox_agents[approved_hostname]:
             raise HTTPException(status_code=401, detail="invalid key")
-
-    async with state_lock:
-        expired, purged = _cleanup_commands_locked()
-        pending = [
-            c for c in commands
-            if c["status"] == "pending" and (
-                c["target"] == hostname or
-                (approved_hostname is not None and _proxmox_hostnames_match(c["target"], approved_hostname)) or
-                (c["target"] == "proxmox" and approved_hostname is not None)
-            )
-        ]
-        now = time.time()
-        for cmd in pending:
-            cmd["status"] = "delivered"
-            cmd["updated_at"] = now
-        if pending:
-            _save_commands()
-        serialized = _serialize_commands()
-        payload = [{"id": c["id"], "action": c["action"], "args": c["args"], "type": c.get("type")} for c in pending]
-
-    if pending or expired or purged:
-        await broadcast({"type": "commands_update", "commands": serialized})
-    return payload
+    return await _poll_agent_inbox(hostname, approved_hostname)
 
 
 @app.post("/api/inbox/ack")
@@ -7607,6 +8087,115 @@ async def acme_challenge(token: str):
     if not key_authorization:
         raise HTTPException(404)
     return PlainTextResponse(key_authorization)
+
+
+async def _proxmox_disconnect_grace(expected_hostname: str | None) -> None:
+    await asyncio.sleep(PROXMOX_WS_GRACE_SECS)
+    if proxmox_ws_connection is not None:
+        return
+    if expected_hostname and proxmox_ws_hostname and _proxmox_hostnames_match(expected_hostname, proxmox_ws_hostname):
+        return
+    if proxmox_state.get("last_seen") and (time.time() - float(proxmox_state.get("last_seen") or 0)) <= PROXMOX_WS_GRACE_SECS:
+        return
+    proxmox_state["connected"] = False
+    await _broadcast_proxmox_state()
+
+
+@app.websocket("/ws/client")
+async def ws_client_endpoint(
+    websocket: WebSocket,
+    hostname: str = Query(""),
+    platform: str = Query("linux"),
+    api_key: str = Query(""),
+) -> None:
+    del api_key
+    if not hostname:
+        await websocket.close(code=4400, reason="hostname is required")
+        return
+    await websocket.accept()
+    client_ws_connections[hostname] = websocket
+    try:
+        await _push_pending_agent_commands(hostname, websocket)
+        await websocket.send_json({"type": "hello", "hostname": hostname, "platform": platform})
+        while True:
+            data = await websocket.receive_json()
+            msg_type = str(data.get("type") or "status").strip().lower()
+            if msg_type == "status":
+                payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+                payload.setdefault("hostname", hostname)
+                payload.setdefault("platform", platform)
+                status = ClientStatus(**payload)
+                client_payload, watchdog_changed, ignored = await _apply_client_status(status)
+                if ignored is None:
+                    await broadcast({"type": "status_update", "client": client_payload})
+                    if watchdog_changed:
+                        await _broadcast_proxmox_state()
+                    await websocket.send_json({"type": "status_ack", "hostname": hostname})
+            elif msg_type == "ack":
+                payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+                await ack_command(payload)
+                await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
+            elif msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif msg_type == "sync":
+                await _push_pending_agent_commands(hostname, websocket)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if client_ws_connections.get(hostname) is websocket:
+            client_ws_connections.pop(hostname, None)
+
+
+@app.websocket("/ws/proxmox")
+async def ws_proxmox_endpoint(
+    websocket: WebSocket,
+    hostname: str = Query(""),
+    api_key: str = Query(""),
+) -> None:
+    global proxmox_ws_connection, proxmox_ws_hostname, proxmox_ws_disconnect_task
+    if not hostname:
+        await websocket.close(code=4400, reason="hostname is required")
+        return
+    approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, websocket.client.host if websocket.client else "unknown", time.time())
+    if response is not None or approved_hostname is None:
+        detail = response.body.decode("utf-8", errors="ignore") if isinstance(response, JSONResponse) else "agent not approved"
+        await websocket.close(code=4401, reason=detail[:120])
+        return
+    await websocket.accept()
+    proxmox_ws_connection = websocket
+    proxmox_ws_hostname = approved_hostname
+    if proxmox_ws_disconnect_task is not None:
+        proxmox_ws_disconnect_task.cancel()
+        proxmox_ws_disconnect_task = None
+    try:
+        await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)
+        while True:
+            data = await websocket.receive_json()
+            msg_type = str(data.get("type") or "telemetry").strip().lower()
+            if msg_type == "telemetry":
+                payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+                node = payload.get("node") if isinstance(payload.get("node"), dict) else {}
+                payload_hostname = str(node.get("hostname") or hostname).strip() or hostname
+                if not _proxmox_hostnames_match(payload_hostname, approved_hostname):
+                    await websocket.close(code=4403, reason="hostname mismatch")
+                    return
+                await _apply_proxmox_telemetry_state(payload, approved_hostname, time.time())
+                await websocket.send_json({"type": "telemetry_ack", "hostname": approved_hostname})
+            elif msg_type == "ack":
+                payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+                await ack_command(payload)
+                await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
+            elif msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif msg_type == "sync":
+                await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if proxmox_ws_connection is websocket:
+            proxmox_ws_connection = None
+            proxmox_ws_hostname = approved_hostname
+            proxmox_ws_disconnect_task = asyncio.create_task(_proxmox_disconnect_grace(approved_hostname))
 
 
 @app.websocket("/ws")

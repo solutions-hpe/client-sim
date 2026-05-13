@@ -197,8 +197,8 @@ report_status() {
     "$(json_escape "${kill_switch:-off}")" "$(json_escape "${dns_fail:-off}")" "$(json_escape "${iperf:-off}")" \
     "$(json_escape "${www_traffic:-off}")" "$(json_escape "${download:-off}")" "$(json_escape "${ping_test:-off}")" \
     "$(json_escape "${ssidpw_fail:-off}")" "$(json_escape "${auth_fail:-off}")" "$(json_escape "${dhcp_fail:-off}")"
-  curl -m 5 -s -o /dev/null -H "Content-Type: application/json" \
-    -X POST --data "$payload" "${server_url%/}/api/status" 2>/dev/null && \
+  local status_file="/usr/local/scripts/client-status.json"
+  printf '%s\n' "$payload" > "$status_file" 2>/dev/null && \
     { [[ -z "${_in_report_error:-}" ]] && error_log=(); } || true
   return 0
 }

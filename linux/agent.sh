@@ -1,10 +1,19 @@
 #!/bin/bash
-# agent.sh — Client inbox agent
-# Polls the WebUI API for pending commands and executes them.
-# Called from update.sh after the update tiers complete.
+# agent.sh — Client websocket agent
+# Launches a background websocket client that streams status and receives commands.
 
+set -u
+
+SCRIPT_PATH=$(python3 - <<'PY'
+from pathlib import Path
+print(Path(__file__).resolve())
+PY
+)
+PID_FILE="/var/run/client-sim-ws-agent.pid"
+STATUS_FILE="/usr/local/scripts/client-status.json"
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-agent.log"
+
 echo "Agent Script $(date)" | tee -a "$debug"
 
 source '/usr/local/scripts/ini-parser.sh'
@@ -12,39 +21,32 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
+platform="${CLIENT_SIM_PLATFORM:-linux}"
+hostname_val=$(hostname)
 
 [[ "$web_server" != "on" || -z "$server_url" ]] && exit 0
 
-hostname_val=$(hostname)
-
-# Poll inbox
-response=$(curl -sS --max-time 10 \
-  "$server_url/api/inbox?hostname=${hostname_val}" 2>/dev/null)
-
-[[ -z "$response" || "$response" == "[]" ]] && exit 0
-
-echo "Inbox response: $response" | tee -a "$debug"
-
-# Process each command (simple JSON parsing without jq — one command per line approach)
-# Extract id and action pairs using grep/sed
-echo "$response" | python3 -c "
+handle_command() {
+  local raw_cmd="${1:-}"
+  python3 - "$raw_cmd" <<'PY'
 import json, sys
-cmds = json.load(sys.stdin)
-for c in cmds:
-    print(c.get('id',''), c.get('action',''), json.dumps(c.get('args', {})), sep='\t')
-" 2>/dev/null | while IFS=$'\t' read -r cmd_id action args_json; do
-  # Extract a simple 'value' arg if present (e.g. {"value":"off"})
-  arg_value=$(echo "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null || true)
+cmd = json.loads(sys.argv[1] or '{}')
+print(cmd.get('id',''), cmd.get('action',''), json.dumps(cmd.get('args', {})), sep='\t')
+PY
+}
 
-  echo "Executing command: $cmd_id action=$action" | tee -a "$debug" "$log"
+run_command() {
+  local raw_cmd="${1:-}"
+  local cmd_id action args_json arg_value status message reboot_now
+  IFS=$'\t' read -r cmd_id action args_json < <(handle_command "$raw_cmd")
+  arg_value=$(printf '%s' "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null || true)
   status="completed"
   message=""
+  reboot_now="false"
 
+  echo "Executing command: $cmd_id action=$action" | tee -a "$debug" "$log"
   case "$action" in
     restart_sim)
-      # Send SIGUSR1 to simulation.sh so it exits its loop and re-execs cleanly.
-      # DO NOT use pkill — pkill kills the managed process that startup.desktop
-      # is watching, which causes "; systemctl reboot" to fire immediately.
       _sim_pid=$(pgrep -f '[/]simulation.sh' | head -1)
       if [[ -n "$_sim_pid" ]]; then
         kill -USR1 "$_sim_pid" 2>/dev/null || true
@@ -54,22 +56,12 @@ for c in cmds:
       fi
       ;;
     reboot)
-      # Early-boot guard: if simulation.sh isn't running yet we are still in the
-      # startup phase (called from update.sh before simulation starts). Executing a
-      # reboot here would cause a boot loop if a stale command slipped through.
-      # Once simulation.sh is running it is safe to honour a reboot command.
       if ! pgrep -f '[/]simulation.sh' >/dev/null 2>&1; then
         echo "Early-boot guard: skipping reboot command — simulation not yet running" | tee -a "$debug"
-        status="completed"
         message="Skipped — early-boot protection (simulation not running)"
       else
-        message="Rebooting"
-        curl -sS --max-time 5 -X POST "$server_url/api/inbox/ack" \
-          -H "Content-Type: application/json" \
-          -d "{\"id\":\"$cmd_id\",\"status\":\"completed\",\"message\":\"Rebooting now\"}" \
-          >/dev/null 2>&1
-        sudo reboot
-        exit 0
+        message="Rebooting now"
+        reboot_now="true"
       fi
       ;;
     update_now)
@@ -77,13 +69,9 @@ for c in cmds:
       message="Update triggered"
       ;;
     kill_switch)
-      # Set kill_switch to the requested value (default: on) in simulation.conf
       ks_val="${arg_value:-on}"
       if [[ "$ks_val" != "on" && "$ks_val" != "off" ]]; then ks_val="on"; fi
       sed -i "s/^kill_switch=.*/kill_switch=${ks_val}/" /usr/local/scripts/simulation.conf
-      # Send SIGUSR1 to break simulation.sh out of its loop/sleep so it re-execs
-      # and picks up the new kill_switch value immediately.
-      # DO NOT use pkill — see restart_sim comment above.
       _sim_pid=$(pgrep -f '[/]simulation.sh' | head -1)
       if [[ -n "$_sim_pid" ]]; then
         kill -USR1 "$_sim_pid" 2>/dev/null || true
@@ -101,11 +89,136 @@ for c in cmds:
       ;;
   esac
 
-  # ACK result
-  curl -sS --max-time 10 -X POST "$server_url/api/inbox/ack" \
-    -H "Content-Type: application/json" \
-    -d "{\"id\":\"$cmd_id\",\"status\":\"$status\",\"message\":\"$message\"}" \
-    >/dev/null 2>&1
+  python3 - <<PY
+import json
+print(json.dumps({
+  "id": ${cmd_id@Q},
+  "status": ${status@Q},
+  "message": ${message@Q},
+  "reboot": ${reboot_now@Q}
+}))
+PY
+}
 
-  echo "ACK sent: $cmd_id status=$status" | tee -a "$debug"
-done
+if [[ "${1:-}" == "--handle-command" ]]; then
+  run_command "${2:-{}}"
+  exit 0
+fi
+
+if [[ "${1:-}" != "--daemon" ]]; then
+  if [[ -f "$PID_FILE" ]]; then
+    existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+      exit 0
+    fi
+  fi
+  nohup bash "$0" --daemon >/dev/null 2>&1 &
+  echo $! > "$PID_FILE"
+  exit 0
+fi
+
+trap 'rm -f "$PID_FILE"' EXIT
+
+echo $$ > "$PID_FILE"
+
+python3 - "$0" "$server_url" "$hostname_val" "$platform" "$STATUS_FILE" <<'PY'
+import asyncio, json, os, pathlib, subprocess, sys
+
+script_path, server_url, hostname, platform, status_file = sys.argv[1:6]
+try:
+    import websockets
+except ImportError:
+    sys.exit(0)
+
+ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
+ws_url += f"/ws/client?hostname={hostname}&platform={platform}"
+
+
+def fallback_status():
+    return {
+        "hostname": hostname,
+        "simulation_id": "",
+        "platform": platform,
+        "iteration": 0,
+        "connected_ssid": "",
+        "gateway_reachable": False,
+        "active_simulations": [],
+        "errors": [],
+        "config": {},
+    }
+
+
+def load_status():
+    path = pathlib.Path(status_file)
+    if not path.exists():
+        return fallback_status()
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return fallback_status()
+    payload.setdefault("hostname", hostname)
+    payload.setdefault("platform", platform)
+    payload.setdefault("simulation_id", "")
+    payload.setdefault("iteration", 0)
+    payload.setdefault("gateway_reachable", False)
+    payload.setdefault("active_simulations", [])
+    payload.setdefault("errors", [])
+    payload.setdefault("config", {})
+    return payload
+
+
+async def handle_command(ws, command):
+    proc = await asyncio.create_subprocess_exec(
+        "bash", script_path, "--handle-command", json.dumps(command),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _stderr = await proc.communicate()
+    raw = stdout.decode().strip().splitlines()
+    if not raw:
+        return
+    try:
+        ack = json.loads(raw[-1])
+    except Exception:
+        return
+    await ws.send(json.dumps({"type": "ack", "payload": ack}))
+    if ack.get("reboot") == "true":
+        subprocess.Popen(["sudo", "reboot"])
+
+
+async def send_loop(ws):
+    while True:
+        await ws.send(json.dumps({"type": "status", "payload": load_status()}))
+        await asyncio.sleep(15)
+
+
+async def main():
+    backoff = 1
+    while True:
+        try:
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+                backoff = 1
+                await ws.send(json.dumps({"type": "sync"}))
+                sender = asyncio.create_task(send_loop(ws))
+                try:
+                    async for message in ws:
+                        try:
+                            payload = json.loads(message)
+                        except Exception:
+                            continue
+                        msg_type = str(payload.get("type") or "").lower()
+                        if msg_type == "commands":
+                            for command in payload.get("commands") or []:
+                                await handle_command(ws, command)
+                finally:
+                    sender.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await sender
+        except Exception:
+            await asyncio.sleep(min(backoff, 30))
+            backoff = min(backoff * 2, 30)
+
+
+import contextlib
+asyncio.run(main())
+PY

@@ -5,14 +5,14 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.25"
+AGENT_VERSION="3.26"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
-TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-10}"
+TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
 STATE_FILE="/etc/client-sim-usb-state.conf"
@@ -1736,6 +1736,50 @@ execute_vm_command() {
     esac
 }
 
+process_single_ws_command() {
+    local raw="${1:-{}}"
+    local parsed cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type status message
+    parsed=$(python3 - "$raw" <<'PY' 2>/dev/null || true
+import json, sys
+raw = sys.argv[1] if len(sys.argv) > 1 else '{}'
+try:
+    cmd = json.loads(raw)
+except Exception:
+    cmd = {}
+args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
+print(
+    str(cmd.get('id', '')).replace('\t', ' '),
+    str(cmd.get('action', '')).replace('\t', ' ').replace('-', '_'),
+    str(args.get('vmid', '')),
+    str(args.get('type') or args.get('vm_type') or '').replace('\t', ' '),
+    str(args.get('source_vmid', '')),
+    str(args.get('branch', '')).replace('\t', ' '),
+    str(args.get('repo_raw', '')).replace('\t', ' '),
+    str(cmd.get('type', '')).replace('\t', ' ').replace('-', '_'),
+    sep='\t'
+)
+PY
+)
+    IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type <<< "$parsed"
+    [[ -z "$cmd_id" || -z "$action" ]] && return 0
+    status="completed"
+    message="${action} completed"
+    if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" 2>>"$AGENT_LOG"; then
+        status="failed"
+        message="${action} failed — check $AGENT_LOG"
+    fi
+    ack_inbox_command "$cmd_id" "$status" "$message" || true
+}
+
+if [[ "${1:-}" == "--collect-telemetry" ]]; then
+    collect_telemetry 2>/dev/null || true
+    exit 0
+fi
+if [[ "${1:-}" == "--process-single-command" ]]; then
+    process_single_ws_command "${2:-{}}"
+    exit 0
+fi
+
 mkdir -p /var/lib/client-sim
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
@@ -1768,23 +1812,103 @@ post_telemetry() {
     esac
 }
 
-# Background real-time telemetry sender (every TELEMETRY_INTERVAL seconds)
-# Runs as a subprocess — reads node/VM stats fresh and USB state from cache files
-(
-    while true; do
-        sleep "$TELEMETRY_INTERVAL"
-        post_telemetry || true
-    done
-) &
-TELEMETRY_PID=$!
-log "Background telemetry sender started (PID $TELEMETRY_PID, interval ${TELEMETRY_INTERVAL}s)"
-
-post_telemetry || true
-
 # ── Inbox command processor ────────────────────────────────────────────────────
 # Runs in its own background loop every INBOX_INTERVAL seconds, fully decoupled
 # from the main USB provisioning loop. Reclone wait+ACK is itself backgrounded
 # so process_inbox always returns immediately — never blocked by clone operations.
+start_proxmox_ws_client() {
+    local poll_hostname script_path
+    poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
+    script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" <<'PY' &
+import asyncio, contextlib, json, sys
+script_path, server_url, api_key, hostname, telemetry_interval = sys.argv[1:6]
+telemetry_interval = max(1, int(float(telemetry_interval or 3)))
+try:
+    import websockets
+except ImportError:
+    sys.exit(1)
+ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
+ws_url += f"/ws/proxmox?hostname={hostname}&api_key={api_key}"
+async def collect_telemetry():
+    proc = await asyncio.create_subprocess_exec(
+        'bash', script_path, '--collect-telemetry',
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    raw = stdout.decode().strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+async def run_command(command):
+    proc = await asyncio.create_subprocess_exec(
+        'bash', script_path, '--process-single-command', json.dumps(command),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+async def send_loop(ws):
+    while True:
+        payload = await collect_telemetry()
+        if payload is not None:
+            await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
+        await asyncio.sleep(telemetry_interval)
+async def main():
+    backoff = 1
+    while True:
+        try:
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+                backoff = 1
+                await ws.send(json.dumps({'type': 'sync'}))
+                sender = asyncio.create_task(send_loop(ws))
+                try:
+                    async for message in ws:
+                        try:
+                            payload = json.loads(message)
+                        except Exception:
+                            continue
+                        msg_type = str(payload.get('type') or '').lower()
+                        if msg_type == 'commands':
+                            for command in payload.get('commands') or []:
+                                await run_command(command)
+                        elif msg_type == 'command':
+                            await run_command(payload)
+                finally:
+                    sender.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await sender
+        except Exception:
+            await asyncio.sleep(min(backoff, 30))
+            backoff = min(backoff * 2, 30)
+asyncio.run(main())
+PY
+    WS_PID=$!
+    log "Proxmox WebSocket client started (PID $WS_PID)"
+}
+
+USE_PROXMOX_WS=0
+if python3 -c "import websockets" >/dev/null 2>&1; then
+    start_proxmox_ws_client || true
+    USE_PROXMOX_WS=1
+fi
+
+if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
+    # Background real-time telemetry sender (every TELEMETRY_INTERVAL seconds)
+    # Runs as a subprocess — reads node/VM stats fresh and USB state from cache files
+    (
+        while true; do
+            sleep "$TELEMETRY_INTERVAL"
+            post_telemetry || true
+        done
+    ) &
+    TELEMETRY_PID=$!
+    log "Background telemetry sender started (PID $TELEMETRY_PID, interval ${TELEMETRY_INTERVAL}s)"
+
+    post_telemetry || true
+fi
+
 process_inbox() {
     local response_with_status response status poll_hostname
     local -a args
@@ -2023,15 +2147,17 @@ PY
     fi
 }
 
-# Launch inbox as an independent background loop
-(
-    while true; do
-        process_inbox || true
-        sleep "$INBOX_INTERVAL"
-    done
-) &
-INBOX_PID=$!
-log "Background inbox poller started (PID $INBOX_PID, interval ${INBOX_INTERVAL}s)"
+# Launch inbox as an independent background loop only when websocket transport is unavailable
+if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
+    (
+        while true; do
+            process_inbox || true
+            sleep "$INBOX_INTERVAL"
+        done
+    ) &
+    INBOX_PID=$!
+    log "Background inbox poller started (PID $INBOX_PID, interval ${INBOX_INTERVAL}s)"
+fi
 
 while true; do
     refresh_usb_config || true
