@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.30"
+AGENT_VERSION="3.31"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -24,6 +24,7 @@ USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
 USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
+RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -1647,6 +1648,7 @@ print(json.dumps(out))
     "storage": ${storage_json:-[]}
   },
   "agent_version": "${AGENT_VERSION}",
+  "reseed_in_progress": $([ -f "$RESEED_LOCK_FILE" ] && echo true || echo false),
   "pve_version": "${pve_version}",
   "missing_timeout_mins": ${MISSING_TIMEOUT},
   "vms": ${vms_json:-[]},
@@ -1709,6 +1711,14 @@ self_update_agent() {
     fi
 }
 
+run_reseed_command() {
+    local status=0
+    touch "$RESEED_LOCK_FILE"
+    [[ -f /opt/client-sim-repo/proxmox/clone.sh ]] && bash /opt/client-sim-repo/proxmox/clone.sh || status=$?
+    rm -f "$RESEED_LOCK_FILE"
+    return "$status"
+}
+
 execute_vm_command() {
     local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}"
     local guest_type="${_type:-qemu}"
@@ -1750,7 +1760,9 @@ execute_vm_command() {
                 destroy_vm "$vmid"
             fi
             ;;
-        reclone_vms)  [[ -f /opt/client-sim-repo/proxmox/clone.sh ]] && bash /opt/client-sim-repo/proxmox/clone.sh ;;
+        reclone_vms|reseed)
+            run_reseed_command
+            ;;
         provision_unassigned)
             log "provision_unassigned: running USB provision loop to assign dongles without VMs"
             usb_provision_loop || log "WARNING: provision_unassigned loop failed"
@@ -1814,6 +1826,8 @@ if [[ "${1:-}" == "--process-single-command" ]]; then
 fi
 
 mkdir -p /var/lib/client-sim
+# Clean up any stale reseed lock from a previous crash
+rm -f "$RESEED_LOCK_FILE"
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
 _LAST_SELF_UPDATE=0
@@ -2195,6 +2209,11 @@ if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
 fi
 
 while true; do
+    if [[ "$AUTO_PROVISION" == "on" ]] && [[ -f "$RESEED_LOCK_FILE" ]]; then
+        log "Reseed in progress — skipping auto-provisioning cycle"
+        sleep 5
+        continue
+    fi
     refresh_usb_config || true
     if [[ "$AUTO_PROVISION" == "on" ]]; then
         usb_provision_loop || log "WARNING: USB auto-provisioning loop failed"
