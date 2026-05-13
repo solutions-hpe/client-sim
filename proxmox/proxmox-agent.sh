@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.17"
+AGENT_VERSION="3.18"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"

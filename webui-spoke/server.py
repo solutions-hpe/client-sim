@@ -328,7 +328,7 @@ def _save_state_cache(force: bool = False) -> None:
         return
     try:
         cache = {
-            "proxmox_state": {**proxmox_state, "connected": False},
+            "proxmox_state": dict(proxmox_state),
             "central_status": central_status,
             "central_wireless_clients": dict(central_wireless_clients),
             "repo_state": dict(repo_state),
@@ -386,7 +386,13 @@ def _load_state_cache() -> None:
         cached_px = cache.get("proxmox_state", {})
         if cached_px:
             proxmox_state.update(cached_px)
-            proxmox_state["connected"] = False  # never restore as connected
+            # Restore connected status only if last_seen is within OFFLINE_TIMEOUT;
+            # otherwise agent has gone quiet and we should show disconnected.
+            last_seen_ts = cached_px.get("last_seen")
+            if last_seen_ts and (time.time() - last_seen_ts) <= OFFLINE_TIMEOUT:
+                proxmox_state["connected"] = cached_px.get("connected", False)
+            else:
+                proxmox_state["connected"] = False
         central_status.update(cache.get("central_status", {}))
         central_wireless_clients.update(cache.get("central_wireless_clients", {}))
         cached_repo = cache.get("repo_state", {})
@@ -1086,6 +1092,59 @@ def _central_token_state() -> dict[str, str]:
             return {"state": "token_expired", "detail": "Token has expired — will refresh on next poll"}
         return {"state": "token_expired", "detail": "Token has expired — re-enter a valid token in Setup tab"}
     return {"state": "connected", "detail": "Token valid"}
+
+
+async def _apply_central_feed(feed: dict) -> None:
+    """Apply hub-provided Central data feed to local in-memory state (centralized mode)."""
+    global central_status, central_wireless_clients, hardware_alert_devices
+    new_status = feed.get("status") or {}
+    new_wireless = feed.get("wireless_clients") or {}
+    token_valid = bool(feed.get("token_valid", False))
+    hardware_alerts = feed.get("hardware_alerts") or []
+
+    central_status.clear()
+    for wsite, checks in new_status.items():
+        if isinstance(checks, dict):
+            central_status[wsite] = {
+                cid: dict(v) for cid, v in checks.items() if isinstance(v, dict)
+            }
+    central_wireless_clients.clear()
+    central_wireless_clients.update({w: int(c or 0) for w, c in new_wireless.items()})
+
+    hardware_alert_devices = {}
+    for alert in hardware_alerts:
+        if not isinstance(alert, dict):
+            continue
+        check_id = str(alert.get("id") or "").strip()
+        if not check_id:
+            continue
+        sites = alert.get("sites") or {}
+        site_devices: dict[str, list[str]] = {}
+        for wsite, info in sites.items():
+            if not isinstance(info, dict):
+                continue
+            devices = [str(device).strip() for device in info.get("devices") or [] if str(device).strip()]
+            if devices:
+                site_devices[str(wsite)] = devices
+        hardware_alert_devices[check_id] = site_devices
+
+    # Update token state so spoke Central tab shows connected status
+    if token_valid:
+        central_token.setdefault("access_token", "_hub_managed_")
+        central_token["expires_at"] = time.time() + 3600
+    else:
+        central_token["access_token"] = None
+        central_token["expires_at"] = 0.0
+
+    await broadcast({
+        "type": "central_update",
+        "status": _central_status_payload(),
+        "wireless_clients": dict(central_wireless_clients),
+        "hardware_alerts": _hw_alerts_payload(),
+        "client_count_status": _client_count_payload(),
+        "ts": time.time(),
+        "token_state": _central_token_state(),
+    })
 
 
 def _can_refresh() -> bool:
@@ -1883,6 +1942,9 @@ async def central_poller() -> None:
     async with httpx.AsyncClient() as client:
         while True:
             try:
+                if settings.get("hub_aruba_polling_mode") == "centralized":
+                    await asyncio.sleep(300)
+                    continue
                 await _poll_central_once(client)
                 _update_service_health("central_poller", ok=True)
             except asyncio.CancelledError:
@@ -3523,6 +3585,7 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     if central_api_payload is not ...:
         if central_api_payload is None:
             settings["central_api"] = _default_central_api_settings()
+            settings["hub_aruba_polling_mode"] = "centralized"
         elif isinstance(central_api_payload, dict):
             merged_api = _normalize_central_api_settings(settings.get("central_api", {}), settings.get("central_config", {}))
             mode = str(central_api_payload.get("mode", merged_api.get("mode", "classic"))).strip().lower()
@@ -3542,6 +3605,7 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
                 if "client_secret" in central_update:
                     merged_api["central"]["client_secret"] = "" if central_update.get("client_secret") is None else str(central_update.get("client_secret", ""))
             settings["central_api"] = merged_api
+            settings["hub_aruba_polling_mode"] = "distributed"
         changed.append("central_api")
         central_changed = True
 
@@ -3740,6 +3804,9 @@ async def relay_sync_once() -> None:
                     "client_count_status": _client_count_payload(),
                     "token_valid": bool(central_token.get("access_token") and time.time() < central_token.get("expires_at", 0)),
                     "token_state": _central_token_state(),
+                    "site_mappings": dict(settings.get("site_mappings", {})),
+                    "monitored_checks": list(settings.get("monitored_checks", [])),
+                    "hardware_checks": list(settings.get("hardware_checks", [])),
                 },
                 "reclone_state": {
                     k: v for k, v in reclone_state.items() if k != "log" and k != "auto_recovery_log"
@@ -3750,6 +3817,14 @@ async def relay_sync_once() -> None:
             telemetry_resp = await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
             telemetry_resp.raise_for_status()
             resp = await hc.get(f"{base}/inbox", headers=headers)
+            # In centralized mode, get Central data from hub instead of polling directly
+            if settings.get("hub_aruba_polling_mode") == "centralized":
+                try:
+                    feed_resp = await hc.get(f"{base}/central-feed", headers=headers, timeout=15)
+                    if feed_resp.status_code == 200:
+                        await _apply_central_feed(feed_resp.json())
+                except Exception as _feed_exc:
+                    logger.debug("Central feed fetch failed: %s", _feed_exc)
             resp.raise_for_status()
             remote_cmds = resp.json()
 
