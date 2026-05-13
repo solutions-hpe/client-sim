@@ -9,7 +9,7 @@ STATE_FILE="${STATE_DIR}/state"
 LOG_FILE="/var/log/proxmox-watchdog.log"
 INSTALLER_PATH="/opt/proxmox-agent-installer/install-proxmox-agent.sh"
 INSTALLER_TMP_PATH="/tmp/install-proxmox-agent-latest.sh"
-REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-lrb}"
+REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-main}"
 
 log_event() {
     local timestamp message

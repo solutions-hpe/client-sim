@@ -36,9 +36,9 @@ BRIDGE_COMMENT="${BRIDGE_COMMENT:-Client-Sim internal isolated network}"
 INTERFACES_FILE="/etc/network/interfaces"
 
 # Script sync configuration
-# Default branch is lrb until promoted to main — override with --branch or REPO_BRANCH env var
+# Default branch is main — override with --branch or REPO_BRANCH env var
 REPO_URL="https://github.com/solutions-hpe/client-sim.git"
-REPO_BRANCH="${REPO_BRANCH:-lrb}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_CACHE="/opt/client-sim-repo"
 SCRIPT_DST="/etc/pve/scripts"
 CRON_FILE="/etc/cron.d/client-sim-sync"

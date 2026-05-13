@@ -41,7 +41,7 @@ Options:
 
 Examples:
   sudo bash install-lxc.sh
-  sudo bash install-lxc.sh --branch lrb --port 9000
+  sudo bash install-lxc.sh --branch main --port 9000
   sudo bash install-lxc.sh --reinstall --branch main
 EOF
   exit 0
@@ -453,7 +453,7 @@ fi
 # STEP 5c — cs-webui frontend (app.js, style.css, index.html from cs-webui repo)
 #
 # Files are fetched from cs-webui at the same branch as the spoke repo so dev
-# work on lrb automatically pulls the lrb version of the unified frontend.
+# work on main automatically pulls the main version of the unified frontend.
 # After fetch, WEBUI_MODE is injected as 'spoke' into index.html.
 # Failures are non-fatal — the spoke continues with whatever version exists.
 ###############################################################################

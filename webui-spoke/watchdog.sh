@@ -11,7 +11,7 @@ INSTALLER_PATH="${INSTALLER_PATH:-/opt/client-sim-repo/webui-spoke/install-lxc.s
 INSTALLER_TMP_PATH="${INSTALLER_TMP_PATH:-/tmp/install-lxc-latest.sh}"
 HEALTH_PATH="${HEALTH_PATH:-/api/health}"
 PORT="${PORT:-8000}"
-REPO_BRANCH="${REPO_BRANCH:-lrb}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 FAILURE_COUNT=0
 INSTALLED_VERSION=""
 

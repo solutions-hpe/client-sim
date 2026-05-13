@@ -195,7 +195,7 @@ class UpstreamJSONError(RuntimeError):
     """Raised when an upstream service returns malformed JSON."""
 
 
-REPO_BRANCH = os.getenv("REPO_BRANCH", "lrb")
+REPO_BRANCH = os.getenv("REPO_BRANCH", "main")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "300"))
 # Max error entries kept per client in memory.
 # WHY: errors accumulate over a long run; capping prevents unbounded memory growth.
@@ -5205,7 +5205,7 @@ async def _run_self_update() -> None:
         full_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         installer = _shlex.quote(str(_INSTALLER_PATH))
         # Pass --branch and --port so the bootstrap step can curl the right branch.
-        _branch = _shlex.quote(os.environ.get("REPO_BRANCH", "lrb"))
+        _branch = _shlex.quote(os.environ.get("REPO_BRANCH", "main"))
         _port   = _shlex.quote(os.environ.get("PORT", "8000"))
         _base     = f'/bin/bash {installer} --branch {_branch} --port {_port}'
         shell_cmd = _base if _os.geteuid() == 0 else f'sudo -n /bin/bash {installer} --branch {_branch} --port {_port}'
@@ -7937,7 +7937,7 @@ async def api_system_health(request: Request) -> dict[str, Any]:
     raw_base = REPO_URL.replace(".git", "").replace(
         "github.com", "raw.githubusercontent.com"
     )
-    branch = os.environ.get("REPO_BRANCH", "lrb")
+    branch = os.environ.get("REPO_BRANCH", "main")
     install_cmd = (
         f"bash <(curl -sSL {raw_base}/{branch}/proxmox/install-proxmox-agent.sh)"
         f" --server {base}"

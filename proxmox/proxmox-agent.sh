@@ -1738,7 +1738,7 @@ self_update_agent() {
     local configured_branch branch repo_raw download_dir tmp_file
     configured_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
     branch="${requested_branch:-$configured_branch}"
-    branch="${branch:-lrb}"
+    branch="${branch:-main}"
     repo_raw="${requested_repo_raw:-https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}}"
     download_dir="/var/lib/client-sim/update"
     tmp_file="${download_dir}/proxmox-agent.sh.download"

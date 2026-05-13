@@ -298,8 +298,8 @@ ok "Base packages installed in container"
 
 info "Running Client-Sim dashboard installer inside container..."
 pct exec "$CTID" -- bash -c "
-  curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/lrb/webui-spoke/install-lxc.sh \
-    | bash -s -- --branch lrb --port 8000
+  curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/webui-spoke/install-lxc.sh \
+    | bash -s -- --branch main --port 8000
 "
 ok "Client-Sim dashboard installed"
 

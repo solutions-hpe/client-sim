@@ -17,8 +17,8 @@
 #
 # Configuration — edit these to match your environment
 REPO_URL="https://github.com/solutions-hpe/client-sim.git"
-# Default branch is lrb until promoted to main — override with REPO_BRANCH env var
-REPO_BRANCH="${REPO_BRANCH:-lrb}"
+# Default branch is main — override with REPO_BRANCH env var
+REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_CACHE="/opt/client-sim-repo"
 SCRIPT_SRC="$REPO_CACHE/proxmox"          # folder inside the repo to install from
 SCRIPT_DST="/etc/pve/scripts"             # where scripts live on the Proxmox host
