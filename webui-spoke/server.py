@@ -8137,12 +8137,18 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
     if not hostname:
         raise HTTPException(status_code=422, detail="hostname is required")
-    _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox")
+    # Accept either a valid simulation client key OR a valid proxmox agent key.
+    # Proxmox agents send X-API-Key; simulation clients send X-Client-Key.
+    api_key = request.headers.get("X-API-Key", "")
     approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
-    if approved_hostname is not None:
-        api_key = request.headers.get("X-API-Key", "")
-        if api_key != approved_proxmox_agents[approved_hostname]:
-            raise HTTPException(status_code=401, detail="invalid key")
+    is_approved_proxmox = (
+        approved_hostname is not None
+        and api_key == approved_proxmox_agents[approved_hostname]
+    )
+    if not is_approved_proxmox:
+        _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox")
+    elif api_key != approved_proxmox_agents[approved_hostname]:
+        raise HTTPException(status_code=401, detail="invalid key")
     return await _poll_agent_inbox(hostname, approved_hostname)
 
 
@@ -8174,7 +8180,13 @@ async def _ack_command_internal(body: dict[str, Any]) -> dict[str, bool]:
 @app.post("/api/inbox/ack")
 async def ack_command(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, bool]:
     """Device reports command result."""
-    _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox/ack")
+    # Accept either a valid simulation client key OR a valid proxmox agent key.
+    api_key = request.headers.get("X-API-Key", "")
+    is_approved_proxmox = any(
+        api_key == v for v in approved_proxmox_agents.values()
+    ) if api_key else False
+    if not is_approved_proxmox:
+        _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox/ack")
     return await _ack_command_internal(body)
 
 
