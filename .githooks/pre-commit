@@ -1,0 +1,92 @@
+#!/bin/bash
+# Pre-commit hook: syntax checks + auto-increment version numbers.
+
+set -euo pipefail
+
+LINUX_VER_FILE="linux/VERSION"
+INSTALLER="webui-spoke/install-lxc.sh"
+AGENT="proxmox/proxmox-agent.sh"
+
+# ── Syntax checks ─────────────────────────────────────────────────────────────
+
+fail=0
+
+# Python: compile-check any staged .py files
+staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+for f in $staged_py; do
+    if ! py_err=$(python3 -m py_compile "$f" 2>&1); then
+        echo "[pre-commit] ✗ Python syntax error in $f:"
+        echo "$py_err"
+        fail=1
+    fi
+done
+
+# Bash: check staged .sh files
+staged_sh=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
+for f in $staged_sh; do
+    if ! sh_err=$(bash -n "$f" 2>&1); then
+        echo "[pre-commit] ✗ Bash syntax error in $f:"
+        echo "$sh_err"
+        fail=1
+    fi
+done
+
+# JavaScript: real V8 syntax check via node --check
+NODE_BIN=$(command -v node 2>/dev/null || echo "/opt/homebrew/bin/node")
+staged_js=$(git diff --cached --name-only --diff-filter=ACM | grep '\.js$' || true)
+for f in $staged_js; do
+    if ! js_err=$("$NODE_BIN" --check "$f" 2>&1); then
+        echo "[pre-commit] ✗ JS syntax error in $f:"
+        echo "$js_err"
+        fail=1
+    fi
+done
+
+if [[ $fail -ne 0 ]]; then
+    echo "[pre-commit] Commit blocked due to syntax errors above. Fix and re-stage."
+    exit 1
+fi
+
+echo "[pre-commit] Syntax checks passed ✓"
+
+# ── Version bump ──────────────────────────────────────────────────────────────
+# Skip on main — the post-merge hook owns versioning there.
+_current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+if [[ "$_current_branch" == "main" ]]; then
+    echo "[pre-commit] On main branch — version bump managed by post-merge hook"
+    exit 0
+fi
+
+# Skip the bump if every staged change is a .conf file — conf changes are
+# propagated to clients independently via the API diff check in update.sh,
+# so they don't need a VERSION increment.
+
+staged_non_conf=$(git diff --cached --name-only --diff-filter=ACM | grep -v '\.conf$' || true)
+if [[ -z "$staged_non_conf" ]]; then
+    echo "[pre-commit] Only .conf files staged — skipping version bump"
+    exit 0
+fi
+
+current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$current" ]]; then
+    echo "[pre-commit] WARNING: $LINUX_VER_FILE not found — skipping version bump"
+    exit 0
+fi
+
+# If --no-verify commits were made since the last hook run, the VERSION file
+# will be behind the actual latest commit. Parse the last commit's subject line
+# (format "vX.XX: ...") and use whichever is higher so the bump is always correct.
+commit_ver=$(git log -1 --format="%s" 2>/dev/null | grep -oE '^v[0-9]+\.[0-9]+' | tr -d 'v' || true)
+if [[ -n "$commit_ver" ]] && awk -v a="$commit_ver" -v b="$current" 'BEGIN { exit !(a+0 > b+0) }'; then
+    echo "[pre-commit] VERSION file ($current) is behind last commit (v$commit_ver) — syncing up"
+    current="$commit_ver"
+fi
+
+new=$(awk -v v="$current" 'BEGIN { printf "%.2f", v + 0.01 }')
+echo "[pre-commit] Bumping version $current → $new"
+
+echo "$new" > "$LINUX_VER_FILE"
+sed -i.bak "s/^VERSION=\"[^\"]*\"/VERSION=\"$new\"/" "$INSTALLER" && rm -f "${INSTALLER}.bak"
+sed -i.bak "s/^AGENT_VERSION=\"[^\"]*\"/AGENT_VERSION=\"$new\"/" "$AGENT" && rm -f "${AGENT}.bak"
+
+git add "$LINUX_VER_FILE" "$INSTALLER" "$AGENT"

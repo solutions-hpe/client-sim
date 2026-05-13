@@ -1,187 +1,923 @@
-#!/bin/bash
-version=.43
-touch /tmp/client-sim.log
-echo Installer Version $version | tee /tmp/client-sim.log
-sudo apt install gnome-terminal -y
-gnome-terminal --geometry=80x15+0+477 -- tail -f /tmp/client-sim.log
-#lxterminal -t Installer --geometry=80x15 -e tail -f /tmp/client-sim.log
-#------------------------------------------------------------
-#Checking OS
-os=$(uname -n)
-#------------------------------------------------------------
-echo Adding user $USER to sudoers for script simlulations | tee -a /tmp/client-sim.log
-if sudo grep -q "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" "/etc/sudoers"; then
-  echo User is already setup in sudoers | tee -a /tmp/client-sim.log
-else
-  echo Enabling no password for sudo for current user | tee -a /tmp/client-sim.log
-  echo "$USER   ALL=(ALL:ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers
+#!/usr/bin/env bash
+###############################################################################
+# Client Simulator Installer v0.09
+###############################################################################
+
+set -euo pipefail
+export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+
+###############################################################################
+# Debug flag  (sudo bash install.sh --debug)
+###############################################################################
+DEBUG=0
+for arg in "$@"; do
+  [[ "$arg" == "--debug" || "$arg" == "-d" ]] && DEBUG=1
+done
+
+###############################################################################
+# Root check
+###############################################################################
+if [[ "$EUID" -ne 0 ]]; then
+  echo "ERROR: This script must be run as root (e.g. sudo $0)" >&2
+  exit 1
 fi
-echo Making scripts directory | tee -a /usr/local/scripts/sim.log
-sudo mkdir /usr/local/scripts
-#Without this - the logging screens at boot will not be pinned to the right x,y coordinates
-echo Disabling Wayland so gnome-terminal windows can be pinned | tee -a /tmp/client-sim.log
-sudo sed -i '/WaylandEnable=false/s/^#//g' /etc/gdm3/custom.conf
-#By default screen will blank and need to log back in after 5 minutes - disabling this as the client is running scripts
-echo Disabling screen blanking | tee -a /tmp/client-sim.log
-gsettings set org.gnome.desktop.session idle-delay 0
-xset s noblank
-xset -dpms
-xset s off
-#Setting Resolution
-xrandr --output Virtual-1 --mode 1440x900
-#On raspberrypi changing WLAN local to US
-#Only applies to raspberrypi
-sudo raspi-config nonint do_change_locale en_US.UTF-8
-sudo raspi-config nonint do_wifi_country US
-#Installing SMBClient to sync with local CIFS repo
-#Installing DKMS, DNSUtils, QEMU Agent, GIT, Net Tools
-#------------------------------------------------------------
-echo Running system updates | tee -a /tmp/client-sim.log
-sudo DEBIAN_FRONTEND=noninteractive apt update
-sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y
-sudo DEBIAN_FRONTEND=noninteractive apt remote sysstat -y
-sudo DEBIAN_FRONTEND=noninteractive apt install git -y
-sudo DEBIAN_FRONTEND=noninteractive apt install wget -y
-sudo DEBIAN_FRONTEND=noninteractive apt install network-manager -y
-sudo DEBIAN_FRONTEND=noninteractive apt install qemu-guest-agent -y
-sudo DEBIAN_FRONTEND=noninteractive apt install net-tools -y
-sudo DEBIAN_FRONTEND=noninteractive apt install smbclient -y
-sudo DEBIAN_FRONTEND=noninteractive apt install dnsutils -y
-sudo DEBIAN_FRONTEND=noninteractive apt install dkms -y
-sudo DEBIAN_FRONTEND=noninteractive apt install iperf3 -y
-sudo DEBIAN_FRONTEND=noninteractive apt install firefox-esr -y
-sudo DEBIAN_FRONTEND=noninteractive apt install rsyslog -y
-sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
-#------------------------------------------------------------
-#VirtualHere is coded into the client simulation
-#VirtualHere is used to connect to a remote USB dongle (Wired or Wireless)
-#No license is required for the client - only the server needs to be licensed
-#Installing so the client is ready to connect to a server if configured
-echo Downloading VirtualHere client | tee -a /tmp/client-sim.log
-wget https://www.virtualhere.com/sites/default/files/usbclient/scripts/virtualhereclient.service
-sleep 1
-wget https://www.virtualhere.com/sites/default/files/usbclient/vhclientx86_64
-sleep 1
-chmod +x ./vhclientx86_64
-echo Installing VirtualHere client | tee -a /tmp/client-sim.log
-sudo mv ./vhclientx86_64 /usr/sbin
-sudo mv virtualhereclient.service /etc/systemd/system/virtualhereclient.service
-sudo systemctl daemon-reload
-sudo systemctl enable virtualhereclient.service
-sudo systemctl start virtualhereclient.service
-rm /usr/local/scripts/vhcached.txt
-smbclient //nas/scripts -N -c 'lcd /usr/local/scripts/; cd /SIM/CONFIG/; prompt off; mget *.conf'
-/usr/sbin/vhclientx86_64 -t "AUTO USE CLEAR ALL"
-/usr/sbin/vhclientx86_64 -t "STOP USING ALL LOCAL"
-#------------------------------------------------------------
-echo Downloading scripts from source on GitHub | tee -a /tmp/client-sim.log
-cd ~
-git clone https://github.com/solutions-hpe/client-sim.git
-cd client-sim
-cd linux
-#switching the branch to the one designated in the simulation.conf file
-#Copying config file template for syslog messages of simulation
-sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
-#copying startup files to autostart
-sudo cp *.desktop /etc/xdg/autostart/
-#copying shell scripts to the active script repo
-sudo mkdir /usr/local/scripts
-sudo cp *.sh /usr/local/scripts/
-#copying flat files for simulation to active script repo
-sudo cp *.txt /usr/local/scripts/
-#making all simulation scripts executable
-sudo chmod -R 777 /usr/local/scripts
-if [ -e "/usr/local/scripts/simulation.conf" ]; then
- echo Local simulation config exists | tee -a /tmp/client-sim.log
-else
- #copying latest config file to active repository
- echo Coying config from local repo | tee -a /tmp/client-sim.log
- cd ..
- cd configs
- sudo cp simulation.conf /usr/local/scripts/simulation.conf
+
+###############################################################################
+# Non-interactive guarantees
+###############################################################################
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1          # belt-and-suspenders for needrestart
+export GIT_TERMINAL_PROMPT=0
+export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
+export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
+
+VERSION="0.16"
+INSTALL_START=$(date +%s)
+WARN_COUNT=0
+ERR_COUNT=0
+PHASE_START=0
+
+###############################################################################
+# Platform detection
+###############################################################################
+IS_PI=false
+if grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
+  IS_PI=true
 fi
+# Also catch Pi via cpuinfo (older firmware / no device-tree)
+if ! $IS_PI && grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
+  IS_PI=true
+fi
+
+###############################################################################
+# Logging
+###############################################################################
+STATE_DIR="/var/lib/client-sim"
+LOG="/var/log/client-sim_install.log"
+DRIVER_STATE="$STATE_DIR/wlan-drivers.state"
+
+mkdir -p "$STATE_DIR"
+: >"$LOG"
+: >"$DRIVER_STATE"
+chmod 644 "$LOG" "$DRIVER_STATE"
+
+ts()   { date "+%H:%M:%S"; }
+info() { echo "[$(ts)] INFO: $*" | tee -a "$LOG"; }
+ok()   { echo "[$(ts)] OK:   $*" | tee -a "$LOG"; }
+warn() { WARN_COUNT=$(( WARN_COUNT + 1 )); echo "[$(ts)] WARN: $*" | tee -a "$LOG"; }
+err()  { ERR_COUNT=$(( ERR_COUNT + 1 ));  echo "[$(ts)] ERR:  $*" | tee -a "$LOG" >&2; }
+
+###############################################################################
+# PROGRESS TRACKING
+###############################################################################
+PHASE_NAMES=(
+  "User Provisioning"
+  "Package Install"
+  "GNOME Configuration"
+  "Scripts Directory"
+  "Client-Sim Repo"
+  "SMB Config Sync"
+  "rsyslog Config"
+  "WLAN Drivers"
+  "Health Check"
+)
+PHASE_WEIGHTS=( 4 12 5 2 8 5 3 10 49 2 )
+
+CURRENT_PHASE=0
+CURRENT_PROGRESS=0
+
+# ── Terminal helpers ─────────────────────────────────────────────────────────
+TERM_WIDTH=80
+if command -v tput &>/dev/null && tput cols &>/dev/null 2>&1; then
+  TERM_WIDTH="$(tput cols)"
+fi
+BAR_WIDTH=$(( TERM_WIDTH - 30 ))
+[[ "$BAR_WIDTH" -lt 20 ]] && BAR_WIDTH=20
+
+COL_RESET="\033[0m"
+COL_GREEN="\033[0;32m"
+COL_RED="\033[0;31m"
+COL_CYAN="\033[0;36m"
+COL_YELLOW="\033[1;33m"
+COL_BOLD="\033[1m"
+COL_DIM="\033[2m"
+
+# ── Draw progress bar ────────────────────────────────────────────────────────
+draw_bar() {
+  local pct="$1" label="$2"
+  local filled=$(( pct * BAR_WIDTH / 100 ))
+  local empty=$(( BAR_WIDTH - filled ))
+  local bar=""
+
+  for (( i=0; i<filled; i++ )); do bar+="█"; done
+  for (( i=0; i<empty;  i++ )); do bar+="░"; done
+
+  printf "\r${COL_BOLD}%-20s${COL_RESET} %s ${COL_BOLD}%3d%%${COL_RESET}" \
+    "${label:0:20}" "$bar" "$pct"
+}
+
+# ── Phase control ────────────────────────────────────────────────────────────
+begin_phase() {
+  PHASE_START=$(date +%s)
+  local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
+  draw_bar "$CURRENT_PROGRESS" "$name"
+  echo ""
+  info "Phase $((CURRENT_PHASE+1))/${#PHASE_NAMES[@]}: $name"
+}
+
+end_phase() {
+  local elapsed=$(( $(date +%s) - PHASE_START ))
+  local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
+  CURRENT_PROGRESS=$(( CURRENT_PROGRESS + weight ))
+  [[ "$CURRENT_PROGRESS" -gt 100 ]] && CURRENT_PROGRESS=100
+  local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
+  draw_bar "$CURRENT_PROGRESS" "$name"
+  printf "  ${COL_GREEN}✓${COL_RESET}  ${COL_DIM}(%ds)${COL_RESET}\n" "$elapsed"
+  CURRENT_PHASE=$(( CURRENT_PHASE + 1 ))
+}
+
+# ── Sub-step progress within a phase ────────────────────────────────────────
+phase_step() {
+  local step="$1" total="$2"
+  local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
+  local prev_weight=0
+  for (( i=0; i<CURRENT_PHASE; i++ )); do
+    prev_weight=$(( prev_weight + PHASE_WEIGHTS[i] ))
+  done
+  local frac_pct=$(( prev_weight + (step * weight / total) ))
+  draw_bar "$frac_pct" "${PHASE_NAMES[$CURRENT_PHASE]:-}"
+}
+
+
+trap 'tput cnorm 2>/dev/null || true' EXIT
+trap 'echo; echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; tput cnorm 2>/dev/null || true; exit 130' INT
+
+###############################################################################
+# Startup banner
+###############################################################################
+{
+echo
+echo "============================================================"
+echo " Client Simulator Installer v${VERSION}"
+echo " Started at: $(date)"
+[[ "$DEBUG" -eq 1 ]] && echo " *** DEBUG MODE — apt output shown on screen ***"
+echo "============================================================"
+echo
+} | tee -a "$LOG"
+
+
+# ── Pre-flight summary ───────────────────────────────────────────────────────
+printf "${COL_DIM}  Phases : ${COL_RESET}"
+for (( i=0; i<${#PHASE_NAMES[@]}; i++ )); do
+  [[ $i -gt 0 ]] && printf "${COL_DIM} →${COL_RESET} "
+  printf "${COL_DIM}%s${COL_RESET}" "${PHASE_NAMES[$i]}"
+done
+printf "\n"
+printf "${COL_DIM}  Log    : %s${COL_RESET}\n" "$LOG"
+if $IS_PI; then
+  printf "${COL_DIM}  Platform: Raspberry Pi (raspberrypi-kernel-headers, no qemu-guest-agent)${COL_RESET}\n"
+else
+  printf "${COL_DIM}  Platform: Debian x86/VM (linux-headers-$(uname -r))${COL_RESET}\n"
+fi
+printf "${COL_DIM}  Press Ctrl+C at any time to abort.${COL_RESET}\n"
+echo
+
+###############################################################################
+# HELPER: retry wrapper
+###############################################################################
+retry() {
+  local attempts=3 delay=5 cmd=("$@")
+  for ((i=1; i<=attempts; i++)); do
+    "${cmd[@]}" && return 0
+    warn "Command failed (attempt $i/$attempts): ${cmd[*]}"
+    sleep "$delay"
+  done
+  return 1
+}
+
+###############################################################################
+# HELPER: apt_run — silent normally, live output in --debug mode
+#         timeout baked in: APT_TIMEOUT seconds (default 300)
+# Usage: apt_run [apt-get args...]
+###############################################################################
+APT_TIMEOUT=300
+apt_run() {
+  if [[ "$DEBUG" -eq 1 ]]; then
+    printf "\n${COL_DIM}  [DEBUG] apt-get %s${COL_RESET}\n" "$*"
+    timeout "$APT_TIMEOUT" apt-get "$@" 2>&1 | tee -a "$LOG"
+    local rc=${PIPESTATUS[0]}
+    return $rc
+  else
+    timeout "$APT_TIMEOUT" apt-get "$@" >>"$LOG" 2>&1
+  fi
+}
+
+###############################################################################
+# PHASE 1 — USER PROVISIONING + SCOPED SUDO
+###############################################################################
+begin_phase
+SIM_USER="sim-user"
+
+info "Checking user '$SIM_USER'"
+if ! id "$SIM_USER" &>/dev/null; then
+  useradd -m -s /bin/bash "$SIM_USER" >>"$LOG" 2>&1
+  ok "Created user '$SIM_USER'"
+else
+  ok "User '$SIM_USER' already exists"
+fi
+
+info "Configuring sudoers"
+
+# sim-user: scoped passwordless sudo for simulation operations
+cat >/etc/sudoers.d/99-simuser-nopasswd <<EOF
+# Managed by client-sim-install.sh — do not edit manually
+$SIM_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/sbin/dpkg, /bin/systemctl, /sbin/depmod, /usr/sbin/dkms
+EOF
+chmod 0440 /etc/sudoers.d/99-simuser-nopasswd
+
+if ! visudo -cf /etc/sudoers.d/99-simuser-nopasswd >>"$LOG" 2>&1; then
+  err "sudoers fragment failed validation — removing"
+  rm -f /etc/sudoers.d/99-simuser-nopasswd
+  exit 1
+fi
+ok "Scoped passwordless sudo configured for '$SIM_USER'"
+
+# user: full passwordless sudo — required for driver builds (morrownr install-driver.sh calls sudo internally)
+if id "user" &>/dev/null; then
+  cat >/etc/sudoers.d/99-user-nopasswd <<EOF
+# Managed by client-sim-install.sh — do not edit manually
+user ALL=(ALL) NOPASSWD: ALL
+EOF
+  chmod 0440 /etc/sudoers.d/99-user-nopasswd
+  if ! visudo -cf /etc/sudoers.d/99-user-nopasswd >>"$LOG" 2>&1; then
+    err "sudoers fragment for 'user' failed validation — removing"
+    rm -f /etc/sudoers.d/99-user-nopasswd
+    exit 1
+  fi
+  ok "Full passwordless sudo configured for 'user'"
+else
+  warn "User 'user' does not exist — skipping its sudoers entry"
+fi
+
+# ── SMB credentials template ─────────────────────────────────────────────────
+info "Checking SMB credentials file"
+SMB_CREDS_DIR="/etc/client-sim"
+SMB_CREDS="$SMB_CREDS_DIR/smb-credentials"
+mkdir -p "$SMB_CREDS_DIR"
+if [[ ! -f "$SMB_CREDS" ]]; then
+  cat >"$SMB_CREDS" <<'CREDS'
+# client-sim SMB credentials — edit before running installer
+# username=your_username
+# password=your_password
+# domain=your_domain
+CREDS
+  chmod 600 "$SMB_CREDS"
+  warn "SMB credentials template created at $SMB_CREDS — edit it to enable SMB sync"
+else
+  chmod 600 "$SMB_CREDS"
+  ok "SMB credentials file already exists"
+fi
+end_phase
+
+###############################################################################
+# PHASE 2 — PACKAGE INSTALL  (update + upgrade + install)
+###############################################################################
+begin_phase
+
+info "Updating package lists"
+retry apt_run update --quiet=2
+ok "Package lists updated"
+
+# Pre-seed debconf answers for packages known to prompt interactively.
+# samba-common ignores DEBIAN_FRONTEND without do_debconf=false.
+info "Pre-seeding debconf answers"
+{
+  # samba-common: do_debconf=false prevents ALL interactive questions
+  echo "samba-common samba-common/do_debconf boolean false"
+  echo "samba-common samba-common/workgroup string WORKGROUP"
+  echo "samba-common samba-common/dhcp boolean false"
+  echo "samba-common samba-common/smb.conf.update.template boolean false"
+  echo "samba-common samba-common/smb.conf.upgrade boolean false"
+  # rsyslog
+  echo "rsyslog rsyslog/enable_all boolean false"
+  # display manager
+  echo "lightdm shared/default-x-display-manager select lightdm"
+  echo "gdm3 shared/default-x-display-manager select lightdm"
+} | debconf-set-selections >>"$LOG" 2>&1
+ok "debconf answers pre-seeded"
+
+info "Upgrading existing packages"
+retry apt_run upgrade -y --quiet \
+  -o Dpkg::Options::="--force-confdef" \
+  -o Dpkg::Options::="--force-confold"
+ok "System packages upgraded"
+
+# Kernel headers package name differs between Debian x86 and Raspberry Pi OS
+if $IS_PI; then
+  KERNEL_HEADERS="raspberrypi-kernel-headers"
+else
+  KERNEL_HEADERS="linux-headers-$(uname -r)"
+fi
+
+PACKAGES=(
+  "gnome-terminal"
+  "wget"
+  "$KERNEL_HEADERS"
+  "git"
+  "smbclient"
+  "rsyslog"
+  "rfkill"
+  "firefox-esr"
+  "iperf3"
+  "dkms"
+  "build-essential"
+  "net-tools"
+  "dnsutils"
+  "network-manager"
+  "lightdm"
+  "lxde-core"
+  "xorg"
+)
+
+# qemu-guest-agent only needed in VM environments — skip on Raspberry Pi
+$IS_PI || PACKAGES+=("qemu-guest-agent")
+TOTAL_PKGS="${#PACKAGES[@]}"
+BATCH_SIZE=4
+INSTALLED_COUNT=0
+
+for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
+  BATCH=( "${PACKAGES[@]:$i:$BATCH_SIZE}" )
+  INSTALLED_COUNT=$(( i + ${#BATCH[@]} ))
+  [[ "$INSTALLED_COUNT" -gt "$TOTAL_PKGS" ]] && INSTALLED_COUNT="$TOTAL_PKGS"
+
+  phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
+  info "Installing: ${BATCH[*]}"
+  info "Batch install start [$(ts)]: ${BATCH[*]}"
+  if ! apt_run install -y --quiet \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      "${BATCH[@]}"; then
+    warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
+    for pkg in "${BATCH[@]}"; do
+      info "Retrying individual install: $pkg"
+      APT_TIMEOUT=180
+      apt_run install -y --quiet \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        "$pkg" \
+        && ok "Installed: $pkg" \
+        || warn "Failed to install: $pkg (non-fatal, continuing)"
+      APT_TIMEOUT=300
+    done
+    info "Installing: ${BATCH[*]}"
+  fi
+  info "Batch install end   [$(ts)]: ${BATCH[*]}"
+done
+info "Running autoremove"
+apt_run autoremove -y --quiet=2
+ok "Core dependencies installed"
+end_phase
+
+###############################################################################
+# Live GNOME terminal for installer log
+###############################################################################
+if [[ -n "${DISPLAY:-}" ]] && command -v gnome-terminal &>/dev/null; then
+  gnome-terminal --geometry=80x15+0+477 -- tail -f "$LOG" &
+  ok "Live log terminal launched"
+else
+  warn "No DISPLAY detected — skipping live terminal"
+fi
+
+###############################################################################
+# PHASE 3 — DISPLAY MANAGER & POWER MANAGEMENT
+###############################################################################
+begin_phase
+
+# ── LightDM autologin ────────────────────────────────────────────────────────
+# Write the autologin config AFTER lightdm is installed (Phase 2).
+# Without this block LightDM always shows the greeter — autologin never fires.
+info "Configuring LightDM autologin for $SIM_USER"
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
+[Seat:*]
+autologin-user=$SIM_USER
+autologin-user-timeout=0
+autologin-session=LXDE
+user-session=LXDE
+greeter-session=lightdm-greeter
+LIGHTDM_EOF
+ok "LightDM autologin → $SIM_USER (session: LXDE)"
+
+if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+  info "Applying screen power settings to current session"
+  xset s noblank || true
+  xset -dpms     || true
+  xset s off     || true
+  ok "Screen power management disabled"
+else
+  info "No active graphical session — power settings will apply on next login"
+fi
+
+if command -v raspi-config &>/dev/null; then
+  info "Configuring Raspberry Pi locale and Wi-Fi region"
+  raspi-config nonint do_change_locale en_US.UTF-8
+  raspi-config nonint do_wifi_country US
+  ok "Raspberry Pi locale and Wi-Fi region configured"
+fi
+
+end_phase
+
+###############################################################################
+# PHASE 4 — /usr/local/scripts setup
+###############################################################################
+begin_phase
+
+info "Preparing /usr/local/scripts"
+mkdir -p /usr/local/scripts
+chown root:"$SIM_USER" /usr/local/scripts
+chmod 775 /usr/local/scripts
+
 touch /usr/local/scripts/sim.log
-echo Installer Version $version | tee /usr/local/scripts/sim.log
-sudo chmod -R 777 /usr/local/scripts
-#------------------------------------------------------------
-echo Getting Network Adapter Drivers from GitHub | tee -a /tmp/client-sim.log
-rm -Rf 8821au-20210708
-git clone https://github.com/morrownr/8821au-20210708.git
-rm -Rf 8821cu-20210916
-git clone https://github.com/morrownr/8821cu-20210916.git
-rm -Rf rtw89
-git clone https://github.com/morrownr/rtw89
-rm -Rf 8814au
-git clone https://github.com/morrownr/8814au.git
-rm -Rf rtl8852cu-20240510
-git clone https://github.com/morrownr/rtl8852cu-20240510.git
-rm -Rf 8812au-20210820
-git clone https://github.com/morrownr/8812au-20210820.git
-rm -Rf rtl8852bu-20240418
-git clone https://github.com/morrownr/rtl8852bu-20240418.git
-rm -Rf rtl8812au
-git clone https://github.com/aircrack-ng/rtl8812au.git
-rm -Rf 88x2bu-20210702
-git clone https://github.com/morrownr/88x2bu-20210702.git
-rm -Rf rtl8852au
-git clone https://github.com/lwfinger/rtl8852au.git
-rm -Rf rtl8188eu
-git clone https://github.com/lwfinger/rtl8188eu.git
-rm -Rf rtl8723au
-git clone https://github.com/lwfinger/rtl8723au.git
-#------------------------------------------------------------
-echo Installing Network Adapter Drivers | tee -a /tmp/client-sim.log
-echo Installing Wireless Adapter 8821au | tee -a /tmp/client-sim.log
-cd 8821au-20210708
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8821cu | tee -a /tmp/client-sim.log
-cd 8821cu-20210916
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8814au | tee -a /tmp/client-sim.log
-cd 8814au
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8812au | tee -a /tmp/client-sim.log
-cd 8812au-20210820
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8852bu | tee -a /tmp/client-sim.log
-cd rtl8852bu-20240418
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8852cu | tee -a /tmp/client-sim.log
-cd rtl8852cu-20240510
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 88x2bu | tee -a /tmp/client-sim.log
-cd 88x2bu-20210702
-sudo ./install-driver.sh NoPrompt
-cd ..
-echo Installing Wireless Adapter 8188eu | tee -a /tmp/client-sim.log
-cd rtl8188eu
-sudo make all
-sudo make install
-sudo dkms add .
-cd ..
-echo Installing Wireless Adapter 8852au | tee -a /tmp/client-sim.log
-cd rtl8852au
-sudo make all
-sudo make install
-sudo dkms add .
-cd ..
-echo Installing Wireless Adpater rtw89 | tee -a /tmp/client-sim.log
-cd rtw89
-sudo make all
-sudo make install
-sudo kdms add .
-cd ..
-echo Installing Wireless Adapter 8723au | tee -a /tmp/client-sim.log
-cd rtl8723au
-sudo make all
-sudo make install
-sudo modprobe 8723au
-sudo dkms add .
-#------------------------------------------------------------
-echo install is complete | tee -a /tmp/client-sim.log
+chown "$SIM_USER":"$SIM_USER" /usr/local/scripts/sim.log
+chmod 664 /usr/local/scripts/sim.log
+
+# Write installer version to sim.log (from original script)
+echo "Installer Version $VERSION" | tee /usr/local/scripts/sim.log >>"$LOG"
+
+ok "/usr/local/scripts prepared — version $VERSION written to sim.log"
+end_phase
+
+###############################################################################
+# PHASE 5 — CLIENT-SIM GITHUB REPO CLONE + FILE DEPLOYMENT
+###############################################################################
+begin_phase
+
+CLIENT_SIM_REPO="https://github.com/solutions-hpe/client-sim.git"
+CLIENT_SIM_DIR="$HOME/client-sim"
+
+info "Cloning solutions-hpe/client-sim"
+rm -rf "$CLIENT_SIM_DIR"
+if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1; then
+  ok "client-sim repo cloned"
+
+  LINUX_DIR="$CLIENT_SIM_DIR/linux"
+  CONFIGS_DIR="$CLIENT_SIM_DIR/configs"
+
+  if [[ -d "$LINUX_DIR" ]]; then
+    cd "$LINUX_DIR"
+
+    # ── .desktop autostart files ─────────────────────────────────────────────
+    info "Installing .desktop autostart files"
+    if compgen -G "*.desktop" &>/dev/null; then
+      cp *.desktop /etc/xdg/autostart/ >>"$LOG" 2>&1
+      ok ".desktop autostart files installed"
+    else
+      warn "No .desktop files found in $LINUX_DIR"
+    fi
+
+    # ── Shell scripts ────────────────────────────────────────────────────────
+    info "Copying shell scripts to /usr/local/scripts"
+    if compgen -G "*.sh" &>/dev/null; then
+      cp *.sh /usr/local/scripts/ >>"$LOG" 2>&1
+      ok "Shell scripts copied"
+    else
+      warn "No .sh files found in $LINUX_DIR"
+    fi
+
+    # ── Flat text files ──────────────────────────────────────────────────────
+    info "Copying text files to /usr/local/scripts"
+    if compgen -G "*.txt" &>/dev/null; then
+      cp *.txt /usr/local/scripts/ >>"$LOG" 2>&1
+      ok "Text files copied"
+    else
+      warn "No .txt files found in $LINUX_DIR"
+    fi
+
+    # ── VERSION file ─────────────────────────────────────────────────────────
+    if [[ -f "VERSION" ]]; then
+      cp VERSION /usr/local/scripts/VERSION >>"$LOG" 2>&1
+      ok "VERSION $(cat VERSION | tr -d '[:space:]') written to /usr/local/scripts"
+    else
+      warn "VERSION file not found in linux/ — update.sh will always sync"
+    fi
+
+    # ── simulation.conf (conditional — don't overwrite existing) ─────────────
+    info "Checking simulation.conf"
+    if [[ -f /usr/local/scripts/simulation.conf ]]; then
+      ok "simulation.conf already exists — not overwriting"
+    else
+      if [[ -f "$CONFIGS_DIR/simulation.conf" ]]; then
+        cp "$CONFIGS_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
+        ok "simulation.conf copied from configs directory"
+      elif [[ -f "$LINUX_DIR/simulation.conf" ]]; then
+        cp "$LINUX_DIR/simulation.conf" /usr/local/scripts/simulation.conf >>"$LOG" 2>&1
+        ok "simulation.conf copied from linux directory"
+      else
+        warn "simulation.conf not found in repo — skipping"
+      fi
+    fi
+
+    # ── user-overrides.conf ──────────────────────────────────────────────────
+    if [[ -f "$CONFIGS_DIR/user-overrides.conf" ]]; then
+      cp "$CONFIGS_DIR/user-overrides.conf" /usr/local/scripts/user-overrides.conf >>"$LOG" 2>&1
+      ok "user-overrides.conf copied"
+    else
+      warn "user-overrides.conf not found in configs/ — skipping"
+    fi
+
+    # ── rsyslog config from repo ─────────────────────────────────────────────
+    info "Checking for rsyslog config in repo"
+    if [[ -f "$LINUX_DIR/10-rsyslog.conf" ]]; then
+      info "Found 10-rsyslog.conf in repo — will apply in rsyslog phase"
+      REPO_RSYSLOG_CONF="$LINUX_DIR/10-rsyslog.conf"
+    else
+      warn "No 10-rsyslog.conf in repo linux directory"
+      REPO_RSYSLOG_CONF=""
+    fi
+
+    # ── Final permissions ────────────────────────────────────────────────────
+    info "Setting permissions on /usr/local/scripts"
+    find /usr/local/scripts -type d                -exec chmod 755 {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f -name "*.sh"   -exec chmod 755 {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} \; >>"$LOG" 2>&1
+    ok "Permissions set on /usr/local/scripts"
+
+    cd "$HOME"
+  else
+    warn "linux/ directory not found in client-sim repo — skipping file deployment"
+    REPO_RSYSLOG_CONF=""
+  fi
+else
+  warn "Failed to clone client-sim repo — skipping file deployment"
+  REPO_RSYSLOG_CONF=""
+fi
+
+end_phase
+
+###############################################################################
+# PHASE 6 — SMB CONFIG SYNC  (authenticated + checksum validated)
+###############################################################################
+begin_phase
+
+SMB_SHARE="//nas/scripts"
+SMB_REMOTE_DIR="/SIM/CONFIG"
+
+# Check credentials exist and have been filled in (not just the template)
+if [[ ! -f "$SMB_CREDS" ]]; then
+  warn "SMB credentials file not found at $SMB_CREDS — skipping SMB sync"
+elif grep -qE '^\s*#|^[[:space:]]*$' "$SMB_CREDS" && ! grep -qE '^username=' "$SMB_CREDS"; then
+  warn "SMB credentials file is still a template — edit $SMB_CREDS to enable SMB sync"
+else
+  chmod 600 "$SMB_CREDS"
+  info "Syncing config files from SMB share"
+  if smbclient "$SMB_SHARE" --authentication-file="$SMB_CREDS" -c \
+      "lcd /usr/local/scripts; cd $SMB_REMOTE_DIR; prompt off; mget *.conf" \
+      >>"$LOG" 2>&1; then
+
+    MANIFEST="/usr/local/scripts/checksums.sha256"
+    if [[ -f "$MANIFEST" ]]; then
+      info "Verifying SMB file checksums"
+      if ! (cd /usr/local/scripts && sha256sum -c "$MANIFEST" >>"$LOG" 2>&1); then
+        err "Checksum verification FAILED — aborting"
+        exit 1
+      fi
+      ok "SMB file checksums verified"
+    else
+      warn "No checksums.sha256 manifest found — skipping integrity check"
+    fi
+    ok "SMB config sync complete"
+  else
+    warn "SMB config sync failed — continuing without remote config"
+  fi
+fi
+
+end_phase
+
+###############################################################################
+# PHASE 7 — RSYSLOG CUSTOM CONFIG
+# Priority: repo file > SMB-synced file > skip
+###############################################################################
+begin_phase
+
+RSYSLOG_SOURCE=""
+if [[ -n "${REPO_RSYSLOG_CONF:-}" && -f "$REPO_RSYSLOG_CONF" ]]; then
+  RSYSLOG_SOURCE="$REPO_RSYSLOG_CONF"
+  info "Using rsyslog config from GitHub repo"
+elif [[ -f /usr/local/scripts/10-rsyslog.conf ]]; then
+  RSYSLOG_SOURCE="/usr/local/scripts/10-rsyslog.conf"
+  info "Using rsyslog config from /usr/local/scripts (SMB)"
+fi
+
+if [[ -n "$RSYSLOG_SOURCE" ]]; then
+  info "Installing rsyslog config"
+  mkdir -p /etc/rsyslog.d
+  cp "$RSYSLOG_SOURCE" /etc/rsyslog.d/10-rsyslog.conf
+  # Validate the full rsyslog config (including the new drop-in) not just the snippet
+  if rsyslogd -N1 >>"$LOG" 2>&1; then
+    systemctl restart rsyslog || true
+    systemctl enable  rsyslog || true
+    ok "rsyslog configured from $RSYSLOG_SOURCE"
+  else
+    warn "rsyslog config validation failed — reverting"
+    rm -f /etc/rsyslog.d/10-rsyslog.conf
+  fi
+else
+  warn "No rsyslog config source found — skipping"
+fi
+
+end_phase
+
+###############################################################################
+# PHASE 9 — WLAN DRIVERS INSTALL
+###############################################################################
+begin_phase
+
+WIFI_SRC="/usr/src/wifi-drivers"
+mkdir -p "$WIFI_SRC"
+cd "$WIFI_SRC"
+
+# ── Reboot suppression shim ──────────────────────────────────────────────────
+SUPPRESS="$(mktemp -d)"
+for c in reboot shutdown poweroff halt; do
+  printf '#!/bin/sh\necho "[SUPPRESSED] %s called — ignored during driver install"\nexit 0\n' "$c" \
+    >"$SUPPRESS/$c"
+  chmod +x "$SUPPRESS/$c"
+done
+cat >"$SUPPRESS/systemctl" <<'SHIM'
+#!/bin/sh
+case "${1:-}" in
+  reboot|shutdown|poweroff|halt)
+    echo "[SUPPRESSED] systemctl $* ignored during driver install"
+    exit 0 ;;
+  *) exec /bin/systemctl "$@" ;;
+esac
+SHIM
+chmod +x "$SUPPRESS/systemctl"
+OLD_PATH="$PATH"
+export PATH="$SUPPRESS:$PATH"
+# ────────────────────────────────────────────────────────────────────────────
+
+# Format: "dir-name|type|repo-url|dkms-module|pinned-tag|modprobe-module"
+# Types:
+#   morrownr  — uses install-driver.sh NoPrompt
+#   aircrack  — uses install-driver.sh (with stdin echo)
+#   lwfinger  — bare Makefile; source copied to /usr/src then registered with DKMS
+#   dkms-only — bare Makefile + dkms.conf; DKMS-managed, no install-driver.sh
+# modprobe-module: use "-" if no explicit modprobe needed after install
+#
+# Bug fixes applied:
+#   - rtl8812au (aircrack-ng) removed — duplicate of 8812au-20210820 (same chipset, conflict)
+#   - rtw89 changed from type morrownr→dkms-only (repo has no install-driver.sh)
+#   - rtw89 skipped at runtime if kernel ≥ 5.16 (driver is in-tree on modern kernels)
+DRIVERS=(
+  "8821au-20210708|morrownr|https://github.com/morrownr/8821au-20210708.git|8821au|HEAD|-"
+  "8821cu-20210916|morrownr|https://github.com/morrownr/8821cu-20210916.git|8821cu|HEAD|-"
+  "8814au|morrownr|https://github.com/morrownr/8814au.git|8814au|HEAD|-"
+  "8812au-20210820|morrownr|https://github.com/morrownr/8812au-20210820.git|8812au|HEAD|-"
+  "rtl8852bu-20240418|morrownr|https://github.com/morrownr/rtl8852bu-20240418.git|8852bu|HEAD|-"
+  "rtl8852cu-20240510|morrownr|https://github.com/morrownr/rtl8852cu-20240510.git|8852cu|HEAD|-"
+  "88x2bu-20210702|morrownr|https://github.com/morrownr/88x2bu-20210702.git|88x2bu|HEAD|-"
+  "rtw89|dkms-only|https://github.com/morrownr/rtw89.git|rtw89|HEAD|-"
+  "rtl8188eu|lwfinger|https://github.com/lwfinger/rtl8188eu.git|8188eu|HEAD|-"
+  "rtl8723au|lwfinger|https://github.com/lwfinger/rtl8723au.git|8723au|HEAD|8723au"
+  "rtl8852au|lwfinger|https://github.com/lwfinger/rtl8852au.git|8852au|HEAD|-"
+)
+
+TOTAL_DRIVERS="${#DRIVERS[@]}"
+DRIVER_NUM=0
+
+for entry in "${DRIVERS[@]}"; do
+  SAVED_IFS="$IFS"
+  IFS='|' read -r NAME TYPE REPO MOD PIN MODPROBE <<<"$entry"
+  IFS="$SAVED_IFS"
+
+  DRIVER_NUM=$(( DRIVER_NUM + 1 ))
+
+  phase_step "$DRIVER_NUM" "$TOTAL_DRIVERS"
+  info "Driver $DRIVER_NUM/$TOTAL_DRIVERS: $NAME"
+
+  rm -rf "$NAME"
+  CLONE_ARGS=(--depth=1)
+  [[ "$PIN" != "HEAD" ]] && CLONE_ARGS+=(--branch "$PIN")
+
+  info "Cloning $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
+  if git clone "${CLONE_ARGS[@]}" "$REPO" "$NAME" >>"$LOG" 2>&1; then
+    cd "$NAME"
+
+  INSTALL_OK=true
+    case "$TYPE" in
+      morrownr)
+        if [[ -x ./install-driver.sh ]]; then
+          info "Building $NAME (morrownr)"
+          ./install-driver.sh NoPrompt >>"$LOG" 2>&1 || INSTALL_OK=false
+        else
+          warn "$NAME: install-driver.sh not found or not executable"
+          INSTALL_OK=false
+        fi
+        ;;
+
+      aircrack)
+        if [[ -x ./install-driver.sh ]]; then
+          info "Building $NAME (aircrack-ng)"
+          echo "" | ./install-driver.sh >>"$LOG" 2>&1 || INSTALL_OK=false
+        else
+          warn "$NAME: install-driver.sh not found or not executable"
+          INSTALL_OK=false
+        fi
+        ;;
+
+      dkms-only)
+        # Repos that have dkms.conf + Makefile but no install-driver.sh (e.g. morrownr/rtw89).
+        # Also skips rtw89 entirely on kernels >= 5.16 where it is already in-tree.
+        if [[ "$MOD" == "rtw89" ]]; then
+          KVER_MAJOR=$(uname -r | cut -d. -f1)
+          KVER_MINOR=$(uname -r | cut -d. -f2)
+          if (( KVER_MAJOR > 5 || ( KVER_MAJOR == 5 && KVER_MINOR >= 16 ) )); then
+            info "Skipping $NAME — rtw89 is built-in to kernel $(uname -r) (>= 5.16)"
+            echo "$NAME:SKIPPED_IN_TREE" >>"$DRIVER_STATE"
+            cd "$WIFI_SRC"; continue
+          fi
+        fi
+
+        DKMS_VER="0.0"
+        [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
+
+        SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
+        info "Installing $NAME via DKMS ($MOD/$DKMS_VER)"
+
+        # Copy source into /usr/src where dkms expects it
+        rm -rf "$SRC_DEST"
+        cp -r "$(pwd)" "$SRC_DEST"
+
+        dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
+        dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+          && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+          || { INSTALL_OK=false; }
+
+        if [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
+          info "Loading module: $MODPROBE"
+          modprobe "$MODPROBE" >>"$LOG" 2>&1 \
+            || warn "modprobe $MODPROBE failed (may need reboot)"
+          ok "Module $MODPROBE loaded"
+        fi
+        ;;
+
+      lwfinger)
+        # Build only (no make install) — DKMS manages the module lifecycle.
+        # Source must be copied to /usr/src/MOD-VER/ before dkms add.
+        info "Building $NAME (lwfinger)"
+        if make all >>"$LOG" 2>&1; then
+
+          DKMS_VER="0.0"
+          [[ -f dkms.conf ]] && DKMS_VER="$(grep 'PACKAGE_VERSION=' dkms.conf | cut -d'"' -f2 || echo "0.0")"
+
+          SRC_DEST="/usr/src/${MOD}-${DKMS_VER}"
+          info "Registering $NAME with DKMS ($MOD/$DKMS_VER)"
+
+          # Copy source into /usr/src where dkms expects it, then register
+          rm -rf "$SRC_DEST"
+          cp -r "$(pwd)" "$SRC_DEST"
+
+          dkms add    -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 || true
+          dkms build  -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+            && dkms install -m "$MOD" -v "$DKMS_VER" >>"$LOG" 2>&1 \
+            || { warn "$NAME: dkms build/install failed"; INSTALL_OK=false; }
+
+          if $INSTALL_OK && [[ "$MODPROBE" != "-" && -n "$MODPROBE" ]]; then
+            info "Loading module: $MODPROBE"
+            modprobe "$MODPROBE" >>"$LOG" 2>&1 \
+              || warn "modprobe $MODPROBE failed (may need reboot)"
+            ok "Module $MODPROBE loaded"
+          fi
+        else
+          INSTALL_OK=false
+        fi
+        ;;
+    esac
+
+    cd "$WIFI_SRC"
+
+    if $INSTALL_OK; then
+      echo "$NAME:INSTALLED" >>"$DRIVER_STATE"
+      ok "✓ $NAME installed [$DRIVER_NUM/$TOTAL_DRIVERS]"
+    else
+      echo "$NAME:FAILED" >>"$DRIVER_STATE"
+      warn "✗ $NAME build/install failed [$DRIVER_NUM/$TOTAL_DRIVERS]"
+    fi
+  else
+    echo "$NAME:CLONE_FAILED" >>"$DRIVER_STATE"
+    warn "✗ Failed to clone $NAME [$DRIVER_NUM/$TOTAL_DRIVERS]"
+  fi
+done
+
+info "Running depmod -a"
+depmod -a >>"$LOG" 2>&1
+
+export PATH="$OLD_PATH"
+rm -rf "$SUPPRESS"
+ok "WLAN driver installation complete"
+end_phase
+
+###############################################################################
+# PHASE 10 — FINAL HEALTH SUMMARY
+###############################################################################
+begin_phase
+
+tput cnorm 2>/dev/null || true
+
+echo ""
+{
+# Helper functions for colored health check rows (output goes to tee below)
+_hc_ok()   { printf "  \033[0;32m✓\033[0m  %-24s \033[0;32mOK\033[0m\n"       "$1"; }
+_hc_warn()  { printf "  \033[1;33m✗\033[0m  %-24s \033[1;33m%s\033[0m\n"      "$1" "$2"; }
+_hc_fail()  { printf "  \033[0;31m✗\033[0m  %-24s \033[0;31m%s\033[0m\n"      "$1" "$2"; }
+_hc_drv_ok(){ printf "  \033[0;32m✓\033[0m  %-35s \033[0;32mINSTALLED\033[0m\n" "$1"; }
+_hc_drv_fail(){ printf "  \033[0;31m✗\033[0m  %-35s \033[0;31m%s\033[0m\n"    "$1" "$2"; }
+
+echo "================ HEALTH CHECK ================"
+id "$SIM_USER" &>/dev/null \
+  && _hc_ok   "User ($SIM_USER)" \
+  || _hc_fail "User ($SIM_USER)" "MISSING"
+[[ -f /etc/sudoers.d/99-simuser-nopasswd ]] \
+  && _hc_ok   "Scoped sudoers" \
+  || _hc_fail "Scoped sudoers" "MISSING"
+systemctl is-active --quiet lightdm \
+  && _hc_ok   "LightDM" \
+  || _hc_warn "LightDM" "NOT ACTIVE"
+[[ -f /etc/lightdm/lightdm.conf.d/50-autologin.conf ]] \
+  && grep -q "autologin-user=$SIM_USER" /etc/lightdm/lightdm.conf.d/50-autologin.conf \
+  && _hc_ok   "LightDM autologin" \
+  || _hc_fail "LightDM autologin" "NOT CONFIGURED"
+systemctl is-active --quiet NetworkManager \
+  && _hc_ok   "NetworkManager" \
+  || _hc_fail "NetworkManager" "NOT ACTIVE"
+lsmod | grep -qE '^(88|rtw|rtl)' \
+  && _hc_ok   "WLAN modules" \
+  || _hc_warn "WLAN modules" "NOT LOADED (reboot may be needed)"
+[[ -f /usr/local/scripts/simulation.conf ]] \
+  && _hc_ok   "simulation.conf" \
+  || _hc_fail "simulation.conf" "MISSING"
+[[ -f /etc/rsyslog.d/10-rsyslog.conf ]] \
+  && _hc_ok   "rsyslog config" \
+  || _hc_warn "rsyslog config" "NOT INSTALLED"
+
+echo ""
+echo "  ---- Driver State ----"
+while IFS=: read -r drv status; do
+  case "$status" in
+    INSTALLED)        _hc_drv_ok   "$drv" ;;
+    SKIPPED_IN_TREE)  _hc_warn     "$drv (in-tree)" "SKIPPED — already in kernel" ;;
+    FAILED)           _hc_drv_fail "$drv" "FAILED" ;;
+    CLONE_FAILED)     _hc_drv_fail "$drv" "CLONE FAILED" ;;
+    *)                printf "  ?  %-35s %s\n" "$drv" "$status" ;;
+  esac
+done < "$DRIVER_STATE"
+
+echo "============================================="
+} | tee -a "$LOG"
+
+end_phase
+
+###############################################################################
+# FINAL PROGRESS BAR — 100%
+###############################################################################
+draw_bar 100 "Complete"
+printf "  ${COL_GREEN}✓${COL_RESET}\n\n"
+
+###############################################################################
+# END
+###############################################################################
+TOTAL_ELAPSED=$(( $(date +%s) - INSTALL_START ))
+ELAPSED_MIN=$(( TOTAL_ELAPSED / 60 ))
+ELAPSED_SEC=$(( TOTAL_ELAPSED % 60 ))
+
+{
+echo "============================================================"
+printf " Installation complete — reboot recommended\n"
+printf " Total time : %dm %02ds\n" "$ELAPSED_MIN" "$ELAPSED_SEC"
+if [[ "$WARN_COUNT" -gt 0 ]]; then
+  printf " Warnings   : %d  (see %s)\n" "$WARN_COUNT" "$LOG"
+else
+  printf " Warnings   : 0\n"
+fi
+if [[ "$ERR_COUNT" -gt 0 ]]; then
+  printf " Errors     : %d  (see %s)\n" "$ERR_COUNT" "$LOG"
+else
+  printf " Errors     : 0\n"
+fi
+printf " Full log   : %s\n" "$LOG"
+printf " Driver state: %s\n" "$DRIVER_STATE"
+printf " Sim log    : /usr/local/scripts/sim.log\n"
+echo "============================================================"
+} | tee -a "$LOG" | while IFS= read -r line; do
+  if   echo "$line" | grep -q "Warnings" && [[ "$WARN_COUNT" -gt 0 ]]; then
+    printf "${COL_YELLOW}%s${COL_RESET}\n" "$line"
+  elif echo "$line" | grep -q "Errors"   && [[ "$ERR_COUNT"  -gt 0 ]]; then
+    printf "${COL_RED}%s${COL_RESET}\n" "$line"
+  elif echo "$line" | grep -q "complete"; then
+    printf "${COL_GREEN}%s${COL_RESET}\n" "$line"
+  else
+    echo "$line"
+  fi
+done

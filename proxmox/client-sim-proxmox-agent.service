@@ -1,0 +1,17 @@
+[Unit]
+Description=Client-Sim Proxmox Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/client-sim-proxmox-agent.env
+ExecStart=/usr/local/bin/client-sim-proxmox-agent
+Restart=always
+RestartSec=30
+StandardOutput=append:/var/log/client-sim-proxmox-agent.log
+StandardError=append:/var/log/client-sim-proxmox-agent.log
+
+[Install]
+WantedBy=multi-user.target
+Alias=proxmox-agent.service

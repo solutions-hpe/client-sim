@@ -1,22 +1,13 @@
 #!/bin/bash
-version=.01
-echo Download Script Version $version | tee -a /usr/local/scripts/sim.log
-echo $(date) | tee -a /usr/local/scripts/sim.log
+version=.02
+log="/usr/local/scripts/sim.log"
+debug="/usr/local/scripts/debug-download.log"
+echo Download Script Version $version | tee "$debug"
 #------------------------------------------------------------
 r_count=0
-echo Running Download simulation
-dlfile=$(cat /usr/local/scripts/downloads.txt)
-for r in $dlfile; do r_count=$((r_count+1)); done
-rn_dl=$((1 + RANDOM % $r_count))
-r_count=0
-for r in $dlfile; do
- r_count=$((r_count+1))
- if [[ $r_count == $rn_dl ]]; then
-  sleep 1
-  echo $(date) | tee -a /usr/local/scripts/sim.log
-  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  echo Running Download Simulation: | tee -a /usr/local/scripts/sim.log
-  echo ------------------------------| tee -a /usr/local/scripts/sim.log
-  wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp $r | tee -a /usr/local/scripts/sim.log
- fi
-done
+dlfile=($(< /usr/local/scripts/downloads.txt))
+r_count=${#dlfile[@]}
+rn_dl=$((RANDOM % r_count))
+url=${dlfile[rn_dl]}
+sleep 1
+wget --waitretry=10 --read-timeout=20 --show-progress -O /tmp/file.tmp "$url" | tee -a "$debug"

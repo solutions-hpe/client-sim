@@ -2,9 +2,8 @@
 .env
 
 # Configuration Repository
-/configs/
-configs/simulation.conf
-/configs/simulation.conf
+!/configs/simulation.conf
+!/configs/user-overrides.conf
 /local/
 
 # OS Files/Junk

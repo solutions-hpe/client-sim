@@ -33,9 +33,12 @@ ping -c1 $github
    sleep 1
    sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/T3/update_script.sh -O /usr/local/scripts/update_script.sh
    sleep 1
+   sudo wget --waitretry=10 --read-timeout=20 --timeout=15 https://raw.githubusercontent.com/solutions-hpe/client-sim/main/t3/agent.sh -O /usr/local/scripts/agent.sh
+   sleep 1
 fi
 sudo chmod 777 /usr/scripts/wireless.sh
 sudo chmod 777 /usr/scripts/update_script.sh
+sudo chmod 777 /usr/scripts/agent.sh
 #--------------------------------------------------------------------------------------------------------
 echo "Script Version " $scriptver | tee -a /usr/scripts/wireless.log
 echo "Starting DHCP Daemon" | tee -a /usr/scripts/wireless.log
@@ -439,4 +442,5 @@ sudo dhcpcd -h Crestron -i $crestron_opt60 -o $generic_opt55 vwlan19
 #Updating Scripts and restarting simulation
 #--------------------------------------------------------------------------------------------------------
 pkill -f firefox
+bash /usr/scripts/agent.sh >/dev/null 2>&1 || true
 bash /usr/scripts/update_script.sh
