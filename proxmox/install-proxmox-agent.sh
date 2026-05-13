@@ -16,6 +16,8 @@ INSTALLER_DIR="/opt/proxmox-agent-installer"
 INSTALLER_SCRIPT="${INSTALLER_DIR}/install-proxmox-agent.sh"
 WATCHDOG_STATE_DIR="/var/lib/proxmox-watchdog"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
+AZURE_ACCOUNT="lrbcsvms"
+AZURE_CONTAINER="vms"
 
 SERVER_URL=""
 API_KEY=""
@@ -26,6 +28,78 @@ SERVER_SET=0
 KEY_SET=0
 INTERVAL_SET=0
 BRANCH_SET=0
+
+_restore_template_from_azure() {
+    local blob_manifest_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}?restype=container&comp=list"
+    local blob_manifest
+    if ! blob_manifest=$(curl -sf "$blob_manifest_url"); then
+        echo "[WARN] Unable to query Azure template backups (${blob_manifest_url}). Skipping template restore."
+        return 0
+    fi
+
+    local blob_list
+    blob_list=$(printf '%s\n' "$blob_manifest" | grep -oP '(?<=<Name>)[^<]+\.vma\.zst' | sort || true)
+
+    if [ -z "$blob_list" ]; then
+        echo "[WARN] No template backups found in Azure (https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}). Skipping template restore."
+        return 0
+    fi
+
+    local blob_count
+    blob_count=$(echo "$blob_list" | wc -l)
+    local selected_blob
+
+    if [ "$blob_count" -eq 1 ]; then
+        selected_blob=$(echo "$blob_list" | head -1)
+        echo "[INFO] Found template: $selected_blob"
+    else
+        echo "[INFO] Multiple templates available:"
+        local i=1
+        while IFS= read -r blob; do
+            echo "  $i) $(basename "$blob")"
+            i=$((i+1))
+        done <<< "$blob_list"
+        printf "Select template [1-${blob_count}]: "
+        if ! read -r selection; then
+            echo "[WARN] No template selection received. Skipping template restore."
+            return 0
+        fi
+        if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+            echo "[WARN] Invalid selection. Skipping template restore."
+            return 0
+        fi
+        selected_blob=$(echo "$blob_list" | sed -n "${selection}p")
+        if [ -z "$selected_blob" ]; then
+            echo "[WARN] Invalid selection. Skipping template restore."
+            return 0
+        fi
+    fi
+
+    local blob_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}/${selected_blob}"
+    local local_file="${INSTALLER_DIR}/$(basename "$selected_blob")"
+    echo "[INFO] Downloading template from Azure: $blob_url"
+    if ! curl -L --progress-bar -o "$local_file" "$blob_url"; then
+        echo "[ERROR] Failed to download template. Skipping restore."
+        rm -f "$local_file"
+        return 0
+    fi
+
+    echo "[INFO] Restoring template to VM ID 100..."
+    if ! qmrestore "$local_file" 100 --force; then
+        echo "[ERROR] qmrestore failed. Skipping template conversion."
+        rm -f "$local_file"
+        return 0
+    fi
+
+    echo "[INFO] Converting VM 100 to template..."
+    if qm template 100; then
+        echo "[INFO] Template VM 100 ready."
+    else
+        echo "[WARN] qm template conversion failed — VM 100 restored but not marked as template."
+    fi
+
+    rm -f "$local_file"
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -130,6 +204,14 @@ if curl -sSf --max-time 5 "${SERVER_URL}/api/health" | grep -q '"status".*"ok"';
     echo "  OK: WebUI reachable at $SERVER_URL"
 else
     echo "  WARNING: Could not reach WebUI at $SERVER_URL"
+fi
+
+echo "[INFO] Checking for template VM (ID 100)..."
+if qm list 2>/dev/null | awk '{print $1}' | grep -q '^100$'; then
+    echo "[INFO] Template VM 100 already exists — skipping Azure restore."
+else
+    echo "[INFO] VM 100 not found — checking Azure for template backup..."
+    _restore_template_from_azure
 fi
 
 echo
