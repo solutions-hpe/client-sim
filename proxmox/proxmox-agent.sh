@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.22"
+AGENT_VERSION="3.23"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1405,6 +1405,49 @@ for line in vh_out.splitlines():
         srv_m = srv_re.match(line)
         if srv_m:
             current_server = srv_m.group(2)
+
+# ── Enrich each device with DEVICE INFO ────────────────────────────────────
+def vh_command(cmd, vhbin, timeout=5):
+    """Send a VH IPC command, try TCP first then binary."""
+    try:
+        with socket.create_connection(("127.0.0.1", 7575), timeout=timeout) as s:
+            s.sendall((cmd + "\n").encode())
+            buf = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            return buf.decode("utf-8", errors="replace")
+    except Exception:
+        pass
+    if vhbin:
+        try:
+            r = subprocess.run([vhbin, "-t", cmd],
+                               capture_output=True, text=True, timeout=timeout)
+            return r.stdout
+        except Exception:
+            pass
+    return ""
+
+info_re = re.compile(r'^([A-Z ]+):\s*(.+)$')
+
+for dev in devices:
+    addr = dev.get("address", "")
+    if not addr:
+        continue
+    out = vh_command(f"DEVICE INFO,{addr}", vhbin)
+    info = {}
+    for line in out.splitlines():
+        m = info_re.match(line.strip())
+        if m:
+            info[m.group(1).strip()] = m.group(2).strip()
+    if info:
+        dev["vendor"]     = info.get("VENDOR", "")
+        dev["vendor_id"]  = info.get("VENDOR ID", "")
+        dev["product_id"] = info.get("PRODUCT ID", "")
+        dev["serial"]     = info.get("SERIAL", "")
+        dev["in_use_by"]  = info.get("IN USE BY", "")
 
 print(json.dumps({
     "vh_service_active": svc_active,
