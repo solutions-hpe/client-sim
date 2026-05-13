@@ -1,7 +1,7 @@
 #!/bin/bash
 # install-proxmox-agent.sh — Install the Client-Sim Proxmox agent on this host.
-# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--key apikey] [--interval 60]
-# Or run directly: bash install-proxmox-agent.sh --server http://... --key ...
+# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--key apikey] [--interval 60]
+# Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ...
 
 SCRIPT_VERSION="0.05"
 
@@ -18,6 +18,14 @@ WATCHDOG_STATE_DIR="/var/lib/proxmox-watchdog"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
 AZURE_ACCOUNT="lrbcsvms"
 AZURE_CONTAINER="vms"
+SPOKE_IP=""
+SPOKE_NAME=""
+SPOKE_PORT="8000"
+
+HUB_URL=""
+TENANT_ID=""
+HUB_SET=0
+TENANT_SET=0
 
 SERVER_URL=""
 API_KEY=""
@@ -194,6 +202,116 @@ _restore_spoke_from_azure() {
 
     rm -f "$local_file"
     echo "[INFO] Spoke VM 1001 restore complete."
+
+    # Wait for IP then configure hub settings
+    if _wait_for_spoke_ip; then
+        _configure_spoke_hub "$SPOKE_IP"
+    fi
+}
+
+# Waits up to ~3 minutes for VM 1001 to boot and report a non-loopback IP.
+# Sets SPOKE_IP on success. Works for both QEMU (qm agent) and LXC (pct exec).
+_wait_for_spoke_ip() {
+    echo "[INFO] Waiting for spoke VM 1001 to boot and report an IP address..."
+    local is_qemu=0
+    qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$' && is_qemu=1
+
+    local attempts=0 max_attempts=36  # 36 × 5s = 3 minutes
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        local ip=""
+        if [ "$is_qemu" -eq 1 ]; then
+            # qm agent network-get-interfaces returns JSON; extract first non-loopback IPv4
+            ip=$(qm agent 1001 network-get-interfaces 2>/dev/null \
+                | python3 -c "
+import json, sys
+ifaces = json.load(sys.stdin)
+for iface in ifaces:
+    if iface.get('name','') == 'lo':
+        continue
+    for addr in iface.get('ip-addresses', []):
+        if addr.get('ip-address-type') == 'ipv4':
+            print(addr['ip-address'])
+            sys.exit(0)
+" 2>/dev/null || true)
+        else
+            ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^::' | head -1" 2>/dev/null || true)
+        fi
+
+        if [ -n "$ip" ]; then
+            SPOKE_IP="$ip"
+            echo "[INFO] Spoke VM 1001 IP: ${SPOKE_IP}"
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        printf "\r[INFO] Waiting for IP... (%ds)" "$((attempts * 5))"
+        sleep 5
+    done
+    echo ""
+    echo "[WARN] Spoke VM 1001 did not report an IP within 3 minutes — configure hub settings manually."
+    return 1
+}
+
+# Configures hub URL and tenant ID on the spoke via its settings API.
+# Called after VM 1001 is up and we have its IP.
+_configure_spoke_hub() {
+    local spoke_ip="$1"
+    local spoke_base="http://${spoke_ip}:${SPOKE_PORT}"
+
+    if [ -z "$HUB_URL" ] && [ -z "$TENANT_ID" ]; then
+        echo "[INFO] No --hub-url or --tenant-id provided — skipping spoke hub configuration."
+        return 0
+    fi
+
+    echo "[INFO] Waiting for spoke API to be ready at ${spoke_base}..."
+    local attempts=0 max_attempts=24  # 24 × 5s = 2 minutes
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        if curl -sf --max-time 3 "${spoke_base}/api/health" >/dev/null 2>&1; then
+            break
+        fi
+        attempts=$((attempts + 1))
+        printf "\r[INFO] Waiting for spoke API... (%ds)" "$((attempts * 5))"
+        sleep 5
+    done
+    echo ""
+
+    if ! curl -sf --max-time 3 "${spoke_base}/api/health" >/dev/null 2>&1; then
+        echo "[WARN] Spoke API not reachable at ${spoke_base} — configure hub settings manually."
+        return 0
+    fi
+
+    echo "[INFO] Configuring hub settings on spoke..."
+
+    # Build JSON payload with only the fields that were provided
+    local payload
+    payload=$(python3 -c "
+import json, sys
+d = {}
+hub_url   = sys.argv[1]
+tenant_id = sys.argv[2]
+if hub_url:
+    d['relay_server_url'] = hub_url
+    d['relay_enabled']    = 'on'
+if tenant_id:
+    d['relay_tenant_id']   = tenant_id
+    d['relay_tenant_hint'] = tenant_id
+print(json.dumps(d))
+" "$HUB_URL" "$TENANT_ID")
+
+    local http_status
+    http_status=$(curl -sf --max-time 10 \
+        -X POST "${spoke_base}/api/settings" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+
+    if [ "$http_status" = "200" ]; then
+        echo "[INFO] Spoke hub settings configured successfully."
+        [ -n "$HUB_URL" ]    && echo "  Hub URL   : $HUB_URL"
+        [ -n "$TENANT_ID" ]  && echo "  Tenant ID : $TENANT_ID"
+    else
+        echo "[WARN] Failed to configure spoke hub settings (HTTP ${http_status}) — configure manually in the spoke UI."
+    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -202,6 +320,8 @@ while [[ $# -gt 0 ]]; do
         --key)         API_KEY="$2"; KEY_SET=1; shift 2 ;;
         --interval)    POLL_INTERVAL="$2"; INTERVAL_SET=1; shift 2 ;;
         --branch)      REPO_BRANCH="$2"; BRANCH_SET=1; shift 2 ;;
+        --hub-url)     HUB_URL="$2"; HUB_SET=1; shift 2 ;;
+        --tenant-id)   TENANT_ID="$2"; TENANT_SET=1; shift 2 ;;
         --unattended)  UNATTENDED=1; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
@@ -234,10 +354,12 @@ if ! command -v qm &>/dev/null && [[ ! -x /usr/sbin/qm ]]; then
 fi
 
 echo "=== Client-Sim Proxmox Agent Installer v${SCRIPT_VERSION} ==="
-echo "Server : $SERVER_URL"
-echo "Branch : $REPO_BRANCH"
-echo "Key    : ${API_KEY:+(set)}"
-echo "Mode   : $([[ $UNATTENDED -eq 1 ]] && echo unattended || echo interactive)"
+echo "Server    : $SERVER_URL"
+echo "Branch    : $REPO_BRANCH"
+echo "Key       : ${API_KEY:+(set)}"
+echo "Hub URL   : ${HUB_URL:-(not set)}"
+echo "Tenant ID : ${TENANT_ID:-(not set)}"
+echo "Mode      : $([[ $UNATTENDED -eq 1 ]] && echo unattended || echo interactive)"
 echo
 
 install -d -m 0755 "$INSTALLER_DIR" "$WATCHDOG_STATE_DIR"
@@ -279,10 +401,10 @@ echo "  OK: $WATCHDOG_STATE_DIR"
 echo "[5/6] Enabling and (re)starting service + timer..."
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
-systemctl restart "$SERVICE_NAME"
-systemctl enable --now proxmox-watchdog.timer
-systemctl start proxmox-watchdog.service || true
-sleep 3
+systemctl restart "$SERVICE_NAME" --no-block
+systemctl enable --now proxmox-watchdog.timer --no-block
+systemctl start proxmox-watchdog.service --no-block || true
+sleep 5
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "  OK: service running"
 else
@@ -320,7 +442,8 @@ fi
 
 echo
 echo "=== Installation complete ==="
-echo "  Agent : v${AGENT_VERSION:-unknown}"
-echo "  Logs  : journalctl -u $SERVICE_NAME -f"
-echo "  Status: systemctl status $SERVICE_NAME"
-echo "  Watchdog: systemctl status proxmox-watchdog.timer"
+echo "  Agent    : v${AGENT_VERSION:-unknown}"
+[ -n "$SPOKE_IP" ] && echo "  Spoke IP : ${SPOKE_IP}  (login: http://${SPOKE_IP}:${SPOKE_PORT})"
+echo "  Logs     : journalctl -u $SERVICE_NAME -f"
+echo "  Status   : systemctl status $SERVICE_NAME"
+echo "  Watchdog : systemctl status proxmox-watchdog.timer"

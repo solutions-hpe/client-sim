@@ -5333,6 +5333,56 @@ async def api_settings_get() -> dict[str, Any]:
     }
 
 
+@app.post("/api/bootstrap")
+async def api_bootstrap(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, str]:
+    """One-time hub configuration — only accepted from localhost (via qm guest exec / pct exec).
+
+    Security model:
+      - Only 127.0.0.1 / ::1 can call this endpoint — enforced server-side.
+      - If relay_server_url is already configured the endpoint returns 409 (idempotent lock).
+      - The installer invokes this via `qm guest exec` / `pct exec` so the request never
+        crosses the network; an external caller cannot reach it.
+    """
+    global relay_registration_refresh_needed
+
+    client_host = (request.client.host if request.client else "") or ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        logger.warning("Bootstrap attempt rejected from non-localhost %s", client_host)
+        raise HTTPException(status_code=403, detail="bootstrap only accepted from localhost")
+
+    if settings.get("relay_server_url", "").strip():
+        raise HTTPException(status_code=409, detail="hub already configured — bootstrap is one-time only")
+
+    hub_url = str(body.get("relay_server_url", "") or "").strip()
+    tenant_id = str(body.get("relay_tenant_id", "") or "").strip()
+
+    if not hub_url:
+        raise HTTPException(status_code=422, detail="relay_server_url is required")
+
+    settings["relay_server_url"] = hub_url
+    if tenant_id:
+        settings["relay_tenant_id"] = tenant_id
+        settings["relay_tenant_hint"] = tenant_id
+    settings["relay_enabled"] = "on"
+    _save_settings()
+
+    relay_state.update({
+        "enabled": True,
+        "connected": False,
+        "error": None,
+        "registration_status": _relay_registration_status_from_settings(),
+    })
+    relay_registration_refresh_needed = True
+    _save_relay_state()
+    task = background_tasks.get("relay")
+    if task and not task.done():
+        task.cancel()
+    background_tasks["relay"] = asyncio.get_event_loop().create_task(relay_loop())
+
+    logger.info("Bootstrap: hub configured to %s (tenant: %s)", hub_url, tenant_id or "none")
+    return {"status": "ok", "relay_server_url": hub_url, "relay_tenant_id": tenant_id}
+
+
 @app.post("/api/settings")
 async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     global relay_registration_refresh_needed
