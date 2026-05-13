@@ -126,6 +126,8 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
     [[ -n "${_env_br}" && "${_env_br}" != "lrb" ]] && REPO_BRANCH="${_env_br}"
   fi
   _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/install-lxc.sh"
+  _local_ver=$(grep '^VERSION=' "$0" 2>/dev/null | head -1 | tr -d '"' | cut -d= -f2)
+  echo "[bootstrap] Local installer version : ${_local_ver:-unknown}"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
@@ -134,7 +136,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="1.00.05"
+VERSION="1.00.06"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
