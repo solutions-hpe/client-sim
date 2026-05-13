@@ -1,13 +1,15 @@
 # client-sim
 
-`client-sim` contains the spoke-side runtime for the HPE Client-Sim platform:
+![Release](https://img.shields.io/badge/release-v1.0.0-success)
+
+`client-sim` contains the spoke-side runtime for the HPE Client-Sim platform. Version **v1.0.0** on `main` is the production release for spoke services, the Proxmox agent, and the shared installer flow:
 
 - the **spoke backend** (`webui-spoke/`)
 - the **Proxmox host agent** (`proxmox/`)
 - the **Linux simulation scripts** (`linux/`)
 - related configs, Windows equivalents, and installer assets
 
-This repo is the local execution plane. It can run standalone, or relay telemetry and commands to Hub.
+This repo is the local execution plane. It can run standalone, or relay telemetry and commands to Hub. In v1.0 it also carries the Azure-backed VM backup/reseed path used by hub-managed Proxmox environments.
 
 ---
 
@@ -48,7 +50,7 @@ Before you run it, have:
 - root or `sudo` access
 - outbound access to GitHub
 - a Proxmox-attached second NIC if you want the isolated DHCP network
-- the target branch decided (`lrb` for current development work)
+- the target branch decided (`main` for production, `lrb` only for development/testing overrides)
 
 #### Install commands
 
@@ -56,20 +58,20 @@ Standard install/update:
 
 ```bash
 cd /opt/client-sim-repo/webui-spoke
-sudo bash install-lxc.sh --branch lrb
+sudo bash install-lxc.sh --branch main
 ```
 
 Full wipe/reinstall:
 
 ```bash
 cd /opt/client-sim-repo/webui-spoke
-sudo bash install-lxc.sh --reinstall --branch lrb
+sudo bash install-lxc.sh --reinstall --branch main
 ```
 
 Custom port example:
 
 ```bash
-sudo bash install-lxc.sh --branch lrb --port 9000
+sudo bash install-lxc.sh --branch main --port 9000
 ```
 
 #### What to verify after install
@@ -98,12 +100,28 @@ The Proxmox agent installer:
 
 Run this on the **Proxmox host**, not inside the LXC.
 
-1. Install from the repo or raw URL.
+1. Install from GitHub (recommended for production `main`) or from a local checkout.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/proxmox/install-proxmox-agent.sh | sudo bash -s -- \
+  --server http://169.253.1.1:8000 \
+  --branch main \
+  --hub-url https://<hub-host>:8443 \
+  --tenant-id <tenant-id> \
+  --installer-key <installer-api-key>
+```
 
 ```bash
 cd /opt/client-sim-repo/proxmox
-sudo bash install-proxmox-agent.sh --server http://169.253.1.1:8000 --branch lrb
+sudo bash install-proxmox-agent.sh \
+  --server http://169.253.1.1:8000 \
+  --branch main \
+  --hub-url https://<hub-host>:8443 \
+  --tenant-id <tenant-id> \
+  --installer-key <installer-api-key>
 ```
+
+`--hub-url` and `--tenant-id` let the installer seed spoke-to-hub settings through the spoke's localhost-only `/api/bootstrap` endpoint. `--installer-key` is the shared secret Hub expects on `X-Installer-Key` when the installer requests an Azure SAS URL for private blob downloads.
 
 2. Check that the service started.
 
@@ -130,12 +148,30 @@ curl http://169.253.1.1:8000/api/proxmox/status
 
 | Flag | Meaning |
 |---|---|
-| `--server <url>` | Required spoke URL |
+| `--server <url>` | Required spoke URL used by the Proxmox agent for local API access |
+| `--hub-url <url>` | Optional Hub URL used for one-time spoke bootstrap and installer SAS requests |
+| `--tenant-id <id>` | Optional tenant identifier passed to the spoke bootstrap flow |
+| `--installer-key <key>` | Optional shared secret sent as `X-Installer-Key` when requesting the installer SAS token from Hub |
 | `--key <api_key>` | Pre-seed an API key instead of waiting for approval |
 | `--interval <seconds>` | Override poll interval |
-| `--branch <name>` | Branch to pull scripts from |
+| `--branch <name>` | Branch to pull scripts from (`main` for production, `lrb` for development) |
 | `--unattended` | Automation-friendly mode |
 | `--skip-vh` | Skip VirtualHere client installation |
+
+#### Azure VM backup and reseed
+
+In v1.0, the Proxmox agent can receive `backup` and `reseed` commands over its WebSocket client and execute them asynchronously. Operationally:
+
+- `run_backup_command()` creates a `vzdump` snapshot, then uploads the artifact to private Azure Blob Storage in `csvmstorage/vms` with `azcopy`.
+- `run_reseed_command()` downloads the selected blob URL, restores the VM with `qmrestore`, converts the template when needed, and reclones VMs.
+- Progress is reported back to Hub with `backup_progress` and `reseed_progress` messages so Hub users can watch long-running jobs.
+- Installers and restore flows request a short-lived, read-only SAS URL from Hub instead of embedding the raw Azure account key on the Proxmox host.
+
+#### Branch override config
+
+At startup, `install-proxmox-agent.sh` tries to download `proxmox/installer-override.conf` from the selected branch and silently skips it on `404`. When present, that file can override values such as `AZURE_ACCOUNT`, `OVERRIDE_HUB_URL`, `OVERRIDE_TENANT_ID`, and `OVERRIDE_SERVER_URL`.
+
+On production `main`, `installer-override.conf` is intentionally **not** shipped. The override file is an `lrb`-only development convenience, so production installs should expect the download to be skipped with no effect.
 
 ### VirtualHere auto-use sync
 

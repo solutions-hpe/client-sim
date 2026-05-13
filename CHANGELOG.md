@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [1.0.0] — 2026-05-13
+
+Initial stable production release of the spoke-side platform on `main`. Legacy script history remains below for earlier simulation components.
+
+### Added
+- Proxmox agent **v1.0** with asynchronous WebSocket handling for `backup` and `reseed` commands, Azure Blob backup uploads via `azcopy`, progress reporting (`backup_progress` / `reseed_progress`), and GitHub self-update on startup
+- Proxmox installer **v1.0** with authenticated SAS token requests (`X-Installer-Key`), optional hub bootstrap inputs (`--hub-url`, `--tenant-id`, `--installer-key`), branch override config support, and interactive or piped install flows
+- Spoke server **v1.07** with a localhost-only `/api/bootstrap` endpoint, Proxmox backup/reseed WebSocket relay, and exponential reclone retry behavior
+- Private Azure storage rollout using the `csvmstorage` account and `vms` container for VM backup/reseed artifacts
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
