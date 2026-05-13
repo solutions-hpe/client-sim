@@ -3281,16 +3281,21 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             cmd = await _queue_proxmox_command("reclone_vm", _reclone_command_args(vm), command_type=trigger_type)
             deadline = time.time() + 1800
             last_status = "pending"
+            poll_interval = 2.0
             while time.time() < deadline:
+                # Commands remain in a small module-level list, so a linear scan keeps the
+                # lookup simple here without a broader commands storage refactor.
                 current = next((item for item in commands if item["id"] == cmd["id"]), None)
                 if current is None:
                     break
                 status = current.get("status", "pending")
-                if status != last_status and status == "delivered":
-                    _update_reclone_log(vmid, name, "in_progress")
-                    await _broadcast_reclone_state()
-                    await _broadcast_proxmox_state()
-                last_status = status
+                if status != last_status:
+                    if status == "delivered":
+                        _update_reclone_log(vmid, name, "in_progress")
+                        await _broadcast_reclone_state()
+                        await _broadcast_proxmox_state()
+                        poll_interval = 5.0
+                    last_status = status
                 if status in {"completed", "failed", "expired"}:
                     final_status = "completed" if status == "completed" else "failed"
                     _update_reclone_log(vmid, name, final_status, str(current.get("message") or "").strip() or None)
@@ -3303,7 +3308,9 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                     await _broadcast_reclone_state()
                     await _broadcast_proxmox_state()
                     return
-                await asyncio.sleep(2)
+                await asyncio.sleep(poll_interval)
+                if status == "pending":
+                    poll_interval = min(poll_interval * 2, 10.0)
             logger.warning("Rolling reclone: VM %s (%s) timed out", vmid, name)
             _update_reclone_log(vmid, name, "failed", "Timed out waiting for Proxmox agent ACK")
             reclone_state["failed"] += 1
