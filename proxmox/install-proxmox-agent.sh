@@ -1,9 +1,9 @@
 #!/bin/bash
 # install-proxmox-agent.sh — Install the Client-Sim Proxmox agent on this host.
-# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--key apikey] [--interval 60]
-# Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ...
+# Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--installer-key <key>] [--key apikey] [--interval 60]
+# Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ... --installer-key ...
 
-SCRIPT_VERSION="0.05"
+SCRIPT_VERSION="0.06"
 
 set -euo pipefail
 
@@ -24,6 +24,7 @@ SPOKE_PORT="8000"
 
 HUB_URL=""
 TENANT_ID=""
+INSTALLER_KEY="${CLIENT_SIM_INSTALLER_KEY:-}"
 HUB_SET=0
 TENANT_SET=0
 
@@ -37,11 +38,57 @@ KEY_SET=0
 INTERVAL_SET=0
 BRANCH_SET=0
 
+OVERRIDE_CONFIG_URL="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/proxmox/installer-override.conf"
+if _override_content=$(curl -sf "$OVERRIDE_CONFIG_URL"); then
+    source <(echo "$_override_content")
+    echo "[override] Branch config applied from ${REPO_BRANCH}/proxmox/installer-override.conf"
+fi
+
+_get_installer_sas() {
+    if [ -z "$HUB_URL" ]; then
+        return 0
+    fi
+    if [ -z "$INSTALLER_KEY" ]; then
+        echo "[WARN] Installer key not set; skipping SAS token fetch." >&2
+        return 0
+    fi
+
+    local response
+    if ! response=$(curl -sf -H "X-Installer-Key: ${INSTALLER_KEY}" "${HUB_URL}/api/backups/installer/sas-token"); then
+        echo "[WARN] Failed to fetch installer SAS token; falling back to direct Azure URLs." >&2
+        return 0
+    fi
+
+    local sas_url
+    sas_url=$(python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print("")
+    raise SystemExit(0)
+print((data.get("sas_url") or "").strip())
+' <<< "$response")
+    if [ -z "$sas_url" ]; then
+        echo "[WARN] Hub returned an empty SAS token; falling back to direct Azure URLs." >&2
+        return 0
+    fi
+    echo "$sas_url"
+}
+
 _restore_template_from_azure() {
-    local blob_manifest_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}?restype=container&comp=list"
+    local _sas_url _sas_query="" _blob_base blob_manifest_url
+    _sas_url=$(_get_installer_sas)
+    _blob_base="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}"
+    blob_manifest_url="${_blob_base}?restype=container&comp=list"
+    if [ -n "$_sas_url" ]; then
+        _sas_query="${_sas_url#*\?}"
+        blob_manifest_url="${_blob_base}?${_sas_query}&restype=container&comp=list"
+    fi
+
     local blob_manifest
     if ! blob_manifest=$(curl -sf "$blob_manifest_url"); then
-        echo "[WARN] Unable to query Azure template backups (${blob_manifest_url}). Skipping template restore."
+        echo "[WARN] Unable to query Azure template backups. Skipping template restore."
         return 0
     fi
 
@@ -49,7 +96,7 @@ _restore_template_from_azure() {
     blob_list=$(printf '%s\n' "$blob_manifest" | grep -oP '(?<=<Name>)[^<]+\.vma\.zst' | sort || true)
 
     if [ -z "$blob_list" ]; then
-        echo "[WARN] No template backups found in Azure (https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}). Skipping template restore."
+        echo "[WARN] No template backups found in Azure (${AZURE_ACCOUNT}/${AZURE_CONTAINER}). Skipping template restore."
         return 0
     fi
 
@@ -83,9 +130,12 @@ _restore_template_from_azure() {
         fi
     fi
 
-    local blob_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}/${selected_blob}"
+    local blob_url="${_blob_base}/${selected_blob}"
+    if [ -n "$_sas_query" ]; then
+        blob_url="${blob_url}?${_sas_query}"
+    fi
     local local_file="${INSTALLER_DIR}/$(basename "$selected_blob")"
-    echo "[INFO] Downloading template from Azure: $blob_url"
+    echo "[INFO] Downloading template from Azure: ${selected_blob}"
     if ! curl -L --progress-bar -o "$local_file" "$blob_url"; then
         echo "[ERROR] Failed to download template. Skipping restore."
         rm -f "$local_file"
@@ -110,10 +160,18 @@ _restore_template_from_azure() {
 }
 
 _restore_spoke_from_azure() {
-    local blob_manifest_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}?restype=container&comp=list"
+    local _sas_url _sas_query="" _blob_base blob_manifest_url
+    _sas_url=$(_get_installer_sas)
+    _blob_base="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}"
+    blob_manifest_url="${_blob_base}?restype=container&comp=list"
+    if [ -n "$_sas_url" ]; then
+        _sas_query="${_sas_url#*\?}"
+        blob_manifest_url="${_blob_base}?${_sas_query}&restype=container&comp=list"
+    fi
+
     local blob_manifest
     if ! blob_manifest=$(curl -sf "$blob_manifest_url"); then
-        echo "[WARN] Unable to query Azure spoke backups (${blob_manifest_url}). Skipping spoke restore."
+        echo "[WARN] Unable to query Azure spoke backups. Skipping spoke restore."
         return 0
     fi
 
@@ -121,7 +179,7 @@ _restore_spoke_from_azure() {
     blob_list=$(printf '%s\n' "$blob_manifest" | grep -oP '(?<=<Name>)[^<]+\.vma\.zst' | sort || true)
 
     if [ -z "$blob_list" ]; then
-        echo "[WARN] No spoke backups found in Azure (https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}). Skipping spoke VM restore."
+        echo "[WARN] No spoke backups found in Azure (${AZURE_ACCOUNT}/${AZURE_CONTAINER}). Skipping spoke VM restore."
         return 0
     fi
 
@@ -155,9 +213,12 @@ _restore_spoke_from_azure() {
         fi
     fi
 
-    local blob_url="https://${AZURE_ACCOUNT}.blob.core.windows.net/${AZURE_CONTAINER}/${selected_blob}"
+    local blob_url="${_blob_base}/${selected_blob}"
+    if [ -n "$_sas_query" ]; then
+        blob_url="${blob_url}?${_sas_query}"
+    fi
     local local_file="${INSTALLER_DIR}/$(basename "$selected_blob")"
-    echo "[INFO] Downloading spoke backup from Azure: $blob_url"
+    echo "[INFO] Downloading spoke backup from Azure: ${selected_blob}"
     if ! curl -L --progress-bar -o "$local_file" "$blob_url"; then
         echo "[ERROR] Download failed. Skipping spoke restore."
         rm -f "$local_file"
@@ -382,6 +443,7 @@ while [[ $# -gt 0 ]]; do
         --interval)    POLL_INTERVAL="$2"; INTERVAL_SET=1; shift 2 ;;
         --branch)      REPO_BRANCH="$2"; BRANCH_SET=1; shift 2 ;;
         --hub-url)     HUB_URL="$2"; HUB_SET=1; shift 2 ;;
+        --installer-key) INSTALLER_KEY="$2"; shift 2 ;;
         --tenant-id)   TENANT_ID="$2"; TENANT_SET=1; shift 2 ;;
         --unattended)  UNATTENDED=1; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
@@ -401,6 +463,10 @@ if [[ -f "$ENV_FILE" ]]; then
     [[ $BRANCH_SET -eq 1 ]] || [[ -z "$existing_branch" ]] || REPO_BRANCH="$existing_branch"
     [[ -z "$existing_agent_port" ]] || AGENT_PORT="$existing_agent_port"
 fi
+
+[[ "$HUB_SET" -eq 0 && -n "${OVERRIDE_HUB_URL:-}" ]] && HUB_URL="$OVERRIDE_HUB_URL"
+[[ "$TENANT_SET" -eq 0 && -n "${OVERRIDE_TENANT_ID:-}" ]] && TENANT_ID="$OVERRIDE_TENANT_ID"
+[[ "$SERVER_SET" -eq 0 && -n "${OVERRIDE_SERVER_URL:-}" ]] && SERVER_URL="$OVERRIDE_SERVER_URL"
 
 REPO_RAW="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}"
 
