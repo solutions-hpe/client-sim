@@ -519,7 +519,7 @@ fi
 
 info "Installing/updating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip >>"$LOG" 2>&1
-"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt" >>"$LOG" 2>&1
+"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt" "ldap3>=3.4" "pyrad>=2.4" "tacacs-plus>=1.0.5" >>"$LOG" 2>&1
 ok "Python dependencies up to date"
 
 ###############################################################################

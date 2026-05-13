@@ -6,7 +6,7 @@ import contextlib
 import copy
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import acme as spoke_acme
 import logging
 import os
@@ -92,7 +92,7 @@ _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_CLASSIC_API_KEYS = {"password"}
 _SENSITIVE_CENTRAL_API_KEYS = {"client_secret"}
-_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token", "client_api_key", "admin_ws_token", "admin_password"}
+_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token", "client_api_key", "admin_ws_token", "admin_password", "auth_ldap_bind_password", "auth_radius_secret", "auth_tacacs_secret"}
 _SENSITIVE_TOP_DICT_KEYS = {"proxmox_approved_agents"}
 _SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
 
@@ -732,6 +732,24 @@ settings: dict[str, Any] = {
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
     "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
+    # Auth provider config
+    "auth_provider": _persisted.get("auth_provider", "local"),
+    "auth_ldap_url": _persisted.get("auth_ldap_url", ""),
+    "auth_ldap_bind_dn": _persisted.get("auth_ldap_bind_dn", ""),
+    "auth_ldap_bind_password": _persisted.get("auth_ldap_bind_password", ""),
+    "auth_ldap_user_base": _persisted.get("auth_ldap_user_base", ""),
+    "auth_ldap_user_filter": _persisted.get("auth_ldap_user_filter", "(&(objectClass=user)(sAMAccountName={username}))"),
+    "auth_ldap_group_admin": _persisted.get("auth_ldap_group_admin", ""),
+    "auth_ldap_group_viewer": _persisted.get("auth_ldap_group_viewer", ""),
+    "auth_radius_host": _persisted.get("auth_radius_host", ""),
+    "auth_radius_port": _persisted.get("auth_radius_port", 1812),
+    "auth_radius_secret": _persisted.get("auth_radius_secret", ""),
+    "auth_radius_role_attr": _persisted.get("auth_radius_role_attr", "Filter-Id"),
+    "auth_radius_admin_val": _persisted.get("auth_radius_admin_val", "admin"),
+    "auth_tacacs_host": _persisted.get("auth_tacacs_host", ""),
+    "auth_tacacs_port": _persisted.get("auth_tacacs_port", 49),
+    "auth_tacacs_secret": _persisted.get("auth_tacacs_secret", ""),
+    "auth_tacacs_admin_priv": _persisted.get("auth_tacacs_admin_priv", 15),
 }
 _ensure_relay_spoke_id(_persisted)
 
@@ -2066,33 +2084,215 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 
 # ── Spoke session auth ─────────────────────────────────────────────────────────
-# When ADMIN_PASSWORD env var is set, all API routes (except /api/auth/*,
-# /static/*, /ws, and GET /) require a valid session cookie.
+# When spoke auth is enabled, all API routes (except /api/auth/*, /static/*,
+# /ws, and GET /) require a valid session cookie.
 _SPOKE_SESSION_COOKIE = "spoke_session"
 _SPOKE_SESSION_TTL    = 12 * 3600   # 12 hours
-_spoke_sessions: dict[str, float] = {}  # token → expiry timestamp
+
+
+@dataclass
+class SpokeUser:
+    username: str
+    role: str
+    auth_provider: str
+    display_name: str = ""
+
+
+_spoke_sessions: dict[str, tuple[SpokeUser, float] | float] = {}  # token → (user, expiry)
+
 
 def _admin_password() -> str:
     return str(os.getenv("ADMIN_PASSWORD", settings.get("admin_password", "") or "") or "").strip()
 
-def _create_spoke_session() -> str:
+
+def _normalize_spoke_auth_provider(value: Any) -> str:
+    provider = str(value or "local").strip().lower()
+    return provider if provider in {"local", "ldap", "radius", "tacacs"} else "local"
+
+
+def _spoke_auth_required() -> bool:
+    return bool(_admin_password() or _normalize_spoke_auth_provider(settings.get("auth_provider", "local")) != "local")
+
+
+def _create_spoke_session(user: SpokeUser) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
-    _spoke_sessions[token] = now + _SPOKE_SESSION_TTL
-    # Prune expired sessions opportunistically
-    expired = [t for t, exp in list(_spoke_sessions.items()) if now > exp]
-    for t in expired:
-        _spoke_sessions.pop(t, None)
+    _spoke_sessions[token] = (user, now + _SPOKE_SESSION_TTL)
+    expired: list[str] = []
+    for stored_token, entry in list(_spoke_sessions.items()):
+        if isinstance(entry, tuple):
+            _, expiry = entry
+        else:
+            expiry = float(entry)
+        if now > expiry:
+            expired.append(stored_token)
+    for stored_token in expired:
+        _spoke_sessions.pop(stored_token, None)
     return token
 
-def _validate_spoke_session(token: str) -> bool:
+
+def _validate_spoke_session(token: str) -> SpokeUser | None:
     if not token:
-        return False
-    exp = _spoke_sessions.get(token)
-    if exp is None or time.time() > exp:
+        return None
+    entry = _spoke_sessions.get(token)
+    if entry is None:
+        return None
+    if isinstance(entry, tuple):
+        user, expiry = entry
+    else:
+        expiry = float(entry)
+        user = SpokeUser(username="", role="admin", auth_provider="local")
+        _spoke_sessions[token] = (user, expiry)
+    if time.time() > expiry:
         _spoke_sessions.pop(token, None)
-        return False
-    return True
+        return None
+    return user
+
+
+async def _ldap_authenticate(username: str, password: str) -> SpokeUser | None:
+    """Authenticate against LDAP/AD. Returns SpokeUser or None."""
+    try:
+        from ldap3 import ALL, Connection, Server
+
+        s = settings
+        if not s.get("auth_ldap_url") or not s.get("auth_ldap_bind_dn"):
+            return None
+
+        srv = Server(s["auth_ldap_url"], get_info=ALL)
+
+        with Connection(srv, user=s["auth_ldap_bind_dn"], password=s["auth_ldap_bind_password"], auto_bind=True) as conn:
+            search_filter = str(s.get("auth_ldap_user_filter") or "(&(objectClass=user)(sAMAccountName={username}))").format(username=username)
+            conn.search(
+                search_base=s["auth_ldap_user_base"],
+                search_filter=search_filter,
+                attributes=["cn", "mail", "memberOf", "displayName"],
+            )
+            if not conn.entries:
+                return None
+            entry = conn.entries[0]
+            user_dn = entry.entry_dn
+            display_name = str(entry.displayName) if hasattr(entry, "displayName") and entry.displayName else username
+            member_of = [str(group) for group in list(entry.memberOf)] if hasattr(entry, "memberOf") and entry.memberOf else []
+
+        with Connection(srv, user=user_dn, password=password, auto_bind=True) as user_conn:
+            if not user_conn.bound:
+                return None
+
+        admin_group = str(s.get("auth_ldap_group_admin", "") or "")
+        viewer_group = str(s.get("auth_ldap_group_viewer", "") or "")
+        role = "viewer"
+        if admin_group and any(admin_group.lower() in group.lower() for group in member_of):
+            role = "admin"
+        elif not viewer_group:
+            role = "admin"
+        elif viewer_group and any(viewer_group.lower() in group.lower() for group in member_of):
+            role = "viewer"
+        else:
+            return None
+
+        return SpokeUser(username=username, role=role, auth_provider="ldap", display_name=display_name)
+    except ImportError:
+        logger.warning("ldap3 not installed — LDAP auth unavailable")
+        return None
+    except Exception as exc:
+        logger.warning(f"LDAP auth error for {username}: {exc}")
+        return None
+
+
+async def _radius_authenticate(username: str, password: str) -> SpokeUser | None:
+    try:
+        import io
+
+        import pyrad.client
+        import pyrad.dictionary
+        import pyrad.packet
+
+        s = settings
+        if not s.get("auth_radius_host") or not s.get("auth_radius_secret"):
+            return None
+
+        dict_src = """
+ATTRIBUTE User-Name      1  string
+ATTRIBUTE User-Password  2  string
+ATTRIBUTE Filter-Id      11 string
+ATTRIBUTE Class          25 string
+"""
+        dictionary = pyrad.dictionary.Dictionary(io.StringIO(dict_src))
+        client = pyrad.client.Client(
+            server=s["auth_radius_host"],
+            authport=int(s.get("auth_radius_port", 1812)),
+            secret=str(s["auth_radius_secret"]).encode(),
+            dict=dictionary,
+        )
+        client.timeout = 10
+
+        req = client.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=username)
+        req["User-Password"] = req.PwCrypt(password)
+        reply = client.SendPacket(req)
+
+        if reply.code != pyrad.packet.AccessAccept:
+            return None
+
+        role_attr = str(s.get("auth_radius_role_attr", "Filter-Id") or "Filter-Id")
+        admin_val = str(s.get("auth_radius_admin_val", "admin") or "admin").lower()
+        role = "admin"
+        display_name = ""
+
+        if role_attr in reply:
+            raw_value = reply[role_attr][0] if reply[role_attr] else b""
+            if isinstance(raw_value, bytes):
+                attr_val = raw_value.decode(errors="ignore")
+            else:
+                attr_val = str(raw_value)
+            role = "admin" if admin_val in attr_val.lower() else "viewer"
+            display_name = attr_val
+
+        return SpokeUser(username=username, role=role, auth_provider="radius", display_name=display_name)
+    except ImportError:
+        logger.warning("pyrad not installed — RADIUS auth unavailable")
+        return None
+    except Exception as exc:
+        logger.warning(f"RADIUS auth error for {username}: {exc}")
+        return None
+
+
+async def _tacacs_authenticate(username: str, password: str) -> SpokeUser | None:
+    try:
+        import tacacs_plus.client as tacacs
+
+        s = settings
+        if not s.get("auth_tacacs_host") or not s.get("auth_tacacs_secret"):
+            return None
+
+        client = tacacs.TACACSClient(
+            host=s["auth_tacacs_host"],
+            port=int(s.get("auth_tacacs_port", 49)),
+            secret=str(s["auth_tacacs_secret"]).encode(),
+            timeout=10,
+        )
+
+        authen = client.authenticate(username, password)
+        if not getattr(authen, "valid", False):
+            return None
+
+        admin_priv = int(s.get("auth_tacacs_admin_priv", 15))
+        author = client.authorize(username, arguments=[b"service=shell", b"cmd="])
+        priv_level = 1
+        for arg in (getattr(author, "arguments", None) or []):
+            if b"priv-lvl=" in arg:
+                try:
+                    priv_level = int(arg.split(b"=", 1)[1])
+                except Exception:
+                    pass
+
+        role = "admin" if priv_level >= admin_priv else "viewer"
+        return SpokeUser(username=username, role=role, auth_provider="tacacs")
+    except ImportError:
+        logger.warning("tacacs-plus not installed — TACACS+ auth unavailable")
+        return None
+    except Exception as exc:
+        logger.warning(f"TACACS+ auth error for {username}: {exc}")
+        return None
 
 
 app = FastAPI(title="Client Simulator", lifespan=lifespan)
@@ -2111,16 +2311,24 @@ class SpokeAuthMiddleware(BaseHTTPMiddleware):
     _PUBLIC_PATHS    = ("/ws",)
 
     async def dispatch(self, request: Request, call_next):
-        if not _admin_password():
+        if not _spoke_auth_required():
             return await call_next(request)
         path = request.url.path
-        # Always allow: static assets, auth endpoints, WebSocket (has own token auth), GET /
         if (path == "/" or path.startswith(self._PUBLIC_PREFIXES) or path in self._PUBLIC_PATHS or request.method == "OPTIONS"):
             return await call_next(request)
         token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
-        if _validate_spoke_session(token):
-            return await call_next(request)
-        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        user = _validate_spoke_session(token)
+        if not user:
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        request.state.spoke_user = user
+        if (
+            user.role == "viewer"
+            and path.startswith("/api/")
+            and not path.startswith("/api/auth/")
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+        ):
+            return JSONResponse({"detail": "Viewer role cannot modify data"}, status_code=403)
+        return await call_next(request)
 
 app.add_middleware(SpokeAuthMiddleware)
 app.add_middleware(NoCacheMiddleware)
@@ -2294,6 +2502,23 @@ class SettingsUpdate(BaseModel):
     relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
     admin_password: str | None = None
+    auth_provider: str | None = None
+    auth_ldap_url: str | None = None
+    auth_ldap_bind_dn: str | None = None
+    auth_ldap_bind_password: str | None = None
+    auth_ldap_user_base: str | None = None
+    auth_ldap_user_filter: str | None = None
+    auth_ldap_group_admin: str | None = None
+    auth_ldap_group_viewer: str | None = None
+    auth_radius_host: str | None = None
+    auth_radius_port: int | None = None
+    auth_radius_secret: str | None = None
+    auth_radius_role_attr: str | None = None
+    auth_radius_admin_val: str | None = None
+    auth_tacacs_host: str | None = None
+    auth_tacacs_port: int | None = None
+    auth_tacacs_secret: str | None = None
+    auth_tacacs_admin_priv: int | None = None
     usb_vidpids: str | None = None
     usb_missing_timeout: str | None = None
     usb_template_id: str | None = None
@@ -5342,33 +5567,99 @@ async def heartbeat_check() -> None:
 # ── Auth endpoints ─────────────────────────────────────────────────────────────
 
 class _SpokeLoginRequest(BaseModel):
+    username: str = ""
     password: str = ""
+
 
 @app.get("/api/auth/check")
 async def spoke_auth_check(request: Request):
-    pw = _admin_password()
-    if not pw:
-        return {"auth_required": False, "authenticated": True}
+    auth_required = _spoke_auth_required()
+    if not auth_required:
+        return {
+            "auth_required": False,
+            "authenticated": True,
+            "username": "admin",
+            "role": "admin",
+            "auth_provider": "local",
+        }
     token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
-    return {"auth_required": True, "authenticated": _validate_spoke_session(token)}
+    user = _validate_spoke_session(token)
+    return {
+        "auth_required": True,
+        "authenticated": bool(user),
+        "username": user.username if user else "",
+        "role": user.role if user else "",
+        "auth_provider": user.auth_provider if user else _normalize_spoke_auth_provider(settings.get("auth_provider", "local")),
+    }
+
 
 @app.post("/api/auth/login")
-async def spoke_auth_login(payload: _SpokeLoginRequest, response: JSONResponse = None):
-    pw = _admin_password()
-    if not pw:
-        return JSONResponse({"ok": True})
-    if not payload.password or not secrets.compare_digest(payload.password.strip(), pw):
-        raise HTTPException(status_code=401, detail="Invalid password")
-    token = _create_spoke_session()
-    resp = JSONResponse({"ok": True})
+async def spoke_auth_login(payload: _SpokeLoginRequest):
+    username = str(payload.username or "").strip()
+    password = str(payload.password or "")
+    provider = _normalize_spoke_auth_provider(settings.get("auth_provider", "local"))
+    user: SpokeUser | None = None
+
+    if not _spoke_auth_required():
+        user = SpokeUser(username=username or "admin", role="admin", auth_provider="local")
+    elif provider == "ldap" and username and password:
+        user = await _ldap_authenticate(username, password)
+    elif provider == "radius" and username and password:
+        user = await _radius_authenticate(username, password)
+    elif provider == "tacacs" and username and password:
+        user = await _tacacs_authenticate(username, password)
+
+    if user is None:
+        pw = _admin_password()
+        if pw and password and secrets.compare_digest(password.strip(), pw):
+            user = SpokeUser(username=username or "admin", role="admin", auth_provider="local")
+
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = _create_spoke_session(user)
+    resp = JSONResponse({"ok": True, "role": user.role, "username": user.username})
     resp.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=_SPOKE_SESSION_TTL)
     return resp
 
+
 @app.post("/api/auth/logout")
-async def spoke_auth_logout():
+async def spoke_auth_logout(request: Request):
+    token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
+    if token:
+        _spoke_sessions.pop(token, None)
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(_SPOKE_SESSION_COOKIE)
     return resp
+
+
+@app.post("/api/auth/test")
+async def test_auth_provider(payload: dict, request: Request):
+    """Test auth provider connectivity (admin only)."""
+    user = _validate_spoke_session(request.cookies.get(_SPOKE_SESSION_COOKIE, ""))
+    if not user or user.role != "admin":
+        raise HTTPException(403, "Admin required")
+
+    provider = str(payload.get("provider", settings.get("auth_provider", "local")) or "local").strip().lower()
+    if provider == "ldap":
+        try:
+            from ldap3 import ALL, Connection, Server
+
+            srv = Server(settings["auth_ldap_url"], get_info=ALL)
+            with Connection(srv, user=settings["auth_ldap_bind_dn"], password=settings["auth_ldap_bind_password"], auto_bind=True):
+                return {"ok": True, "detail": f"Connected to {settings['auth_ldap_url']}"}
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+    if provider == "radius":
+        return {"ok": True, "detail": "RADIUS: send a test login to verify"}
+    if provider == "tacacs":
+        try:
+            sock = socket.create_connection((settings["auth_tacacs_host"], int(settings.get("auth_tacacs_port", 49))), timeout=5)
+            sock.close()
+            return {"ok": True, "detail": f"TCP connection to {settings['auth_tacacs_host']}:{settings.get('auth_tacacs_port', 49)} OK"}
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+    return {"ok": True, "detail": "Local auth — no external connectivity needed"}
 
 
 @app.get("/api/settings")
@@ -5417,6 +5708,23 @@ async def api_settings_get() -> dict[str, Any]:
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
         "relay_api_key_configured": bool(settings.get("relay_api_key")),
         "admin_password_configured": bool(_admin_password()),
+        "auth_provider": _normalize_spoke_auth_provider(settings.get("auth_provider", "local")),
+        "auth_ldap_url": settings.get("auth_ldap_url", ""),
+        "auth_ldap_bind_dn": settings.get("auth_ldap_bind_dn", ""),
+        "auth_ldap_bind_password_configured": bool(settings.get("auth_ldap_bind_password")),
+        "auth_ldap_user_base": settings.get("auth_ldap_user_base", ""),
+        "auth_ldap_user_filter": settings.get("auth_ldap_user_filter", "(&(objectClass=user)(sAMAccountName={username}))"),
+        "auth_ldap_group_admin": settings.get("auth_ldap_group_admin", ""),
+        "auth_ldap_group_viewer": settings.get("auth_ldap_group_viewer", ""),
+        "auth_radius_host": settings.get("auth_radius_host", ""),
+        "auth_radius_port": int(settings.get("auth_radius_port", 1812)),
+        "auth_radius_secret_configured": bool(settings.get("auth_radius_secret")),
+        "auth_radius_role_attr": settings.get("auth_radius_role_attr", "Filter-Id"),
+        "auth_radius_admin_val": settings.get("auth_radius_admin_val", "admin"),
+        "auth_tacacs_host": settings.get("auth_tacacs_host", ""),
+        "auth_tacacs_port": int(settings.get("auth_tacacs_port", 49)),
+        "auth_tacacs_secret_configured": bool(settings.get("auth_tacacs_secret")),
+        "auth_tacacs_admin_priv": int(settings.get("auth_tacacs_admin_priv", 15)),
         "spoke_tls": settings.get("spoke_tls", "off"),
     }
 
@@ -5476,6 +5784,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     global relay_registration_refresh_needed
     changed_branch = False
     relay_config_changed = False
+    auth_provider_changed = False
     update_data = update.model_dump(exclude_none=True)
 
     if settings.get("hub_managed"):
@@ -5535,6 +5844,43 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.admin_password is not None:
         settings["admin_password"] = update.admin_password.strip()
+        _spoke_sessions.clear()
+
+    if update.auth_provider is not None:
+        next_provider = _normalize_spoke_auth_provider(update.auth_provider)
+        if next_provider != _normalize_spoke_auth_provider(settings.get("auth_provider", "local")):
+            auth_provider_changed = True
+        settings["auth_provider"] = next_provider
+
+    for key in (
+        "auth_ldap_url",
+        "auth_ldap_bind_dn",
+        "auth_ldap_bind_password",
+        "auth_ldap_user_base",
+        "auth_ldap_user_filter",
+        "auth_ldap_group_admin",
+        "auth_ldap_group_viewer",
+        "auth_radius_host",
+        "auth_radius_secret",
+        "auth_radius_role_attr",
+        "auth_radius_admin_val",
+        "auth_tacacs_host",
+        "auth_tacacs_secret",
+    ):
+        value = getattr(update, key)
+        if value is not None:
+            settings[key] = str(value).strip()
+
+    if update.auth_radius_port is not None:
+        settings["auth_radius_port"] = max(1, min(65535, int(update.auth_radius_port)))
+
+    if update.auth_tacacs_port is not None:
+        settings["auth_tacacs_port"] = max(1, min(65535, int(update.auth_tacacs_port)))
+
+    if update.auth_tacacs_admin_priv is not None:
+        settings["auth_tacacs_admin_priv"] = max(0, int(update.auth_tacacs_admin_priv))
+
+    if auth_provider_changed:
         _spoke_sessions.clear()
 
     if relay_config_changed:
@@ -8605,15 +8951,16 @@ async def root(request: Request):
     index = STATIC_DIR / "index.html"
     html = index.read_text()
     html = html.replace("{{WEBUI_MODE}}", "spoke")
-    pw = _admin_password()
-    auth_required = bool(pw)
-    authenticated = not auth_required or _validate_spoke_session(request.cookies.get(_SPOKE_SESSION_COOKIE, ""))
+    auth_provider = _normalize_spoke_auth_provider(settings.get("auth_provider", "local"))
+    auth_required = _spoke_auth_required()
+    authenticated = not auth_required or bool(_validate_spoke_session(request.cookies.get(_SPOKE_SESSION_COOKIE, "")))
     html = html.replace(
         "</head>",
         (
             f"<script>window.__SPOKE_WS_TOKEN__ = {json.dumps(settings.get('admin_ws_token', ''))};"
             f"window.__SPOKE_AUTH_REQUIRED__ = {json.dumps(auth_required)};"
-            f"window.__SPOKE_AUTHENTICATED__ = {json.dumps(authenticated)};</script></head>"
+            f"window.__SPOKE_AUTHENTICATED__ = {json.dumps(authenticated)};"
+            f"window.__SPOKE_AUTH_PROVIDER__ = {json.dumps(auth_provider)};</script></head>"
         ),
         1,
     )
