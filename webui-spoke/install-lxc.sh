@@ -134,7 +134,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   exit $?
 fi
 
-VERSION="3.39"
+VERSION="1.00.05"
 INSTALL_START=$(date +%s)
 MODE="Update"
 [[ "$REINSTALL" -eq 1 ]] && MODE="Full Reinstall"
@@ -372,6 +372,9 @@ git config --system --add safe.directory "$REPO_CACHE" >>"$LOG" 2>&1 || true
 [[ -d "$REPO_CACHE" ]] && chown -R root:root "$REPO_CACHE"
 
 if [[ -d "$REPO_CACHE/.git" ]]; then
+  # Unlock all remote branches — needed when repo was previously cloned
+  # --single-branch (e.g. lrb) so origin/main doesn't exist locally yet
+  git -C "$REPO_CACHE" remote set-branches origin '*' >>"$LOG" 2>&1 || true
   git -C "$REPO_CACHE" fetch origin >>"$LOG" 2>&1
   # -B creates the local branch if missing, or resets it — handles repos
   # previously cloned on a different branch (e.g. lrb → main migration)
