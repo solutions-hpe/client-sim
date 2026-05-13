@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.37"
+AGENT_VERSION="3.38"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -25,6 +25,7 @@ USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
+PROGRESS_EVENT_QUEUE_DIR="/var/lib/client-sim/progress-events"
 
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -178,6 +179,68 @@ curl_api_status() {
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     [[ -n "$data" ]] && args+=(-d "$data")
     curl "${args[@]}"
+}
+
+post_progress_event() {
+    local event_type="$1" payload_json="${2:-{}}"
+    local event_json event_file
+    mkdir -p "$PROGRESS_EVENT_QUEUE_DIR" || return 0
+    event_json=$(python3 - "$event_type" "$payload_json" <<'PY' 2>/dev/null || true
+import json, sys
+message_type = sys.argv[1]
+raw_payload = sys.argv[2] if len(sys.argv) > 2 else '{}'
+try:
+    payload = json.loads(raw_payload) if raw_payload else {}
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+print(json.dumps({"type": message_type, "payload": payload}))
+PY
+)
+    [[ -n "$event_json" ]] || return 0
+    event_file="${PROGRESS_EVENT_QUEUE_DIR}/$(date +%s%N)-$$-$RANDOM.json"
+    atomic_write_file "$event_file" "$event_json" || return 0
+}
+
+emit_backup_progress() {
+    local job_id="$1" vm_id="$2" status="$3" pct="$4" step="$5" error="${6:-}" spoke_id="${7:-}"
+    local payload
+    payload=$(python3 - "$job_id" "$vm_id" "$status" "$pct" "$step" "$error" "$spoke_id" <<'PY' 2>/dev/null || true
+import json, sys
+payload = {
+    "job_id": sys.argv[1],
+    "vm_id": int(sys.argv[2]) if str(sys.argv[2]).isdigit() else sys.argv[2],
+    "status": sys.argv[3],
+    "pct": max(0, min(100, int(float(sys.argv[4] or 0)))),
+    "step": sys.argv[5],
+}
+if sys.argv[6]:
+    payload["error"] = sys.argv[6]
+if sys.argv[7]:
+    payload["spoke_id"] = sys.argv[7]
+print(json.dumps(payload))
+PY
+)
+    [[ -n "$payload" ]] && post_progress_event "backup_progress" "$payload"
+}
+
+emit_reseed_progress() {
+    local job_id="$1" status="$2" step="$3" error="${4:-}"
+    local payload
+    payload=$(python3 - "$job_id" "$status" "$step" "$error" <<'PY' 2>/dev/null || true
+import json, sys
+payload = {
+    "job_id": sys.argv[1],
+    "status": sys.argv[2],
+    "step": sys.argv[3],
+}
+if sys.argv[4]:
+    payload["error"] = sys.argv[4]
+print(json.dumps(payload))
+PY
+)
+    [[ -n "$payload" ]] && post_progress_event "reseed_progress" "$payload"
 }
 
 normalize_command_name() {
@@ -1713,12 +1776,183 @@ self_update_agent() {
     fi
 }
 
+run_backup_command() {
+    local vm_ids_json="${1:-[]}" job_id="${2:-}" azure_account="${3:-}" azure_container="${4:-}" azure_key="${5:-}"
+    local retention="${6:-3}" spoke_id="${7:-}"
+    local backup_root="/tmp/cs-backup" overall_status=0
+    local -a vm_ids=()
+    mapfile -t vm_ids < <(python3 - "$vm_ids_json" <<'PY' 2>/dev/null || true
+import json, sys
+raw = sys.argv[1] if len(sys.argv) > 1 else '[]'
+try:
+    data = json.loads(raw)
+except Exception:
+    data = []
+if not isinstance(data, list):
+    data = [data] if data not in (None, '') else []
+for item in data:
+    print(item)
+PY
+)
+    if [[ ${#vm_ids[@]} -eq 0 ]]; then
+        log "WARNING: backup command received without vm_ids"
+        return 1
+    fi
+    mkdir -p "$backup_root"
+    [[ -n "$azure_account" ]] && export AZCOPY_ACCOUNT_NAME="$azure_account"
+    [[ -n "$azure_key" ]] && export AZCOPY_ACCOUNT_KEY="$azure_key"
+    for vmid in "${vm_ids[@]}"; do
+        local vm_backup_dir="$backup_root/$vmid"
+        local backup_file="" destination_url=""
+        rm -rf "$vm_backup_dir"
+        mkdir -p "$vm_backup_dir"
+        log "Starting backup job ${job_id:-n/a} for VM $vmid (retention=${retention})"
+        [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "starting" 0 "starting" "" "$spoke_id"
+        [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "running" 15 "vzdump" "" "$spoke_id"
+        if ! vzdump "$vmid" --compress zstd --mode snapshot --dumpdir "$vm_backup_dir" >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: vzdump failed for VM $vmid"
+            [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "failed" 100 "vzdump" "vzdump failed — check $AGENT_LOG" "$spoke_id"
+            overall_status=1
+            rm -rf "$vm_backup_dir"
+            continue
+        fi
+        backup_file=$(find "$vm_backup_dir" -maxdepth 1 -type f | sort | tail -n 1)
+        if [[ -z "$backup_file" ]]; then
+            log "ERROR: unable to locate backup artifact for VM $vmid"
+            [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "failed" 100 "locate_backup" "backup artifact not found" "$spoke_id"
+            overall_status=1
+            rm -rf "$vm_backup_dir"
+            continue
+        fi
+        if ! command -v azcopy >/dev/null 2>&1; then
+            log "WARNING: azcopy not installed; skipping upload for VM $vmid"
+            [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "completed" 100 "upload_skipped" "azcopy not installed" "$spoke_id"
+            rm -rf "$vm_backup_dir"
+            continue
+        fi
+        if [[ -z "$azure_account" || -z "$azure_container" ]]; then
+            log "ERROR: missing Azure destination for VM $vmid backup upload"
+            [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "failed" 100 "upload" "missing Azure destination" "$spoke_id"
+            overall_status=1
+            rm -rf "$vm_backup_dir"
+            continue
+        fi
+        destination_url="https://${azure_account}.blob.core.windows.net/${azure_container}/${spoke_id}/${vmid}/$(basename "$backup_file")"
+        [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "running" 80 "uploading" "" "$spoke_id"
+        if ! azcopy copy "$backup_file" "$destination_url" --overwrite=true >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: azcopy upload failed for VM $vmid"
+            [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "failed" 100 "uploading" "upload failed — check $AGENT_LOG" "$spoke_id"
+            overall_status=1
+            rm -rf "$vm_backup_dir"
+            continue
+        fi
+        log "Backup job ${job_id:-n/a} completed for VM $vmid"
+        [[ -n "$job_id" ]] && emit_backup_progress "$job_id" "$vmid" "completed" 100 "completed" "" "$spoke_id"
+        rm -rf "$vm_backup_dir"
+    done
+    return "$overall_status"
+}
+
 run_reseed_command() {
+    local blob_url="${1:-}" vm_id="${2:-100}" job_id="${3:-}"
+    local download_path="/tmp/reseed-vm-${vm_id}.vma.zst"
     local status=0
     touch "$RESEED_LOCK_FILE"
-    [[ -f /opt/client-sim-repo/proxmox/clone.sh ]] && bash /opt/client-sim-repo/proxmox/clone.sh || status=$?
-    rm -f "$RESEED_LOCK_FILE"
+    [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "starting" "starting"
+    if [[ -n "$blob_url" ]]; then
+        log "Starting reseed job ${job_id:-n/a} for VM $vm_id from $blob_url"
+        [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "running" "downloading"
+        if ! curl -L --progress-bar -o "$download_path" "$blob_url" >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: reseed download failed for VM $vm_id"
+            [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "failed" "downloading" "download failed — check $AGENT_LOG"
+            status=1
+        elif [[ -n "$job_id" ]]; then
+            emit_reseed_progress "$job_id" "running" "restoring"
+        fi
+        if [[ "$status" -eq 0 ]] && ! qmrestore "$download_path" "$vm_id" --force >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: qmrestore failed for VM $vm_id"
+            [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "failed" "restoring" "qmrestore failed — check $AGENT_LOG"
+            status=1
+        elif [[ "$status" -eq 0 ]] && [[ -n "$job_id" ]]; then
+            emit_reseed_progress "$job_id" "running" "templating"
+        fi
+        if [[ "$status" -eq 0 ]] && ! qm template "$vm_id" >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: qm template failed for VM $vm_id"
+            [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "failed" "templating" "qm template failed — check $AGENT_LOG"
+            status=1
+        fi
+    else
+        log "No blob_url supplied for reseed; running clone.sh only"
+    fi
+    if [[ "$status" -eq 0 ]] && [[ -f /opt/client-sim-repo/proxmox/clone.sh ]]; then
+        [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "running" "cloning"
+        if ! bash /opt/client-sim-repo/proxmox/clone.sh >>"$AGENT_LOG" 2>&1; then
+            log "ERROR: clone.sh failed during reseed"
+            [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "failed" "cloning" "clone.sh failed — check $AGENT_LOG"
+            status=1
+        fi
+    elif [[ "$status" -eq 0 ]]; then
+        log "WARNING: clone.sh not found; reseed restore completed without clone step"
+    fi
+    if [[ "$status" -eq 0 ]]; then
+        log "Reseed job ${job_id:-n/a} completed for VM $vm_id"
+        [[ -n "$job_id" ]] && emit_reseed_progress "$job_id" "completed" "completed"
+    fi
+    rm -f "$download_path" "$RESEED_LOCK_FILE"
     return "$status"
+}
+
+process_backup_ws_command() {
+    local raw="${1:-{}}"
+    local parsed
+    local -a fields=()
+    parsed=$(python3 - "$raw" <<'PY' 2>/dev/null || printf '[]\n\n\n\n\n3\n\n'
+import json, sys
+raw = sys.argv[1] if len(sys.argv) > 1 else '{}'
+try:
+    data = json.loads(raw)
+except Exception:
+    data = {}
+payload = data.get('payload', data) if isinstance(data, dict) else {}
+if not isinstance(payload, dict):
+    payload = {}
+vm_ids = payload.get('vm_ids', [])
+if not isinstance(vm_ids, list):
+    vm_ids = [vm_ids] if vm_ids not in (None, '') else []
+print(json.dumps(vm_ids))
+print(str(payload.get('job_id', '')))
+print(str(payload.get('azure_account', '')))
+print(str(payload.get('azure_container', '')))
+print(str(payload.get('azure_key', '')))
+print(str(payload.get('retention', '3')))
+print(str(payload.get('spoke_id', '')))
+PY
+)
+    mapfile -t fields <<< "$parsed"
+    run_backup_command "${fields[0]:-[]}" "${fields[1]:-}" "${fields[2]:-}" "${fields[3]:-}" "${fields[4]:-}" "${fields[5]:-3}" "${fields[6]:-}"
+}
+
+process_reseed_ws_command() {
+    local raw="${1:-{}}"
+    local parsed
+    local -a fields=()
+    parsed=$(python3 - "$raw" <<'PY' 2>/dev/null || printf '\n100\n\n'
+import json, sys
+raw = sys.argv[1] if len(sys.argv) > 1 else '{}'
+try:
+    data = json.loads(raw)
+except Exception:
+    data = {}
+payload = data.get('payload', data) if isinstance(data, dict) else {}
+if not isinstance(payload, dict):
+    payload = {}
+print(str(payload.get('blob_url', '')))
+print(str(payload.get('vm_id', '100')))
+print(str(payload.get('job_id', '')))
+PY
+)
+    mapfile -t fields <<< "$parsed"
+    run_reseed_command "${fields[0]:-}" "${fields[1]:-100}" "${fields[2]:-}"
 }
 
 execute_vm_command() {
@@ -1826,6 +2060,14 @@ if [[ "${1:-}" == "--process-single-command" ]]; then
     process_single_ws_command "${2:-{}}"
     exit 0
 fi
+if [[ "${1:-}" == "--process-backup-command" ]]; then
+    process_backup_ws_command "${2:-{}}"
+    exit 0
+fi
+if [[ "${1:-}" == "--process-reseed-command" ]]; then
+    process_reseed_ws_command "${2:-{}}"
+    exit 0
+fi
 
 mkdir -p /var/lib/client-sim
 # Clean up any stale reseed lock from a previous crash
@@ -1869,10 +2111,13 @@ start_proxmox_ws_client() {
     local poll_hostname script_path
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
     script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" <<'PY' &
+    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$PROGRESS_EVENT_QUEUE_DIR" <<'PY' &
 import asyncio, contextlib, json, sys
-script_path, server_url, api_key, hostname, telemetry_interval = sys.argv[1:6]
+from pathlib import Path
+script_path, server_url, api_key, hostname, telemetry_interval, progress_queue_dir = sys.argv[1:7]
 telemetry_interval = max(1, int(float(telemetry_interval or 3)))
+queue_dir = Path(progress_queue_dir)
+queue_dir.mkdir(parents=True, exist_ok=True)
 try:
     import websockets
 except ImportError:
@@ -1899,11 +2144,42 @@ async def run_command(command):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     await proc.wait()
+async def run_command_bg(flag, command):
+    proc = await asyncio.create_subprocess_exec(
+        'bash', script_path, flag, command,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    asyncio.create_task(proc.wait())
+async def send_progress_events(ws):
+    for event_file in sorted(queue_dir.glob('*.json')):
+        try:
+            raw = event_file.read_text(encoding='utf-8').strip()
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            print(f"[WARN] Failed reading progress event {event_file.name}: {exc}", file=sys.stderr)
+            continue
+        if not raw:
+            with contextlib.suppress(FileNotFoundError):
+                event_file.unlink()
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            print(f"[WARN] Malformed progress event (truncated): {raw[:200]}", file=sys.stderr)
+            with contextlib.suppress(FileNotFoundError):
+                event_file.unlink()
+            continue
+        await ws.send(json.dumps(payload))
+        with contextlib.suppress(FileNotFoundError):
+            event_file.unlink()
 async def send_loop(ws):
     while True:
+        await send_progress_events(ws)
         payload = await collect_telemetry()
         if payload is not None:
             await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
+        await send_progress_events(ws)
         await asyncio.sleep(telemetry_interval)
 async def main():
     backoff = 1
@@ -1926,6 +2202,10 @@ async def main():
                                 await run_command(command)
                         elif msg_type == 'command':
                             await run_command(payload)
+                        elif msg_type == 'backup':
+                            asyncio.create_task(run_command_bg('--process-backup-command', json.dumps(payload)))
+                        elif msg_type == 'reseed':
+                            asyncio.create_task(run_command_bg('--process-reseed-command', json.dumps(payload)))
                 finally:
                     sender.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
