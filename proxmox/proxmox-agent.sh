@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="3.21"
+AGENT_VERSION="3.22"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1313,26 +1313,43 @@ _find_vhclient() {
 }
 
 collect_vh_devices() {
-    python3 - <<'PY'
-import subprocess, re, json, socket
+    local vhbin
+    vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
 
-# ── Service status check ────────────────────────────────────────────────────
+    python3 - "$vhbin" <<'PY'
+import subprocess, re, json, socket, sys
+
+vhbin = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ""
+
+# ── Service / process status ───────────────────────────────────────────────
+# vhclient may not be a systemd service — check systemctl first, then pgrep.
 svc_active = False
 for svc_name in ("virtualhereclient", "vhclient", "vhclientd", "virtualhere"):
     try:
-        svc_r = subprocess.run(
-            ["systemctl", "is-active", svc_name],
-            capture_output=True, text=True, timeout=5
-        )
-        if svc_r.stdout.strip() == "active":
+        r = subprocess.run(["systemctl", "is-active", svc_name],
+                           capture_output=True, text=True, timeout=5)
+        if r.stdout.strip() in ("active", "activating"):
             svc_active = True
             break
     except Exception:
         pass
 
-# ── Query VirtualHere client via TCP API (port 7575) ───────────────────────
+if not svc_active:
+    # Fall back to pgrep — handles "not running as a service" case
+    for proc in ("vhclient", "vhclientx86_64", "vhclientarm"):
+        try:
+            r = subprocess.run(["pgrep", "-x", proc],
+                               capture_output=True, timeout=5)
+            if r.returncode == 0:
+                svc_active = True
+                break
+        except Exception:
+            pass
+
+# ── Fetch device list: TCP API first, binary fallback ──────────────────────
 vh_out = ""
 vh_ok  = False
+
 try:
     with socket.create_connection(("127.0.0.1", 7575), timeout=5) as s:
         s.sendall(b"LIST\n")
@@ -1342,30 +1359,52 @@ try:
             if not chunk:
                 break
             buf += chunk
-        vh_out = buf.decode("utf-8", errors="replace")
-        vh_ok  = True
+        text = buf.decode("utf-8", errors="replace")
+        if "-->" in text or "Servers" in text or "VirtualHere" in text:
+            vh_out = text
+            vh_ok  = True
 except Exception:
     pass
 
-# ── Parse device list ───────────────────────────────────────────────────────
+if not vh_ok and vhbin:
+    try:
+        r = subprocess.run([vhbin, "-t", "list"],
+                           capture_output=True, text=True, timeout=8)
+        if r.returncode == 0 and r.stdout.strip():
+            vh_out = r.stdout
+            vh_ok  = True
+    except Exception:
+        pass
+
+# ── Parse ──────────────────────────────────────────────────────────────────
+# Example output:
+#   QNAP Hub (QNAP:7575)
+#     *--> 802.11ac NIC (QNAP.5134) (In-use by you)
+#   Auto-Use All currently on
 devices        = []
 current_server = None
-auto_use_all   = "Auto-Use All currently on" in vh_out
+auto_use_all   = bool(re.search(r'auto.?use.?all\s+currently\s+on', vh_out, re.IGNORECASE))
+
+# Server line: "Some Name (host:port)" — no "-->"
+# Device line: "*--> Name (address)" optionally followed by "(In-use by you)" etc.
+srv_re = re.compile(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$')
+dev_re = re.compile(r'^\s*(\*?)\s*-->\s+(.+?)\s+\(([^)]+)\)(?:\s+\([^)]*\))?\s*$')
 
 for line in vh_out.splitlines():
-    srv_m = re.match(r'^\s*(.+?)\s+\((\S+:\d+)\)\s*$', line)
-    if srv_m and '-->' not in line:
-        current_server = srv_m.group(2)
-        continue
-    dev_m = re.match(r'^(\*?)\s*-->\s+(.+?)\s+\((\S+)\)\s*$', line)
-    if dev_m:
-        auto_use = bool(dev_m.group(1)) or auto_use_all
-        devices.append({
-            "name":     dev_m.group(2).strip(),
-            "address":  dev_m.group(3).strip(),
-            "server":   current_server,
-            "auto_use": auto_use,
-        })
+    if '-->' in line:
+        dev_m = dev_re.match(line)
+        if dev_m:
+            in_use = bool(dev_m.group(1)) or auto_use_all
+            devices.append({
+                "name":     dev_m.group(2).strip(),
+                "address":  dev_m.group(3).strip(),
+                "server":   current_server,
+                "auto_use": in_use,
+            })
+    else:
+        srv_m = srv_re.match(line)
+        if srv_m:
+            current_server = srv_m.group(2)
 
 print(json.dumps({
     "vh_service_active": svc_active,
