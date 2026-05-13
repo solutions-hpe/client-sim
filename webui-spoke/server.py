@@ -92,7 +92,7 @@ _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_CLASSIC_API_KEYS = {"password"}
 _SENSITIVE_CENTRAL_API_KEYS = {"client_secret"}
-_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token", "client_api_key", "admin_ws_token"}
+_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token", "client_api_key", "admin_ws_token", "admin_password"}
 _SENSITIVE_TOP_DICT_KEYS = {"proxmox_approved_agents"}
 _SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
 
@@ -731,6 +731,7 @@ settings: dict[str, Any] = {
     "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
+    "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
 }
 _ensure_relay_spoke_id(_persisted)
 
@@ -2064,6 +2065,36 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
             await task
 
 
+# ── Spoke session auth ─────────────────────────────────────────────────────────
+# When ADMIN_PASSWORD env var is set, all API routes (except /api/auth/*,
+# /static/*, /ws, and GET /) require a valid session cookie.
+_SPOKE_SESSION_COOKIE = "spoke_session"
+_SPOKE_SESSION_TTL    = 12 * 3600   # 12 hours
+_spoke_sessions: dict[str, float] = {}  # token → expiry timestamp
+
+def _admin_password() -> str:
+    return str(os.getenv("ADMIN_PASSWORD", settings.get("admin_password", "") or "") or "").strip()
+
+def _create_spoke_session() -> str:
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    _spoke_sessions[token] = now + _SPOKE_SESSION_TTL
+    # Prune expired sessions opportunistically
+    expired = [t for t, exp in list(_spoke_sessions.items()) if now > exp]
+    for t in expired:
+        _spoke_sessions.pop(t, None)
+    return token
+
+def _validate_spoke_session(token: str) -> bool:
+    if not token:
+        return False
+    exp = _spoke_sessions.get(token)
+    if exp is None or time.time() > exp:
+        _spoke_sessions.pop(token, None)
+        return False
+    return True
+
+
 app = FastAPI(title="Client Simulator", lifespan=lifespan)
 
 # Prevent browser caching on all responses
@@ -2075,6 +2106,23 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         response.headers["Expires"] = "0"
         return response
 
+class SpokeAuthMiddleware(BaseHTTPMiddleware):
+    _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
+    _PUBLIC_PATHS    = ("/ws",)
+
+    async def dispatch(self, request: Request, call_next):
+        if not _admin_password():
+            return await call_next(request)
+        path = request.url.path
+        # Always allow: static assets, auth endpoints, WebSocket (has own token auth), GET /
+        if (path == "/" or path.startswith(self._PUBLIC_PREFIXES) or path in self._PUBLIC_PATHS or request.method == "OPTIONS"):
+            return await call_next(request)
+        token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
+        if _validate_spoke_session(token):
+            return await call_next(request)
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+app.add_middleware(SpokeAuthMiddleware)
 app.add_middleware(NoCacheMiddleware)
 clients: dict[str, dict[str, Any]] = _load_client_history()
 
@@ -2245,6 +2293,7 @@ class SettingsUpdate(BaseModel):
     relay_spoke_id: str | None = None
     relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
+    admin_password: str | None = None
     usb_vidpids: str | None = None
     usb_missing_timeout: str | None = None
     usb_template_id: str | None = None
@@ -5290,6 +5339,38 @@ async def heartbeat_check() -> None:
         await asyncio.sleep(HEARTBEAT_INTERVAL)
 
 
+# ── Auth endpoints ─────────────────────────────────────────────────────────────
+
+class _SpokeLoginRequest(BaseModel):
+    password: str = ""
+
+@app.get("/api/auth/check")
+async def spoke_auth_check(request: Request):
+    pw = _admin_password()
+    if not pw:
+        return {"auth_required": False, "authenticated": True}
+    token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
+    return {"auth_required": True, "authenticated": _validate_spoke_session(token)}
+
+@app.post("/api/auth/login")
+async def spoke_auth_login(payload: _SpokeLoginRequest, response: JSONResponse = None):
+    pw = _admin_password()
+    if not pw:
+        return JSONResponse({"ok": True})
+    if not payload.password or not secrets.compare_digest(payload.password.strip(), pw):
+        raise HTTPException(status_code=401, detail="Invalid password")
+    token = _create_spoke_session()
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=_SPOKE_SESSION_TTL)
+    return resp
+
+@app.post("/api/auth/logout")
+async def spoke_auth_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(_SPOKE_SESSION_COOKIE)
+    return resp
+
+
 @app.get("/api/settings")
 async def api_settings_get() -> dict[str, Any]:
     cfg = dict(settings["central_config"])
@@ -5335,6 +5416,7 @@ async def api_settings_get() -> dict[str, Any]:
         "relay_tenant_id": settings.get("relay_tenant_id", settings.get("relay_tenant_hint", "")),
         "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
         "relay_api_key_configured": bool(settings.get("relay_api_key")),
+        "admin_password_configured": bool(_admin_password()),
         "spoke_tls": settings.get("spoke_tls", "off"),
     }
 
@@ -5450,6 +5532,10 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if update.relay_poll_interval is not None:
         settings["relay_poll_interval"] = _clamp_relay_interval(update.relay_poll_interval)
         relay_config_changed = True
+
+    if update.admin_password is not None:
+        settings["admin_password"] = update.admin_password.strip()
+        _spoke_sessions.clear()
 
     if relay_config_changed:
         relay_state.update({
@@ -8515,13 +8601,20 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
     index = STATIC_DIR / "index.html"
     html = index.read_text()
     html = html.replace("{{WEBUI_MODE}}", "spoke")
+    pw = _admin_password()
+    auth_required = bool(pw)
+    authenticated = not auth_required or _validate_spoke_session(request.cookies.get(_SPOKE_SESSION_COOKIE, ""))
     html = html.replace(
         "</head>",
-        f"<script>window.__SPOKE_WS_TOKEN__ = {json.dumps(settings.get('admin_ws_token', ''))};</script></head>",
+        (
+            f"<script>window.__SPOKE_WS_TOKEN__ = {json.dumps(settings.get('admin_ws_token', ''))};"
+            f"window.__SPOKE_AUTH_REQUIRED__ = {json.dumps(auth_required)};"
+            f"window.__SPOKE_AUTHENTICATED__ = {json.dumps(authenticated)};</script></head>"
+        ),
         1,
     )
     # Inject version as cache-busting query param on static assets so the browser
