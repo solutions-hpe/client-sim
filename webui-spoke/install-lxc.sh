@@ -27,21 +27,24 @@ REINSTALL=0
 UNATTENDED=0
 CLI_BRANCH=""
 CLI_PORT=""
+ADMIN_PASSWORD_ARG=""
 
 usage() {
   cat <<EOF
 Usage: $0 [OPTIONS]
 
 Options:
-  --branch <name>     Git branch to sync from (overrides REPO_BRANCH env var)
-  --port   <number>   TCP port to serve on    (overrides PORT env var)
-  --reinstall         Full wipe and fresh install (default: safe in-place update)
-  --unattended        Non-interactive mode (accepted for automation/watchdog)
-  --help              Show this message
+  --branch <name>             Git branch to sync from (overrides REPO_BRANCH env var)
+  --port   <number>           TCP port to serve on    (overrides PORT env var)
+  --admin-password <value>    Spoke admin password written to .env (default: )
+  --reinstall                 Full wipe and fresh install (default: safe in-place update)
+  --unattended                Non-interactive mode (accepted for automation/watchdog)
+  --help                      Show this message
 
 Examples:
   sudo bash install-lxc.sh
   sudo bash install-lxc.sh --branch main --port 9000
+  sudo bash install-lxc.sh --admin-password 'MySecret123!'
   sudo bash install-lxc.sh --reinstall --branch main
 EOF
   exit 0
@@ -51,10 +54,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --reinstall|-r)   REINSTALL=1;              shift ;;
     --unattended)     UNATTENDED=1;             shift ;;
-    --branch=*)       CLI_BRANCH="${1#*=}";     shift ;;
-    --branch|-b)      CLI_BRANCH="${2:-}";      shift 2 ;;
-    --port=*)         CLI_PORT="${1#*=}";       shift ;;
-    --port|-p)        CLI_PORT="${2:-}";        shift 2 ;;
+    --branch=*)       CLI_BRANCH="${1#*=}";          shift ;;
+    --branch|-b)      CLI_BRANCH="${2:-}";           shift 2 ;;
+    --port=*)         CLI_PORT="${1#*=}";            shift ;;
+    --port|-p)        CLI_PORT="${2:-}";             shift 2 ;;
+    --admin-password) ADMIN_PASSWORD_ARG="${2:-}";   shift 2 ;;
     --help|-h)        usage ;;
     *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
   esac
@@ -96,6 +100,7 @@ DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-1h}"
 # CLI flags take priority over environment variables
 [[ -n "$CLI_BRANCH" ]] && REPO_BRANCH="$CLI_BRANCH"
 [[ -n "$CLI_PORT"   ]] && PORT="$CLI_PORT"
+ADMIN_PASSWORD_VAL="${ADMIN_PASSWORD_ARG:-}"
 
 # Validate branch name
 if [[ ! "$REPO_BRANCH" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
@@ -130,6 +135,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   echo "[bootstrap] Local installer version : ${_local_ver:-unknown}"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
+  [[ -n "$ADMIN_PASSWORD_ARG" ]] && _bs_args+=(--admin-password "$ADMIN_PASSWORD_ARG")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
   [[ "$UNATTENDED" -eq 1 ]] && _bs_args+=(--unattended)
   bash <(curl -fsSL "$_bs_url") "${_bs_args[@]}"
@@ -587,6 +593,7 @@ REPO_DIR=$REPO_CACHE
 OFFLINE_TIMEOUT=$OFFLINE_TIMEOUT
 SPOKE_ID=$SPOKE_ID
 INSTALLER_VERSION=$VERSION
+ADMIN_PASSWORD=$ADMIN_PASSWORD_VAL
 EOF
   ok "Environment file written"
 else
@@ -598,6 +605,7 @@ else
   write_env_key "OFFLINE_TIMEOUT"      "$OFFLINE_TIMEOUT"
   update_env_key "SPOKE_ID"            "$SPOKE_ID"
   update_env_key "INSTALLER_VERSION"   "$VERSION"
+  write_env_key  "ADMIN_PASSWORD"      "$ADMIN_PASSWORD_VAL"
   ok "Environment file checked — existing values preserved"
 fi
 chmod 640 "$INSTALL_DIR/.env"
