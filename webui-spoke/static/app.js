@@ -3888,7 +3888,9 @@ function handleMessage(message) {
 
 function connectWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+  const wsUrl = new URL(`${protocol}://${window.location.host}/ws`);
+  if (window.__SPOKE_WS_TOKEN__) wsUrl.searchParams.set('token', window.__SPOKE_WS_TOKEN__);
+  socket = new WebSocket(wsUrl.toString());
   setWsStatus(false, 'Connecting');
 
   socket.addEventListener('open', () => {

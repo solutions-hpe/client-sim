@@ -12,6 +12,7 @@ import logging
 import os
 import random
 import re
+import secrets
 import socket
 import subprocess
 import time
@@ -91,7 +92,7 @@ _ENC_PREFIX = "enc:"
 _SENSITIVE_CFG_KEYS = {"access_token", "refresh_token", "client_secret"}
 _SENSITIVE_CLASSIC_API_KEYS = {"password"}
 _SENSITIVE_CENTRAL_API_KEYS = {"client_secret"}
-_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token"}
+_SENSITIVE_TOP_KEYS = {"relay_api_key", "github_token", "client_api_key", "admin_ws_token"}
 _SENSITIVE_TOP_DICT_KEYS = {"proxmox_approved_agents"}
 _SENSITIVE_NOTIF_KEYS = {"smtp_password", "teams_webhook_url"}
 
@@ -188,6 +189,12 @@ INSTALLER_VERSION: str = _version_file.read_text().strip() if _version_file.exis
 # App version — from VERSION file in repo root
 _app_version_file = BASE_DIR / "VERSION"
 APP_VERSION: str = _app_version_file.read_text().strip() if _app_version_file.exists() else INSTALLER_VERSION
+
+
+class UpstreamJSONError(RuntimeError):
+    """Raised when an upstream service returns malformed JSON."""
+
+
 REPO_BRANCH = os.getenv("REPO_BRANCH", "lrb")
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "300"))
 # Max error entries kept per client in memory.
@@ -722,8 +729,26 @@ settings: dict[str, Any] = {
     "l1_vlan_start": str(_persisted.get("l1_vlan_start", "100")),
     "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
     "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
+    "client_api_key": _persisted.get("client_api_key", ""),
+    "admin_ws_token": _persisted.get("admin_ws_token", ""),
 }
 _ensure_relay_spoke_id(_persisted)
+
+
+def _ensure_secret_settings(*keys: str) -> None:
+    changed = False
+    for key in keys:
+        value = str(settings.get(key, "") or "").strip()
+        if value:
+            settings[key] = value
+            continue
+        settings[key] = secrets.token_urlsafe(32)
+        changed = True
+    if changed:
+        _save_settings()
+
+
+_ensure_secret_settings("client_api_key", "admin_ws_token")
 
 # Initialise in-memory token from persisted values so a restart
 # doesn't require the user to re-enter credentials.
@@ -1316,7 +1341,7 @@ async def _refresh_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         resp = await client.post(token_url, data=data, timeout=15)
         if not resp.is_success:
             return False, f"Refresh failed (HTTP {resp.status_code}): {resp.text[:300]}"
-        payload = resp.json()
+        payload = _parse_upstream_json(resp)
         new_access = payload["access_token"]
         new_refresh = payload.get("refresh_token", refresh_tok)
         central_token["access_token"] = new_access
@@ -1327,6 +1352,8 @@ async def _refresh_central_token(client: httpx.AsyncClient) -> tuple[bool, str]:
         _save_settings()
         logger.info("Aruba Central token refreshed successfully")
         return True, "Token refreshed successfully."
+    except UpstreamJSONError as exc:
+        return False, str(exc)
     except Exception as exc:
         return False, f"Refresh request failed: {exc}"
 
@@ -1354,6 +1381,37 @@ def _central_headers() -> dict[str, str]:
     if not token:
         raise HTTPException(status_code=503, detail="Aruba Central token not available — check connection settings")
     return {"Authorization": f"Bearer {token}"}
+
+
+def _parse_bearer_token(authorization: str | None) -> str:
+    value = str(authorization or "").strip()
+    if not value:
+        return ""
+    scheme, _, token = value.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()
+
+
+def _parse_upstream_json(resp: httpx.Response) -> Any:
+    try:
+        return resp.json()
+    except ValueError as exc:
+        logger.warning("Malformed JSON from upstream (status %s): %s", resp.status_code, exc)
+        raise UpstreamJSONError(f"Malformed JSON from upstream (HTTP {resp.status_code})") from exc
+
+
+def _valid_shared_client_key(provided_key: str) -> bool:
+    expected_key = str(settings.get("client_api_key", "") or "").strip()
+    candidate = str(provided_key or "").strip()
+    return bool(expected_key and candidate) and secrets.compare_digest(candidate, expected_key)
+
+
+def _require_shared_client_key(provided_key: str, context: str) -> None:
+    if _valid_shared_client_key(provided_key):
+        return
+    logger.warning("Rejected %s with invalid shared client API key", context)
+    raise HTTPException(status_code=403, detail="invalid client key")
 
 
 async def central_token_manager() -> None:
@@ -4148,11 +4206,13 @@ async def relay_sync_once() -> None:
                 try:
                     feed_resp = await hc.get(f"{base}/central-feed", headers=headers, timeout=15)
                     if feed_resp.status_code == 200:
-                        await _apply_central_feed(feed_resp.json())
+                        await _apply_central_feed(_parse_upstream_json(feed_resp))
+                except UpstreamJSONError:
+                    pass
                 except Exception as _feed_exc:
                     logger.debug("Central feed fetch failed: %s", _feed_exc)
             resp.raise_for_status()
-            remote_cmds = resp.json()
+            remote_cmds = _parse_upstream_json(resp)
 
         if not isinstance(remote_cmds, list):
             remote_cmds = []
@@ -4496,6 +4556,11 @@ async def relay_loop() -> None:
             _update_service_health("relay", ok=True)
         except asyncio.CancelledError:
             raise
+        except UpstreamJSONError as exc:
+            _update_service_health("relay", ok=False, error=str(exc))
+            logger.warning("Relay loop upstream JSON error: %s", exc)
+            await asyncio.sleep(interval + jitter)
+            continue
         except Exception as exc:
             _update_service_health("relay", ok=False, error=str(exc))
             logger.exception("Relay loop error: %s", exc)
@@ -4617,21 +4682,39 @@ def _push_to_github(files_changed: list[str], commit_message: str) -> bool:
     except RuntimeError:
         _git("config", "user.email", "client-sim@localhost")
 
-    authed_url = REPO_URL.replace("https://", f"https://{token}@", 1)
-    _git("remote", "set-url", "origin", authed_url)
+    askpass_script = BASE_DIR / f".git-askpass-{uuid.uuid4().hex}.sh"
+    askpass_script.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf '%s\\n' 'x-access-token' ;;\n"
+        "  *Password*) printf '%s\\n' \"$GITHUB_TOKEN\" ;;\n"
+        "  *) printf '%s\\n' \"$GITHUB_TOKEN\" ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass_script.chmod(0o700)
+    push_env = {
+        "GIT_ASKPASS": str(askpass_script),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GITHUB_TOKEN": token,
+    }
+
+    _git("remote", "set-url", "origin", REPO_URL)
     try:
         _git("add", *files_changed)
         # Check if there is anything staged
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
-            cwd=REPO_DIR
+            cwd=REPO_DIR,
         )
         if status.returncode == 0:
             return False  # nothing staged
         _git("commit", "-m", commit_message)
-        _git("push")
+        _git("push", env=push_env)
         return True
     finally:
+        with contextlib.suppress(FileNotFoundError):
+            askpass_script.unlink()
         _git("remote", "set-url", "origin", REPO_URL)
 
 
@@ -4688,7 +4771,7 @@ def _update_ini_section(filepath: Path, section: str, updates: dict[str, str]) -
     filepath.write_text(output, encoding="utf-8")
 
 
-def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
+def _git(*args: str, cwd: Path | None = None, timeout: int = 120, env: dict[str, str] | None = None) -> str:
     """Run a git command, raise RuntimeError on failure.
 
     timeout (default 120 s) prevents git clone/fetch from hanging indefinitely
@@ -4700,6 +4783,7 @@ def _git(*args: str, cwd: Path | None = None, timeout: int = 120) -> str:
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_ASKPASS": "/bin/echo",
+        **(env or {}),
     }
     try:
         result = subprocess.run(
@@ -5967,34 +6051,45 @@ async def proxmox_pending_list() -> list[dict[str, Any]]:
 
 @app.post("/api/proxmox/approve/{hostname}")
 async def proxmox_approve(hostname: str) -> dict[str, Any]:
-    pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
-    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
-    if approved_hostname is not None:
-        if pending_hostname is not None:
-            pending_proxmox_agents.pop(pending_hostname, None)
-            await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
-            await _broadcast_proxmox_state()
-        return {"approved": True, "hostname": approved_hostname, "key": approved_proxmox_agents[approved_hostname], "existing": True}
+    pending_payload: list[dict[str, Any]] | None = None
+    should_broadcast_state = False
+    async with state_lock:
+        pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+        approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+        if approved_hostname is not None:
+            if pending_hostname is not None:
+                pending_proxmox_agents.pop(pending_hostname, None)
+                pending_payload = _pending_proxmox_payload()
+                should_broadcast_state = True
+            result = {"approved": True, "hostname": approved_hostname, "key": approved_proxmox_agents[approved_hostname], "existing": True}
+        else:
+            resolved_hostname = pending_hostname or _normalize_proxmox_hostname(hostname)
+            if not resolved_hostname:
+                raise HTTPException(status_code=400, detail="hostname is required")
 
-    resolved_hostname = pending_hostname or _normalize_proxmox_hostname(hostname)
-    if not resolved_hostname:
-        raise HTTPException(status_code=400, detail="hostname is required")
+            key = str(uuid.uuid4())
+            approved_proxmox_agents[resolved_hostname] = key
+            pending_proxmox_agents.pop(pending_hostname or resolved_hostname, None)
+            settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+            _save_settings()
+            pending_payload = _pending_proxmox_payload()
+            should_broadcast_state = True
+            result = {"approved": True, "hostname": resolved_hostname, "key": key}
 
-    key = str(uuid.uuid4())
-    approved_proxmox_agents[resolved_hostname] = key
-    pending_proxmox_agents.pop(pending_hostname or resolved_hostname, None)
-    settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
-    _save_settings()
-    await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
-    await _broadcast_proxmox_state()
-    return {"approved": True, "hostname": resolved_hostname, "key": key}
+    if pending_payload is not None:
+        await broadcast({"type": "proxmox_pending_update", "pending": pending_payload})
+    if should_broadcast_state:
+        await _broadcast_proxmox_state()
+    return result
 
 
 @app.post("/api/proxmox/reject/{hostname}")
 async def proxmox_reject(hostname: str) -> dict[str, Any]:
-    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents) or _normalize_proxmox_hostname(hostname)
-    pending_proxmox_agents.pop(resolved_hostname, None)
-    await broadcast({"type": "proxmox_pending_update", "pending": _pending_proxmox_payload()})
+    async with state_lock:
+        resolved_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+        pending_proxmox_agents.pop(resolved_hostname, None)
+        pending_payload = _pending_proxmox_payload()
+    await broadcast({"type": "proxmox_pending_update", "pending": pending_payload})
     await _broadcast_proxmox_state()
     return {"rejected": True, "hostname": resolved_hostname}
 
@@ -6002,10 +6097,11 @@ async def proxmox_reject(hostname: str) -> dict[str, Any]:
 @app.delete("/api/proxmox/approved/{hostname}")
 async def proxmox_revoke(hostname: str) -> dict[str, Any]:
     """Revoke an approved agent's key."""
-    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
-    approved_proxmox_agents.pop(resolved_hostname, None)
-    settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
-    _save_settings()
+    async with state_lock:
+        resolved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+        approved_proxmox_agents.pop(resolved_hostname, None)
+        settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+        _save_settings()
     await _broadcast_proxmox_state()
     return {"revoked": True, "hostname": resolved_hostname}
 
@@ -7537,6 +7633,7 @@ async def api_logs_stream(source: str = Query(default="journal")):
             yield _encode_sse_line(_log_source_hint("install"))
 
         proc = None
+        idle_deadline = time.monotonic() + 30
         try:
             if source == "install":
                 proc = await asyncio.create_subprocess_exec(
@@ -7551,19 +7648,22 @@ async def api_logs_stream(source: str = Query(default="journal")):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-        except Exception as exc:
-            yield _encode_sse_line(_log_source_hint(source, str(exc)))
-            while True:
-                yield await _stream_keepalive()
+        except Exception:
+            yield "event: error\ndata: Log stream failed\n\n"
+            return
 
         try:
             while True:
                 try:
                     line = await asyncio.wait_for(proc.stdout.readline(), timeout=LOG_STREAM_KEEPALIVE_SECS)
                 except asyncio.TimeoutError:
+                    if time.monotonic() >= idle_deadline:
+                        yield "event: end\ndata: Log stream idle timeout\n\n"
+                        return
                     yield ": keepalive\n\n"
                     continue
                 if line:
+                    idle_deadline = time.monotonic() + 30
                     text = line.decode("utf-8", errors="replace").rstrip("\n")
                     if text:
                         yield _encode_sse_line(text)
@@ -7571,9 +7671,9 @@ async def api_logs_stream(source: str = Query(default="journal")):
                 detail = None
                 if source == "journal" and proc.stderr is not None:
                     detail = (await proc.stderr.read()).decode("utf-8", errors="replace").strip() or None
-                yield _encode_sse_line(_log_source_hint(source, detail))
-                while True:
-                    yield await _stream_keepalive()
+                terminal = _log_source_hint(source, detail)
+                yield f"event: end\ndata: {terminal}\n\n"
+                return
         finally:
             if proc is not None and proc.returncode is None:
                 with contextlib.suppress(Exception):
@@ -7970,6 +8070,7 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     """Device polls for pending commands addressed to it. Marks them delivered."""
     if not hostname:
         raise HTTPException(status_code=422, detail="hostname is required")
+    _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox")
     approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
     if approved_hostname is not None:
         api_key = request.headers.get("X-API-Key", "")
@@ -7978,9 +8079,7 @@ async def poll_inbox(request: Request, hostname: str) -> list[dict[str, Any]]:
     return await _poll_agent_inbox(hostname, approved_hostname)
 
 
-@app.post("/api/inbox/ack")
-async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
-    """Device reports command result."""
+async def _ack_command_internal(body: dict[str, Any]) -> dict[str, bool]:
     cmd_id = str(body.get("id", "")).strip()
     status = str(body.get("status", "completed")).strip().lower()
     message = body.get("message", "")
@@ -8003,6 +8102,13 @@ async def ack_command(body: dict[str, Any] = Body(...)) -> dict[str, bool]:
 
     await broadcast({"type": "commands_update", "commands": serialized})
     return {"ok": True}
+
+
+@app.post("/api/inbox/ack")
+async def ack_command(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, bool]:
+    """Device reports command result."""
+    _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox/ack")
+    return await _ack_command_internal(body)
 
 
 @app.delete("/api/commands/pending")
@@ -8108,9 +8214,12 @@ async def ws_client_endpoint(
     platform: str = Query("linux"),
     api_key: str = Query(""),
 ) -> None:
-    del api_key
     if not hostname:
         await websocket.close(code=4400, reason="hostname is required")
+        return
+    if not _valid_shared_client_key(api_key):
+        logger.warning("Rejected /ws/client for %s with invalid shared client API key", hostname or "unknown")
+        await websocket.close(code=4403, reason="invalid client key")
         return
     await websocket.accept()
     client_ws_connections[hostname] = websocket
@@ -8133,7 +8242,7 @@ async def ws_client_endpoint(
                     await websocket.send_json({"type": "status_ack", "hostname": hostname})
             elif msg_type == "ack":
                 payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
-                await ack_command(payload)
+                await _ack_command_internal(payload)
                 await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -8183,7 +8292,7 @@ async def ws_proxmox_endpoint(
                 await websocket.send_json({"type": "telemetry_ack", "hostname": approved_hostname})
             elif msg_type == "ack":
                 payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
-                await ack_command(payload)
+                await _ack_command_internal(payload)
                 await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -8200,6 +8309,12 @@ async def ws_proxmox_endpoint(
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    token = (websocket.query_params.get("token") or _parse_bearer_token(websocket.headers.get("authorization"))).strip()
+    expected_token = str(settings.get("admin_ws_token", "") or "").strip()
+    if not expected_token or not token or not secrets.compare_digest(token, expected_token):
+        logger.warning("Rejected browser WebSocket connection with invalid admin token")
+        await websocket.close(code=4401, reason="unauthorized")
+        return
     await websocket.accept()
     ws_connections.append(websocket)
     # Send initial state snapshot — each message is individually guarded so one
@@ -8267,6 +8382,11 @@ async def root():
     index = STATIC_DIR / "index.html"
     html = index.read_text()
     html = html.replace("{{WEBUI_MODE}}", "spoke")
+    html = html.replace(
+        "</head>",
+        f"<script>window.__SPOKE_WS_TOKEN__ = {json.dumps(settings.get('admin_ws_token', ''))};</script></head>",
+        1,
+    )
     # Inject version as cache-busting query param on static assets so the browser
     # automatically fetches updated files after "Check & Update Now" — no manual
     # hard-refresh required.
