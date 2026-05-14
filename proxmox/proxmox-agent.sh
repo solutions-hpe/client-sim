@@ -2129,7 +2129,15 @@ async def collect_telemetry():
         'bash', script_path, '--collect-telemetry',
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
     )
-    stdout, _ = await proc.communicate()
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=25.0)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        print("[WARN] collect_telemetry timed out after 25s", file=sys.stderr)
+        return None
     raw = stdout.decode().strip()
     if not raw:
         return None
@@ -2378,15 +2386,29 @@ PY
             local _rj=$(( RANDOM % 31 ))
             if [[ "$_guest_type" == "lxc" ]]; then
                 log "Parallel reclone starting: CT $_vmid (source=$_source_vmid, jitter=${_rj}s)"
+                local _local_cmd_id="$_cmd_id" _local_vmid="$_vmid" _local_src="$_source_vmid"
                 (
                     [[ $_rj -gt 0 ]] && sleep "$_rj"
-                    clone_lxc_instance "$_vmid" "$_source_vmid"
+                    if clone_lxc_instance "$_local_vmid" "$_local_src"; then
+                        ack_inbox_command "$_local_cmd_id" "completed" "reclone_vm completed" || true
+                        log "ACK reclone: $_local_cmd_id status=completed vmid=$_local_vmid"
+                    else
+                        ack_inbox_command "$_local_cmd_id" "failed" "reclone_vm failed — check $AGENT_LOG" || true
+                        log "ACK reclone: $_local_cmd_id status=failed vmid=$_local_vmid"
+                    fi
                 ) &
             else
                 log "Parallel reclone starting: VM $_vmid (bus=$_bus type=$_dtype image=$_image, jitter=${_rj}s)"
+                local _local_cmd_id="$_cmd_id" _local_vmid="$_vmid" _local_bus="$_bus" _local_product="$_product" _local_image="$_image" _local_dtype="$_dtype"
                 (
                     [[ $_rj -gt 0 ]] && sleep "$_rj"
-                    _reclone_parallel_job "$_vmid" "$_bus" "$_product" "$_image" "$_dtype"
+                    if _reclone_parallel_job "$_local_vmid" "$_local_bus" "$_local_product" "$_local_image" "$_local_dtype"; then
+                        ack_inbox_command "$_local_cmd_id" "completed" "reclone_vm completed" || true
+                        log "ACK reclone: $_local_cmd_id status=completed vmid=$_local_vmid"
+                    else
+                        ack_inbox_command "$_local_cmd_id" "failed" "reclone_vm failed — check $AGENT_LOG" || true
+                        log "ACK reclone: $_local_cmd_id status=failed vmid=$_local_vmid"
+                    fi
                 ) &
             fi
             local _pid=$!
@@ -2404,19 +2426,14 @@ PY
             _rc_vmids_json="[$(IFS=,; echo "${_rc_batch_vmids[*]}")]"
             write_reclone_state_cache running "$_rc_vmids_json"
         fi
+        # Background subshell: wait for all reclone jobs to finish (using kill -0 polling
+        # since they are sibling PIDs, not children), then update state cache.
+        # ACKs are now sent from within each reclone subshell above.
         local _snap_pids=("${_rc_pids[@]}")
-        local _snap_ids=("${_rc_batch_ids[@]}")
         local _snap_vmids=("${_rc_batch_vmids[@]}")
-        local _snap_buses=("${_rc_batch_buses[@]}")
         (
-            for _rpi in "${!_snap_pids[@]}"; do
-                local _rc_status="completed" _rc_msg="reclone_vm completed"
-                if ! wait "${_snap_pids[$_rpi]}" 2>/dev/null; then
-                    _rc_status="failed"
-                    _rc_msg="reclone_vm failed — check $AGENT_LOG"
-                fi
-                ack_inbox_command "${_snap_ids[$_rpi]}" "$_rc_status" "$_rc_msg" || true
-                log "ACK reclone: ${_snap_ids[$_rpi]} status=$_rc_status vmid=${_snap_vmids[$_rpi]}"
+            for _p in "${_snap_pids[@]}"; do
+                while kill -0 "$_p" 2>/dev/null; do sleep 2; done
             done
             # Reload state, clear missing flags for completed reclones, persist
             load_state_file
