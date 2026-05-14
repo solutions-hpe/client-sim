@@ -2309,7 +2309,8 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 
 class SpokeAuthMiddleware(BaseHTTPMiddleware):
     _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
-    _PUBLIC_PATHS    = ("/ws",)
+    # Paths accessible by simulation client devices (no browser session required)
+    _PUBLIC_PATHS = ("/ws", "/ws/client", "/ws/proxmox", "/api/health", "/api/status")
 
     async def dispatch(self, request: Request, call_next):
         if not _spoke_auth_required():
