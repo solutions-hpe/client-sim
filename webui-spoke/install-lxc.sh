@@ -24,12 +24,15 @@ export DEBIAN_FRONTEND=noninteractive
 # Flags
 ###############################################################################
 REINSTALL=0
+FORCE=0
 UNATTENDED=0
 CLI_BRANCH=""
 CLI_PORT=""
 ADMIN_PASSWORD_ARG=""
 HUB_URL_ARG=""
 HUB_TENANT_ARG=""
+HUB_USER_ARG=""
+HUB_PASS_ARG=""
 
 usage() {
   cat <<EOF
@@ -41,7 +44,10 @@ Options:
   --admin-password <value>    Spoke admin password written to .env (default: )
   --hub-url <url>             Hub URL to auto-configure after install (e.g. https://cs-hub.westus3.azurecontainer.io:8443)
   --hub-tenant <id-or-name>   Hub tenant ID or name (e.g. contoso or contoso.onmicrosoft.com)
+  --hub-user <username>       Hub admin username (used to resolve tenant name → ID)
+  --hub-password <password>   Hub admin password (used to resolve tenant name → ID)
   --reinstall                 Full wipe and fresh install (default: safe in-place update)
+  --force                     Like --reinstall but also clears hub config so --hub-url/--hub-tenant re-apply
   --unattended                Non-interactive mode (accepted for automation/watchdog)
   --help                      Show this message
 
@@ -50,6 +56,8 @@ Examples:
   sudo bash install-lxc.sh --branch main --port 9000
   sudo bash install-lxc.sh --admin-password 'MySecret123!'
   sudo bash install-lxc.sh --reinstall --branch main
+  sudo bash install-lxc.sh --force --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant ssplm
+  sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant "My Tenant" --hub-user admin --hub-password MySecret123!
   sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant contoso.onmicrosoft.com
   sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant caf117e2-a73d-4439-a759-ecc629158954
 EOF
@@ -59,6 +67,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reinstall|-r)   REINSTALL=1;              shift ;;
+    --force|-f)       FORCE=1; REINSTALL=1;     shift ;;
     --unattended)     UNATTENDED=1;             shift ;;
     --branch=*)       CLI_BRANCH="${1#*=}";          shift ;;
     --branch|-b)      CLI_BRANCH="${2:-}";           shift 2 ;;
@@ -69,26 +78,59 @@ while [[ $# -gt 0 ]]; do
     --hub-url)        HUB_URL_ARG="${2:-}";          shift 2 ;;
     --hub-tenant=*)   HUB_TENANT_ARG="${1#*=}";      shift ;;
     --hub-tenant)     HUB_TENANT_ARG="${2:-}";       shift 2 ;;
+    --hub-user=*)     HUB_USER_ARG="${1#*=}";        shift ;;
+    --hub-user)       HUB_USER_ARG="${2:-}";         shift 2 ;;
+    --hub-password=*) HUB_PASS_ARG="${1#*=}";        shift ;;
+    --hub-password)   HUB_PASS_ARG="${2:-}";         shift 2 ;;
     --help|-h)        usage ;;
     *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
   esac
 done
 
 ###############################################################################
-# Resolve tenant name → UUID (if --hub-tenant was given as a name, not a UUID)
+# Resolve tenant name → UUID via hub API
+# If --hub-tenant is not already a UUID, use --hub-user/--hub-password to
+# authenticate against the hub and look up the tenant ID by name.
 ###############################################################################
 if [[ -n "$HUB_TENANT_ARG" ]] && ! [[ "$HUB_TENANT_ARG" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-  _tenant_input="$HUB_TENANT_ARG"
-  # Append .onmicrosoft.com if no dot present (shorthand like "contoso")
-  [[ "$_tenant_input" != *.* ]] && _tenant_input="${_tenant_input}.onmicrosoft.com"
-  _oidc_url="https://login.microsoftonline.com/${_tenant_input}/.well-known/openid-configuration"
-  _oidc_resp=$(curl -sf "$_oidc_url" 2>/dev/null || true)
-  _resolved_uuid=$(echo "$_oidc_resp" | grep -oP '"issuer"\s*:\s*"[^"]+/\K[0-9a-f-]{36}(?=/)' | head -1)
+  if [[ -z "$HUB_URL_ARG" ]]; then
+    echo "ERROR: --hub-url is required to resolve a tenant name" >&2
+    exit 1
+  fi
+  if [[ -z "$HUB_USER_ARG" || -z "$HUB_PASS_ARG" ]]; then
+    echo "ERROR: --hub-user and --hub-password are required to resolve tenant name '${HUB_TENANT_ARG}'" >&2
+    exit 1
+  fi
+
+  # Log in to get a JWT
+  _login_resp=$(curl -sk -X POST "${HUB_URL_ARG}/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"${HUB_USER_ARG}\",\"password\":\"${HUB_PASS_ARG}\"}" 2>/dev/null || true)
+  _hub_token=$(echo "$_login_resp" | grep -oP '"access_token"\s*:\s*"\K[^"]+' | head -1)
+
+  if [[ -z "$_hub_token" ]]; then
+    echo "ERROR: Could not log in to hub at ${HUB_URL_ARG} — check --hub-user and --hub-password" >&2
+    exit 1
+  fi
+
+  # Fetch tenant list and match by name (case-insensitive)
+  _tenants_resp=$(curl -sk -H "Authorization: Bearer ${_hub_token}" \
+    "${HUB_URL_ARG}/api/superadmin/tenants" 2>/dev/null || true)
+  _resolved_uuid=$(echo "$_tenants_resp" | \
+    python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+name = '${HUB_TENANT_ARG}'.lower()
+tenants = data if isinstance(data, list) else data.get('tenants', [])
+match = next((t for t in tenants if t.get('name','').lower() == name), None)
+print(match['id'] if match else '')
+" 2>/dev/null || true)
+
   if [[ -n "$_resolved_uuid" ]]; then
-    echo "[info] Resolved tenant '${_tenant_input}' → ${_resolved_uuid}"
+    echo "[info] Resolved hub tenant '${HUB_TENANT_ARG}' → ${_resolved_uuid}"
     HUB_TENANT_ARG="$_resolved_uuid"
   else
-    echo "ERROR: Could not resolve tenant '${_tenant_input}' — check the name or supply the UUID directly" >&2
+    echo "ERROR: No hub tenant named '${HUB_TENANT_ARG}' found — check the name or supply the UUID directly" >&2
     exit 1
   fi
 fi
@@ -167,7 +209,10 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   [[ -n "$ADMIN_PASSWORD_ARG" ]] && _bs_args+=(--admin-password "$ADMIN_PASSWORD_ARG")
   [[ -n "$HUB_URL_ARG" ]]        && _bs_args+=(--hub-url "$HUB_URL_ARG")
   [[ -n "$HUB_TENANT_ARG" ]]     && _bs_args+=(--hub-tenant "$HUB_TENANT_ARG")
+  [[ -n "$HUB_USER_ARG" ]]       && _bs_args+=(--hub-user "$HUB_USER_ARG")
+  [[ -n "$HUB_PASS_ARG" ]]       && _bs_args+=(--hub-password "$HUB_PASS_ARG")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
+  [[ "$FORCE" -eq 1 ]]    && _bs_args+=(--force)
   [[ "$UNATTENDED" -eq 1 ]] && _bs_args+=(--unattended)
   bash <(curl -fsSL "$_bs_url") "${_bs_args[@]}"
   exit $?
@@ -439,17 +484,24 @@ info "Deploying dashboard app to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 
 # Back up user-generated files that must survive a reinstall
+# --force skips the backup so hub config is cleared and re-applied via bootstrap
 SETTINGS_BACKUP=""
-if [[ -f "$INSTALL_DIR/settings.json" ]]; then
+if [[ "$FORCE" -eq 0 && -f "$INSTALL_DIR/settings.json" ]]; then
   SETTINGS_BACKUP=$(cat "$INSTALL_DIR/settings.json")
 fi
 
 if [[ "$REINSTALL" -eq 1 ]]; then
-  info "Reinstall mode — removing existing application files..."
+  if [[ "$FORCE" -eq 1 ]]; then
+    info "Force reinstall — removing existing application files and hub configuration..."
+  else
+    info "Reinstall mode — removing existing application files..."
+  fi
   # Remove app files only; keep venv dir removal for Step 6
   find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
     ! -name 'venv' ! -name '.env' ! -name 'settings.json' ! -name '.secret_key' \
     -exec rm -rf {} + 2>/dev/null || true
+  # --force: delete settings.json so bootstrap can write fresh hub config
+  [[ "$FORCE" -eq 1 ]] && rm -f "$INSTALL_DIR/settings.json"
 fi
 
 # Sync webui files from repo cache.
