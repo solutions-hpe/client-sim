@@ -2311,12 +2311,21 @@ class SpokeAuthMiddleware(BaseHTTPMiddleware):
     _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
     # Paths accessible by simulation client devices (no browser session required)
     _PUBLIC_PATHS = ("/ws", "/ws/client", "/ws/proxmox", "/api/health", "/api/status")
+    # Proxmox agent registration endpoints (no key yet at this stage)
+    _PROXMOX_PUBLIC_PATHS = ("/api/proxmox/register", "/api/proxmox/key")
 
     async def dispatch(self, request: Request, call_next):
         if not _spoke_auth_required():
             return await call_next(request)
         path = request.url.path
         if (path == "/" or path.startswith(self._PUBLIC_PREFIXES) or path in self._PUBLIC_PATHS or request.method == "OPTIONS"):
+            return await call_next(request)
+        # Allow Proxmox agent registration before it has a key
+        if path in self._PROXMOX_PUBLIC_PATHS:
+            return await call_next(request)
+        # Allow requests carrying a valid Proxmox agent API key
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key and api_key in approved_proxmox_agents.values():
             return await call_next(request)
         token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
         user = _validate_spoke_session(token)
