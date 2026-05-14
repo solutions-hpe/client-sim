@@ -40,7 +40,7 @@ Options:
   --port   <number>           TCP port to serve on    (overrides PORT env var)
   --admin-password <value>    Spoke admin password written to .env (default: )
   --hub-url <url>             Hub URL to auto-configure after install (e.g. https://cs-hub.westus3.azurecontainer.io:8443)
-  --hub-tenant <uuid>         Hub tenant ID to auto-configure after install
+  --hub-tenant <id-or-name>   Hub tenant ID or name (e.g. contoso or contoso.onmicrosoft.com)
   --reinstall                 Full wipe and fresh install (default: safe in-place update)
   --unattended                Non-interactive mode (accepted for automation/watchdog)
   --help                      Show this message
@@ -50,6 +50,7 @@ Examples:
   sudo bash install-lxc.sh --branch main --port 9000
   sudo bash install-lxc.sh --admin-password 'MySecret123!'
   sudo bash install-lxc.sh --reinstall --branch main
+  sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant contoso.onmicrosoft.com
   sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant caf117e2-a73d-4439-a759-ecc629158954
 EOF
   exit 0
@@ -72,6 +73,25 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
   esac
 done
+
+###############################################################################
+# Resolve tenant name → UUID (if --hub-tenant was given as a name, not a UUID)
+###############################################################################
+if [[ -n "$HUB_TENANT_ARG" ]] && ! [[ "$HUB_TENANT_ARG" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  _tenant_input="$HUB_TENANT_ARG"
+  # Append .onmicrosoft.com if no dot present (shorthand like "contoso")
+  [[ "$_tenant_input" != *.* ]] && _tenant_input="${_tenant_input}.onmicrosoft.com"
+  _oidc_url="https://login.microsoftonline.com/${_tenant_input}/.well-known/openid-configuration"
+  _oidc_resp=$(curl -sf "$_oidc_url" 2>/dev/null || true)
+  _resolved_uuid=$(echo "$_oidc_resp" | grep -oP '"issuer"\s*:\s*"[^"]+/\K[0-9a-f-]{36}(?=/)' | head -1)
+  if [[ -n "$_resolved_uuid" ]]; then
+    echo "[info] Resolved tenant '${_tenant_input}' → ${_resolved_uuid}"
+    HUB_TENANT_ARG="$_resolved_uuid"
+  else
+    echo "ERROR: Could not resolve tenant '${_tenant_input}' — check the name or supply the UUID directly" >&2
+    exit 1
+  fi
+fi
 
 ###############################################################################
 # Root check
