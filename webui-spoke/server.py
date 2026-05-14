@@ -16,6 +16,7 @@ import secrets
 import socket
 import subprocess
 import time
+import ssl
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -4810,7 +4811,16 @@ async def relay_ws_loop() -> None:
             ws_url = _relay_ws_url(server_url, tenant_id, spoke_id, api_key)
             send_lock = asyncio.Lock()
 
-            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as websocket:
+            # Build SSL context: disable cert verification when hub_tls_verify is off
+            ws_ssl: bool | ssl.SSLContext = True
+            if not _hub_tls_verify():
+                ws_ssl_ctx = ssl.create_default_context()
+                ws_ssl_ctx.check_hostname = False
+                ws_ssl_ctx.verify_mode = ssl.CERT_NONE
+                ws_ssl = ws_ssl_ctx
+
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10,
+                                          ssl=ws_ssl if ws_url.startswith("wss://") else None) as websocket:
                 backoff = 1
 
                 async def send_json(payload: dict[str, Any]) -> None:
