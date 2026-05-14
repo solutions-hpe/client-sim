@@ -28,6 +28,8 @@ UNATTENDED=0
 CLI_BRANCH=""
 CLI_PORT=""
 ADMIN_PASSWORD_ARG=""
+HUB_URL_ARG=""
+HUB_TENANT_ARG=""
 
 usage() {
   cat <<EOF
@@ -37,6 +39,8 @@ Options:
   --branch <name>             Git branch to sync from (overrides REPO_BRANCH env var)
   --port   <number>           TCP port to serve on    (overrides PORT env var)
   --admin-password <value>    Spoke admin password written to .env (default: )
+  --hub-url <url>             Hub URL to auto-configure after install (e.g. https://cs-hub.westus3.azurecontainer.io:8443)
+  --hub-tenant <uuid>         Hub tenant ID to auto-configure after install
   --reinstall                 Full wipe and fresh install (default: safe in-place update)
   --unattended                Non-interactive mode (accepted for automation/watchdog)
   --help                      Show this message
@@ -46,6 +50,7 @@ Examples:
   sudo bash install-lxc.sh --branch main --port 9000
   sudo bash install-lxc.sh --admin-password 'MySecret123!'
   sudo bash install-lxc.sh --reinstall --branch main
+  sudo bash install-lxc.sh --hub-url https://cs-hub.westus3.azurecontainer.io:8443 --hub-tenant caf117e2-a73d-4439-a759-ecc629158954
 EOF
   exit 0
 }
@@ -59,6 +64,10 @@ while [[ $# -gt 0 ]]; do
     --port=*)         CLI_PORT="${1#*=}";            shift ;;
     --port|-p)        CLI_PORT="${2:-}";             shift 2 ;;
     --admin-password) ADMIN_PASSWORD_ARG="${2:-}";   shift 2 ;;
+    --hub-url=*)      HUB_URL_ARG="${1#*=}";         shift ;;
+    --hub-url)        HUB_URL_ARG="${2:-}";          shift 2 ;;
+    --hub-tenant=*)   HUB_TENANT_ARG="${1#*=}";      shift ;;
+    --hub-tenant)     HUB_TENANT_ARG="${2:-}";       shift 2 ;;
     --help|-h)        usage ;;
     *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
   esac
@@ -136,6 +145,8 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
   _bs_args=(--branch "$REPO_BRANCH" --port "$PORT")
   [[ -n "$ADMIN_PASSWORD_ARG" ]] && _bs_args+=(--admin-password "$ADMIN_PASSWORD_ARG")
+  [[ -n "$HUB_URL_ARG" ]]        && _bs_args+=(--hub-url "$HUB_URL_ARG")
+  [[ -n "$HUB_TENANT_ARG" ]]     && _bs_args+=(--hub-tenant "$HUB_TENANT_ARG")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
   [[ "$UNATTENDED" -eq 1 ]] && _bs_args+=(--unattended)
   bash <(curl -fsSL "$_bs_url") "${_bs_args[@]}"
@@ -717,6 +728,31 @@ fi
 unset _service_ready _i
 
 ###############################################################################
+# HUB BOOTSTRAP (if --hub-url was provided)
+###############################################################################
+if [[ -n "$HUB_URL_ARG" ]]; then
+  echo
+  info "Configuring hub relay..."
+  _bootstrap_payload="{\"relay_server_url\":\"${HUB_URL_ARG}\""
+  [[ -n "$HUB_TENANT_ARG" ]] && _bootstrap_payload+=",\"relay_tenant_id\":\"${HUB_TENANT_ARG}\""
+  _bootstrap_payload+="}"
+
+  _bootstrap_result=$(curl -sf -X POST "http://localhost:${PORT}/api/bootstrap" \
+    -H "Content-Type: application/json" \
+    -d "$_bootstrap_payload" 2>&1 || true)
+
+  if echo "$_bootstrap_result" | grep -q '"status":"ok"'; then
+    ok "Hub relay configured → ${HUB_URL_ARG}"
+    [[ -n "$HUB_TENANT_ARG" ]] && ok "Tenant ID           → ${HUB_TENANT_ARG}"
+  elif echo "$_bootstrap_result" | grep -q "409"; then
+    warn "Hub already configured (bootstrap is one-time only — use Setup page to change)"
+  else
+    warn "Hub bootstrap failed — configure manually via the Setup page"
+    warn "Response: ${_bootstrap_result:-no response}"
+  fi
+fi
+
+###############################################################################
 # HEALTH CHECK
 ###############################################################################
 echo
@@ -770,6 +806,7 @@ echo -e "${COL_GREEN}${COL_BOLD}${MODE} complete${COL_RESET} in ${ELAPSED}s"
 echo
 echo -e "  Dashboard  : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}${COL_RESET}"
 echo -e "  API docs   : ${COL_BOLD}http://${CONTAINER_IP}:${PORT}/docs${COL_RESET}"
+[[ -n "$HUB_URL_ARG" ]] && echo -e "  Hub relay  : ${COL_BOLD}${HUB_URL_ARG}${COL_RESET}"
 echo -e "  Logs       : journalctl -u client-sim-dashboard -f"
 echo -e "  Install log: $LOG"
 echo
