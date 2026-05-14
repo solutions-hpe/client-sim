@@ -209,6 +209,7 @@ HUB_RELAY_KEYS = {
     "relay_server_url",
     "relay_api_key",
     "relay_tenant_id",
+    "relay_onboarding_psk",
     "hub_tls_verify",
     "relay_spoke_id",
     "relay_spoke_name",
@@ -3905,6 +3906,7 @@ async def _hub_self_register(server_url: str) -> None:
         "label": hostname,
         "spoke_name": spoke_name,
         "tenant_id_hint": (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip(),
+        "onboarding_psk": settings.get("relay_onboarding_psk", "").strip(),
         "config": _build_registration_config(),
     }
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
@@ -5771,6 +5773,7 @@ async def api_bootstrap(request: Request, body: dict[str, Any] = Body(...)) -> d
 
     hub_url = str(body.get("relay_server_url", "") or "").strip()
     tenant_id = str(body.get("relay_tenant_id", "") or "").strip()
+    onboarding_psk = str(body.get("relay_onboarding_psk", "") or "").strip()
 
     if not hub_url:
         raise HTTPException(status_code=422, detail="relay_server_url is required")
@@ -5779,6 +5782,8 @@ async def api_bootstrap(request: Request, body: dict[str, Any] = Body(...)) -> d
     if tenant_id:
         settings["relay_tenant_id"] = tenant_id
         settings["relay_tenant_hint"] = tenant_id
+    if onboarding_psk:
+        settings["relay_onboarding_psk"] = onboarding_psk
     settings["relay_enabled"] = "on"
     _save_settings()
 
@@ -5796,7 +5801,7 @@ async def api_bootstrap(request: Request, body: dict[str, Any] = Body(...)) -> d
     background_tasks["relay"] = asyncio.get_event_loop().create_task(relay_loop())
 
     logger.info("Bootstrap: hub configured to %s (tenant: %s)", hub_url, tenant_id or "none")
-    return {"status": "ok", "relay_server_url": hub_url, "relay_tenant_id": tenant_id}
+    return {"status": "ok", "relay_server_url": hub_url, "relay_tenant_id": tenant_id, "has_psk": bool(onboarding_psk)}
 
 
 @app.post("/api/settings")

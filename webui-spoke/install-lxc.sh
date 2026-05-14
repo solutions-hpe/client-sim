@@ -33,6 +33,7 @@ HUB_URL_ARG=""
 HUB_TENANT_ARG=""
 HUB_USER_ARG=""
 HUB_PASS_ARG=""
+HUB_PSK_ARG=""
 
 usage() {
   cat <<EOF
@@ -46,6 +47,7 @@ Options:
   --hub-tenant <id-or-name>   Hub tenant ID or name (e.g. contoso or contoso.onmicrosoft.com)
   --hub-user <username>       Hub admin username (used to resolve tenant name → ID)
   --hub-password <password>   Hub admin password (used to resolve tenant name → ID)
+  --hub-psk <token>           Onboarding PSK for auto-approval (bypasses manual approval in hub)
   --reinstall                 Full wipe and fresh install (default: safe in-place update)
   --force                     Like --reinstall but also clears hub config so --hub-url/--hub-tenant re-apply
   --unattended                Non-interactive mode (accepted for automation/watchdog)
@@ -82,6 +84,8 @@ while [[ $# -gt 0 ]]; do
     --hub-user)       HUB_USER_ARG="${2:-}";         shift 2 ;;
     --hub-password=*) HUB_PASS_ARG="${1#*=}";        shift ;;
     --hub-password)   HUB_PASS_ARG="${2:-}";         shift 2 ;;
+    --hub-psk=*)      HUB_PSK_ARG="${1#*=}";         shift ;;
+    --hub-psk)        HUB_PSK_ARG="${2:-}";          shift 2 ;;
     --help|-h)        usage ;;
     *) echo "Unknown option: $1 — run with --help for usage" >&2; exit 1 ;;
   esac
@@ -211,6 +215,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
   [[ -n "$HUB_TENANT_ARG" ]]     && _bs_args+=(--hub-tenant "$HUB_TENANT_ARG")
   [[ -n "$HUB_USER_ARG" ]]       && _bs_args+=(--hub-user "$HUB_USER_ARG")
   [[ -n "$HUB_PASS_ARG" ]]       && _bs_args+=(--hub-password "$HUB_PASS_ARG")
+  [[ -n "$HUB_PSK_ARG" ]]        && _bs_args+=(--hub-psk "$HUB_PSK_ARG")
   [[ "$REINSTALL" -eq 1 ]] && _bs_args+=(--reinstall)
   [[ "$FORCE" -eq 1 ]]    && _bs_args+=(--force)
   [[ "$UNATTENDED" -eq 1 ]] && _bs_args+=(--unattended)
@@ -807,6 +812,7 @@ if [[ -n "$HUB_URL_ARG" ]]; then
   info "Configuring hub relay..."
   _bootstrap_payload="{\"relay_server_url\":\"${HUB_URL_ARG}\""
   [[ -n "$HUB_TENANT_ARG" ]] && _bootstrap_payload+=",\"relay_tenant_id\":\"${HUB_TENANT_ARG}\""
+  [[ -n "$HUB_PSK_ARG" ]]    && _bootstrap_payload+=",\"relay_onboarding_psk\":\"${HUB_PSK_ARG}\""
   _bootstrap_payload+="}"
 
   _bootstrap_result=$(curl -sf -X POST "http://localhost:${PORT}/api/bootstrap" \
