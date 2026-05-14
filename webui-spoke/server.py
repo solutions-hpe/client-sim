@@ -733,6 +733,7 @@ settings: dict[str, Any] = {
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
     "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
+    "session_timeout_minutes": int(_persisted.get("session_timeout_minutes", 30)),
     # Auth provider config
     "auth_provider": _persisted.get("auth_provider", "local"),
     "auth_ldap_url": _persisted.get("auth_ldap_url", ""),
@@ -2088,7 +2089,6 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 # When spoke auth is enabled, all API routes (except /api/auth/*, /static/*,
 # /ws, and GET /) require a valid session cookie.
 _SPOKE_SESSION_COOKIE = "spoke_session"
-_SPOKE_SESSION_TTL    = 12 * 3600   # 12 hours
 
 
 @dataclass
@@ -2099,7 +2099,11 @@ class SpokeUser:
     display_name: str = ""
 
 
-_spoke_sessions: dict[str, tuple[SpokeUser, float] | float] = {}  # token → (user, expiry)
+_spoke_sessions: dict[str, tuple[SpokeUser, float]] = {}  # token → (user, expiry)
+
+
+def _get_session_ttl() -> int:
+    return max(5, min(1440, int(settings.get("session_timeout_minutes", 30)))) * 60
 
 
 def _admin_password() -> str:
@@ -2118,15 +2122,8 @@ def _spoke_auth_required() -> bool:
 def _create_spoke_session(user: SpokeUser) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
-    _spoke_sessions[token] = (user, now + _SPOKE_SESSION_TTL)
-    expired: list[str] = []
-    for stored_token, entry in list(_spoke_sessions.items()):
-        if isinstance(entry, tuple):
-            _, expiry = entry
-        else:
-            expiry = float(entry)
-        if now > expiry:
-            expired.append(stored_token)
+    _spoke_sessions[token] = (user, now + _get_session_ttl())
+    expired = [stored_token for stored_token, (_, expiry) in list(_spoke_sessions.items()) if now >= expiry]
     for stored_token in expired:
         _spoke_sessions.pop(stored_token, None)
     return token
@@ -2138,13 +2135,8 @@ def _validate_spoke_session(token: str) -> SpokeUser | None:
     entry = _spoke_sessions.get(token)
     if entry is None:
         return None
-    if isinstance(entry, tuple):
-        user, expiry = entry
-    else:
-        expiry = float(entry)
-        user = SpokeUser(username="", role="admin", auth_provider="local")
-        _spoke_sessions[token] = (user, expiry)
-    if time.time() > expiry:
+    user, expiry = entry
+    if time.time() >= expiry:
         _spoke_sessions.pop(token, None)
         return None
     return user
@@ -2331,6 +2323,8 @@ class SpokeAuthMiddleware(BaseHTTPMiddleware):
         user = _validate_spoke_session(token)
         if not user:
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        ttl = _get_session_ttl()
+        _spoke_sessions[token] = (user, time.time() + ttl)
         request.state.spoke_user = user
         if (
             user.role == "viewer"
@@ -2338,8 +2332,12 @@ class SpokeAuthMiddleware(BaseHTTPMiddleware):
             and not path.startswith("/api/auth/")
             and request.method not in {"GET", "HEAD", "OPTIONS"}
         ):
-            return JSONResponse({"detail": "Viewer role cannot modify data"}, status_code=403)
-        return await call_next(request)
+            response = JSONResponse({"detail": "Viewer role cannot modify data"}, status_code=403)
+            response.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=ttl)
+            return response
+        response = await call_next(request)
+        response.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=ttl)
+        return response
 
 app.add_middleware(SpokeAuthMiddleware)
 app.add_middleware(NoCacheMiddleware)
@@ -2513,6 +2511,7 @@ class SettingsUpdate(BaseModel):
     relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
     admin_password: str | None = None
+    session_timeout_minutes: int | None = None
     auth_provider: str | None = None
     auth_ldap_url: str | None = None
     auth_ldap_bind_dn: str | None = None
@@ -5639,7 +5638,7 @@ async def spoke_auth_login(payload: _SpokeLoginRequest):
 
     token = _create_spoke_session(user)
     resp = JSONResponse({"ok": True, "role": user.role, "username": user.username})
-    resp.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=_SPOKE_SESSION_TTL)
+    resp.set_cookie(_SPOKE_SESSION_COOKIE, token, httponly=True, samesite="strict", max_age=_get_session_ttl())
     return resp
 
 
@@ -5695,6 +5694,7 @@ async def api_settings_get() -> dict[str, Any]:
         "repo_url": REPO_URL,
         "repo_branch": settings.get("repo_branch", ""),
         "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
+        "session_timeout_minutes": int(settings.get("session_timeout_minutes", 30)),
         "github_token_configured": bool(settings.get("github_token")),
         "hub_managed": bool(settings.get("hub_managed", False)),
         "central_api": _public_central_api_settings(),
@@ -5865,6 +5865,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if update.admin_password is not None:
         settings["admin_password"] = update.admin_password.strip()
         _spoke_sessions.clear()
+
+    if update.session_timeout_minutes is not None:
+        settings["session_timeout_minutes"] = max(5, min(1440, int(update.session_timeout_minutes)))
 
     if update.auth_provider is not None:
         next_provider = _normalize_spoke_auth_provider(update.auth_provider)
