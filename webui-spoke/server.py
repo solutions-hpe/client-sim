@@ -210,9 +210,10 @@ HUB_RELAY_KEYS = {
     "relay_api_key",
     "relay_tenant_id",
     "relay_onboarding_psk",
-    "hub_tls_verify",
     "relay_spoke_id",
+    "relay_spoke_hostname",
     "relay_spoke_name",
+    "hub_tls_verify",
 }
 HUB_LOCAL_ALLOWED_KEYS = HUB_RELAY_KEYS | {"relay_tenant_hint"}
 HUB_NOTIFICATION_KEY_MAP = {
@@ -286,6 +287,16 @@ def _relay_spoke_id_needs_rotation(value: str, persisted: dict[str, Any] | None 
     if not candidate:
         return True
     if _is_uuid(candidate):
+        # Detect container clone: if stored hostname differs from current hostname, rotate.
+        persisted = persisted or _persisted
+        stored_hostname = str(persisted.get("relay_spoke_hostname") or "").strip()
+        current_hostname = socket.gethostname()
+        if stored_hostname and stored_hostname != current_hostname:
+            logger.warning(
+                "Spoke hostname changed from '%s' to '%s' — rotating spoke_id to avoid duplicate IDs after clone",
+                stored_hostname, current_hostname,
+            )
+            return True
         return False
 
     persisted = persisted or _persisted
@@ -311,9 +322,14 @@ def _ensure_relay_spoke_id(persisted: dict[str, Any] | None = None) -> str:
         candidate = str(uuid.uuid4())
     if settings.get("relay_spoke_id") != candidate or _candidate_relay_spoke_id(persisted) != candidate:
         settings["relay_spoke_id"] = candidate
+        settings["relay_spoke_hostname"] = socket.gethostname()
         _save_settings()
     else:
         settings["relay_spoke_id"] = candidate
+        # Ensure hostname is recorded even if spoke_id was already correct
+        if not settings.get("relay_spoke_hostname"):
+            settings["relay_spoke_hostname"] = socket.gethostname()
+            _save_settings()
     return candidate
 
 
