@@ -205,7 +205,7 @@ if [[ -z "${_CLIENT_SIM_BOOTSTRAPPED:-}" ]]; then
     _env_br=$(grep '^REPO_BRANCH=' "${INSTALL_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"'"'"' ')
     [[ -n "${_env_br}" && "${_env_br}" != "lrb" ]] && REPO_BRANCH="${_env_br}"
   fi
-  _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/webui-spoke/install-lxc.sh"
+  _bs_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}/install-lxc.sh"
   _local_ver=$(grep '^VERSION=' "$0" 2>/dev/null | head -1 | tr -d '"' | cut -d= -f2)
   echo "[bootstrap] Local installer version : ${_local_ver:-unknown}"
   echo "[bootstrap] Fetching latest installer from ${_bs_url} ..."
@@ -747,7 +747,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_CACHE"
 echo "$VERSION" > "$INSTALL_DIR/INSTALLER_VERSION"
 # Allow service user to self-update by re-running this installer as root
 SUDOERS_FILE="/etc/sudoers.d/client-sim-dashboard"
-SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/webui-spoke/install-lxc.sh *"
+SUDOERS_LINE="${SERVICE_USER} ALL=(root) NOPASSWD: /bin/bash ${REPO_CACHE}/install-lxc.sh *"
 mkdir -p /etc/sudoers.d
 # Remove old file first (may have 440 perms from a prior install)
 rm -f "$SUDOERS_FILE"
