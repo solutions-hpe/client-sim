@@ -692,7 +692,12 @@ existing_spoke_id=""
 if [[ -f "$INSTALL_DIR/.env" ]]; then
   existing_spoke_id=$(grep '^SPOKE_ID=' "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d ' ' || true)
 fi
-if [[ "$(is_valid_uuid "$existing_spoke_id")" == "True" ]]; then
+# --force always regenerates SPOKE_ID to avoid reusing a cloned machine's ID.
+# Normal reinstalls preserve the existing SPOKE_ID so the spoke stays known to the hub.
+if [[ "$FORCE" -eq 1 ]]; then
+  SPOKE_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  ok "Force-reinstall: generated fresh SPOKE_ID (old ID discarded)"
+elif [[ "$(is_valid_uuid "$existing_spoke_id")" == "True" ]]; then
   SPOKE_ID="$existing_spoke_id"
   ok "Preserving existing SPOKE_ID"
 else
