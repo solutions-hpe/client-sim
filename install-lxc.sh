@@ -101,10 +101,14 @@ if [[ -n "$HUB_TENANT_ARG" ]] && ! [[ "$HUB_TENANT_ARG" =~ ^[0-9a-f]{8}-[0-9a-f]
     echo "ERROR: --hub-url is required to resolve a tenant name" >&2
     exit 1
   fi
-  if [[ -z "$HUB_USER_ARG" || -z "$HUB_PASS_ARG" ]]; then
-    echo "ERROR: --hub-user and --hub-password are required to resolve tenant name '${HUB_TENANT_ARG}'" >&2
+  # When a PSK is supplied, the hub resolves the tenant name/ID server-side —
+  # no need to log in and resolve it here.
+  if [[ -n "$HUB_PSK_ARG" ]]; then
+    : # pass through as-is; hub will match by id or name during PSK registration
+  elif [[ -z "$HUB_USER_ARG" || -z "$HUB_PASS_ARG" ]]; then
+    echo "ERROR: --hub-user and --hub-password are required to resolve tenant name '${HUB_TENANT_ARG}' (or supply --hub-psk to skip login)" >&2
     exit 1
-  fi
+  else
 
   # Log in to get a JWT
   _login_resp=$(curl -sk -X POST "${HUB_URL_ARG}/api/auth/login" \
@@ -137,10 +141,8 @@ print(match['id'] if match else '')
     echo "ERROR: No hub tenant named '${HUB_TENANT_ARG}' found — check the name or supply the UUID directly" >&2
     exit 1
   fi
-fi
-
-###############################################################################
-# Root check
+  fi  # end: not PSK path
+fi  # end: tenant name resolution block
 ###############################################################################
 if [[ "$EUID" -ne 0 ]]; then
   echo "ERROR: Run as root (e.g. sudo $0)" >&2
@@ -528,7 +530,14 @@ rsync -a --delete \
 
 # Restore settings.json if it existed before sync
 if [[ -n "$SETTINGS_BACKUP" && ! -f "$INSTALL_DIR/settings.json" ]]; then
-  echo "$SETTINGS_BACKUP" > "$INSTALL_DIR/settings.json"
+  # On reinstall, wipe auth credentials (admin password, local users) so a fresh
+  # password can be set on first login — hub relay config is preserved.
+  echo "$SETTINGS_BACKUP" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)
+s.pop('admin_password', None)
+s.pop('local_users', None)
+print(json.dumps(s))" > "$INSTALL_DIR/settings.json"
 fi
 
 ok "Dashboard files synced"
