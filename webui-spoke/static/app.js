@@ -5988,5 +5988,142 @@ let loadServiceLogs = () => {};
   window._logsSetSource   = (src) => { if (sourceSelect) sourceSelect.value = src; };
 })();
 
+(() => {
+  const overlay = document.getElementById('spoke-login-overlay');
+  const usernameGroup = document.getElementById('spoke-login-username-group');
+  const usernameInput = document.getElementById('spoke-login-username');
+  const passwordInput = document.getElementById('spoke-login-password');
+  const errorBox = document.getElementById('spoke-login-error');
+  const loginBtn = document.getElementById('spoke-login-btn');
+  const logoutBtn = document.getElementById('spoke-logout-btn');
+  const userPill = document.getElementById('spoke-current-user-pill');
+  let authProvider = 'local';
+
+  if (!overlay || !passwordInput || !loginBtn) return;
+
+  function setOverlayVisible(isVisible) {
+    overlay.classList.toggle('hidden', !isVisible);
+    overlay.style.display = isVisible ? 'flex' : 'none';
+    document.body.classList.toggle('spoke-login-active', isVisible);
+  }
+
+  function setError(message = '') {
+    errorBox.textContent = message;
+    errorBox.className = message ? 'form-msg msg-error' : 'form-msg';
+  }
+
+  function setFooterAuth(username = '', role = '') {
+    if (username) {
+      window.spokeCurrentUser = { username, role };
+      if (userPill) {
+        userPill.textContent = `👤 ${username}`;
+        userPill.classList.remove('hidden');
+        userPill.style.display = 'inline-flex';
+      }
+      if (logoutBtn) {
+        logoutBtn.classList.remove('hidden');
+        logoutBtn.style.display = 'inline-flex';
+        logoutBtn.disabled = false;
+      }
+      return;
+    }
+
+    delete window.spokeCurrentUser;
+    if (userPill) {
+      userPill.classList.add('hidden');
+      userPill.style.display = 'none';
+    }
+    if (logoutBtn) {
+      logoutBtn.classList.add('hidden');
+      logoutBtn.style.display = 'none';
+      logoutBtn.disabled = false;
+    }
+  }
+
+  function setAuthProvider(provider = 'local') {
+    authProvider = String(provider || 'local').toLowerCase();
+    const needsUsername = authProvider !== 'local';
+    if (usernameGroup) usernameGroup.classList.toggle('hidden', !needsUsername);
+    if (usernameInput) usernameInput.value = needsUsername ? (usernameInput.value || '') : 'admin';
+  }
+
+  async function submitLogin() {
+    const username = authProvider === 'local' ? 'admin' : (usernameInput?.value || '').trim();
+    const password = passwordInput.value;
+
+    if (authProvider !== 'local' && !username) {
+      setError('Enter your username.');
+      usernameInput?.focus();
+      return;
+    }
+    if (!password) {
+      setError('Enter your password.');
+      passwordInput.focus();
+      return;
+    }
+
+    loginBtn.disabled = true;
+    setError('');
+    try {
+      const result = await requestJson('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      setFooterAuth(result?.username || username, result?.role || '');
+      passwordInput.value = '';
+      setOverlayVisible(false);
+    } catch (error) {
+      setError(error.message || 'Sign in failed.');
+      passwordInput.value = '';
+      if (authProvider !== 'local' && !username) usernameInput?.focus();
+      else passwordInput.focus();
+    } finally {
+      loginBtn.disabled = false;
+    }
+  }
+
+  async function initializeAuth() {
+    try {
+      const data = await requestJson('/api/auth/check');
+      const username = data?.username || '';
+      const role = data?.role || '';
+      setAuthProvider(data?.auth_provider || 'local');
+      if (!data?.auth_required || data?.authenticated) {
+        setFooterAuth(username, role);
+        setOverlayVisible(false);
+        return;
+      }
+      setFooterAuth();
+      setError('');
+      passwordInput.value = '';
+      setOverlayVisible(true);
+      if (authProvider === 'local') passwordInput.focus();
+      else usernameInput?.focus();
+    } catch (error) {
+      console.warn('Auth check failed:', error);
+      setOverlayVisible(false);
+    }
+  }
+
+  loginBtn.addEventListener('click', submitLogin);
+  passwordInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submitLogin();
+  });
+  logoutBtn?.addEventListener('click', async () => {
+    logoutBtn.disabled = true;
+    try {
+      await requestJson('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+      console.warn('Logout failed:', error);
+    }
+    window.location.reload();
+  });
+
+  initializeAuth();
+})();
+
 document.getElementById('spoke-acme-challenge')?.addEventListener('change', toggleSpokeAcmeDnsSection);
 document.getElementById('spoke-acme-dns-provider')?.addEventListener('change', toggleSpokeAcmeDnsSection);
