@@ -2939,5 +2939,7 @@ while true; do
         self_update_agent || true
     fi
 
-    sleep "$POLL_INTERVAL"
+    # Jitter: add 0-15s random delay so multiple agents don't poll in lockstep
+    _jitter=$(( RANDOM % 16 ))
+    sleep $(( POLL_INTERVAL + _jitter ))
 done
