@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.03"
+AGENT_VERSION="1.04"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -68,9 +68,13 @@ h=$(hostname)
 last3="${h: -3}"
 [[ "$last3" =~ ^[0-9]{3}$ ]] && host_id="$last3" || host_id="001"
 id_num=$((10#$host_id))
-# MAX_USB_SLOTS is updated from usb-config at runtime; default 24 per host.
+# VMID_BLOCK_STRIDE is the fixed per-host block size used for VMID range calculation.
+# It must never change after VMs are created — changing usb_max_slots does NOT shift blocks.
+# Must be >= the maximum usb_max_slots ever configured. Default 50 gives headroom above 24.
+VMID_BLOCK_STRIDE=50
+# MAX_USB_SLOTS caps how many slots are *used* within this host's block; updated from usb-config at runtime.
 MAX_USB_SLOTS=24
-start_vmid=$((90000 + (id_num - 1) * MAX_USB_SLOTS + 1))
+start_vmid=$((90000 + (id_num - 1) * VMID_BLOCK_STRIDE + 1))
 end_vmid=$((start_vmid + MAX_USB_SLOTS - 1))
 
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
@@ -528,7 +532,7 @@ PY
                 L1_VLAN_END="${i:-199}"
                 MAX_USB_SLOTS="${j:-24}"
                 USE_ALL_DONGLES="${k:-false}"
-                start_vmid=$(( 90000 + (id_num - 1) * MAX_USB_SLOTS + 1 ))
+                # start_vmid is fixed by VMID_BLOCK_STRIDE — only end_vmid changes with slot count
                 end_vmid=$(( start_vmid + MAX_USB_SLOTS - 1 ))
                 ;;
             CERT)
