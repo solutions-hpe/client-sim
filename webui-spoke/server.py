@@ -4143,7 +4143,6 @@ def _build_registration_config() -> dict[str, Any]:
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
-        "usb_vidpids": settings.get("usb_vidpids", "[]"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -4705,6 +4704,13 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     for key, value in config_payload.items():
         if key in HUB_RELAY_KEYS or key in {"command", "config", "config_version", "__config_version", "central_api", "central_config", "notifications", *HUB_NOTIFICATION_KEY_MAP.keys()}:
             continue
+        # usb_vidpids and usb_ignored_vidpids are locally managed on each spoke.
+        # Only apply a hub-pushed value if it is non-empty, so that stale empty
+        # registration values stored in spoke.config don't wipe locally configured VID:PIDs.
+        if key in {"usb_vidpids", "usb_ignored_vidpids"}:
+            incoming = _parse_json_list(value) if value is not None else []
+            if not incoming:
+                continue
         if key in {"usb_auto_provision", "reclone_schedule_enabled", "spoke_tls"}:
             settings[key] = _normalize_relay_enabled(value)
         elif value is None:
