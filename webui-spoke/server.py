@@ -231,7 +231,7 @@ VM_WATCHDOG_TIMEOUT_SECS = 86400
 VM_WATCHDOG_INTERVAL_SECS = 1800
 
 # Self-update: the installer lives inside the synced repo
-_INSTALLER_PATH = REPO_DIR / "webui-spoke" / "install-lxc.sh"
+_INSTALLER_PATH = REPO_DIR / "install-lxc.sh"
 
 update_state: dict[str, Any] = {
     "current_version": INSTALLER_VERSION,
