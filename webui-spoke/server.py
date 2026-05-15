@@ -4348,6 +4348,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "agent_version": proxmox_state.get("agent_version"),
             "pve_version": proxmox_state.get("pve_version"),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
+            "hw_faults": proxmox_state.get("hw_faults") or {},
+            "hw_last_reset": proxmox_state.get("hw_last_reset"),
         },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
@@ -6810,6 +6812,24 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
     proxmox_state["vh_devices"] = body.get("vh_devices", {})
 
+    # Hardware watchdog fault log + last reset reason (set by hw_watchdog_loop in agent)
+    if "hw_faults" in body:
+        proxmox_state["hw_faults"] = body["hw_faults"]
+    if "hw_last_reset" in body and body["hw_last_reset"]:
+        existing = proxmox_state.get("hw_last_reset") or {}
+        incoming = body["hw_last_reset"]
+        # Only overwrite if this is a newer reset record
+        if not existing or incoming.get("ts", 0) > existing.get("ts", 0):
+            proxmox_state["hw_last_reset"] = incoming
+            # Broadcast a dedicated alert so the hub hears about it in real-time
+            await broadcast({
+                "type": "proxmox_hw_reset",
+                "hostname": str((body.get("node") or {}).get("hostname", "") or ""),
+                "reason": incoming.get("reason", ""),
+                "ts": incoming.get("ts"),
+                "agent_version": incoming.get("agent_version", ""),
+            })
+
     # Clear pending-delete VMIDs that the agent has confirmed are gone.
     # intersection_update keeps only IDs still in the telemetry report;
     # any VMID that has disappeared from the agent has been successfully deleted.
@@ -6918,6 +6938,59 @@ async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
     proxmox_log_buffer.append(log_line)
     if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
         del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+    await broadcast({"type": "proxmox_log_update", "lines": [log_line]})
+    return {"ok": True}
+
+
+@app.post("/api/proxmox/hw_reset_event")
+async def proxmox_hw_reset_event(body: dict = Body(...)) -> dict[str, bool]:
+    """Called by the proxmox agent immediately before triggering a hard reset.
+    Stores the event so the hub learns about it even if the agent never sends
+    another telemetry post after rebooting."""
+    hostname  = str(body.get("hostname", "") or "").strip()
+    reason    = str(body.get("reason", "") or "").strip()
+    tier      = str(body.get("tier", "") or "").strip()
+    ts        = body.get("ts") or time.time()
+    patterns  = body.get("patterns") or []
+    agent_ver = str(body.get("agent_version", "") or "").strip()
+
+    record = {
+        "ts": ts,
+        "hostname": hostname,
+        "reason": reason,
+        "tier": tier,
+        "patterns": patterns,
+        "agent_version": agent_ver,
+        "source": "pre_reboot_notification",
+    }
+
+    # Store as last reset so the relay includes it immediately
+    existing = proxmox_state.get("hw_last_reset") or {}
+    if not existing or float(ts) >= existing.get("ts", 0):
+        proxmox_state["hw_last_reset"] = record
+
+    # Append to fault log
+    hw_faults = proxmox_state.get("hw_faults") or {"faults": []}
+    hw_faults.setdefault("faults", []).append({**record, "type": "pre_reboot_notification"})
+    hw_faults["faults"] = hw_faults["faults"][-100:]
+    proxmox_state["hw_faults"] = hw_faults
+
+    log_line = (
+        f"[HW-RESET] {hostname} initiating hard reset — tier={tier} reason={reason[:160]}"
+    )
+    proxmox_log_buffer.append(log_line)
+    if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
+        del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+
+    await broadcast({
+        "type": "proxmox_hw_reset",
+        "hostname": hostname,
+        "reason": reason,
+        "tier": tier,
+        "patterns": patterns,
+        "ts": ts,
+        "agent_version": agent_ver,
+    })
     await broadcast({"type": "proxmox_log_update", "lines": [log_line]})
     return {"ok": True}
 
