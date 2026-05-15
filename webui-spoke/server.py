@@ -255,7 +255,19 @@ def _load_persisted_settings() -> dict[str, Any]:
         return {}
 
 
+_settings_cache: dict[str, Any] = {}
+_settings_cache_time: float = 0.0
+_SETTINGS_CACHE_TTL: float = 30.0  # seconds
+
+
+def _invalidate_settings_cache() -> None:
+    global _settings_cache, _settings_cache_time
+    _settings_cache = {}
+    _settings_cache_time = 0.0
+
+
 def _save_settings() -> None:
+    _invalidate_settings_cache()
     try:
         SETTINGS_FILE.write_text(json.dumps(_encrypt_settings(settings), indent=2), encoding="utf-8")
     except Exception as exc:
@@ -816,6 +828,84 @@ def _reset_central_runtime_tokens() -> None:
     central_token["refresh_token"] = None
     central_token["expires_at"] = 0.0
     central_auth_error = None
+
+
+def _get_cached_settings() -> dict[str, Any]:
+    global _settings_cache, _settings_cache_time
+    now = time.monotonic()
+    if _settings_cache and (now - _settings_cache_time) < _SETTINGS_CACHE_TTL:
+        return copy.deepcopy(_settings_cache)
+
+    cfg = dict(settings["central_config"])
+    # Strip all secrets — return only non-sensitive fields + presence flags.
+    # Runtime token flags are refreshed in api_settings_get() so they never go stale.
+    for secret_key in ("client_secret", "access_token", "refresh_token"):
+        cfg.pop(secret_key, None)
+    cfg["access_token_configured"] = bool(settings["central_config"].get("access_token") or central_token.get("access_token"))
+    cfg["refresh_token_configured"] = bool(settings["central_config"].get("refresh_token") or central_token.get("refresh_token"))
+    cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
+
+    _settings_cache = {
+        "repo_url": REPO_URL,
+        "repo_branch": settings.get("repo_branch", ""),
+        "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
+        "session_timeout_minutes": int(settings.get("session_timeout_minutes", 30)),
+        "github_token_configured": bool(settings.get("github_token")),
+        "hub_managed": bool(settings.get("hub_managed", False)),
+        "central_api": _public_central_api_settings(),
+        "central_config": cfg,
+        "site_mappings": settings["site_mappings"],
+        "monitored_checks": settings["monitored_checks"],
+        "hardware_checks": settings.get("hardware_checks", []),
+        "usb_vidpids": settings.get("usb_vidpids", "[]"),
+        "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
+        "vm_image_1_template_id": settings.get("vm_image_1_template_id", settings.get("usb_linux_template_id", settings.get("usb_template_id", "100"))),
+        "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
+        "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
+        "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "use_all_dongles": _setting_bool("use_all_dongles", False),
+        "usb_max_slots": settings.get("usb_max_slots", "24"),
+        "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
+        "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
+        "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
+        "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
+        "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
+        "reclone_concurrency": settings.get("reclone_concurrency", "1"),
+        "l1_vlan_start": settings.get("l1_vlan_start", "100"),
+        "l1_vlan_end": settings.get("l1_vlan_end", "199"),
+        "notifications": _public_notification_settings(),
+        "relay_enabled": settings.get("relay_enabled", "off"),
+        "relay_server_url": settings.get("relay_server_url", ""),
+        "hub_tls_verify": settings.get("hub_tls_verify", "off"),
+        "relay_spoke_name": settings.get("relay_spoke_name", ""),
+        "relay_tenant_hint": settings.get("relay_tenant_hint", settings.get("relay_tenant_id", "")),
+        "relay_spoke_id": settings.get("relay_spoke_id", ""),
+        "relay_tenant_id": settings.get("relay_tenant_id", settings.get("relay_tenant_hint", "")),
+        "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
+        "relay_api_key_configured": bool(settings.get("relay_api_key")),
+        "admin_password_configured": bool(_admin_password()),
+        "auth_provider": _normalize_spoke_auth_provider(settings.get("auth_provider", "local")),
+        "auth_ldap_url": settings.get("auth_ldap_url", ""),
+        "auth_ldap_bind_dn": settings.get("auth_ldap_bind_dn", ""),
+        "auth_ldap_bind_password_configured": bool(settings.get("auth_ldap_bind_password")),
+        "auth_ldap_user_base": settings.get("auth_ldap_user_base", ""),
+        "auth_ldap_user_filter": settings.get("auth_ldap_user_filter", "(&(objectClass=user)(sAMAccountName={username}))"),
+        "auth_ldap_group_admin": settings.get("auth_ldap_group_admin", ""),
+        "auth_ldap_group_viewer": settings.get("auth_ldap_group_viewer", ""),
+        "auth_radius_host": settings.get("auth_radius_host", ""),
+        "auth_radius_port": int(settings.get("auth_radius_port", 1812)),
+        "auth_radius_secret_configured": bool(settings.get("auth_radius_secret")),
+        "auth_radius_role_attr": settings.get("auth_radius_role_attr", "Filter-Id"),
+        "auth_radius_admin_val": settings.get("auth_radius_admin_val", "admin"),
+        "auth_tacacs_host": settings.get("auth_tacacs_host", ""),
+        "auth_tacacs_port": int(settings.get("auth_tacacs_port", 49)),
+        "auth_tacacs_secret_configured": bool(settings.get("auth_tacacs_secret")),
+        "auth_tacacs_admin_priv": int(settings.get("auth_tacacs_admin_priv", 15)),
+        "spoke_tls": settings.get("spoke_tls", "off"),
+    }
+    _settings_cache_time = now
+    return copy.deepcopy(_settings_cache)
+
 
 
 def _public_central_api_settings() -> dict[str, Any]:
@@ -5809,8 +5899,15 @@ async def change_password(payload: ChangePasswordPayload, user: SpokeUser = Depe
     current_password = str(payload.current_password or "")
     new_password = str(payload.new_password or "").strip()
     stored_password = _admin_password()
-    if not current_password or not stored_password or not secrets.compare_digest(current_password.strip(), stored_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if not stored_password:
+        raise HTTPException(
+            status_code=400,
+            detail="No admin password is configured. Set ADMIN_PASSWORD environment variable first.",
+        )
+    if not current_password:
+        raise HTTPException(status_code=401, detail="Current password is required.")
+    if not secrets.compare_digest(current_password.strip(), stored_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
     if not new_password:
         raise HTTPException(status_code=422, detail="New password is required")
     settings["admin_password"] = new_password
@@ -5867,6 +5964,8 @@ async def delete_local_user(username: str, user: SpokeUser = Depends(require_aut
         raise HTTPException(status_code=422, detail="Username is required")
     if username.lower() == "admin":
         raise HTTPException(status_code=400, detail="The primary admin account cannot be deleted")
+    if username.lower() == user.username.lower():
+        raise HTTPException(status_code=400, detail="Cannot delete your own account.")
 
     users = _get_local_users()
     remaining = [entry for entry in users if str(entry.get("username", "")).strip().lower() != username.lower()]
@@ -5910,71 +6009,15 @@ async def test_auth_provider(payload: dict, request: Request):
 
 @app.get("/api/settings")
 async def api_settings_get() -> dict[str, Any]:
-    cfg = dict(settings["central_config"])
-    # Strip all secrets — return only non-sensitive fields + presence flags
-    for secret_key in ("client_secret", "access_token", "refresh_token"):
-        cfg.pop(secret_key, None)
-    cfg["access_token_configured"] = bool(settings["central_config"].get("access_token") or central_token.get("access_token"))
-    cfg["refresh_token_configured"] = bool(settings["central_config"].get("refresh_token") or central_token.get("refresh_token"))
-    cfg["client_secret_configured"] = bool(settings["central_config"].get("client_secret"))
-    return {
-        "repo_url": REPO_URL,
-        "repo_branch": settings.get("repo_branch", ""),
-        "repo_sync_interval": settings.get("repo_sync_interval", SYNC_INTERVAL),
-        "session_timeout_minutes": int(settings.get("session_timeout_minutes", 30)),
-        "github_token_configured": bool(settings.get("github_token")),
-        "hub_managed": bool(settings.get("hub_managed", False)),
-        "central_api": _public_central_api_settings(),
-        "central_config": cfg,
-        "site_mappings": settings["site_mappings"],
-        "monitored_checks": settings["monitored_checks"],
-        "hardware_checks": settings.get("hardware_checks", []),
-        "usb_vidpids": settings.get("usb_vidpids", "[]"),
-        "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
-        "vm_image_1_template_id": settings.get("vm_image_1_template_id", settings.get("usb_linux_template_id", settings.get("usb_template_id", "100"))),
-        "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
-        "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
-        "usb_auto_provision": settings.get("usb_auto_provision", "off"),
-        "use_all_dongles": _setting_bool("use_all_dongles", False),
-        "usb_max_slots": settings.get("usb_max_slots", "24"),
-        "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
-        "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
-        "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
-        "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
-        "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
-        "reclone_concurrency": settings.get("reclone_concurrency", "1"),
-        "l1_vlan_start": settings.get("l1_vlan_start", "100"),
-        "l1_vlan_end": settings.get("l1_vlan_end", "199"),
-        "notifications": _public_notification_settings(),
-        "relay_enabled": settings.get("relay_enabled", "off"),
-        "relay_server_url": settings.get("relay_server_url", ""),
-        "hub_tls_verify": settings.get("hub_tls_verify", "off"),
-        "relay_spoke_name": settings.get("relay_spoke_name", ""),
-        "relay_tenant_hint": settings.get("relay_tenant_hint", settings.get("relay_tenant_id", "")),
-        "relay_spoke_id": settings.get("relay_spoke_id", ""),
-        "relay_tenant_id": settings.get("relay_tenant_id", settings.get("relay_tenant_hint", "")),
-        "relay_poll_interval": settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT),
-        "relay_api_key_configured": bool(settings.get("relay_api_key")),
-        "admin_password_configured": bool(_admin_password()),
-        "auth_provider": _normalize_spoke_auth_provider(settings.get("auth_provider", "local")),
-        "auth_ldap_url": settings.get("auth_ldap_url", ""),
-        "auth_ldap_bind_dn": settings.get("auth_ldap_bind_dn", ""),
-        "auth_ldap_bind_password_configured": bool(settings.get("auth_ldap_bind_password")),
-        "auth_ldap_user_base": settings.get("auth_ldap_user_base", ""),
-        "auth_ldap_user_filter": settings.get("auth_ldap_user_filter", "(&(objectClass=user)(sAMAccountName={username}))"),
-        "auth_ldap_group_admin": settings.get("auth_ldap_group_admin", ""),
-        "auth_ldap_group_viewer": settings.get("auth_ldap_group_viewer", ""),
-        "auth_radius_host": settings.get("auth_radius_host", ""),
-        "auth_radius_port": int(settings.get("auth_radius_port", 1812)),
-        "auth_radius_secret_configured": bool(settings.get("auth_radius_secret")),
-        "auth_radius_role_attr": settings.get("auth_radius_role_attr", "Filter-Id"),
-        "auth_radius_admin_val": settings.get("auth_radius_admin_val", "admin"),
-        "auth_tacacs_host": settings.get("auth_tacacs_host", ""),
-        "auth_tacacs_port": int(settings.get("auth_tacacs_port", 49)),
-        "auth_tacacs_secret_configured": bool(settings.get("auth_tacacs_secret")),
-        "auth_tacacs_admin_priv": int(settings.get("auth_tacacs_admin_priv", 15)),
-        "spoke_tls": settings.get("spoke_tls", "off"),
-    }
+    payload = _get_cached_settings()
+    payload["central_config"]["access_token_configured"] = bool(
+        settings["central_config"].get("access_token") or central_token.get("access_token")
+    )
+    payload["central_config"]["refresh_token_configured"] = bool(
+        settings["central_config"].get("refresh_token") or central_token.get("refresh_token")
+    )
+    payload["admin_password_configured"] = bool(_admin_password())
+    return payload
 
 
 @app.post("/api/bootstrap")
@@ -6264,7 +6307,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
 
     if update.use_all_dongles is not None:
-        settings["use_all_dongles"] = bool(update.use_all_dongles)
+        settings["use_all_dongles"] = bool(update.use_all_dongles)  # validated: always boolean
 
     if update.usb_max_slots is not None:
         settings["usb_max_slots"] = str(max(1, min(256, int(update.usb_max_slots.strip() or "24"))))
