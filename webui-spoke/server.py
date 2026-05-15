@@ -5899,15 +5899,12 @@ async def change_password(payload: ChangePasswordPayload, user: SpokeUser = Depe
     current_password = str(payload.current_password or "")
     new_password = str(payload.new_password or "").strip()
     stored_password = _admin_password()
-    if not stored_password:
-        raise HTTPException(
-            status_code=400,
-            detail="No admin password is configured. Set ADMIN_PASSWORD environment variable first.",
-        )
-    if not current_password:
-        raise HTTPException(status_code=401, detail="Current password is required.")
-    if not secrets.compare_digest(current_password.strip(), stored_password):
-        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    if stored_password:
+        # A password is already set — require the current one to change it.
+        if not current_password:
+            raise HTTPException(status_code=401, detail="Current password is required.")
+        if not secrets.compare_digest(current_password.strip(), stored_password):
+            raise HTTPException(status_code=401, detail="Current password is incorrect.")
     if not new_password:
         raise HTTPException(status_code=422, detail="New password is required")
     settings["admin_password"] = new_password

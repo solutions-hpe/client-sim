@@ -1590,8 +1590,8 @@ async function spokeChangePassword() {
   const newPw = document.getElementById('sp-pw-new')?.value || '';
   const confirm = document.getElementById('sp-pw-confirm')?.value || '';
   const msg = document.getElementById('sp-pw-msg');
-  if (!current || !newPw) {
-    if (msg) { msg.textContent = 'Enter current and new password.'; msg.className = 'form-msg error'; }
+  if (!newPw) {
+    if (msg) { msg.textContent = 'Enter a new password.'; msg.className = 'form-msg error'; }
     return;
   }
   if (newPw !== confirm) {
