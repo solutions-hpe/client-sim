@@ -24,8 +24,9 @@ At an operational level, this repo gives you:
 - Linux VM scripts that fetch config, run simulations, and report status
 - watchdogs for both the spoke service and Proxmox agent
 - configuration-driven simulation behavior using INI files
+- local spoke auth management with password rotation and extra admin/viewer users
 
-### Spoke installation (`webui-spoke/install-lxc.sh`)
+### Spoke installation (`install-lxc.sh`)
 
 #### What the installer does
 
@@ -53,24 +54,44 @@ Before you run it, have:
 
 #### Install commands
 
+The production installer now lives at the repo root and should be fetched from:
+
+```text
+https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh
+```
+
 Standard install/update:
 
 ```bash
-cd /opt/client-sim-repo/webui-spoke
-sudo bash install-lxc.sh --branch main
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main
 ```
 
 Full wipe/reinstall:
 
 ```bash
-cd /opt/client-sim-repo/webui-spoke
-sudo bash install-lxc.sh --reinstall --branch main
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --reinstall --branch main
 ```
 
 Custom port example:
 
 ```bash
-sudo bash install-lxc.sh --branch main --port 9000
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main --port 9000
+```
+
+Hub onboarding with tenant PSK auto-approval:
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) \
+  --hub-url https://hub.example.com:8443 \
+  --hub-tenant <tenant-id> \
+  --hub-psk <psk>
+```
+
+Local checkout usage still works too:
+
+```bash
+cd /opt/client-sim-repo
+sudo bash install-lxc.sh --branch main
 ```
 
 #### What to verify after install
@@ -172,6 +193,15 @@ At startup, `install-proxmox-agent.sh` tries to download `proxmox/installer-over
 
 On production `main`, `installer-override.conf` is intentionally **not** shipped. Production installs will silently skip the override download with no effect.
 
+### USB allocation policies
+
+Spoke USB auto-provisioning is configured in **Setup → Proxmox**.
+
+- `sim_phy` now accepts `wireless`, `ethernet`, or `any`.
+- `sim_phy=any` allows any certified dongle type to be provisioned, and the Proxmox workflow writes the VM's effective `sim_phy` to match the actual dongle type attached.
+- **Use All Available Dongles** lets the spoke or hub overflow to the other certified dongle type when the preferred type is exhausted.
+- The hub tenant setting lives in **Setup → Tenant Setup** and the local spoke override lives in **Setup → Proxmox**.
+
 ### VirtualHere auto-use sync
 
 Once the Proxmox agent is approved and polling, it keeps the local VirtualHere client aligned by sending `AUTO USE ALL` over the VirtualHere IPC interface.
@@ -186,6 +216,14 @@ Once the Proxmox agent is approved and polling, it keeps the local VirtualHere c
 Operationally, this means the spoke-side agent claims every device the VH server exposes, while the VH server remains the source of truth for which devices are actually shared.
 
 To skip VH installation entirely, pass `--skip-vh` to the installer. The auto-use sync is a no-op if `virtualhereclient.service` is not installed.
+
+### Local spoke auth
+
+The spoke now includes **Setup → Account** for local authentication management.
+
+- **Change Password** rotates the primary local `admin` account password.
+- **Local Users** lets spoke admins add or remove extra local users with `admin` or `viewer` roles.
+- Hub-driven config sync never overwrites spoke auth settings: `admin_password`, `auth_provider`, and all LDAP/RADIUS/TACACS fields remain local-only on the spoke.
 
 ### Configuration files
 
@@ -266,7 +304,7 @@ These keys are valid in `[s0]`-`[s9]` bucket sections and in `[username]` sectio
 | `download` | `on` | HTTP download traffic generation |
 | `www_traffic` | `on` | Browser/web traffic generation |
 | `iperf` | `off` except `s2=on` in shipped sample | iPerf bandwidth generation |
-| `sim_phy` | `wireless` | Expected physical medium |
+| `sim_phy` | `wireless` | Expected physical medium: `wireless`, `ethernet`, or `any`; when `any` is used for USB provisioning, the guest override is rewritten to the actual certified dongle type |
 | `l1` | `no` | If `yes`, Proxmox agent adds an L1 VLAN NIC for that bucket |
 | `kill_switch` | `off` in user override examples | User-specific local kill switch override |
 | `sim_load` | `100` in user override examples | User-specific load override |
@@ -459,6 +497,7 @@ client-sim/
 - polling Aruba Central
 - relaying telemetry to Hub when enabled
 - tracking updates, reclones, VM watchdog state, and service logs
+- serving `VERSION`/`INSTALLER_VERSION` data to the UI and cache-busting `app.js`/`style.css` with `?v=<app_version>`
 - broadcasting real-time state over `/ws`
 
 #### Background tasks
@@ -624,9 +663,12 @@ That avoids hard-killing the process and lets the VM loop exit cleanly into its 
 
 | Endpoint | Use |
 |---|---|
+| `GET /api/init` | one-shot UI bootstrap payload, including `app_version` and `installer_version` |
 | `GET /api/clients` | live client list |
 | `POST /api/commands` / `GET /api/commands` | local command queue |
 | `GET/POST /api/settings` | spoke settings |
+| `POST /api/auth/change-password` | rotate the primary local admin password |
+| `GET/POST/DELETE /api/auth/local-users` | list, add, and remove spoke-local users |
 | `GET /api/proxmox/status` | host, VM, USB, and reclone summary |
 | `POST /api/proxmox/telemetry` | host telemetry ingest |
 | `GET /api/central/status` | Central state summary |

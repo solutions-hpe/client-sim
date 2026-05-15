@@ -53,14 +53,20 @@ Aruba Central (AP/switch telemetry)
 2. **Enter the container and run the installer**:
 
    ```bash
-   sudo bash install-lxc.sh --branch main --port 8000
+   sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main --port 8000
    ```
 
    Common alternatives:
 
    ```bash
-   sudo bash install-lxc.sh --branch main --port 9000
-   sudo bash install-lxc.sh --reinstall
+   sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main --port 9000
+   sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --reinstall
+   ```
+
+   The production installer moved from `webui-spoke/install-lxc.sh` to the repo root. The current raw URL is:
+
+   ```text
+   https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh
    ```
 
 3. **Attach client VMs to the isolated bridge** used by the spoke.
@@ -110,6 +116,7 @@ Configure the spoke in the UI or through `POST /api/settings`:
 - set `relay_server_url` to the base URL of `webui-hub`
 - set `relay_enabled` to `on`
 - optionally set `relay_poll_interval` (default: `60` seconds)
+- optionally set `relay_onboarding_psk` when you want the hub to auto-approve the spoke during registration
 
 Example settings payload:
 
@@ -132,11 +139,24 @@ Example settings payload:
 2. The spoke sends its hostname/label plus seed configuration (repo branch, site mappings, monitored checks, hardware checks, USB/reclone settings, etc.).
 3. The hub returns an initial registration record.
 4. The spoke stores `relay_spoke_id` automatically when the hub returns it.
-5. A **superadmin approves the spoke** in `webui-hub`.
+5. In the standard path, a **superadmin approves the spoke** in `webui-hub`.
 6. After approval, the hub returns:
    - `relay_tenant_id`
    - `relay_api_key`
 7. The spoke saves both values automatically and switches into approved relay mode.
+
+### PSK-assisted onboarding
+
+Tenant admins can generate an onboarding PSK in **Hub → Setup → Onboarding**. When the spoke installs or registers with a matching tenant ID and PSK, the hub skips the pending-approval queue and returns approved relay credentials immediately.
+
+Recommended install command:
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) \
+  --hub-url https://hub.example.com:8443 \
+  --hub-tenant <tenant-id> \
+  --hub-psk <psk>
+```
 
 ### Relay settings
 
@@ -174,6 +194,8 @@ The hub can push these command types through the inbox:
 - `gkill_switch` — updates the global kill switch state on the spoke
 - regular device/proxmox commands — queued into the local command system for clients or the Proxmox agent
 
+Auth settings are intentionally excluded from hub-driven config updates. The hub never stores or pushes `admin_password`, `auth_provider`, or any LDAP, RADIUS, or TACACS fields to the spoke.
+
 Every inbox command receives an ack. For example:
 
 - `config_update` → ack with `status: executed` and a result payload describing the changes applied
@@ -206,6 +228,8 @@ The spoke persists its configuration in `settings.json` and exposes it through `
 | `relay_spoke_id` | Hub-assigned spoke ID |
 | `relay_tenant_id` | Hub-assigned tenant ID |
 | `relay_poll_interval` | Relay polling interval in seconds |
+| `relay_onboarding_psk` | Optional tenant PSK used for hub auto-approval |
+| `use_all_dongles` | Allow overflow to the other certified dongle type when the preferred type is exhausted |
 | `site_mappings` | Local `wsite` to Aruba Central site name mapping |
 | `monitored_checks` | Central checks to watch per site |
 | `hardware_checks` | Hardware alert checks to watch |
@@ -236,6 +260,15 @@ The spoke persists its configuration in `settings.json` and exposes it through `
 | `teams_enabled` | Enable Microsoft Teams notifications |
 | `teams_webhook_url` | Teams incoming webhook URL |
 
+### Local auth settings
+
+Spoke-local auth is managed in **Setup → Account**.
+
+- `admin_password` stays local to the spoke and is changed through `POST /api/auth/change-password`.
+- Extra local users are stored in `local_users` and managed through `GET/POST/DELETE /api/auth/local-users`.
+- Supported local roles are `admin` and `viewer`.
+- These auth fields are never overwritten by hub sync.
+
 ### Installer and deployment variables
 
 | Variable | Default | Description |
@@ -258,7 +291,7 @@ The spoke persists its configuration in `settings.json` and exposes it through `
 If another device provides DHCP, install without local DHCP:
 
 ```bash
-DHCP_IFACE="" bash install-lxc.sh
+DHCP_IFACE="" sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh)
 ```
 
 ---
@@ -272,8 +305,13 @@ These are the main local endpoints exposed by `webui-spoke`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/health` | Basic health check, including installer version |
+| `GET` | `/api/init` | Initial UI bootstrap payload, including `app_version` and `installer_version` |
 | `GET` | `/api/settings` | Current spoke settings |
 | `POST` | `/api/settings` | Update spoke settings |
+| `POST` | `/api/auth/change-password` | Change the local `admin` password |
+| `GET` | `/api/auth/local-users` | List local spoke users (`admin` only) |
+| `POST` | `/api/auth/local-users` | Add a local spoke user with `admin` or `viewer` role |
+| `DELETE` | `/api/auth/local-users/{username}` | Remove a local spoke user |
 | `GET` | `/api/clients` | Current client inventory/state. Each client includes `has_usb: bool` for T1/T2 classification |
 | `GET` | `/api/simulations` | Grouped simulation view |
 | `GET` | `/api/simulations/{sim_id}/clients` | Client list for one simulation/site bucket |
@@ -315,10 +353,10 @@ This is the intended production deployment model.
 #### Common installer commands
 
 ```bash
-sudo bash install-lxc.sh
-sudo bash install-lxc.sh --branch main --port 8000
-sudo bash install-lxc.sh --branch main --port 9000
-sudo bash install-lxc.sh --reinstall
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main --port 8000
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --branch main --port 9000
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/solutions-hpe/client-sim/main/install-lxc.sh) --reinstall
 ```
 
 #### CLI flags
@@ -327,11 +365,16 @@ sudo bash install-lxc.sh --reinstall
 |---|---|
 | `--branch <name>` | Override `REPO_BRANCH` |
 | `--port <number>` | Override `PORT` |
+| `--admin-password <value>` | Seed the local spoke `admin` password |
+| `--hub-url <url>` | Seed hub relay URL during install |
+| `--hub-tenant <id>` | Seed tenant ID/name for onboarding |
+| `--hub-psk <token>` | Supply the onboarding PSK for hub auto-approval |
 | `--reinstall` | Full wipe and fresh install while preserving backed-up settings |
+| `--force` | Reapply hub bootstrap settings during reinstall |
 
 #### Self-update
 
-The installer version is written to `INSTALLER_VERSION` and shown in the UI. The spoke can check for newer installer versions and re-run the installer in place during self-update.
+The installer version is written to `INSTALLER_VERSION` and shown in the UI. The frontend build version is written to `VERSION`. The spoke can check for newer installer versions and re-run the installer in place during self-update, and `server.py` cache-busts `app.js` and `style.css` with `?v=<app_version>` so browsers pick up the refreshed UI immediately after deploy/update.
 
 ### Docker (development / lab use)
 

@@ -36,10 +36,11 @@ Expected response:
 ```json
 {
   "status": "ok",
+  "version": "1.00",
   "clients": 0,
   "repo_synced": true,
   "repo_error": null,
-  "installer_version": "0.38"
+  "installer_version": "1.00"
 }
 ```
 
@@ -70,10 +71,11 @@ GET /api/health
 ```json
 {
   "status": "ok",
+  "version": "1.00",
   "clients": 4,
   "repo_synced": true,
   "repo_error": null,
-  "installer_version": "0.38"
+  "installer_version": "1.00"
 }
 ```
 
@@ -278,6 +280,74 @@ The spoke can push overrides to individual clients or all clients at once. Clien
 ```
 
 Overrides are in-memory only — they are cleared when the spoke restarts, or when explicitly deleted.
+
+---
+
+## Browser Bootstrap and Local Auth Endpoints
+
+These endpoints are used by the spoke WebUI, not by simulation clients.
+
+### Initial page bootstrap
+
+```
+GET /api/init
+```
+
+**Response (excerpt):**
+
+```json
+{
+  "mode": "spoke",
+  "installer_version": "1.00",
+  "app_version": "1.00",
+  "settings": {
+    "relay_enabled": "off",
+    "relay_server_url": "",
+    "hub_tls_verify": "off",
+    "hub_managed": false
+  }
+}
+```
+
+`app_version` is the current frontend build version (`VERSION`), and `installer_version` is the installed spoke package version (`INSTALLER_VERSION`).
+
+### Change local admin password
+
+```
+POST /api/auth/change-password
+Content-Type: application/json
+```
+
+**Request body:**
+
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-password"
+}
+```
+
+Requires an authenticated local `admin` session.
+
+### Manage local users
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/auth/local-users` | List the built-in `admin` user plus any extra local users |
+| `POST` | `/api/auth/local-users` | Create a local user with role `admin` or `viewer` |
+| `DELETE` | `/api/auth/local-users/{username}` | Remove a local user (the primary `admin` account cannot be deleted) |
+
+**Create user request body:**
+
+```json
+{
+  "username": "viewer1",
+  "password": "ChangeMeNow!",
+  "role": "viewer"
+}
+```
+
+Hub-driven config sync never overwrites these local auth settings.
 
 ---
 
