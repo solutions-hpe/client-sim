@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.05"
+AGENT_VERSION="1.06"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2520,6 +2520,10 @@ rm -f "$RESEED_LOCK_FILE"
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
 _LAST_SELF_UPDATE=0
+# Clean up stale provisioning flag files from any previous run.
+# These are /tmp files that survive service restarts; without cleanup they
+# make VMs appear permanently stuck in "provisioning" status.
+rm -f "${PROV_DIR}"/* 2>/dev/null || true
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
 fi
