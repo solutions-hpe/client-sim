@@ -781,6 +781,7 @@ settings: dict[str, Any] = {
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
     "use_all_dongles": bool(_persisted.get("use_all_dongles", False)),
     "usb_max_slots": str(_persisted.get("usb_max_slots", "24")),
+    "vmid_start": int(_persisted.get("vmid_start", 0)),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "ignored_hostnames": _persisted.get("ignored_hostnames", '["sim-rpi-0000"]'),
     "vm_silent_timeout": str(_persisted.get("vm_silent_timeout", "24")),
@@ -895,6 +896,7 @@ def _get_cached_settings() -> dict[str, Any]:
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "use_all_dongles": _setting_bool("use_all_dongles", False),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
+        "vmid_start": int(settings.get("vmid_start", 0) or 0),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
@@ -2788,6 +2790,7 @@ class SettingsUpdate(BaseModel):
     usb_auto_provision: str | None = None
     use_all_dongles: bool | None = None
     usb_max_slots: str | None = None
+    vmid_start: int | None = None
     usb_ignored_vidpids: str | None = None
     ignored_hostnames: str | None = None
     vm_silent_timeout: str | None = None
@@ -3250,6 +3253,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "use_all_dongles": _setting_bool("use_all_dongles", False),
         "max_slots": max(1, min(256, int(str(settings.get("usb_max_slots", "24")).strip() or "24"))),
+        "vmid_start": int(settings.get("vmid_start", 0) or 0),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
@@ -6438,6 +6442,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.usb_max_slots is not None:
         settings["usb_max_slots"] = str(max(1, min(256, int(update.usb_max_slots.strip() or "24"))))
+
+    if update.vmid_start is not None:
+        settings["vmid_start"] = max(0, int(update.vmid_start))
 
     if update.usb_ignored_vidpids is not None:
         settings["usb_ignored_vidpids"] = _ensure_json_list(update.usb_ignored_vidpids.strip(), "usb_ignored_vidpids")

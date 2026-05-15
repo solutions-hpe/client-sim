@@ -473,7 +473,7 @@ sim_phy = str(data.get("sim_phy", "wireless")).strip().lower() or "wireless"
 if sim_phy not in {"wireless", "ethernet", "any"}:
     sim_phy = "wireless"
 use_all_dongles = str(data.get("use_all_dongles", False)).strip().lower()
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
@@ -485,6 +485,7 @@ print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     max(1, min(4094, int(data.get("l1_vlan_end", 199) or 199))),
     max(1, min(256, int(data.get("max_slots", 24) or 24))),
     use_all_dongles,
+    max(0, int(data.get("vmid_start", 0) or 0)),
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -517,7 +518,7 @@ PY
     MAX_USB_SLOTS=24
     USE_ALL_DONGLES="false"
 
-    while IFS=$'\t' read -r kind a b c d e f g h i j k; do
+    while IFS=$'\t' read -r kind a b c d e f g h i j k l; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -532,7 +533,21 @@ PY
                 L1_VLAN_END="${i:-199}"
                 MAX_USB_SLOTS="${j:-24}"
                 USE_ALL_DONGLES="${k:-false}"
-                # start_vmid is fixed by VMID_BLOCK_STRIDE — only end_vmid changes with slot count
+                local _vmid_start_cfg="${l:-0}"
+                # If usb_max_slots > 25 and a manual vmid_start is configured, use it.
+                # If usb_max_slots > 25 with no manual override, log an error and cap at 25
+                # so we don't silently produce overlapping VM ranges across hosts.
+                if (( MAX_USB_SLOTS > 25 )); then
+                    if [[ "$_vmid_start_cfg" =~ ^[0-9]+$ ]] && (( _vmid_start_cfg > 0 )); then
+                        start_vmid="$_vmid_start_cfg"
+                        log "VMID range: manual override — start_vmid=$start_vmid (usb_max_slots=$MAX_USB_SLOTS)"
+                    else
+                        log "ERROR: usb_max_slots=$MAX_USB_SLOTS exceeds 25 but no vmid_start is configured for this host."
+                        log "ERROR: Set vmid_start in the hub spoke config to use more than 25 slots."
+                        log "WARNING: Capping MAX_USB_SLOTS at 25 to prevent VM range overlap."
+                        MAX_USB_SLOTS=25
+                    fi
+                fi
                 end_vmid=$(( start_vmid + MAX_USB_SLOTS - 1 ))
                 ;;
             CERT)
