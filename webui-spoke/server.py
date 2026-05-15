@@ -39,7 +39,7 @@ except ImportError:
     WebSocketInvalidStatus = Exception
     _WEBSOCKETS_AVAILABLE = False
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -751,6 +751,7 @@ settings: dict[str, Any] = {
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
     "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
+    "local_users": _persisted.get("local_users", []),
     "session_timeout_minutes": int(_persisted.get("session_timeout_minutes", 30)),
     # Auth provider config
     "auth_provider": _persisted.get("auth_provider", "local"),
@@ -2125,7 +2126,7 @@ def _get_session_ttl() -> int:
 
 
 def _admin_password() -> str:
-    return str(os.getenv("ADMIN_PASSWORD", settings.get("admin_password", "") or "") or "").strip()
+    return str(settings.get("admin_password", "") or os.getenv("ADMIN_PASSWORD", "") or "").strip()
 
 
 def _normalize_spoke_auth_provider(value: Any) -> str:
@@ -2133,8 +2134,118 @@ def _normalize_spoke_auth_provider(value: Any) -> str:
     return provider if provider in {"local", "ldap", "radius", "tacacs"} else "local"
 
 
+_LOCAL_USER_ROLES = {"admin", "viewer"}
+_LOCAL_PASSWORD_SCHEME = "pbkdf2_sha256"
+_LOCAL_PASSWORD_ITERATIONS = 200_000
+
+
+def _normalize_local_role(value: Any) -> str:
+    role = str(value or "viewer").strip().lower()
+    return role if role in _LOCAL_USER_ROLES else "viewer"
+
+
+def _normalize_local_users(value: Any) -> list[dict[str, str]]:
+    users: list[dict[str, str]] = []
+    if not isinstance(value, list):
+        return users
+    seen: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        username = str(entry.get("username", "") or "").strip()
+        password_hash = str(entry.get("password_hash", "") or "")
+        if not username or not password_hash:
+            continue
+        username_key = username.lower()
+        if username_key == "admin" or username_key in seen:
+            continue
+        seen.add(username_key)
+        users.append({
+            "username": username,
+            "password_hash": password_hash,
+            "role": _normalize_local_role(entry.get("role", "viewer")),
+        })
+    return users
+
+
+def _get_local_users() -> list[dict[str, str]]:
+    users = _normalize_local_users(settings.get("local_users", []))
+    if users != settings.get("local_users", []):
+        settings["local_users"] = users
+    return users
+
+
+def _hash_local_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _LOCAL_PASSWORD_ITERATIONS)
+    return f"{_LOCAL_PASSWORD_SCHEME}${_LOCAL_PASSWORD_ITERATIONS}${salt.hex()}${derived.hex()}"
+
+
+def _verify_local_password(password: str, password_hash: str) -> bool:
+    try:
+        scheme, iterations_raw, salt_hex, digest_hex = str(password_hash or "").split("$", 3)
+        if scheme != _LOCAL_PASSWORD_SCHEME:
+            return False
+        derived = hashlib.pbkdf2_hmac(
+            "sha256",
+            str(password or "").encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations_raw),
+        )
+        return secrets.compare_digest(derived.hex(), digest_hex)
+    except Exception:
+        return False
+
+
+def _check_credentials(username: str, password: str) -> SpokeUser | None:
+    candidate = str(username or "").strip()
+    supplied_password = str(password or "")
+    if not supplied_password:
+        return None
+
+    admin_password = _admin_password()
+    if candidate.lower() in {"", "admin"} and admin_password and secrets.compare_digest(supplied_password.strip(), admin_password):
+        return SpokeUser(username="admin", role="admin", auth_provider="local")
+
+    if not candidate:
+        return None
+    candidate_key = candidate.lower()
+    for entry in _get_local_users():
+        stored_username = str(entry.get("username", "") or "").strip()
+        if stored_username.lower() != candidate_key:
+            continue
+        if _verify_local_password(supplied_password, str(entry.get("password_hash", "") or "")):
+            return SpokeUser(
+                username=stored_username,
+                role=_normalize_local_role(entry.get("role", "viewer")),
+                auth_provider="local",
+            )
+        break
+    return None
+
+
 def _spoke_auth_required() -> bool:
-    return bool(_admin_password() or _normalize_spoke_auth_provider(settings.get("auth_provider", "local")) != "local")
+    return bool(
+        _admin_password()
+        or _get_local_users()
+        or _normalize_spoke_auth_provider(settings.get("auth_provider", "local")) != "local"
+    )
+
+
+async def require_auth(request: Request) -> SpokeUser:
+    user = getattr(request.state, "spoke_user", None)
+    if isinstance(user, SpokeUser):
+        return user
+    if not _spoke_auth_required():
+        user = SpokeUser(username="admin", role="admin", auth_provider="local")
+        request.state.spoke_user = user
+        return user
+    token = request.cookies.get(_SPOKE_SESSION_COOKIE, "")
+    user = _validate_spoke_session(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    request.state.spoke_user = user
+    return user
 
 
 def _create_spoke_session(user: SpokeUser) -> str:
@@ -5620,6 +5731,17 @@ class _SpokeLoginRequest(BaseModel):
     password: str = ""
 
 
+class ChangePasswordPayload(BaseModel):
+    current_password: str = ""
+    new_password: str = ""
+
+
+class LocalUserCreatePayload(BaseModel):
+    username: str = ""
+    password: str = ""
+    role: str = "admin"
+
+
 @app.get("/api/auth/check")
 async def spoke_auth_check(request: Request):
     auth_required = _spoke_auth_required()
@@ -5659,9 +5781,7 @@ async def spoke_auth_login(payload: _SpokeLoginRequest):
         user = await _tacacs_authenticate(username, password)
 
     if user is None:
-        pw = _admin_password()
-        if pw and password and secrets.compare_digest(password.strip(), pw):
-            user = SpokeUser(username=username or "admin", role="admin", auth_provider="local")
+        user = _check_credentials(username, password)
 
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -5680,6 +5800,83 @@ async def spoke_auth_logout(request: Request):
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(_SPOKE_SESSION_COOKIE)
     return resp
+
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: ChangePasswordPayload, user: SpokeUser = Depends(require_auth)):
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+    current_password = str(payload.current_password or "")
+    new_password = str(payload.new_password or "").strip()
+    stored_password = _admin_password()
+    if not current_password or not stored_password or not secrets.compare_digest(current_password.strip(), stored_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if not new_password:
+        raise HTTPException(status_code=422, detail="New password is required")
+    settings["admin_password"] = new_password
+    _save_settings()
+    _spoke_sessions.clear()
+    return {"ok": True}
+
+
+@app.get("/api/auth/local-users")
+async def list_local_users(user: SpokeUser = Depends(require_auth)):
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+    users = [{"username": "admin", "role": "admin"}]
+    users.extend({"username": entry["username"], "role": entry["role"]} for entry in _get_local_users())
+    return users
+
+
+@app.post("/api/auth/local-users")
+async def create_local_user(payload: LocalUserCreatePayload, user: SpokeUser = Depends(require_auth)):
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+    username = str(payload.username or "").strip()
+    password = str(payload.password or "")
+    role_raw = str(payload.role or "admin").strip().lower()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username is required")
+    if username.lower() == "admin":
+        raise HTTPException(status_code=400, detail="The primary admin account already exists")
+    if not password:
+        raise HTTPException(status_code=422, detail="Password is required")
+    if role_raw not in _LOCAL_USER_ROLES:
+        raise HTTPException(status_code=422, detail="Role must be admin or viewer")
+
+    users = _get_local_users()
+    if any(str(entry.get("username", "")).strip().lower() == username.lower() for entry in users):
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    users.append({
+        "username": username,
+        "password_hash": _hash_local_password(password),
+        "role": role_raw,
+    })
+    settings["local_users"] = users
+    _save_settings()
+    return {"ok": True}
+
+
+@app.delete("/api/auth/local-users/{username}")
+async def delete_local_user(username: str, user: SpokeUser = Depends(require_auth)):
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+    username = str(username or "").strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username is required")
+    if username.lower() == "admin":
+        raise HTTPException(status_code=400, detail="The primary admin account cannot be deleted")
+
+    users = _get_local_users()
+    remaining = [entry for entry in users if str(entry.get("username", "")).strip().lower() != username.lower()]
+    if len(remaining) == len(users):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    settings["local_users"] = remaining
+    _save_settings()
+    _spoke_sessions.clear()
+    return {"ok": True}
 
 
 @app.post("/api/auth/test")

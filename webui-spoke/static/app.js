@@ -154,6 +154,7 @@ function activateSetupSubtab(subtabId = 'setup-github') {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
+  if (subtabId === 'setup-account') loadSpokeLocalUsers().catch(() => {});
 }
 
 function activateConfigSubtab(subtabId = 'config-general') {
@@ -1580,6 +1581,95 @@ function escHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/\x22/g, '&quot;')
     .replace(/\x27/g, '&#39;');
+}
+
+async function spokeChangePassword() {
+  const current = document.getElementById('sp-pw-current')?.value || '';
+  const newPw = document.getElementById('sp-pw-new')?.value || '';
+  const confirm = document.getElementById('sp-pw-confirm')?.value || '';
+  const msg = document.getElementById('sp-pw-msg');
+  if (!current || !newPw) {
+    if (msg) { msg.textContent = 'Enter current and new password.'; msg.className = 'form-msg error'; }
+    return;
+  }
+  if (newPw !== confirm) {
+    if (msg) { msg.textContent = 'Passwords do not match.'; msg.className = 'form-msg error'; }
+    return;
+  }
+  try {
+    await requestJson('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: current, new_password: newPw }),
+    });
+    if (msg) { msg.textContent = 'Password updated.'; msg.className = 'form-msg success'; }
+    ['sp-pw-current', 'sp-pw-new', 'sp-pw-confirm'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  } catch (error) {
+    if (msg) { msg.textContent = error.message || 'Failed to change password.'; msg.className = 'form-msg error'; }
+  }
+}
+
+async function loadSpokeLocalUsers() {
+  const tbody = document.getElementById('sp-local-users-body');
+  if (!tbody) return;
+  try {
+    const users = await requestJson('/api/auth/local-users');
+    if (!Array.isArray(users) || !users.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="muted">No users configured.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map((u) => `
+      <tr>
+        <td><strong>${escHtml(u.username)}</strong>${u.username === 'admin' ? ' <span class="badge badge-blue">primary</span>' : ''}</td>
+        <td>${escHtml(u.role || 'admin')}</td>
+        <td>${u.username !== 'admin' ? `<button class="btn btn-sm btn-danger sp-remove-user-btn" data-username="${escHtml(u.username)}" type="button">Remove</button>` : ''}</td>
+      </tr>`).join('');
+    tbody.querySelectorAll('.sp-remove-user-btn').forEach((button) => {
+      button.addEventListener('click', () => deleteSpokeUser(button.dataset.username || ''));
+    });
+  } catch (_) {
+    tbody.innerHTML = '<tr><td colspan="3" class="muted">Unable to load users.</td></tr>';
+  }
+}
+
+async function addSpokeUser() {
+  const username = document.getElementById('sp-new-username')?.value.trim() || '';
+  const password = document.getElementById('sp-new-password')?.value || '';
+  const role = document.getElementById('sp-new-role')?.value || 'admin';
+  const msg = document.getElementById('sp-user-msg');
+  if (!username || !password) {
+    if (msg) { msg.textContent = 'Username and password required.'; msg.className = 'form-msg error'; }
+    return;
+  }
+  try {
+    await requestJson('/api/auth/local-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    if (msg) { msg.textContent = `User "${username}" added.`; msg.className = 'form-msg success'; }
+    const usernameInput = document.getElementById('sp-new-username');
+    const passwordInput = document.getElementById('sp-new-password');
+    if (usernameInput) usernameInput.value = '';
+    if (passwordInput) passwordInput.value = '';
+    loadSpokeLocalUsers();
+  } catch (error) {
+    if (msg) { msg.textContent = error.message || 'Failed to add user.'; msg.className = 'form-msg error'; }
+  }
+}
+
+async function deleteSpokeUser(username) {
+  if (!username) return;
+  try {
+    await requestJson(`/api/auth/local-users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    showNotification(`User "${username}" removed.`, 'success');
+    loadSpokeLocalUsers();
+  } catch (error) {
+    showNotification(error.message || 'Failed to remove user.', 'error');
+  }
 }
 
 function parseJsonList(value) {
@@ -4824,6 +4914,9 @@ if (setupSubtabButtons.length) {
     });
   });
 }
+
+document.getElementById('sp-pw-save-btn')?.addEventListener('click', spokeChangePassword);
+document.getElementById('sp-add-user-btn')?.addEventListener('click', addSpokeUser);
 
 if (setupTabButton) {
   setupTabButton.addEventListener('click', () => {

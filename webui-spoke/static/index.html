@@ -696,6 +696,7 @@
       <button class="setup-subtab" data-subtab="setup-central" role="tab">Central API</button>
       <button class="setup-subtab" data-subtab="setup-notifications" role="tab">Notifications</button>
       <button class="setup-subtab" data-subtab="setup-tls" role="tab">TLS Certificate</button>
+      <button class="setup-subtab" data-subtab="setup-account" role="tab">Account</button>
       <button class="setup-subtab" data-subtab="setup-troubleshoot" role="tab">Troubleshooting</button>
     </nav>
 
@@ -1384,6 +1385,58 @@
           </div>
           <p id="spoke-acme-msg" class="form-msg"></p>
         </div>
+      </div>
+    </div>
+
+    <div id="setup-account" class="setup-subpanel hidden">
+      <div class="setup-card" style="max-width:480px;">
+        <div class="setup-card-header"><h2>Change Password</h2></div>
+        <div class="setup-form">
+          <div class="form-group">
+            <label class="form-label" for="sp-pw-current">Current Password</label>
+            <input id="sp-pw-current" type="password" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="sp-pw-new">New Password</label>
+            <input id="sp-pw-new" type="password" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="sp-pw-confirm">Confirm New Password</label>
+            <input id="sp-pw-confirm" type="password" class="form-input">
+          </div>
+          <div class="form-actions">
+            <button id="sp-pw-save-btn" class="btn btn-primary" type="button">Save Password</button>
+            <span id="sp-pw-msg" class="form-msg"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-card" style="max-width:600px;margin-top:16px;">
+        <div class="setup-card-header"><h2>Local Users</h2></div>
+        <p class="setup-card-desc">Manage local accounts for spoke WebUI access. The primary <code>admin</code> account cannot be removed.</p>
+        <table class="data-table" id="sp-local-users-table">
+          <thead><tr><th>Username</th><th>Role</th><th></th></tr></thead>
+          <tbody id="sp-local-users-body"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
+        </table>
+        <div class="setup-form" style="margin-top:12px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+            <label class="form-label" for="sp-new-username">Username</label>
+            <input id="sp-new-username" type="text" class="form-input" placeholder="username">
+          </div>
+          <div class="form-group" style="margin:0;flex:1;min-width:140px;">
+            <label class="form-label" for="sp-new-password">Password</label>
+            <input id="sp-new-password" type="password" class="form-input">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="sp-new-role">Role</label>
+            <select id="sp-new-role" class="form-input">
+              <option value="admin">Admin</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </div>
+          <button id="sp-add-user-btn" class="btn btn-primary" type="button" style="align-self:flex-end;">Add User</button>
+        </div>
+        <span id="sp-user-msg" class="form-msg"></span>
       </div>
     </div>
 
