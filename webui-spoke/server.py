@@ -4398,9 +4398,14 @@ async def _forward_hub_passthrough_to_proxmox(cmd_type: str, payload: dict[str, 
         raise RuntimeError("Proxmox agent is not connected")
     if cmd_type == "backup":
         logger.info(f"Forwarding backup command to proxmox agent: vm_ids={payload.get('vm_ids')}")
-    else:
+    elif cmd_type == "reseed":
         logger.info(f"Forwarding reseed command to proxmox agent: vm_ids={payload.get('vm_ids')}")
-    await proxmox_ws_connection.send_json({"type": cmd_type, "payload": payload})
+    else:
+        logger.info(f"Forwarding {cmd_type} command to proxmox agent: action={payload.get('action')}")
+    if cmd_type == "command":
+        await proxmox_ws_connection.send_json({"type": cmd_type, **payload})
+    else:
+        await proxmox_ws_connection.send_json({"type": cmd_type, "payload": payload})
     return {
         "success": True,
         "task_type": cmd_type,
@@ -4535,12 +4540,7 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
 
         if cmd_type == "proxmox_agent_update":
             try:
-                import uuid as _uuid_mod
-                result = await _forward_hub_passthrough_to_proxmox("command", {
-                    "id": str(_uuid_mod.uuid4()),
-                    "action": "update_agent",
-                    "args": {},
-                })
+                result = await _queue_proxmox_agent_update()
             except Exception as exc:
                 result = {"success": False, "task_type": "proxmox_agent_update", "detail": str(exc)}
             if cmd_id:
@@ -4980,12 +4980,7 @@ async def relay_sync_once() -> None:
 
             if cmd_type == "proxmox_agent_update":
                 try:
-                    import uuid as _uuid_mod
-                    result = await _forward_hub_passthrough_to_proxmox("command", {
-                        "id": str(_uuid_mod.uuid4()),
-                        "action": "update_agent",
-                        "args": {},
-                    })
+                    result = await _queue_proxmox_agent_update()
                 except Exception as exc:
                     result = {"success": False, "task_type": "proxmox_agent_update", "detail": str(exc)}
                 if cmd_id:
