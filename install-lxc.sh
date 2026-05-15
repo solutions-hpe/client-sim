@@ -177,7 +177,13 @@ DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-1h}"
 # CLI flags take priority over environment variables
 [[ -n "$CLI_BRANCH" ]] && REPO_BRANCH="$CLI_BRANCH"
 [[ -n "$CLI_PORT"   ]] && PORT="$CLI_PORT"
-ADMIN_PASSWORD_VAL="${ADMIN_PASSWORD_ARG:-}"
+# --force with no explicit --admin-password leaves the spoke open (no login required).
+# Fresh installs without --admin-password use the default password.
+if [[ "$FORCE" -eq 1 && -z "$ADMIN_PASSWORD_ARG" ]]; then
+  ADMIN_PASSWORD_VAL=""
+else
+  ADMIN_PASSWORD_VAL="${ADMIN_PASSWORD_ARG:-}"
+fi
 
 # Validate branch name
 if [[ ! "$REPO_BRANCH" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
