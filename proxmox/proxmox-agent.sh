@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.00"
+AGENT_VERSION="1.01"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -28,13 +28,24 @@ RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
 PROGRESS_EVENT_QUEUE_DIR="/var/lib/client-sim/progress-events"
 
+# ── Hardware Watchdog ──────────────────────────────────────────────────────────
+HW_WATCHDOG_INTERVAL="${CLIENT_SIM_HW_WATCHDOG_INTERVAL:-60}"   # seconds between scans
+HW_WATCHDOG_ENABLED="${CLIENT_SIM_HW_WATCHDOG_ENABLED:-1}"       # 0 to disable
+HW_FAULT_LOG="/var/lib/client-sim/hw-faults.json"
+HW_WATCHDOG_CURSOR="/var/lib/client-sim/hw-watchdog-cursor"
+HW_RESET_RECORD="/var/lib/client-sim/hw-last-reset.json"
+# How many Tier-2 fault hits within the scan window before rebooting
+HW_TIER2_REBOOT_THRESHOLD="${CLIENT_SIM_HW_TIER2_THRESHOLD:-3}"
+# Minimum seconds between watchdog-triggered reboots (prevent reboot storm)
+HW_REBOOT_COOLDOWN="${CLIENT_SIM_HW_REBOOT_COOLDOWN:-300}"
+
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting."
     exit 1
 fi
 echo $$ > "$PIDFILE"
-trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; [[ -n "${INBOX_PID:-}" ]] && kill "$INBOX_PID" 2>/dev/null; true' EXIT
+trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; [[ -n "${INBOX_PID:-}" ]] && kill "$INBOX_PID" 2>/dev/null; [[ -n "${HW_WATCHDOG_PID:-}" ]] && kill "$HW_WATCHDOG_PID" 2>/dev/null; true' EXIT
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
@@ -1777,6 +1788,16 @@ print(json.dumps(out))
         vms_json="[${combined}]"
     fi
 
+    # Collect hardware watchdog fault log
+    local hw_faults_json='{"faults":[]}'
+    if [[ -f "$HW_FAULT_LOG" ]]; then
+        hw_faults_json=$(cat "$HW_FAULT_LOG" 2>/dev/null || printf '{"faults":[]}')
+    fi
+    local hw_last_reset_json='null'
+    if [[ -f "$HW_RESET_RECORD" ]]; then
+        hw_last_reset_json=$(cat "$HW_RESET_RECORD" 2>/dev/null || printf 'null')
+    fi
+
     cat <<JSON
 {
   "node": {
@@ -1796,6 +1817,8 @@ print(json.dumps(out))
   "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
   "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
+  "hw_faults": ${hw_faults_json},
+  "hw_last_reset": ${hw_last_reset_json},
   "log_lines": $(collect_log_lines)
 }
 JSON
@@ -1848,6 +1871,240 @@ self_update_agent() {
         log "ERROR: Failed to schedule agent restart"
         return 1
     fi
+}
+
+# ── Hardware Watchdog ──────────────────────────────────────────────────────────
+# Tier 1 — Immediate reboot (unrecoverable, system cannot self-heal):
+#   Kernel panic, BUG, Oops        — kernel integrity lost
+#   NVMe controller down/failed    — storage completely gone
+#   ATA hard reset failed          — drive unresponsive after recovery attempts
+#   EXT4/XFS journal abort         — filesystem will not recover without reboot
+#   PCIe Fatal AER                 — PCIe device permanently faulted
+#   EDAC uncorrected (UE)          — uncorrectable memory error
+#
+# Tier 2 — Reboot after N hits (recoverable individually, storm = sick system):
+#   NVMe I/O timeout               — may recover, but N = stuck
+#   blk_update_request I/O error   — block layer errors
+#   ata timeout / soft reset       — ATA retries, N = recurring
+#   hung task                      — kernel task stuck, may cascade
+#   EDAC corrected errors          — single-bit ECC, many = hardware degrading
+#   xhci_hcd/ehci_hcd died         — USB controller crashed
+#   OOM kills                      — memory pressure storm
+
+_record_hw_fault() {
+    local tier="$1" pattern="$2" detail="$3"
+    python3 - "$tier" "$pattern" "$detail" "$HW_FAULT_LOG" <<'PY' 2>/dev/null || true
+import json, sys, time
+from pathlib import Path
+
+tier, pattern, detail, path = sys.argv[1:5]
+f = Path(path)
+try:
+    data = json.loads(f.read_text()) if f.exists() else {'faults': []}
+except Exception:
+    data = {'faults': []}
+data['faults'].append({
+    'ts': time.time(),
+    'tier': tier,
+    'pattern': pattern,
+    'detail': detail,
+})
+data['faults'] = data['faults'][-100:]
+data['last_updated'] = time.time()
+f.write_text(json.dumps(data))
+PY
+}
+
+_hw_reboot_cooled_down() {
+    if [[ ! -f "$HW_RESET_RECORD" ]]; then
+        return 0
+    fi
+    local last_ts
+    last_ts=$(python3 - "$HW_RESET_RECORD" <<'PY' 2>/dev/null || echo 0
+import json, sys
+try:
+    data = json.loads(open(sys.argv[1]).read())
+    print(int(data.get('ts', 0)))
+except Exception:
+    print(0)
+PY
+)
+    local now
+    now=$(date +%s)
+    if (( now - last_ts >= HW_REBOOT_COOLDOWN )); then
+        return 0
+    fi
+    return 1
+}
+
+# Issue an immediate hard reset. Tries IPMI first, then sysrq, then reboot -f.
+hard_reset() {
+    local reason="${1:-unknown}"
+    log "WATCHDOG: Hard reset initiated — ${reason}"
+
+    # Write reset record so next boot can report why we rebooted
+    python3 - "$reason" "$HW_RESET_RECORD" "$AGENT_VERSION" <<'PY' 2>/dev/null || true
+import json, sys, time
+from pathlib import Path
+
+reason, path, version = sys.argv[1:4]
+Path(path).write_text(json.dumps({
+    'ts': time.time(),
+    'reason': reason,
+    'agent_version': version,
+}))
+PY
+
+    # 1. IPMI chassis hard reset (best option — equivalent to pressing reset button)
+    if command -v ipmitool &>/dev/null; then
+        log "WATCHDOG: Attempting IPMI chassis power reset"
+        if ipmitool chassis power reset 2>/dev/null; then
+            sleep 30
+        fi
+    fi
+
+    # 2. Linux sysrq immediate reboot (no sync, no unmount — truly hard)
+    log "WATCHDOG: Falling back to sysrq-b"
+    echo 1 > /proc/sys/kernel/sysrq 2>/dev/null || true
+    sync 2>/dev/null || true
+    echo b > /proc/sysrq-trigger 2>/dev/null || true
+    sleep 5
+
+    # 3. Last resort
+    log "WATCHDOG: Final fallback — reboot -f"
+    reboot -f 2>/dev/null || true
+}
+
+hw_watchdog_check() {
+    command -v journalctl &>/dev/null || return 0
+
+    local -a TIER1_PATTERNS=(
+        "Kernel panic"
+        "kernel BUG at"
+        "BUG: unable to handle kernel"
+        "Oops: general protection"
+        "RIP:.*Oops"
+        "double fault"
+        "machine check exception"
+        "nvme.*controller is down"
+        "nvme.*failed state"
+        "nvme.*Abort status.*DNR"
+        "nvme.*reset: controller failed"
+        "ata.*SRST failed.*error=-19"
+        "ata.*hard reset failed"
+        "ata.*failed to recover some devices"
+        "EXT4-fs error.*aborting journal"
+        "EXT4-fs.*remounting filesystem read-only"
+        "XFS.*log I/O error.*shutting down filesystem"
+        "XFS.*metadata I/O error.*shutting down"
+        "BTRFS.*error.*transaction abort"
+        "pcieport.*PCIe Bus Error.*severity=Fatal"
+        "AER.*Uncorrected.*Fatal"
+        "EDAC.*UE.*uncorrected error"
+        "Hardware Error.*severity.*Fatal"
+        "MCE.*Hardware Error.*fatal"
+    )
+
+    local -a TIER2_PATTERNS=(
+        "nvme.*I/O.*timeout"
+        "nvme.*Abort command"
+        "ata.*exception Emask"
+        "ata.*timeout waiting for"
+        "blk_update_request.*I/O error"
+        "I/O error.*dev.*sector"
+        "scsi.*timing out command"
+        "sd.*Result: hostbyte=DID_TIMEOUT"
+        "SCSI error.*sense key.*HARDWARE ERROR"
+        "SCSI error.*sense key.*MEDIUM ERROR"
+        "ata.*soft resetting link"
+        "ata.*hard resetting link"
+        "task.*blocked for more than.*seconds"
+        "hung_task.*blocked"
+        "EDAC.*CE.*memory error"
+        "MCE.*corrected error"
+        "xhci_hcd.*died"
+        "ehci_hcd.*died"
+        "usb.*hub.*unable to enumerate"
+        "pcieport.*PCIe Bus Error.*severity=Corrected"
+        "Out of memory.*Kill process"
+        "oom.*killed process"
+    )
+
+    local cursor_args=()
+    if [[ -f "$HW_WATCHDOG_CURSOR" ]]; then
+        local saved_cursor
+        saved_cursor=$(cat "$HW_WATCHDOG_CURSOR" 2>/dev/null || true)
+        [[ -n "$saved_cursor" ]] && cursor_args=("--cursor=${saved_cursor}")
+    fi
+
+    local new_cursor
+    new_cursor=$(journalctl -k -n 0 --show-cursor 2>/dev/null | grep -oP '(?<=-- cursor: ).*' || true)
+    [[ -n "$new_cursor" ]] && printf '%s' "$new_cursor" > "$HW_WATCHDOG_CURSOR" 2>/dev/null || true
+
+    local new_msgs
+    new_msgs=$(journalctl -k --no-pager -o short-monotonic "${cursor_args[@]}" 2>/dev/null || true)
+    if [[ -z "$new_msgs" ]]; then
+        return 0
+    fi
+
+    local t1_matched=""
+    for pat in "${TIER1_PATTERNS[@]}"; do
+        local hit
+        hit=$(printf '%s\n' "$new_msgs" | grep -iE "$pat" | head -1 || true)
+        if [[ -n "$hit" ]]; then
+            t1_matched="$pat"
+            log "WATCHDOG: Tier-1 fault detected — pattern='${pat}'"
+            log "WATCHDOG: Matched line: ${hit:0:200}"
+            _record_hw_fault "tier1" "$pat" "$hit"
+            break
+        fi
+    done
+
+    if [[ -n "$t1_matched" ]]; then
+        if _hw_reboot_cooled_down; then
+            post_telemetry 2>/dev/null || true
+            hard_reset "Tier-1 hardware fault: ${t1_matched}"
+        else
+            log "WATCHDOG: Tier-1 fault detected but reboot cooldown active — skipping reset"
+        fi
+        return 0
+    fi
+
+    local t2_count=0
+    local -a t2_reasons=()
+    for pat in "${TIER2_PATTERNS[@]}"; do
+        local count
+        count=$(printf '%s\n' "$new_msgs" | grep -icE "$pat" 2>/dev/null || echo 0)
+        if [[ "$count" -gt 0 ]]; then
+            t2_count=$(( t2_count + count ))
+            t2_reasons+=("${pat}(${count})")
+            _record_hw_fault "tier2" "$pat" "count=${count}"
+        fi
+    done
+
+    if [[ "$t2_count" -ge "$HW_TIER2_REBOOT_THRESHOLD" ]]; then
+        log "WATCHDOG: Tier-2 fault threshold reached — ${t2_count} hits: ${t2_reasons[*]}"
+        if _hw_reboot_cooled_down; then
+            post_telemetry 2>/dev/null || true
+            hard_reset "Tier-2 hardware faults (${t2_count} hits): ${t2_reasons[*]}"
+        else
+            log "WATCHDOG: Tier-2 threshold reached but cooldown active — skipping reset"
+        fi
+    fi
+}
+
+hw_watchdog_loop() {
+    log "Hardware watchdog started (interval=${HW_WATCHDOG_INTERVAL}s, tier2_threshold=${HW_TIER2_REBOOT_THRESHOLD})"
+    if [[ ! -f "$HW_WATCHDOG_CURSOR" ]]; then
+        local init_cursor
+        init_cursor=$(journalctl -k -n 0 --show-cursor 2>/dev/null | grep -oP '(?<=-- cursor: ).*' || true)
+        [[ -n "$init_cursor" ]] && printf '%s' "$init_cursor" > "$HW_WATCHDOG_CURSOR" 2>/dev/null || true
+        log "WATCHDOG: Initialized journal cursor"
+    fi
+    while true; do
+        sleep "$HW_WATCHDOG_INTERVAL"
+        hw_watchdog_check || log "WATCHDOG: check failed (non-fatal)"
+    done
 }
 
 run_backup_command() {
@@ -2586,6 +2843,13 @@ if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
     ) &
     INBOX_PID=$!
     log "Background inbox poller started (PID $INBOX_PID, interval ${INBOX_INTERVAL}s)"
+fi
+
+# Start hardware watchdog in background
+if [[ "$HW_WATCHDOG_ENABLED" -eq 1 ]]; then
+    hw_watchdog_loop &
+    HW_WATCHDOG_PID=$!
+    log "Hardware watchdog started (PID $HW_WATCHDOG_PID)"
 fi
 
 while true; do
