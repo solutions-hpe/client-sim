@@ -4521,6 +4521,26 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                 await ack_fn(cmd_id, "executed", result)
             continue
 
+        if cmd_type == "self_update":
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", {"task_type": "self_update", "detail": "Self-update triggered"})
+            asyncio.create_task(_run_self_update())
+            continue
+
+        if cmd_type == "proxmox_agent_update":
+            try:
+                import uuid as _uuid_mod
+                result = await _forward_hub_passthrough_to_proxmox("command", {
+                    "id": str(_uuid_mod.uuid4()),
+                    "action": "update_agent",
+                    "args": {},
+                })
+            except Exception as exc:
+                result = {"success": False, "task_type": "proxmox_agent_update", "detail": str(exc)}
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
         if cmd_type == "proxmox_reclone_all":
             try:
                 concurrency = int(payload_data.get("concurrency", 0) or 0)
@@ -4915,6 +4935,38 @@ async def relay_sync_once() -> None:
                         "detail": f"Repo Sync failed: {exc}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
+
+            if cmd_type == "self_update":
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": {"task_type": "self_update", "detail": "Self-update triggered"},
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                asyncio.create_task(_run_self_update())
+                continue
+
+            if cmd_type == "proxmox_agent_update":
+                try:
+                    import uuid as _uuid_mod
+                    result = await _forward_hub_passthrough_to_proxmox("command", {
+                        "id": str(_uuid_mod.uuid4()),
+                        "action": "update_agent",
+                        "args": {},
+                    })
+                except Exception as exc:
+                    result = {"success": False, "task_type": "proxmox_agent_update", "detail": str(exc)}
                 if cmd_id:
                     async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
                         ack_resp = await hc_ack.post(f"{base}/ack", json={
