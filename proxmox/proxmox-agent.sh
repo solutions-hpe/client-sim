@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.01"
+AGENT_VERSION="1.02"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2361,6 +2361,21 @@ execute_vm_command() {
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent|update-agent)
             self_update_agent "$_branch" "$_repo_raw"
+            ;;
+        update_spoke|update-spoke)
+            # Ask the spoke to self-update by calling its HTTP endpoint directly.
+            # SERVER_URL already points at the spoke (e.g. http://192.168.x.x:8080).
+            log "update_spoke: triggering spoke self-update via ${SERVER_URL}/api/self-update"
+            local _resp _http
+            _resp=$(curl -sS -o /tmp/_spoke_upd.json -w "%{http_code}" \
+                --max-time 15 -X POST "${SERVER_URL}/api/self-update" 2>/dev/null || true)
+            _http="${_resp:-000}"
+            if [[ "$_http" == "200" ]]; then
+                log "update_spoke: spoke accepted self-update request"
+            else
+                log "WARNING: update_spoke: spoke returned HTTP ${_http}"
+                return 1
+            fi
             ;;
         *)          return 1 ;;
     esac
