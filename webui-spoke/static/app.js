@@ -81,6 +81,8 @@ let currentSettings = {
   vm_image_2_template_id: '200',
   vm_image_1_pct: '50',
   usb_auto_provision: 'off',
+  use_all_dongles: false,
+  sim_phy: 'wireless',
   usb_ignored_vidpids: '[]',
   ignored_hostnames: '["sim-rpi-0000"]',
   vm_silent_timeout: '24',
@@ -468,6 +470,8 @@ const teamsWebhookUrl    = document.getElementById('teams-webhook-url');
 const testTeamsBtn       = document.getElementById('test-teams-btn');
 const teamsNotifMsg      = document.getElementById('teams-notif-msg');
 const usbAutoProvisionInput = document.getElementById('usb-auto-provision');
+const useAllDonglesInput = document.getElementById('use-all-dongles');
+const simPhyInput = document.getElementById('usb-sim-phy');
 const usbMissingTimeoutInput = document.getElementById('usb-missing-timeout');
 const vmImage1TemplateIdInput = document.getElementById('vm-image-1-template-id');
 const vmImage2TemplateIdInput = document.getElementById('vm-image-2-template-id');
@@ -613,6 +617,8 @@ function mergeSettings(next = {}) {
     vm_image_2_template_id: next.vm_image_2_template_id ?? currentSettings.vm_image_2_template_id ?? '200',
     vm_image_1_pct: next.vm_image_1_pct ?? currentSettings.vm_image_1_pct ?? '50',
     usb_auto_provision: next.usb_auto_provision ?? currentSettings.usb_auto_provision ?? 'off',
+    use_all_dongles: next.use_all_dongles ?? currentSettings.use_all_dongles ?? false,
+    sim_phy: next.sim_phy ?? currentSettings.sim_phy ?? 'wireless',
     usb_ignored_vidpids: next.usb_ignored_vidpids ?? currentSettings.usb_ignored_vidpids ?? '[]',
     ignored_hostnames: next.ignored_hostnames ?? currentSettings.ignored_hostnames ?? '["sim-rpi-0000"]',
     vm_silent_timeout: next.vm_silent_timeout ?? currentSettings.vm_silent_timeout ?? '24',
@@ -1094,6 +1100,8 @@ function applySettingsToUI(s) {
     relayIndicator.style.display = relayOn ? '' : 'none';
   }
   if (usbAutoProvisionInput) usbAutoProvisionInput.checked = settings.usb_auto_provision === 'on';
+  if (useAllDonglesInput) useAllDonglesInput.checked = Boolean(settings.use_all_dongles);
+  if (simPhyInput && !simPhyInput.matches(':focus')) simPhyInput.value = settings.sim_phy ?? 'wireless';
   if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = settings.usb_missing_timeout ?? '60';
   if (vmImage1TemplateIdInput && !vmImage1TemplateIdInput.matches(':focus')) vmImage1TemplateIdInput.value = settings.vm_image_1_template_id ?? '100';
   if (vmImage2TemplateIdInput && !vmImage2TemplateIdInput.matches(':focus')) vmImage2TemplateIdInput.value = settings.vm_image_2_template_id ?? '200';
@@ -1699,7 +1707,11 @@ async function loadUsbConfig() {
   currentSettings.vm_image_2_template_id = String(data.image2_template_id ?? currentSettings.vm_image_2_template_id ?? '200');
   currentSettings.vm_image_1_pct = String(data.image1_pct ?? currentSettings.vm_image_1_pct ?? '50');
   currentSettings.usb_auto_provision = data.auto_provision || 'off';
+  currentSettings.use_all_dongles = Boolean(data.use_all_dongles);
+  currentSettings.sim_phy = ['wireless', 'ethernet', 'any'].includes(data.sim_phy) ? data.sim_phy : (currentSettings.sim_phy || 'wireless');
   if (usbAutoProvisionInput) usbAutoProvisionInput.checked = currentSettings.usb_auto_provision === 'on';
+  if (useAllDonglesInput) useAllDonglesInput.checked = currentSettings.use_all_dongles;
+  if (simPhyInput && !simPhyInput.matches(':focus')) simPhyInput.value = currentSettings.sim_phy;
   if (usbMissingTimeoutInput && !usbMissingTimeoutInput.matches(':focus')) usbMissingTimeoutInput.value = currentSettings.usb_missing_timeout;
   if (vmImage1TemplateIdInput && !vmImage1TemplateIdInput.matches(':focus')) vmImage1TemplateIdInput.value = currentSettings.vm_image_1_template_id;
   if (vmImage2TemplateIdInput && !vmImage2TemplateIdInput.matches(':focus')) vmImage2TemplateIdInput.value = currentSettings.vm_image_2_template_id;
@@ -1738,6 +1750,7 @@ function collectUsbSettingsPayload() {
     vm_image_2_template_id: String(vmImage2TemplateIdInput?.value || currentSettings.vm_image_2_template_id || '200'),
     vm_image_1_pct: String(vmImage1PctInput?.value ?? currentSettings.vm_image_1_pct ?? '50'),
     usb_auto_provision: usbAutoProvisionInput?.checked ? 'on' : 'off',
+    use_all_dongles: Boolean(useAllDonglesInput?.checked),
     usb_ignored_vidpids: currentSettings.usb_ignored_vidpids,
     vm_silent_timeout: String(vmSilentTimeoutInput?.value || currentSettings.vm_silent_timeout || '24'),
     reclone_schedule_enabled: recloneScheduleEnabledInput?.checked ? 'on' : 'off',
@@ -3269,6 +3282,7 @@ function buildBucketSummary(section, values = {}) {
   return `${section} — ${values.name || values.wsite || 'Unnamed bucket'}`;
 }
 
+const SIM_PHY_OPTIONS = ['wireless', 'ethernet', 'any'];
 const ADDRESS_SECTION_RE = /^(server|address)$/i;
 
 function _buildSectionCard(section, values, container) {
@@ -3305,6 +3319,13 @@ function _buildSectionCard(section, values, container) {
       select.options[2].textContent = '50% — Half simulations';
       select.options[3].textContent = '25% — 1/4 simulations';
       select.options[4].textContent = '0% — No simulations (stay associated)';
+      fieldGrid.appendChild(group);
+      return;
+    }
+    if (key === 'sim_phy') {
+      const { group } = buildConfigSelect(section, key, SIM_PHY_OPTIONS, String(val || 'wireless'));
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = 'Sim Phy';
       fieldGrid.appendChild(group);
       return;
     }
@@ -3449,7 +3470,7 @@ function renderBucketEditors() {
 
     // sim_phy select (if present)
     if ('sim_phy' in values) {
-      const { group } = buildConfigSelect(section, 'sim_phy', ['wireless', 'ethernet'], values.sim_phy || 'wireless');
+      const { group } = buildConfigSelect(section, 'sim_phy', SIM_PHY_OPTIONS, values.sim_phy || 'wireless');
       const lbl = group.querySelector('label');
       if (lbl) lbl.textContent = 'Sim Phy';
       fieldGrid.appendChild(group);
@@ -4937,11 +4958,27 @@ if (addIgnoredHostnameBtn) {
 
 async function _autoSaveUsb(msgEl) {
   try {
+    currentSettings.use_all_dongles = Boolean(useAllDonglesInput?.checked);
     await requestJson('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(collectUsbSettingsPayload()),
     });
+    showInlineMessage(msgEl, 'Saved.', false);
+  } catch (err) {
+    showInlineMessage(msgEl, `Error: ${err.message}`, true);
+  }
+}
+
+async function _autoSaveSimPhy(msgEl) {
+  const simPhy = ['wireless', 'ethernet', 'any'].includes(simPhyInput?.value) ? simPhyInput.value : 'wireless';
+  try {
+    await requestJson('/api/config/simulation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'simulation', updates: { sim_phy: simPhy } }),
+    });
+    currentSettings.sim_phy = simPhy;
     showInlineMessage(msgEl, 'Saved.', false);
   } catch (err) {
     showInlineMessage(msgEl, `Error: ${err.message}`, true);
@@ -4968,6 +5005,8 @@ async function _autoSaveVmMaintenance(msgEl) {
 
 // USB — save checkbox changes immediately; number inputs on blur.
 if (usbAutoProvisionInput) usbAutoProvisionInput.addEventListener('change', () => _autoSaveUsb(usbSettingsMsg));
+if (useAllDonglesInput) useAllDonglesInput.addEventListener('change', () => _autoSaveUsb(usbSettingsMsg));
+if (simPhyInput) simPhyInput.addEventListener('change', () => _autoSaveSimPhy(usbSettingsMsg));
 [usbMissingTimeoutInput, vmImage1TemplateIdInput, vmImage2TemplateIdInput, vmImage1PctInput].forEach((el) => {
   if (el) el.addEventListener('blur', () => _autoSaveUsb(usbSettingsMsg));
 });
