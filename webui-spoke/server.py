@@ -737,6 +737,7 @@ settings: dict[str, Any] = {
     "vm_image_2_template_id": str(_persisted.get("vm_image_2_template_id", _persisted.get("usb_windows_template_id", "200"))),
     "vm_image_1_pct": str(_persisted.get("vm_image_1_pct", "50")),
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
+    "use_all_dongles": bool(_persisted.get("use_all_dongles", False)),
     "usb_max_slots": str(_persisted.get("usb_max_slots", "24")),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "ignored_hostnames": _persisted.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -2553,6 +2554,7 @@ class SettingsUpdate(BaseModel):
     vm_image_2_template_id: str | None = None
     vm_image_1_pct: str | None = None
     usb_auto_provision: str | None = None
+    use_all_dongles: bool | None = None
     usb_max_slots: str | None = None
     usb_ignored_vidpids: str | None = None
     ignored_hostnames: str | None = None
@@ -2905,6 +2907,13 @@ def _setting_int(key: str, default: int, minimum: int = 0) -> int:
     return max(minimum, value)
 
 
+def _setting_bool(key: str, default: bool = False) -> bool:
+    value = settings.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _parse_ts(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -2988,7 +2997,7 @@ def _vm_pending_checkin(vm: dict[str, Any], client_seen: dict[str, Any] | None =
 
 def _proxmox_usb_config_payload() -> dict[str, Any]:
     # Read sim_phy from the repo's simulation.conf so the agent knows which
-    # USB device type (wired/wireless) to provision and assign.
+    # USB device type (wired/wireless/any) to provision and assign.
     sim_phy = "wireless"
     try:
         sim_conf = REPO_DIR / "configs" / "simulation.conf"
@@ -2998,6 +3007,8 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
             sim_phy = parser.get("simulation", "sim_phy", fallback="wireless").strip().lower() or "wireless"
     except Exception:
         pass
+    if sim_phy not in {"wireless", "ethernet", "any"}:
+        sim_phy = "wireless"
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
@@ -3005,6 +3016,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "image2_template_id": _setting_int("vm_image_2_template_id", _setting_int("usb_windows_template_id", 200, 1), 1),
         "image1_pct": max(0, min(100, int(str(settings.get("vm_image_1_pct", "50")).strip() or "50"))),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
+        "use_all_dongles": _setting_bool("use_all_dongles", False),
         "max_slots": max(1, min(256, int(str(settings.get("usb_max_slots", "24")).strip() or "24"))),
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
@@ -5726,6 +5738,7 @@ async def api_settings_get() -> dict[str, Any]:
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
+        "use_all_dongles": _setting_bool("use_all_dongles", False),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -6052,6 +6065,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.usb_auto_provision is not None:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
+
+    if update.use_all_dongles is not None:
+        settings["use_all_dongles"] = bool(update.use_all_dongles)
 
     if update.usb_max_slots is not None:
         settings["usb_max_slots"] = str(max(1, min(256, int(update.usb_max_slots.strip() or "24"))))

@@ -42,6 +42,8 @@ mkdir -p "$PROV_DIR"
 IMAGE1_TEMPLATE_ID=100
 IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
+SIM_PHY="wireless"
+USE_ALL_DONGLES="false"
 RECLONE_CONCURRENCY=1
 L1_VLAN_START=100
 L1_VLAN_END=199
@@ -80,6 +82,24 @@ atomic_write_file() {
     {
         printf '%s\n' "$content"
     } > "$tmp_file" && mv "$tmp_file" "$target"
+}
+
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+sim_phy_accepts_type() {
+    local actual_type="$1"
+    if [[ "$SIM_PHY" == "any" || "$actual_type" == "$SIM_PHY" ]]; then
+        return 0
+    fi
+    if is_truthy "$USE_ALL_DONGLES" && [[ "$SIM_PHY" == "wireless" || "$SIM_PHY" == "ethernet" ]]; then
+        return 0
+    fi
+    return 1
 }
 
 valid_json_file() {
@@ -419,17 +439,22 @@ try:
 except Exception:
     data = {}
 
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+sim_phy = str(data.get("sim_phy", "wireless")).strip().lower() or "wireless"
+if sim_phy not in {"wireless", "ethernet", "any"}:
+    sim_phy = "wireless"
+use_all_dongles = str(data.get("use_all_dongles", False)).strip().lower()
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
     int(data.get("image2_template_id", 200) or 200),
     max(0, min(100, int(data.get("image1_pct", 50) or 50))),
-    str(data.get("sim_phy", "wireless")).strip().lower() or "wireless",
+    sim_phy,
     max(1, int(data.get("reclone_concurrency", 1) or 1)),
     max(1, min(4094, int(data.get("l1_vlan_start", 100) or 100))),
     max(1, min(4094, int(data.get("l1_vlan_end", 199) or 199))),
     max(1, min(256, int(data.get("max_slots", 24) or 24))),
+    use_all_dongles,
 ))
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
@@ -460,8 +485,9 @@ PY
     L1_VLAN_START=100
     L1_VLAN_END=199
     MAX_USB_SLOTS=24
+    USE_ALL_DONGLES="false"
 
-    while IFS=$'\t' read -r kind a b c d e f g h i j; do
+    while IFS=$'\t' read -r kind a b c d e f g h i j k; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -475,6 +501,7 @@ PY
                 L1_VLAN_START="${h:-100}"
                 L1_VLAN_END="${i:-199}"
                 MAX_USB_SLOTS="${j:-24}"
+                USE_ALL_DONGLES="${k:-false}"
                 start_vmid=$(( 90000 + (id_num - 1) * MAX_USB_SLOTS + 1 ))
                 end_vmid=$(( start_vmid + MAX_USB_SLOTS - 1 ))
                 ;;
@@ -1156,10 +1183,9 @@ reclone_vm_instance() {
     # sim_phy is always derived from the certified USB device table so the correct
     # wired/wireless type is applied regardless of what simulation.conf says globally.
     local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
-    # Guard: if the assigned USB device type no longer matches sim_phy, skip reclone.
-    # This prevents accidentally recloning a wired VM when sim_phy=wireless.
-    if [[ "$device_type" != "$SIM_PHY" ]]; then
-        log "WARNING: VM $vmid USB $bus_path ($vidpid) type=$device_type does not match sim_phy=$SIM_PHY — skipping reclone"
+    # Guard: only skip reclone when the device is outside the current allocation policy.
+    if ! sim_phy_accepts_type "$device_type"; then
+        log "WARNING: VM $vmid USB $bus_path ($vidpid) type=$device_type is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
         return 1
     fi
     # Save image number BEFORE destroy_vm — destroy_vm unsets STATE_VMID_TO_IMAGE[$vmid].
@@ -1255,8 +1281,9 @@ usb_provision_loop() {
     # cannot race and pick the same slot. Associative arrays (STATE_*, CERTIFIED_TYPES)
     # are NOT inherited by background subshells — capture all needed values here.
     local -a _prov_buses=() _prov_vmids=() _prov_products=() _prov_images=() _prov_types=()
+    local -a _preferred_buses=() _overflow_buses=() _ordered_buses=()
     local _next_free_vmid="$start_vmid"
-    local _img1_count=0 _img2_count=0
+    local _img1_count=0 _img2_count=0 _preferred_available=0 _overflow_available=0
 
     for vmid in "${!STATE_VMID_TO_IMAGE[@]}"; do
         [[ "${STATE_VMID_TO_IMAGE[$vmid]}" == "2" ]] && ((_img2_count++)) || ((_img1_count++))
@@ -1266,10 +1293,28 @@ usb_provision_loop() {
         [[ -n "${STATE_BUS_TO_VMID[$bus_path]:-}" ]] && continue
         vidpid="${PRESENT_BUSES[$bus_path]}"
         local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
-        if [[ "$_dtype" != "$SIM_PHY" ]]; then
-            log "Skipping USB $bus_path ($vidpid) — type=$_dtype, sim_phy=$SIM_PHY"
+        if [[ "$SIM_PHY" == "any" || "$_dtype" == "$SIM_PHY" ]]; then
+            _preferred_buses+=("$bus_path")
+            [[ "$SIM_PHY" != "any" ]] && ((_preferred_available++))
             continue
         fi
+        if is_truthy "$USE_ALL_DONGLES" && [[ "$SIM_PHY" == "wireless" || "$SIM_PHY" == "ethernet" ]]; then
+            _overflow_buses+=("$bus_path")
+            ((_overflow_available++))
+            continue
+        fi
+        log "Skipping USB $bus_path ($vidpid) — type=$_dtype, sim_phy=$SIM_PHY"
+    done
+
+    _ordered_buses=("${_preferred_buses[@]}")
+    if [[ ${#_overflow_buses[@]} -gt 0 ]]; then
+        _ordered_buses+=("${_overflow_buses[@]}")
+        log "use_all_dongles enabled — provisioning ${_preferred_available} preferred $SIM_PHY dongles first, then ${_overflow_available} overflow dongles"
+    fi
+
+    for bus_path in "${_ordered_buses[@]}"; do
+        vidpid="${PRESENT_BUSES[$bus_path]}"
+        local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
         while (( _next_free_vmid <= end_vmid )); do
             [[ -z "${STATE_VMID_TO_BUS[$_next_free_vmid]:-}" ]] && break
             ((_next_free_vmid++))
@@ -1301,6 +1346,8 @@ usb_provision_loop() {
 
         if [[ -n "${_reconnected_vidpids[$vidpid]:-}" ]]; then
             log "USB dongle vidpid $vidpid reconnected — auto-provisioning new VM"
+        elif [[ "$SIM_PHY" != "any" && "$_dtype" != "$SIM_PHY" ]]; then
+            log "Provisioning overflow USB $bus_path ($vidpid) — type=$_dtype, preferred=$SIM_PHY"
         fi
     done
 
@@ -2366,9 +2413,9 @@ PY
                     ack_inbox_command "$_cmd_id" "failed" "USB device not present for VM $_vmid" || true
                     continue
                 fi
-                if [[ "$_dtype" != "$SIM_PHY" ]]; then
-                    log "WARNING: VM $_vmid type=$_dtype != sim_phy=$SIM_PHY — skipping reclone"
-                    ack_inbox_command "$_cmd_id" "failed" "sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY" || true
+                if ! sim_phy_accepts_type "$_dtype"; then
+                    log "WARNING: VM $_vmid type=$_dtype is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
+                    ack_inbox_command "$_cmd_id" "failed" "sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY (use_all_dongles=$USE_ALL_DONGLES)" || true
                     continue
                 fi
             fi
