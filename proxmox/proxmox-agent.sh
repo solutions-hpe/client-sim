@@ -16,6 +16,7 @@ TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
 STATE_FILE="/etc/client-sim-usb-state.conf"
+STATE_LOCK_FILE="${STATE_FILE}.lock"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
 HEALTH_STALE_SECS="${CLIENT_SIM_AGENT_HEALTH_STALE_SECS:-180}"
@@ -139,14 +140,28 @@ fi
 curl_api() {
     local method="$1" path="$2" data="${3:-}"
     local args=(-sS --max-time 15 -X "$method" "${SERVER_URL}${path}" -H "Content-Type: application/json")
+    local response http_code body
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     [[ -n "$data" ]] && args+=(-d "$data")
-    curl "${args[@]}"
+    response=$(curl "${args[@]}" -w $'\n%{http_code}') || return 1
+    http_code="${response##*$'\n'}"
+    body="${response%$'\n'*}"
+    if [[ "$http_code" =~ ^[0-9]{3}$ ]] && (( http_code >= 400 )); then
+        log "curl_api ERROR: ${method} ${path} returned HTTP ${http_code}"
+        return 1
+    fi
+    printf '%s' "$body"
 }
 
 json_field() {
-    local payload="$1" field="$2"
-    python3 -c "import json,sys; data=json.loads(sys.argv[1] or '{}'); value=data.get(sys.argv[2], ''); print(str(value))" "$payload" "$field" 2>/dev/null || true
+    local payload="$1" field="$2" default_value="${3:-}"
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$payload" | jq -r --arg f "$field" --arg d "$default_value" '
+            if type == "object" and has($f) and .[$f] != null then .[$f] else $d end
+        ' 2>/dev/null || true
+        return 0
+    fi
+    python3 -c "import json,sys; data=json.loads(sys.argv[1] or '{}'); value=data.get(sys.argv[2], sys.argv[3]); print(str(value))" "$payload" "$field" "$default_value" 2>/dev/null || true
 }
 
 save_api_key() {
@@ -590,12 +605,17 @@ prune_stale_state_vmids() {
 
 save_state_file() {
     ensure_state_file
-    {
-        for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
-            local_bus="${STATE_VMID_TO_BUS[$vmid]}"
-            printf '%s\t%s\t%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}" "${STATE_VMID_TO_IMAGE[$vmid]:-1}" "${STATE_VIDPID_BY_BUS[$local_bus]:-}"
-        done | sort -n
-    } > "$STATE_FILE"
+    (
+        if command -v flock >/dev/null 2>&1; then
+            flock -x 200
+        fi
+        {
+            for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
+                local_bus="${STATE_VMID_TO_BUS[$vmid]}"
+                printf '%s\t%s\t%s\t%s\t%s\n' "$vmid" "$local_bus" "${STATE_MISSING_BY_BUS[$local_bus]:-}" "${STATE_VMID_TO_IMAGE[$vmid]:-1}" "${STATE_VIDPID_BY_BUS[$local_bus]:-}"
+            done | sort -n
+        } > "$STATE_FILE"
+    ) 200>"$STATE_LOCK_FILE"
 }
 
 scan_usb_devices() {
@@ -917,7 +937,7 @@ clone_lxc_instance() {
 }
 
 clone_vm_for_usb() {
-    local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}"
+    local vmid="$1" bus_path="$2" product_name="$3" image_num="${4:-1}" device_type="${5:-wireless}" save_state_on_failure="${6:-true}"
     local guest_ready=0
     local template_id="$IMAGE1_TEMPLATE_ID"
     [[ "$image_num" == "2" ]] && template_id="$IMAGE2_TEMPLATE_ID"
@@ -939,7 +959,7 @@ clone_vm_for_usb() {
         unset "STATE_VMID_TO_IMAGE[$vmid]"
         unset "STATE_BUS_TO_VMID[$bus_path]"
         unset "STATE_MISSING_BY_BUS[$bus_path]"
-        save_state_file
+        is_truthy "$save_state_on_failure" && save_state_file
     }
 
     # Mark this VMID as actively provisioning so the UI can show "Spinning up"
@@ -1179,13 +1199,20 @@ reclone_vm_instance() {
     fi
 
     vidpid="${USB_VIDPID_BY_BUS[$bus_path]:-}"
+    local stored_vidpid="${STATE_VIDPID_BY_BUS[$bus_path]:-$vidpid}"
     product_name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
     # sim_phy is always derived from the certified USB device table so the correct
     # wired/wireless type is applied regardless of what simulation.conf says globally.
     local device_type="${CERTIFIED_TYPES[$vidpid]:-wireless}"
-    # Guard: only skip reclone when the device is outside the current allocation policy.
-    if ! sim_phy_accepts_type "$device_type"; then
-        log "WARNING: VM $vmid USB $bus_path ($vidpid) type=$device_type is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
+    local stored_device_type="${CERTIFIED_TYPES[$stored_vidpid]:-wireless}"
+    # Guard: skip reclone when the attached dongle's current type no longer matches
+    # the VM's stored assignment, unless overflow mode is explicitly enabled.
+    if [[ "$stored_device_type" != "$device_type" ]] && ! is_truthy "$USE_ALL_DONGLES"; then
+        log "WARNING: VM $vmid USB $bus_path current type=$device_type does not match stored type=$stored_device_type — skipping reclone"
+        return 1
+    fi
+    if [[ "$SIM_PHY" != "any" ]] && ! is_truthy "$USE_ALL_DONGLES" && ! sim_phy_accepts_type "$stored_device_type"; then
+        log "WARNING: VM $vmid USB $bus_path stored type=$stored_device_type is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
         return 1
     fi
     # Save image number BEFORE destroy_vm — destroy_vm unsets STATE_VMID_TO_IMAGE[$vmid].
@@ -1372,7 +1399,7 @@ usb_provision_loop() {
             (( _i > 0 )) && sleep 15
             (
                 if clone_vm_for_usb "${_prov_vmids[$_i]}" "${_prov_buses[$_i]}" \
-                    "${_prov_products[$_i]}" "${_prov_images[$_i]}" "${_prov_types[$_i]}"; then
+                    "${_prov_products[$_i]}" "${_prov_images[$_i]}" "${_prov_types[$_i]}" false; then
                     log "Provisioned VM ${_prov_vmids[$_i]} for USB ${_prov_buses[$_i]} type=${_prov_types[$_i]} image=${_prov_images[$_i]} (parallel)"
                 else
                     exit 1
@@ -2404,18 +2431,25 @@ PY
                     fi
                 fi
                 local _vidpid="${USB_VIDPID_BY_BUS[$_bus]:-}"
+                local _stored_vidpid="${STATE_VIDPID_BY_BUS[$_bus]:-$_vidpid}"
                 local _product="${USB_NAME_BY_BUS[$_bus]:-$(find_label_for_vidpid "$_vidpid")}"
                 local _image="${STATE_VMID_TO_IMAGE[$_vmid]:-1}"
                 local _dtype="${CERTIFIED_TYPES[$_vidpid]:-wireless}"
+                local _stored_type="${CERTIFIED_TYPES[$_stored_vidpid]:-wireless}"
 
                 if [[ -z "$_bus" || ! -d "/sys/bus/usb/devices/$_bus" ]]; then
                     log "WARNING: USB device ${_bus:-<unknown>} is not present; cannot reclone VM $_vmid"
                     ack_inbox_command "$_cmd_id" "failed" "USB device not present for VM $_vmid" || true
                     continue
                 fi
-                if ! sim_phy_accepts_type "$_dtype"; then
-                    log "WARNING: VM $_vmid type=$_dtype is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
-                    ack_inbox_command "$_cmd_id" "failed" "sim_phy mismatch: device is $_dtype but sim_phy=$SIM_PHY (use_all_dongles=$USE_ALL_DONGLES)" || true
+                if [[ "$_stored_type" != "$_dtype" ]] && ! is_truthy "$USE_ALL_DONGLES"; then
+                    log "WARNING: VM $_vmid current type=$_dtype does not match stored type=$_stored_type — skipping reclone"
+                    ack_inbox_command "$_cmd_id" "failed" "device type mismatch: VM $_vmid stored=$_stored_type current=$_dtype" || true
+                    continue
+                fi
+                if [[ "$SIM_PHY" != "any" ]] && ! is_truthy "$USE_ALL_DONGLES" && ! sim_phy_accepts_type "$_stored_type"; then
+                    log "WARNING: VM $_vmid stored type=$_stored_type is not allowed by sim_phy=$SIM_PHY use_all_dongles=$USE_ALL_DONGLES — skipping reclone"
+                    ack_inbox_command "$_cmd_id" "failed" "sim_phy mismatch: VM $_vmid stored=$_stored_type sim_phy=$SIM_PHY (use_all_dongles=$USE_ALL_DONGLES)" || true
                     continue
                 fi
             fi
