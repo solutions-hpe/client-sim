@@ -69,9 +69,10 @@ last3="${h: -3}"
 [[ "$last3" =~ ^[0-9]{3}$ ]] && host_id="$last3" || host_id="001"
 id_num=$((10#$host_id))
 # VMID_BLOCK_STRIDE is the fixed per-host block size used for VMID range calculation.
-# It must never change after VMs are created — changing usb_max_slots does NOT shift blocks.
-# Must be >= the maximum usb_max_slots ever configured. Default 50 gives headroom above 24.
-VMID_BLOCK_STRIDE=50
+# Set to 24 to match the existing deployed layout (svr-001→90001, svr-002→90025, svr-003→90049).
+# Changing usb_max_slots no longer shifts start_vmid — only end_vmid moves.
+# To use more than 25 slots on a host, set vmid_start manually in the hub spoke config.
+VMID_BLOCK_STRIDE=24
 # MAX_USB_SLOTS caps how many slots are *used* within this host's block; updated from usb-config at runtime.
 MAX_USB_SLOTS=24
 start_vmid=$((90000 + (id_num - 1) * VMID_BLOCK_STRIDE + 1))
