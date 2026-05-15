@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.04"
+AGENT_VERSION="1.05"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -65,9 +65,15 @@ USB_STATE_JSON="[]"
 PRESENT_USB_JSON="[]"
 
 h=$(hostname)
-last3="${h: -3}"
-[[ "$last3" =~ ^[0-9]{3}$ ]] && host_id="$last3" || host_id="001"
-id_num=$((10#$host_id))
+# Extract trailing numeric suffix — handles svr-01, svr-02, svr-001, etc.
+num_suffix=$(printf '%s' "$h" | grep -oE '[0-9]+$' || true)
+if [[ -n "$num_suffix" && "$num_suffix" =~ ^[0-9]+$ ]]; then
+    id_num=$((10#$num_suffix))
+    [[ $id_num -lt 1 ]] && id_num=1
+else
+    id_num=1
+fi
+host_id=$(printf '%03d' $id_num)
 # VMID_BLOCK_STRIDE is the fixed per-host block size used for VMID range calculation.
 # Set to 24 to match the existing deployed layout (svr-001→90001, svr-002→90025, svr-003→90049).
 # Changing usb_max_slots no longer shifts start_vmid — only end_vmid moves.
@@ -2123,7 +2129,7 @@ hw_watchdog_check() {
     local -a t2_reasons=()
     for pat in "${TIER2_PATTERNS[@]}"; do
         local count
-        count=$(printf '%s\n' "$new_msgs" | grep -icE "$pat" 2>/dev/null || echo 0)
+        count=$(printf '%s\n' "$new_msgs" | grep -icE "$pat" 2>/dev/null) || true
         if [[ "$count" -gt 0 ]]; then
             t2_count=$(( t2_count + count ))
             t2_reasons+=("${pat}(${count})")
