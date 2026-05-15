@@ -507,8 +507,22 @@ if [[ "$REINSTALL" -eq 1 ]]; then
   find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
     ! -name 'venv' ! -name '.env' ! -name 'settings.json' ! -name '.secret_key' \
     -exec rm -rf {} + 2>/dev/null || true
-  # --force: delete settings.json so bootstrap can write fresh hub config
+  # --force: delete settings.json so hub config can be written fresh
   [[ "$FORCE" -eq 1 ]] && rm -f "$INSTALL_DIR/settings.json"
+
+  # --force + hub args: write relay config directly to settings.json now,
+  # before the service starts. This avoids the bootstrap 409 race condition
+  # (deferred service restart can still be running when bootstrap is called).
+  if [[ "$FORCE" -eq 1 && -n "$HUB_URL_ARG" ]]; then
+    python3 -c "
+import json, sys
+s = {'relay_enabled': 'on', 'relay_server_url': sys.argv[1]}
+if sys.argv[2]: s['relay_tenant_id'] = sys.argv[2]; s['relay_tenant_hint'] = sys.argv[2]
+if sys.argv[3]: s['relay_onboarding_psk'] = sys.argv[3]
+print(json.dumps(s))
+" "$HUB_URL_ARG" "$HUB_TENANT_ARG" "$HUB_PSK_ARG" > "$INSTALL_DIR/settings.json"
+    info "Hub relay config written to settings.json (will activate on service start)"
+  fi
 fi
 
 # Sync webui files from repo cache.
@@ -818,6 +832,11 @@ unset _service_ready _i
 ###############################################################################
 if [[ -n "$HUB_URL_ARG" ]]; then
   echo
+  # --force already wrote settings.json directly before service start — no bootstrap needed.
+  if [[ "$FORCE" -eq 1 ]]; then
+    ok "Hub relay configured (via settings.json) → ${HUB_URL_ARG}"
+    [[ -n "$HUB_TENANT_ARG" ]] && ok "Tenant ID           → ${HUB_TENANT_ARG}"
+  else
   info "Configuring hub relay..."
   _bootstrap_payload="{\"relay_server_url\":\"${HUB_URL_ARG}\""
   [[ -n "$HUB_TENANT_ARG" ]] && _bootstrap_payload+=",\"relay_tenant_id\":\"${HUB_TENANT_ARG}\""
@@ -837,6 +856,7 @@ if [[ -n "$HUB_URL_ARG" ]]; then
     warn "Hub bootstrap failed — configure manually via the Setup page"
     warn "Response: ${_bootstrap_result:-no response}"
   fi
+  fi  # end: not --force path
 fi
 
 ###############################################################################
