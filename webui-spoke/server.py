@@ -4316,37 +4316,39 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
     async with state_lock:
         proxmox_vms = list(proxmox_state.get("vms") or [])
         usb_state = list(proxmox_state.get("usb_state", []))
-        unknown_usb = list(proxmox_state.get("unknown_usb", []))
-        clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
-        return {
-            "spoke_id": spoke_id,
-            "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
-            "hostname": socket.gethostname(),
-            "clients": clients_snapshot,
-            "timestamp": time.time(),
+    present_usb = list(proxmox_state.get("present_usb", []))
+    unknown_usb = list(proxmox_state.get("unknown_usb", []))
+    clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
+    return {
+        "spoke_id": spoke_id,
+        "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
+        "hostname": socket.gethostname(),
+        "clients": clients_snapshot,
+        "timestamp": time.time(),
+        "reseed_in_progress": bool(_proxmox_reseed_in_progress),
+        "proxmox": {
+            "connected": bool(proxmox_state.get("connected", False)),
+            "last_seen": proxmox_state.get("last_seen"),
+            "node": dict(proxmox_state.get("node") or {}),
+            "vm_count": len(proxmox_vms),
+            "running_count": sum(1 for vm in proxmox_vms if vm.get("status") == "running"),
+            "vms": [
+                {
+                    "vmid": vm.get("vmid"),
+                    "name": vm.get("name", ""),
+                    "status": vm.get("status", ""),
+                    "type": vm.get("type", ""),
+                }
+                for vm in proxmox_vms
+            ],
+            "usb_state": usb_state,
+            "present_usb": present_usb,
+            "unknown_usb": unknown_usb,
+            "usb_count": len(present_usb) if present_usb else len(usb_state),
+            "agent_version": proxmox_state.get("agent_version"),
+            "pve_version": proxmox_state.get("pve_version"),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
-            "proxmox": {
-                "connected": bool(proxmox_state.get("connected", False)),
-                "last_seen": proxmox_state.get("last_seen"),
-                "node": dict(proxmox_state.get("node") or {}),
-                "vm_count": len(proxmox_vms),
-                "running_count": sum(1 for vm in proxmox_vms if vm.get("status") == "running"),
-                "vms": [
-                    {
-                        "vmid": vm.get("vmid"),
-                        "name": vm.get("name", ""),
-                        "status": vm.get("status", ""),
-                        "type": vm.get("type", ""),
-                    }
-                    for vm in proxmox_vms
-                ],
-                "usb_state": usb_state,
-                "unknown_usb": unknown_usb,
-                "usb_count": len(usb_state),
-                "agent_version": proxmox_state.get("agent_version"),
-                "pve_version": proxmox_state.get("pve_version"),
-                "reseed_in_progress": bool(_proxmox_reseed_in_progress),
-            },
+        },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
             "api_server": {
