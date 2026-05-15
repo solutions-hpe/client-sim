@@ -1094,6 +1094,12 @@
                     <input id="relay-tenant-hint-input" type="text" data-key="relay_tenant_hint" placeholder="e.g. abc123-tenant-id">
                   </div>
                 </div>
+                <div class="form-row">
+                  <div class="form-group" style="flex:2;">
+                    <label>Onboarding PSK <span class="form-hint-inline">(optional — enables auto-approval without superadmin review)</span></label>
+                    <input id="relay-psk-input" type="password" data-key="relay_onboarding_psk" placeholder="Leave blank to keep existing" autocomplete="new-password">
+                  </div>
+                </div>
               </div>
 
               <div id="relay-message" class="settings-message hidden" role="alert"></div>

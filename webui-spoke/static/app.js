@@ -4969,12 +4969,16 @@ if (setupTabButton) {
 }
 
 async function _autoSaveRelay() {
+  const pskInput = document.getElementById('relay-psk-input');
   const payload = {
     relay_enabled: relayEnabledSelect?.value || 'off',
     relay_server_url: relayServerUrlInput?.value?.trim() || '',
     relay_spoke_name: relaySpokeName?.value?.trim() || '',
     relay_tenant_hint: relayTenantHintInput?.value?.trim() || '',
   };
+  const pskVal = pskInput?.value?.trim();
+  if (pskVal) payload.relay_onboarding_psk = pskVal;
+
   try {
     await requestJson('/api/settings', {
       method: 'POST',

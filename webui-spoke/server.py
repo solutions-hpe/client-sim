@@ -2725,6 +2725,7 @@ class SettingsUpdate(BaseModel):
     hub_tls_verify: str | None = None
     relay_spoke_name: str | None = None
     relay_tenant_hint: str | None = None
+    relay_onboarding_psk: str | None = None
     relay_api_key: str | None = None
     relay_spoke_id: str | None = None
     relay_tenant_id: str | None = None
@@ -4215,6 +4216,7 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
                 "label": hostname,
                 "spoke_name": spoke_name,
                 "tenant_id_hint": tenant_hint,
+                "onboarding_psk": settings.get("relay_onboarding_psk", "").strip(),
                 "config": _build_registration_config(),
             })
             resp.raise_for_status()
