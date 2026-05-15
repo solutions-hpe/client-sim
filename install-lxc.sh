@@ -42,7 +42,7 @@ Usage: $0 [OPTIONS]
 Options:
   --branch <name>             Git branch to sync from (overrides REPO_BRANCH env var)
   --port   <number>           TCP port to serve on    (overrides PORT env var)
-  --admin-password <value>    Spoke admin password written to .env (default: )
+  --admin-password <value>    Spoke admin password written to .env (default: none — open access)
   --hub-url <url>             Hub URL to auto-configure after install (e.g. https://cs-hub.westus3.azurecontainer.io:8443)
   --hub-tenant <id-or-name>   Hub tenant ID or name (e.g. contoso or contoso.onmicrosoft.com)
   --hub-user <username>       Hub admin username (used to resolve tenant name → ID)
@@ -182,7 +182,7 @@ DHCP_LEASE_TIME="${DHCP_LEASE_TIME:-1h}"
 if [[ "$FORCE" -eq 1 && -z "$ADMIN_PASSWORD_ARG" ]]; then
   ADMIN_PASSWORD_VAL=""
 else
-  ADMIN_PASSWORD_VAL="${ADMIN_PASSWORD_ARG:-}"
+ADMIN_PASSWORD_VAL="${ADMIN_PASSWORD_ARG:-}"
 fi
 
 # Validate branch name
