@@ -15,6 +15,7 @@ POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
+SELF_UPDATE_RETRY_INTERVAL="${CLIENT_SIM_SELF_UPDATE_RETRY_INTERVAL:-300}"  # 5 minutes after a failed update check
 STATE_FILE="/etc/client-sim-usb-state.conf"
 STATE_LOCK_FILE="${STATE_FILE}.lock"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
@@ -205,6 +206,16 @@ save_repo_branch() {
     else
         echo "CLIENT_SIM_REPO_BRANCH=${branch}" >> "$ENV_FILE"
     fi
+}
+
+normalize_repo_raw_for_branch() {
+    local repo_raw="${1:-}" branch="${2:-main}"
+    repo_raw="${repo_raw%/}"
+    [[ -n "$repo_raw" ]] || return 1
+    case "$repo_raw" in
+        */"$branch") printf '%s\n' "$repo_raw" ;;
+        *) printf '%s\n' "$repo_raw/$branch" ;;
+    esac
 }
 
 schedule_agent_restart() {
@@ -1858,20 +1869,52 @@ self_update_agent() {
     local requested_branch="${1:-}"
     local requested_repo_raw="${2:-}"
     local agent_script="/usr/local/bin/client-sim-proxmox-agent"
-    local configured_branch branch repo_raw download_dir tmp_file
+    local configured_branch configured_repo_raw branch repo_raw download_dir tmp_file selected_repo_raw
+    local -a repo_candidates=()
     configured_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
+    configured_repo_raw=$(grep -oP '(?<=CLIENT_SIM_REPO_RAW=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
     branch="${requested_branch:-$configured_branch}"
     branch="${branch:-main}"
-    repo_raw="${requested_repo_raw:-https://raw.githubusercontent.com/solutions-hpe/client-sim/${branch}}"
     download_dir="/var/lib/client-sim/update"
     tmp_file="${download_dir}/proxmox-agent.sh.download"
     mkdir -p "$download_dir"
-    log "Checking for agent update from GitHub (branch: ${branch}, current: v${AGENT_VERSION})..."
-    if ! curl -sSf --max-time 30 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
+
+    local candidate normalized existing already_added
+    for candidate in \
+        "$requested_repo_raw" \
+        "${CLIENT_SIM_REPO_RAW:-}" \
+        "$configured_repo_raw" \
+        "https://raw.githubusercontent.com/solutions-hpe/client-sim" \
+        "https://github.com/solutions-hpe/client-sim/raw"
+    do
+        [[ -n "$candidate" ]] || continue
+        normalized=$(normalize_repo_raw_for_branch "$candidate" "$branch") || continue
+        already_added=0
+        for existing in "${repo_candidates[@]}"; do
+            if [[ "$existing" == "$normalized" ]]; then
+                already_added=1
+                break
+            fi
+        done
+        if (( already_added == 0 )); then
+            repo_candidates+=("$normalized")
+        fi
+    done
+
+    for repo_raw in "${repo_candidates[@]}"; do
+        log "Checking for agent update from GitHub (branch: ${branch}, current: v${AGENT_VERSION}, source: ${repo_raw})..."
+        if curl -fsSL --connect-timeout 10 --retry 2 --retry-delay 2 --max-time 60 "${repo_raw}/proxmox/proxmox-agent.sh" -o "$tmp_file"; then
+            selected_repo_raw="$repo_raw"
+            break
+        fi
+        log "WARNING: Failed to download agent update from ${repo_raw}"
+    done
+    if [[ -z "$selected_repo_raw" ]]; then
         rm -f "$tmp_file"
-        log "ERROR: Failed to download agent update from ${repo_raw}"
+        log "ERROR: Failed to download agent update from all configured GitHub sources"
         return 1
     fi
+    repo_raw="$selected_repo_raw"
     if ! bash -n "$tmp_file" 2>/dev/null; then
         rm -f "$tmp_file"
         log "ERROR: Downloaded agent script failed syntax check — aborting update"
@@ -2128,8 +2171,9 @@ hw_watchdog_check() {
     local t2_count=0
     local -a t2_reasons=()
     for pat in "${TIER2_PATTERNS[@]}"; do
-        local count
+        local count=0
         count=$(printf '%s\n' "$new_msgs" | grep -icE "$pat" 2>/dev/null) || true
+        [[ "$count" =~ ^[0-9]+$ ]] || count=0
         if [[ "$count" -gt 0 ]]; then
             t2_count=$(( t2_count + count ))
             t2_reasons+=("${pat}(${count})")
@@ -2942,8 +2986,12 @@ while true; do
     # This ensures the agent updates even if the WebUI never sends update_agent.
     _now=$(date +%s)
     if (( _now - _LAST_SELF_UPDATE >= SELF_UPDATE_INTERVAL )); then
-        _LAST_SELF_UPDATE=$_now
-        self_update_agent || true
+        if self_update_agent; then
+            _LAST_SELF_UPDATE=$_now
+        else
+            _LAST_SELF_UPDATE=$(( _now - SELF_UPDATE_INTERVAL + SELF_UPDATE_RETRY_INTERVAL ))
+            log "WARNING: Agent self-update failed; retrying in ${SELF_UPDATE_RETRY_INTERVAL}s"
+        fi
     fi
 
     # Jitter: add 0-15s random delay so multiple agents don't poll in lockstep
