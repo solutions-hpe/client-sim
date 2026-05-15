@@ -771,6 +771,7 @@ settings: dict[str, Any] = {
     "relay_spoke_id": _candidate_relay_spoke_id(_persisted),
     "relay_tenant_id": _persisted.get("relay_tenant_id", _persisted.get("relay_tenant_hint", "")),
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
+    "relay_onboarding_psk": _persisted.get("relay_onboarding_psk", ""),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
