@@ -809,7 +809,9 @@ function renderServerTab(data) {
     const networkTypes = new Set(['nfs', 'cifs', 'glusterfs', 'cephfs', 'rbd', 'iscsi', 'pbs']);
     storagePills.innerHTML = node.storage.map((s) => {
       const icon = networkTypes.has(s.type) ? '🌐' : '🗄️';
-      return `<span class="server-stat-pill" title="${s.name} (${s.type})">${icon} ${s.name}: ${fmtSizeKB(s.used)} / ${fmtSizeKB(s.total)}</span>`;
+      const storageName = escHtml(s.name || '—');
+      const storageType = escHtml(s.type || 'dir');
+      return `<span class="server-stat-pill" title="${storageName} (${storageType})">${icon} ${storageName}: ${fmtSizeKB(s.used)} / ${fmtSizeKB(s.total)}</span>`;
     }).join('');
   }
 
@@ -1708,7 +1710,7 @@ function renderUsbVidPidTable() {
     removeBtn.className = 'btn-icon';
     removeBtn.textContent = '✕';
     removeBtn.addEventListener('click', () => removeVidPid(device.vidpid));
-    tr.innerHTML = `<td>${device.vidpid || '—'}</td><td>${device.type || 'wireless'}</td><td>${device.label || '—'}</td>`;
+    tr.innerHTML = `<td>${escHtml(device.vidpid || '—')}</td><td>${escHtml(device.type || 'wireless')}</td><td>${escHtml(device.label || '—')}</td>`;
     const actionTd = document.createElement('td');
     actionTd.appendChild(removeBtn);
     tr.appendChild(actionTd);
@@ -1913,6 +1915,29 @@ function updateUsbCountdowns() {
   });
 }
 
+function renderTableRowsIncremental(tbody, items, keyFn, rowHtmlFn) {
+  if (!tbody) return;
+  const existingRows = new Map();
+  tbody.querySelectorAll('tr[data-key]').forEach((row) => {
+    existingRows.set(row.dataset.key || '', row);
+  });
+
+  items.forEach((item, index) => {
+    const key = String(keyFn(item, index) ?? index);
+    const rowHtml = rowHtmlFn(item, index);
+    let row = existingRows.get(key);
+    if (!row) {
+      row = document.createElement('tr');
+      row.dataset.key = key;
+    }
+    if (row.innerHTML !== rowHtml) row.innerHTML = rowHtml;
+    tbody.appendChild(row);
+    existingRows.delete(key);
+  });
+
+  existingRows.forEach((row) => row.remove());
+}
+
 function renderUsbSummary(proxmoxData = latestProxmoxData) {
   latestProxmoxData = proxmoxData || latestProxmoxData;
   if (!usbSummaryPanel || !usbSummaryTbody || !unknownUsbSection || !unknownUsbTbody) return;
@@ -1942,52 +1967,61 @@ function renderUsbSummary(proxmoxData = latestProxmoxData) {
       return v && !certifiedSet.has(v) && !ignoredSet.has(v);
     });
 
-  usbSummaryTbody.innerHTML = '';
   const presentUsb = Array.isArray(latestProxmoxData.present_usb) ? latestProxmoxData.present_usb : [];
   const presentBusSet = new Set(presentUsb.map((item) => String(item?.bus_path || '').trim()).filter(Boolean));
-  certified.forEach((device) => {
-    const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
-    const missingEntries = entries.filter((item) => item.missing_since && !presentBusSet.has(String(item?.bus_path || '').trim()));
-    const activeEntries = entries.filter((item) => !missingEntries.includes(item));
-    const missing = missingEntries.length;
-    const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
+  const vmMap = new Map(allVms.map((v) => [Number(v.vmid), v]));
 
-    // Build VM name list for active entries
-    const vmMap = new Map(allVms.map((v) => [Number(v.vmid), v]));
-    const activeVmHtml = activeEntries.length === 0 ? '—' : activeEntries.map((e) => {
-      const vm = vmMap.get(Number(e.vmid));
-      const name = escHtml(vm?.name || `VM ${e.vmid}`);
-      const dot = vm?.status === 'running' ? '🟢' : '⚫';
-      return `<div style="white-space:nowrap">${dot} ${name}</div>`;
-    }).join('');
+  // Small tables, but incremental updates avoid visible flicker during polling.
+  renderTableRowsIncremental(
+    usbSummaryTbody,
+    certified,
+    (device, index) => String(device?.vidpid || device?.label || index),
+    (device) => {
+      const entries = usbState.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase());
+      const missingEntries = entries.filter((item) => item.missing_since && !presentBusSet.has(String(item?.bus_path || '').trim()));
+      const activeEntries = entries.filter((item) => !missingEntries.includes(item));
+      const missing = missingEntries.length;
+      const total = presentUsb.filter((item) => (item.vidpid || '').toLowerCase() === String(device.vidpid || '').toLowerCase()).length;
+      const activeVmHtml = activeEntries.length === 0 ? '—' : activeEntries.map((e) => {
+        const vm = vmMap.get(Number(e.vmid));
+        const name = escHtml(vm?.name || `VM ${e.vmid}`);
+        const dot = vm?.status === 'running' ? '🟢' : '⚫';
+        return `<div style="white-space:nowrap">${dot} ${name}</div>`;
+      }).join('');
+      const missingHtml = missing
+        ? `<div class="usb-missing-list">${missingEntries.map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
+        : '—';
+      const deviceLabel = escHtml(device.label || device.vidpid || '—');
+      const deviceVidPid = escHtml(device.vidpid || '—');
+      const usbType = escHtml(device.type || 'wireless');
+      return `
+        <td>${deviceLabel}</td>
+        <td>${deviceVidPid}</td>
+        <td class="usb-type-${usbType}">${usbType}</td>
+        <td>${activeVmHtml}</td>
+        <td>${missingHtml}</td>
+        <td>${total}</td>
+      `;
+    }
+  );
 
-    const tr = document.createElement('tr');
-    const missingHtml = missing
-      ? `<div class="usb-missing-list">${missingEntries.map((item) => `<div class="usb-missing-item">VM ${item.vmid} · <span data-missing-until="${Number(item.missing_since) + missingTimeoutSeconds}"></span></div>`).join('')}</div>`
-      : '—';
-    tr.innerHTML = `
-      <td>${device.label || device.vidpid || '—'}</td>
-      <td>${device.vidpid || '—'}</td>
-      <td class="usb-type-${device.type || 'wireless'}">${device.type || 'wireless'}</td>
-      <td>${activeVmHtml}</td>
-      <td>${missingHtml}</td>
-      <td>${total}</td>
-    `;
-    usbSummaryTbody.appendChild(tr);
-  });
-
-  unknownUsbTbody.innerHTML = unknownUsb.map((device) => {
-    const vid = escHtml(device.vidpid || '');
-    const nameLabel = escHtml(device.name || device.bus_path || 'Unknown device');
-    return `<tr>
-      <td>${nameLabel}</td>
-      <td>${vid || '—'}</td>
-      <td class="usb-actions">
-        <button type="button" class="btn btn-secondary btn-small" data-action="certify" data-vidpid="${vid}" data-name="${nameLabel}">Add to certified</button>
-        <button type="button" class="btn btn-secondary btn-small" data-action="ignore" data-vidpid="${vid}">Ignore</button>
-      </td>
-    </tr>`;
-  }).join('');
+  renderTableRowsIncremental(
+    unknownUsbTbody,
+    unknownUsb,
+    (device, index) => String(device?.bus_path || device?.vidpid || index),
+    (device) => {
+      const vid = escHtml(device.vidpid || '');
+      const nameLabel = escHtml(device.name || device.bus_path || 'Unknown device');
+      return `
+        <td>${nameLabel}</td>
+        <td>${vid || '—'}</td>
+        <td class="usb-actions">
+          <button type="button" class="btn btn-secondary btn-small" data-action="certify" data-vidpid="${vid}" data-name="${nameLabel}">Add to certified</button>
+          <button type="button" class="btn btn-secondary btn-small" data-action="ignore" data-vidpid="${vid}">Ignore</button>
+        </td>
+      `;
+    }
+  );
   // Use event delegation — one listener on the static tbody handles all button clicks
   unknownUsbTbody._delegated = true;
 
@@ -2089,14 +2123,18 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   if (logEntries.length === 0 && status !== 'idle') {
     recloneVmLog.innerHTML = `<div class="muted" style="padding:8px 0;font-size:13px;">No VMs processed yet.</div>`;
   } else {
-    recloneVmLog.innerHTML = logEntries.map((entry) => `
+    recloneVmLog.innerHTML = logEntries.map((entry) => {
+      const entryName = escHtml(entry.name || `VM ${entry.vmid}`);
+      const entryStatus = escHtml(entry.status || 'unknown');
+      return `
       <div class="log-entry">
         <span>${iconMap[entry.status] || '•'}</span>
-        <span>${entry.name || `VM ${entry.vmid}`}</span>
-        <span class="muted">${entry.status}</span>
+        <span>${entryName}</span>
+        <span class="muted">${entryStatus}</span>
         <span class="muted">${formatUiDate(entry.timestamp)}</span>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   if (state.last_run) {
@@ -2112,14 +2150,17 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   const autoLog = Array.isArray(state.auto_recovery_log) ? state.auto_recovery_log : [];
   if (arSection) arSection.classList.toggle('hidden', autoLog.length === 0);
   if (arLog) {
-    arLog.innerHTML = autoLog.slice().reverse().map((entry) => `
+    arLog.innerHTML = autoLog.slice().reverse().map((entry) => {
+      const entryName = escHtml(entry.name || `VM ${entry.vmid}`);
+      return `
       <div class="log-entry">
         <span>${iconMap[entry.status] || '↺'}</span>
-        <span>${entry.name || `VM ${entry.vmid}`}</span>
+        <span>${entryName}</span>
         <span class="muted">auto-recovery</span>
         <span class="muted">${formatUiDate(entry.timestamp)}</span>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   updateVmRecloneIcons();
@@ -2260,7 +2301,7 @@ function renderAutoProvisionStatus() {
     const isStarting = e.prov_status === 'active';
     const icon  = isStarting ? '🔄' : e.prov_status === 'provisioning' ? '⏳' : e.prov_status === 'tearing_down' ? '🗑️' : '⚠️';
     const label = isStarting ? 'Starting Up' : e.prov_status === 'provisioning' ? 'Cloning' : e.prov_status === 'tearing_down' ? 'Tearing Down' : 'USB Missing';
-    const name  = e.name || `USB ${e.bus_path || ''}`;
+    const name  = escHtml(e.name || `USB ${e.bus_path || ''}`);
     let detail = '';
     if (e.prov_status === 'missing' && e.missing_since) {
       const elapsedMins = Math.round((now - e.missing_since) / 60);
@@ -4653,9 +4694,9 @@ function renderHwPanel() {
     row.setAttribute('role', 'button');
     row.innerHTML = `
       <span class="check-dot ${item.dotCls}"></span>
-      <span class="check-label">${item.label}</span>
-      <span class="check-badge ${item.badgeCls}">${item.badge}</span>
-      <span class="check-detail">${item.detail}</span>
+      <span class="check-label">${escHtml(item.label || '')}</span>
+      <span class="check-badge ${item.badgeCls}">${escHtml(item.badge || '')}</span>
+      <span class="check-detail">${escHtml(item.detail || '')}</span>
       <span class="check-ts">${item.ts ? new Date(item.ts * 1000).toLocaleTimeString() : ''}</span>
     `;
     row.addEventListener('click', item.onClick);
@@ -4684,9 +4725,9 @@ function renderCcPanel() {
     row.setAttribute('role', 'button');
     row.innerHTML = `
       <span class="check-dot ${item.dotCls}"></span>
-      <span class="check-label">${item.label}</span>
-      <span class="check-badge ${item.badgeCls}">${item.badge}</span>
-      <span class="check-detail">${item.detail}</span>
+      <span class="check-label">${escHtml(item.label || '')}</span>
+      <span class="check-badge ${item.badgeCls}">${escHtml(item.badge || '')}</span>
+      <span class="check-detail">${escHtml(item.detail || '')}</span>
       <span class="check-ts">${item.ts ? new Date(item.ts * 1000).toLocaleTimeString() : ''}</span>
     `;
     row.addEventListener('click', item.onClick);
@@ -5773,6 +5814,17 @@ loadSimulations();
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 let _refreshTimer = null;
+let refreshIntervalSeconds = 0;
+
+function syncRefreshTimer() {
+  if (_refreshTimer) {
+    clearInterval(_refreshTimer);
+    _refreshTimer = null;
+  }
+  if (refreshIntervalSeconds > 0 && !document.hidden) {
+    _refreshTimer = setInterval(refreshAll, refreshIntervalSeconds * 1000);
+  }
+}
 
 async function refreshAll() {
   try {
@@ -5802,10 +5854,18 @@ async function refreshAll() {
 }
 
 function applyRefreshInterval(seconds) {
-  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
-  if (seconds > 0) _refreshTimer = setInterval(refreshAll, seconds * 1000);
-  localStorage.setItem('refreshInterval', String(seconds));
+  refreshIntervalSeconds = Number.isFinite(seconds) ? seconds : 0;
+  syncRefreshTimer();
+  localStorage.setItem('refreshInterval', String(refreshIntervalSeconds));
 }
+
+document.addEventListener('visibilitychange', () => {
+  const isHidden = document.hidden;
+  syncRefreshTimer();
+  if (!isHidden && refreshIntervalSeconds > 0) {
+    refreshAll().catch(() => {});
+  }
+});
 
 const refreshSelect = document.getElementById('refresh-interval-select');
 if (refreshSelect) {
