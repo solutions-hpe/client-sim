@@ -1955,6 +1955,24 @@ Path(path).write_text(json.dumps({
 }))
 PY
 
+    # Notify the spoke immediately — best-effort, don't block the reset on failure
+    # The spoke stores this and relays to the hub so the event is recorded even
+    # if the agent never sends another telemetry post after rebooting.
+    local _hw_hostname _hw_payload
+    _hw_hostname=$(hostname 2>/dev/null || echo "unknown")
+    _hw_payload=$(python3 -c "
+import json, sys, time
+reason, hostname, version = sys.argv[1:4]
+print(json.dumps({'hostname': hostname, 'reason': reason, 'tier': 'watchdog',
+                  'ts': time.time(), 'agent_version': version}))
+" "$reason" "$_hw_hostname" "$AGENT_VERSION" 2>/dev/null || echo "{}")
+    if [[ -n "$_hw_payload" && "$_hw_payload" != "{}" ]]; then
+        curl -sk --max-time 5 -X POST "${SERVER_URL}/api/proxmox/hw_reset_event" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${API_KEY}" \
+            -d "$_hw_payload" >/dev/null 2>&1 || true
+    fi
+
     # 1. IPMI chassis hard reset (best option — equivalent to pressing reset button)
     if command -v ipmitool &>/dev/null; then
         log "WATCHDOG: Attempting IPMI chassis power reset"
