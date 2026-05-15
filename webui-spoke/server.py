@@ -274,6 +274,18 @@ def _save_settings() -> None:
         logger.warning("Could not persist settings to %s: %s", SETTINGS_FILE, exc)
 
 
+def _get_machine_id() -> str:
+    """Return a stable machine identifier for clone detection (Linux/LXC)."""
+    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            val = Path(path).read_text().strip()
+            if val:
+                return val
+        except OSError:
+            pass
+    return ""
+
+
 def _candidate_relay_spoke_id(persisted: dict[str, Any]) -> str:
     return str(
         persisted.get("relay_spoke_id")
@@ -299,14 +311,22 @@ def _relay_spoke_id_needs_rotation(value: str, persisted: dict[str, Any] | None 
     if not candidate:
         return True
     if _is_uuid(candidate):
-        # Detect container clone: if stored hostname differs from current hostname, rotate.
+        # Detect container clone: rotate if hostname OR machine-id changed.
         persisted = persisted or _persisted
-        stored_hostname = str(persisted.get("relay_spoke_hostname") or "").strip()
         current_hostname = socket.gethostname()
+        stored_hostname = str(persisted.get("relay_spoke_hostname") or "").strip()
         if stored_hostname and stored_hostname != current_hostname:
             logger.warning(
                 "Spoke hostname changed from '%s' to '%s' — rotating spoke_id to avoid duplicate IDs after clone",
                 stored_hostname, current_hostname,
+            )
+            return True
+        # Check machine-id (works on Linux/LXC; catches same-hostname clones)
+        current_machine_id = _get_machine_id()
+        stored_machine_id = str(persisted.get("relay_machine_id") or "").strip()
+        if current_machine_id and stored_machine_id and stored_machine_id != current_machine_id:
+            logger.warning(
+                "Machine ID changed — rotating spoke_id to avoid duplicate IDs after clone"
             )
             return True
         return False
@@ -332,15 +352,24 @@ def _ensure_relay_spoke_id(persisted: dict[str, Any] | None = None) -> str:
     candidate = str(settings.get("relay_spoke_id") or _candidate_relay_spoke_id(persisted)).strip()
     if _relay_spoke_id_needs_rotation(candidate, persisted):
         candidate = str(uuid.uuid4())
+    machine_id = _get_machine_id()
     if settings.get("relay_spoke_id") != candidate or _candidate_relay_spoke_id(persisted) != candidate:
         settings["relay_spoke_id"] = candidate
         settings["relay_spoke_hostname"] = socket.gethostname()
+        if machine_id:
+            settings["relay_machine_id"] = machine_id
         _save_settings()
     else:
         settings["relay_spoke_id"] = candidate
-        # Ensure hostname is recorded even if spoke_id was already correct
+        # Ensure hostname and machine_id are recorded even if spoke_id was already correct
+        changed = False
         if not settings.get("relay_spoke_hostname"):
             settings["relay_spoke_hostname"] = socket.gethostname()
+            changed = True
+        if machine_id and not settings.get("relay_machine_id"):
+            settings["relay_machine_id"] = machine_id
+            changed = True
+        if changed:
             _save_settings()
     return candidate
 
