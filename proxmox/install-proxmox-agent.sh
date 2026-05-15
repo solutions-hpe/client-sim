@@ -3,7 +3,7 @@
 # Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--installer-key <key>] [--key apikey] [--interval 60]
 # Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ... --installer-key ...
 
-SCRIPT_VERSION="1.00.00"
+SCRIPT_VERSION="1.00"
 
 set -euo pipefail
 
