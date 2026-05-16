@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.11"
+AGENT_VERSION="1.12"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2000,6 +2000,17 @@ self_update_agent() {
         rm -f "$tmp_file"
         if [[ -n "$requested_branch" && "$requested_branch" != "$configured_branch" ]]; then
             save_repo_branch "$branch"
+        fi
+        # Even if the file on disk is already up to date, the RUNNING process may still
+        # be on an older version (disk was updated but service never restarted).
+        # If the on-disk version differs from our running AGENT_VERSION, force a restart.
+        if [[ -n "$new_version" && "$new_version" != "$AGENT_VERSION" ]]; then
+            log "Disk is already v${new_version} but running v${AGENT_VERSION} — forcing restart..."
+            if ! schedule_agent_restart; then
+                log "ERROR: Failed to schedule agent restart"
+                return 1
+            fi
+            return 0
         fi
         log "Agent is already up to date (v${AGENT_VERSION})"
         return 0
