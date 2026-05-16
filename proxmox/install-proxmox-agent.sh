@@ -457,7 +457,8 @@ if [[ -f "$ENV_FILE" ]]; then
     existing_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" || true)
     existing_agent_port=$(grep -oP '(?<=CLIENT_SIM_AGENT_PORT=).*' "$ENV_FILE" || true)
 
-    [[ $SERVER_SET -eq 1 ]] || SERVER_URL="$existing_server"
+    # SERVER_URL is intentionally NOT loaded from env — DHCP IPs change.
+    # Only --server or auto-detection from LXC 1001 sets it.
     [[ $KEY_SET -eq 1 ]] || API_KEY="$existing_key"
     [[ $INTERVAL_SET -eq 1 ]] || [[ -z "$existing_interval" ]] || POLL_INTERVAL="$existing_interval"
     [[ $BRANCH_SET -eq 1 ]] || [[ -z "$existing_branch" ]] || REPO_BRANCH="$existing_branch"
@@ -471,9 +472,23 @@ fi
 REPO_RAW="https://raw.githubusercontent.com/solutions-hpe/client-sim/${REPO_BRANCH}"
 
 if [[ -z "$SERVER_URL" ]]; then
-    echo "ERROR: --server <url> is required"
-    echo "Usage: bash install-proxmox-agent.sh --server http://172.16.1.59:8000"
-    exit 1
+    # No --server given — auto-detect spoke IP from LXC 1001
+    if ! command -v pct &>/dev/null; then
+        echo "ERROR: --server <url> is required (pct not available for auto-detection)"
+        exit 1
+    fi
+    if ! pct list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
+        echo "ERROR: LXC container 1001 not found and --server not specified"
+        exit 1
+    fi
+    echo "[INFO] No --server specified — detecting spoke IP from LXC 1001..."
+    _wait_for_spoke_ip
+    if [[ -z "$SPOKE_IP" ]]; then
+        echo "ERROR: Could not determine IP from LXC 1001; pass --server http://<ip>:8000"
+        exit 1
+    fi
+    SERVER_URL="http://${SPOKE_IP}:${SPOKE_PORT}"
+    echo "[INFO] Auto-detected server: $SERVER_URL"
 fi
 
 if ! command -v qm &>/dev/null && [[ ! -x /usr/sbin/qm ]]; then
