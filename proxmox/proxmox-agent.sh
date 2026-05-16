@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.13"
+AGENT_VERSION="1.14"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -192,9 +192,10 @@ auto_detect_hub_url() {
         return 1
     fi
     local ct_ip
-    # Try static IP from pct config first
+    # Try RFC-1918 static IP from pct config (skip 169.x DHCP-server IPs and dhcp keyword)
     ct_ip=$(pct config 1001 2>/dev/null \
         | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+        | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' \
         | head -1 || true)
     # If DHCP (or no static IP), read the actual assigned IP from inside the container
     if [[ -z "$ct_ip" ]]; then
