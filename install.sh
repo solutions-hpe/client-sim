@@ -49,7 +49,12 @@ fi
 if ! $IS_PI && grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
   IS_PI=true
 fi
-# Also catch Pi VMs — they run Raspberry Pi OS but have no Pi hardware signature
+# Also catch Pi VMs and Raspberry Pi Desktop for x86/x64 — these may not
+# have Pi hardware signatures but do have /etc/rpi-issue (all Pi OS variants)
+# or identify as raspbian/raspberry-pi-os in /etc/os-release
+if ! $IS_PI && [[ -f /etc/rpi-issue ]]; then
+  IS_PI=true
+fi
 if ! $IS_PI && grep -qiE "raspbian|raspberry pi os" /etc/os-release 2>/dev/null; then
   IS_PI=true
 fi
