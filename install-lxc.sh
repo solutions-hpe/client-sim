@@ -817,13 +817,14 @@ sleep 5
 
 _service_ready=0
 info "Waiting for dashboard API to be ready..."
-for _i in $(seq 1 30); do
+for _i in $(seq 1 90); do
   if systemctl is-active --quiet client-sim-dashboard \
     && curl -fsSL --connect-timeout 2 --max-time 2 "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
     _service_ready=1
     ok "Dashboard API ready on :${PORT}"
     break
   fi
+  [[ $((_i % 15)) -eq 0 ]] && info "Still waiting... (${_i}×2s elapsed)"
   sleep 2
 done
 
@@ -853,6 +854,13 @@ if [[ -n "$HUB_URL_ARG" ]]; then
   [[ -n "$HUB_TENANT_ARG" ]] && _bootstrap_payload+=",\"relay_tenant_id\":\"${HUB_TENANT_ARG}\""
   [[ -n "$HUB_PSK_ARG" ]]    && _bootstrap_payload+=",\"relay_onboarding_psk\":\"${HUB_PSK_ARG}\""
   _bootstrap_payload+="}"
+
+  # Wait up to 30s for the API to be reachable before bootstrapping
+  for _bsi in $(seq 1 15); do
+    curl -fsSL --connect-timeout 2 --max-time 2 "http://localhost:${PORT}/api/health" >/dev/null 2>&1 && break
+    sleep 2
+  done
+  unset _bsi
 
   _bootstrap_result=$(curl -sf -X POST "http://localhost:${PORT}/api/bootstrap" \
     -H "Content-Type: application/json" \
