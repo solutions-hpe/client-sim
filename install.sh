@@ -32,7 +32,7 @@ export GIT_TERMINAL_PROMPT=0
 export UCF_FORCE_CONFFOLD=1           # stop ucf (rsyslog/others) from prompting
 export APT_LISTCHANGES_FRONTEND=none  # suppress apt-listchanges pager
 
-VERSION="0.16"
+VERSION="0.17"
 INSTALL_START=$(date +%s)
 WARN_COUNT=0
 ERR_COUNT=0

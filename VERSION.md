@@ -1,6 +1,6 @@
 # Version Management
 
-**Last Updated**: May 8, 2026
+**Last Updated**: May 16, 2026
 **Format**: SemVer-inspired (MAJOR.MINOR format)
 
 ---
@@ -40,7 +40,7 @@ The Client Simulation Suite uses a distributed versioning system where each scri
 - **Current Version**: 0.38
 - **Purpose**: FastAPI dashboard, LXC installer, GitHub sync hub, Aruba Central monitoring, and notification workflows
 - **Status**: Stable
-- **Last Updated**: May 8, 2026
+- **Last Updated**: May 16, 2026
 
 **Major Version Milestones:**
 - **v0.33-v0.35**: Initial WebUI setup, Aruba Central integration, simulation tiles, hardware alert tiles, and client count monitoring
@@ -524,7 +524,7 @@ Select-String 'version = ' C:\Scripts\simulation.ps1
 
 ---
 
-**Last Updated**: May 8, 2026
+**Last Updated**: May 16, 2026
 **Maintained By**: GitHub Copilot
 **Status**: Active & Current ✅
 

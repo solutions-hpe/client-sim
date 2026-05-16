@@ -1,4 +1,4 @@
-$version = '.02'
+$version = '.03'
 $logPath = 'C:\Scripts\sim.log'
 $debugPath = 'C:\Scripts\debug-iperf.log'
 

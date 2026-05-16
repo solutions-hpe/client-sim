@@ -1,6 +1,6 @@
 . 'C:\Scripts\ini-parser.ps1'
 
-$version = '.02'
+$version = '.03'
 $logPath = 'C:\Scripts\sim.log'
 $refreshRate = 5
 $scriptRoot = 'C:\Scripts'
