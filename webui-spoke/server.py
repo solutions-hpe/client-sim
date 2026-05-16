@@ -4,20 +4,27 @@ import asyncio
 import configparser
 import contextlib
 import copy
+import errno
+import fcntl
 import hashlib
 import json
-from dataclasses import asdict, dataclass
-import acme as spoke_acme
-import logging
 import os
+import pty
 import random
 import re
 import secrets
+import shutil
+import signal
 import socket
-import subprocess
-import time
 import ssl
+import struct
+import subprocess
+import termios
+import time
 import uuid
+from dataclasses import asdict, dataclass
+
+import acme as spoke_acme
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2626,6 +2633,7 @@ _RELAY_DIAG_MAX = 50
 relay_diag_log: list[dict[str, Any]] = []
 _relay_ws_send_json: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 _relay_ws_spoke_id: str | None = None
+_shell_sessions: dict[str, dict[str, Any]] = {}
 _repo_ver: str | None = None
 _proxmox_reseed_in_progress = False
 
@@ -4448,6 +4456,220 @@ async def _relay_proxmox_progress_to_hub(message: dict[str, Any]) -> None:
     await _relay_ws_send_json(outbound)
 
 
+async def _wait_for_fd_readable(fd: int) -> None:
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def _ready() -> None:
+        if not future.done():
+            future.set_result(None)
+
+    loop.add_reader(fd, _ready)
+    try:
+        await future
+    finally:
+        with contextlib.suppress(Exception):
+            loop.remove_reader(fd)
+
+
+async def _relay_shell_message(message: dict[str, Any]) -> None:
+    if _relay_ws_send_json is None:
+        raise RuntimeError("Hub relay is not connected")
+    await _relay_ws_send_json(message)
+
+
+def _resize_shell_fd(fd: int, cols: int, rows: int) -> None:
+    safe_cols = max(int(cols or 80), 1)
+    safe_rows = max(int(rows or 24), 1)
+    winsize = struct.pack("HHHH", safe_rows, safe_cols, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+
+
+async def _terminate_shell_process(proc: subprocess.Popen[Any]) -> int | None:
+    if proc.poll() is not None:
+        return proc.returncode
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGHUP)
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=2)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGTERM)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=3)
+        except asyncio.TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(Exception):
+                return await asyncio.to_thread(proc.wait)
+    return proc.returncode
+
+
+async def _cleanup_shell_session(session_id: str, *, exit_code: int | None = None, notify_exit: bool = True) -> None:
+    session = _shell_sessions.pop(session_id, None)
+    if not session:
+        return
+
+    current_task = asyncio.current_task()
+    reader_task = session.get("reader_task")
+    if reader_task is not None and reader_task is not current_task and not reader_task.done():
+        reader_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reader_task
+
+    proc = session.get("process")
+    if proc is not None:
+        if exit_code is None:
+            exit_code = await _terminate_shell_process(proc)
+        else:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(proc.wait)
+
+    master_fd = session.get("pty_fd")
+    if isinstance(master_fd, int):
+        with contextlib.suppress(OSError):
+            os.close(master_fd)
+
+    if notify_exit and _relay_ws_send_json is not None:
+        with contextlib.suppress(Exception):
+            await _relay_shell_message({
+                "type": "shell_exit",
+                "session_id": session_id,
+                "exit_code": int(exit_code if exit_code is not None else -1),
+            })
+
+
+async def _close_all_shell_sessions(*, notify_exit: bool = False) -> None:
+    for session_id in list(_shell_sessions):
+        await _cleanup_shell_session(session_id, notify_exit=notify_exit)
+
+
+async def _shell_reader_loop(session_id: str) -> None:
+    session = _shell_sessions.get(session_id)
+    if not session:
+        return
+
+    proc = session["process"]
+    pty_fd = session["pty_fd"]
+    notify_exit = True
+    exit_code: int | None = None
+    try:
+        while True:
+            await _wait_for_fd_readable(pty_fd)
+            try:
+                data = os.read(pty_fd, 4096)
+            except OSError as exc:
+                if exc.errno in {errno.EIO, errno.EBADF}:
+                    break
+                raise
+            if not data:
+                break
+            try:
+                await _relay_shell_message({
+                    "type": "shell_data",
+                    "session_id": session_id,
+                    "data": data.decode("utf-8", errors="replace"),
+                })
+            except Exception as exc:
+                notify_exit = False
+                logger.warning("Shell relay send failed for session %s: %s", session_id, exc)
+                break
+        exit_code = proc.poll()
+        if exit_code is None:
+            exit_code = await asyncio.to_thread(proc.wait)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Shell reader failed for session %s: %s", session_id, exc)
+        exit_code = proc.poll()
+    finally:
+        await _cleanup_shell_session(session_id, exit_code=exit_code, notify_exit=notify_exit)
+
+
+async def _start_shell_session(command: dict[str, Any]) -> str:
+    requested_session_id = str(command.get("session_id") or "").strip()
+    session_id = requested_session_id or str(uuid.uuid4())
+    await _cleanup_shell_session(session_id, notify_exit=False)
+
+    shell_path = shutil.which("bash") or "/bin/bash"
+    if not Path(shell_path).exists():
+        raise RuntimeError("bash is not installed on the spoke host")
+
+    pty_fd, child_fd = pty.openpty()
+    try:
+        os.set_blocking(pty_fd, False)
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        proc = subprocess.Popen(
+            [shell_path, "-i"],
+            stdin=child_fd,
+            stdout=child_fd,
+            stderr=child_fd,
+            cwd=str(Path.home()),
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(pty_fd)
+        raise
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(child_fd)
+
+    cols = int(command.get("cols") or 80)
+    rows = int(command.get("rows") or 24)
+    _resize_shell_fd(pty_fd, cols, rows)
+    _shell_sessions[session_id] = {
+        "pty_fd": pty_fd,
+        "process": proc,
+        "reader_task": None,
+    }
+    reader_task = asyncio.create_task(_shell_reader_loop(session_id))
+    _shell_sessions[session_id]["reader_task"] = reader_task
+    await _relay_shell_message({"type": "shell_started", "session_id": session_id})
+    return session_id
+
+
+async def _handle_shell_relay_message(message: dict[str, Any]) -> None:
+    msg_type = str(message.get("type") or "").strip().lower()
+    session_id = str(message.get("session_id") or "").strip()
+
+    if msg_type == "shell_start":
+        try:
+            await _start_shell_session(message)
+        except Exception as exc:
+            logger.warning("Failed to start shell session %s: %s", session_id or "<new>", exc)
+            await _relay_shell_message({
+                "type": "shell_exit",
+                "session_id": session_id or str(uuid.uuid4()),
+                "exit_code": -1,
+                "error": str(exc),
+            })
+        return
+
+    session = _shell_sessions.get(session_id)
+    if not session:
+        if msg_type == "shell_exit":
+            return
+        raise RuntimeError(f"Unknown shell session: {session_id}")
+
+    pty_fd = session["pty_fd"]
+    if msg_type == "shell_input":
+        data = message.get("data")
+        if data is not None:
+            os.write(pty_fd, str(data).encode())
+        return
+    if msg_type == "shell_resize":
+        _resize_shell_fd(pty_fd, int(message.get("cols") or 80), int(message.get("rows") or 24))
+        return
+    if msg_type == "shell_exit":
+        await _cleanup_shell_session(session_id)
+        return
+    raise RuntimeError(f"Unsupported shell relay message: {msg_type}")
+
+
 async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) -> None:
     commands_changed = False
     serialized_commands: list[dict[str, Any]] | None = None
@@ -5232,7 +5454,10 @@ async def relay_ws_loop() -> None:
                             await _broadcast_relay_state()
                         elif msg_type == "pong":
                             relay_state.update({"connected": True, "error": None})
+                        elif msg_type.startswith("shell_"):
+                            await _handle_shell_relay_message(message)
                 finally:
+                    await _close_all_shell_sessions(notify_exit=False)
                     if _relay_ws_send_json is send_json:
                         _relay_ws_send_json = None
                         _relay_ws_spoke_id = None
