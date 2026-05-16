@@ -298,6 +298,29 @@ info "Updating package lists"
 retry apt_run update --quiet=2
 ok "Package lists updated"
 
+# ── Raspberry Pi apt repo (non-Pi Debian only) ───────────────────────────────
+# Adds the Pi Foundation's repo so we can install the PIXEL desktop theme
+# (raspberrypi-ui-mods, raspberrypi-artwork) on plain Debian x86/x64 VMs,
+# giving them the same look as Pi OS hardware.
+if ! $IS_PI; then
+  info "Adding Raspberry Pi apt repository for PIXEL desktop packages"
+  apt_run install -y --quiet gnupg curl >>"$LOG" 2>&1 || true
+  curl -fsSL https://archive.raspberrypi.org/debian/raspberrypi.gpg.key \
+    | gpg --dearmor -o /usr/share/keyrings/raspberrypi-archive-keyring.gpg \
+    >>"$LOG" 2>&1
+  echo "deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] \
+http://archive.raspberrypi.org/debian/ bookworm main" \
+    > /etc/apt/sources.list.d/raspberrypi.list
+  # Lower priority so Pi repo never overrides standard Debian packages
+  cat >/etc/apt/preferences.d/raspberrypi <<'PINEOF'
+Package: *
+Pin: origin archive.raspberrypi.org
+Pin-Priority: 100
+PINEOF
+  retry apt_run update --quiet=2
+  ok "Raspberry Pi apt repository added"
+fi
+
 # Pre-seed debconf answers for packages known to prompt interactively.
 # samba-common ignores DEBIAN_FRONTEND without do_debconf=false.
 info "Pre-seeding debconf answers"
@@ -349,8 +372,9 @@ PACKAGES=(
 )
 
 # Pi already has a desktop environment (PIXEL/LXDE) — don't replace it
+# On Debian x86/x64 VMs install PIXEL (from Pi repo) + lightdm/xorg
 if ! $IS_PI; then
-  PACKAGES+=("lightdm" "lxde-core" "xorg")
+  PACKAGES+=("raspberrypi-ui-mods" "raspberrypi-artwork" "lightdm" "lxde-core" "xorg")
 fi
 TOTAL_PKGS="${#PACKAGES[@]}"
 BATCH_SIZE=4
@@ -415,11 +439,11 @@ if ! $IS_PI; then
 [Seat:*]
 autologin-user=$SIM_USER
 autologin-user-timeout=0
-autologin-session=LXDE
-user-session=LXDE
+autologin-session=LXDE-pi
+user-session=LXDE-pi
 greeter-session=lightdm-greeter
 LIGHTDM_EOF
-  ok "LightDM autologin → $SIM_USER (session: LXDE)"
+  ok "LightDM autologin → $SIM_USER (session: LXDE-pi)"
 else
   ok "Pi platform — keeping native Pi OS desktop and display manager"
 fi
