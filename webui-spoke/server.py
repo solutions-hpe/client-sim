@@ -8,6 +8,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import pty
 import random
