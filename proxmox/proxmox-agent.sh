@@ -9,7 +9,12 @@ AGENT_VERSION="1.10"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
-SERVER_URL=""
+ENV_FILE="/etc/client-sim-proxmox-agent.env"
+
+# Load persisted env (API key, SERVER_URL, etc.) before applying defaults
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE" 2>/dev/null || true
+
+SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
@@ -18,7 +23,6 @@ SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-3600}"   # 1 hour
 SELF_UPDATE_RETRY_INTERVAL="${CLIENT_SIM_SELF_UPDATE_RETRY_INTERVAL:-300}"  # 5 minutes after a failed update check
 STATE_FILE="/etc/client-sim-usb-state.conf"
 STATE_LOCK_FILE="${STATE_FILE}.lock"
-ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
 HEALTH_STALE_SECS="${CLIENT_SIM_AGENT_HEALTH_STALE_SECS:-180}"
 HEALTH_FILE="/var/lib/client-sim/agent-health.json"
@@ -202,6 +206,14 @@ auto_detect_hub_url() {
     fi
     SERVER_URL="http://${ct_ip}:8000"
     log "Auto-detected hub at ${SERVER_URL} (LXC 1001)"
+    # Persist so subsequent restarts skip re-detection
+    local escaped_url
+    escaped_url=$(sed_escape "$SERVER_URL")
+    if grep -q '^CLIENT_SIM_SERVER_URL=' "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^CLIENT_SIM_SERVER_URL=.*|CLIENT_SIM_SERVER_URL=${escaped_url}|" "$ENV_FILE"
+    else
+        echo "CLIENT_SIM_SERVER_URL=${SERVER_URL}" >> "$ENV_FILE"
+    fi
     return 0
 }
 
