@@ -6,6 +6,8 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
 STATE_DIR="/var/lib/proxmox-watchdog"
 STATE_FILE="${STATE_DIR}/state"
+CRASH_BOOT_ID_FILE="${STATE_DIR}/os-crash-boot-id"   # tracks which boot we already reported
+HW_FAULT_LOG="/var/lib/client-sim/hw-faults.json"    # shared with the agent — crash events land here
 LOG_FILE="/var/log/proxmox-watchdog.log"
 INSTALLER_PATH="/opt/proxmox-agent-installer/install-proxmox-agent.sh"
 INSTALLER_TMP_PATH="/tmp/install-proxmox-agent-latest.sh"
@@ -34,6 +36,133 @@ save_state() {
 iso_timestamp() {
     date -u +%Y-%m-%dT%H:%M:%SZ
 }
+
+# ── OS crash detection ─────────────────────────────────────────────────────────
+# Runs only within the first 10 minutes after a boot so we catch the previous
+# boot's crash without re-scanning on every 5-minute watchdog tick.
+# Writes any findings into the agent's hw-faults.json so they appear in the
+# hub's Hardware Faults panel without requiring any hub/spoke code changes.
+detect_and_report_os_crash() {
+    command -v journalctl &>/dev/null || return 0
+    command -v python3    &>/dev/null || return 0
+
+    # Only act in the first 10 minutes of uptime
+    local uptime_secs
+    uptime_secs=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 99999)
+    (( uptime_secs > 600 )) && return 0
+
+    # Only report once per boot (track by boot-id)
+    local boot_id
+    boot_id=$(journalctl --list-boots --no-pager 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
+    if [[ -f "$CRASH_BOOT_ID_FILE" ]] && [[ "$(cat "$CRASH_BOOT_ID_FILE" 2>/dev/null)" == "$boot_id" ]]; then
+        return 0
+    fi
+
+    local crash_type="" crash_detail="" crash_found=0
+
+    # 1. OOM kill
+    local oom_lines
+    oom_lines=$(journalctl -b -1 --no-pager -q 2>/dev/null \
+        | grep -iE "oom.killer|out of memory: Kill|Killed process|memory cgroup out of memory" \
+        | tail -5 || true)
+    if [[ -n "$oom_lines" ]]; then
+        crash_type="oom_kill"; crash_detail="$oom_lines"; crash_found=1
+    fi
+
+    # 2. Kernel panic / BUG / oops
+    if [[ $crash_found -eq 0 ]]; then
+        local panic_lines
+        panic_lines=$(journalctl -b -1 --no-pager -q 2>/dev/null \
+            | grep -iE "kernel panic|BUG:|general protection fault|unable to handle kernel" \
+            | tail -5 || true)
+        if [[ -n "$panic_lines" ]]; then
+            crash_type="kernel_panic"; crash_detail="$panic_lines"; crash_found=1
+        fi
+    fi
+
+    # 3. Hung task / soft lockup
+    if [[ $crash_found -eq 0 ]]; then
+        local hung_lines
+        hung_lines=$(journalctl -b -1 --no-pager -q 2>/dev/null \
+            | grep -iE "hung_task|soft lockup|hard lockup|rcu_sched stall" \
+            | tail -5 || true)
+        if [[ -n "$hung_lines" ]]; then
+            crash_type="hung_task"; crash_detail="$hung_lines"; crash_found=1
+        fi
+    fi
+
+    # 4. kdump crash file present
+    local kdump_file=""
+    if [[ -d /var/crash ]]; then
+        kdump_file=$(find /var/crash -maxdepth 2 -name "*.crash" -newer /proc/uptime 2>/dev/null | head -1 || true)
+        if [[ -n "$kdump_file" ]] && [[ $crash_found -eq 0 ]]; then
+            crash_type="kernel_crash_dump"; crash_found=1
+        fi
+    fi
+
+    [[ $crash_found -eq 0 ]] && { echo "$boot_id" > "$CRASH_BOOT_ID_FILE"; return 0; }
+
+    local hostname ts
+    hostname=$(hostname 2>/dev/null || echo "unknown")
+    ts=$(iso_timestamp)
+    log_event "OS_CRASH_DETECTED type=${crash_type} host=${hostname} boot=${boot_id}"
+
+    # Append the crash event into the agent's hw-faults.json so it surfaces
+    # in the hub's Hardware Faults panel automatically via the next telemetry post.
+    mkdir -p "$(dirname "$HW_FAULT_LOG")"
+    python3 - "$crash_type" "$crash_detail" "$hostname" "$ts" "${kdump_file:-}" "$HW_FAULT_LOG" <<'PY' 2>/dev/null || true
+import json, sys
+from pathlib import Path
+
+crash_type, crash_detail, hostname, ts, kdump_file, fault_log = sys.argv[1:7]
+
+fault = {
+    "type":       f"os_crash:{crash_type}",
+    "check":      "os_crash",
+    "message":    crash_detail[:500] if crash_detail else crash_type,
+    "detail":     crash_detail[:2000] if crash_detail else "",
+    "hostname":   hostname,
+    "kdump_file": kdump_file or None,
+    "ts":         ts,
+}
+
+p = Path(fault_log)
+try:
+    data = json.loads(p.read_text())
+    faults = data.get("faults", []) if isinstance(data, dict) else []
+except Exception:
+    faults = []
+
+faults.append(fault)
+faults = faults[-50:]   # cap at 50 entries
+p.write_text(json.dumps({"faults": faults}))
+PY
+
+    echo "$boot_id" > "$CRASH_BOOT_ID_FILE"
+
+    # Also send immediately to the spoke API (best-effort) — the agent will
+    # relay a full copy on its next telemetry cycle regardless.
+    if [[ -n "${CLIENT_SIM_SERVER_URL:-}" ]]; then
+        local payload
+        payload=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'event':       'os_crash',
+    'crash_type':  sys.argv[1],
+    'detail':      sys.argv[2][:500],
+    'hostname':    sys.argv[3],
+    'timestamp':   sys.argv[4],
+    'failure_count': 0,
+}))" "$crash_type" "$crash_detail" "$hostname" "$ts" 2>/dev/null || echo "{}")
+        local -a curl_args=(-sS --max-time 5 -X POST \
+            "${CLIENT_SIM_SERVER_URL%/}/api/proxmox/watchdog_event" \
+            -H "Content-Type: application/json")
+        [[ -n "${CLIENT_SIM_API_KEY:-}" ]] && curl_args+=(-H "X-API-Key: ${CLIENT_SIM_API_KEY}")
+        curl_args+=(-d "$payload")
+        curl "${curl_args[@]}" >/dev/null 2>&1 || true
+    fi
+}
+
 
 read_agent_port() {
     if [[ -n "${CLIENT_SIM_AGENT_PORT:-}" ]]; then
@@ -103,6 +232,10 @@ if [[ -f "$ENV_FILE" ]]; then
     source "$ENV_FILE"
 fi
 REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-$REPO_BRANCH}"
+
+# Check for OS-level crashes from the previous boot and record them into the
+# agent's hw-faults.json so they surface in the hub Hardware Faults panel.
+detect_and_report_os_crash || true
 
 load_state
 AGENT_PORT="$(read_agent_port)"

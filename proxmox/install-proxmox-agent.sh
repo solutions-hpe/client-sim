@@ -3,7 +3,7 @@
 # Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--installer-key <key>] [--key apikey] [--interval 60]
 # Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ... --installer-key ...
 
-SCRIPT_VERSION="1.05"
+SCRIPT_VERSION="1.06"
 
 set -euo pipefail
 
@@ -526,7 +526,7 @@ echo "[4/6] Preparing watchdog state..."
 install -d -m 0755 "$WATCHDOG_STATE_DIR"
 echo "  OK: $WATCHDOG_STATE_DIR"
 
-echo "[5/6] Enabling and (re)starting service + timer..."
+echo "[5/7] Enabling and (re)starting service + timer..."
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME" --no-block
@@ -544,7 +544,38 @@ else
     echo "  WARNING: watchdog timer failed to start — check: systemctl status proxmox-watchdog.timer"
 fi
 
-echo "[6/6] Testing connection to WebUI..."
+echo "[6/7] Crash hardening: kernel watchdog + hung-task detection + kdump..."
+# Kernel settings: log hung tasks after 120 s, reboot automatically on kernel
+# panic / oops so the host recovers without manual intervention.
+SYSCTL_CONF="/etc/sysctl.d/99-client-sim-watchdog.conf"
+cat > "$SYSCTL_CONF" <<'SYSCTL'
+# Client-Sim: detect and recover from kernel hangs / panics
+kernel.hung_task_timeout_secs=120
+kernel.panic=10
+kernel.panic_on_oops=1
+SYSCTL
+sysctl -p "$SYSCTL_CONF" >/dev/null 2>&1 && echo "  OK: kernel hang/panic sysctl applied" \
+    || echo "  WARNING: sysctl apply failed — settings will take effect on next reboot"
+
+# Load the softdog kernel watchdog so the host auto-reboots if the kernel
+# freezes and nothing feeds /dev/watchdog within soft_margin seconds.
+MODULES_CONF="/etc/modules-load.d/client-sim-watchdog.conf"
+if ! grep -q "^softdog" "$MODULES_CONF" 2>/dev/null; then
+    echo "softdog" >> "$MODULES_CONF"
+fi
+modprobe softdog soft_margin=60 2>/dev/null && echo "  OK: softdog watchdog module loaded" \
+    || echo "  WARNING: softdog module unavailable — kernel-level reboot watchdog not active"
+
+# Install kdump-tools for post-crash kernel dump collection.
+# Dumps land in /var/crash/ and survive reboots for later analysis.
+if apt-get install -y -qq kdump-tools 2>/dev/null; then
+    systemctl enable kdump-tools 2>/dev/null || true
+    echo "  OK: kdump-tools installed — crash dumps will be written to /var/crash/"
+else
+    echo "  INFO: kdump-tools not available on this kernel/distro — skipping crash dump setup"
+fi
+
+echo "[7/7] Testing connection to WebUI..."
 if curl -sSf --max-time 5 "${SERVER_URL}/api/health" | grep -q '"status".*"ok"'; then
     echo "  OK: WebUI reachable at $SERVER_URL"
 else
