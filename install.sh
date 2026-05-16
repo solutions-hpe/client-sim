@@ -335,6 +335,7 @@ PACKAGES=(
   "net-tools"
   "dnsutils"
   "network-manager"
+  "network-manager-gnome"
   "lightdm"
   "lxde-core"
   "xorg"
