@@ -5,11 +5,12 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.14"
+AGENT_VERSION="1.15"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
 ENV_FILE="/etc/client-sim-proxmox-agent.env"
+AGENT_SHELL_PID=$$
 
 # Load persisted env (API key, etc.) before applying defaults
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" 2>/dev/null || true
@@ -21,6 +22,7 @@ TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
 SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-3600}"   # 1 hour
 SELF_UPDATE_RETRY_INTERVAL="${CLIENT_SIM_SELF_UPDATE_RETRY_INTERVAL:-300}"  # 5 minutes after a failed update check
+SPOKE_OFFLINE_REINSTALL_SECS=3600
 STATE_FILE="/etc/client-sim-usb-state.conf"
 STATE_LOCK_FILE="${STATE_FILE}.lock"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
@@ -230,15 +232,102 @@ else
     fi
 fi
 
+record_spoke_failure() {
+    local state_dir="/var/lib/client-sim"
+    local fail_since_file="${state_dir}/spoke-fail-since"
+    local cooldown_file="${state_dir}/reinstall-last"
+    local reinstall_cooldown_secs=7200
+    mkdir -p "$state_dir"
+
+    local now
+    now=$(date +%s)
+
+    if [[ ! -f "$fail_since_file" ]]; then
+        echo "$now" > "$fail_since_file"
+        log "AUTO-REPAIR: Spoke contact lost — starting offline timer (threshold: ${SPOKE_OFFLINE_REINSTALL_SECS}s)"
+        return
+    fi
+
+    local fail_since elapsed
+    fail_since=$(cat "$fail_since_file" 2>/dev/null || echo "$now")
+    [[ "$fail_since" =~ ^[0-9]+$ ]] || fail_since="$now"
+    elapsed=$(( now - fail_since ))
+
+    if (( elapsed > 0 && elapsed % 600 < 30 )); then
+        log "AUTO-REPAIR: Spoke still unreachable — offline for ${elapsed}s / ${SPOKE_OFFLINE_REINSTALL_SECS}s before reinstall"
+    fi
+
+    if (( elapsed < SPOKE_OFFLINE_REINSTALL_SECS )); then
+        return
+    fi
+
+    if [[ -f "$cooldown_file" ]]; then
+        local last_reinstall cooldown_elapsed
+        last_reinstall=$(cat "$cooldown_file" 2>/dev/null || echo "0")
+        [[ "$last_reinstall" =~ ^[0-9]+$ ]] || last_reinstall=0
+        cooldown_elapsed=$(( now - last_reinstall ))
+        if (( cooldown_elapsed < reinstall_cooldown_secs )); then
+            log "AUTO-REPAIR: Threshold exceeded but cooldown active (last reinstall ${cooldown_elapsed}s ago — cooldown is ${reinstall_cooldown_secs}s)"
+            return
+        fi
+    fi
+
+    log "AUTO-REPAIR: Spoke unreachable for ${elapsed}s — triggering reinstall"
+    trigger_spoke_reinstall
+}
+
+clear_spoke_failure() {
+    local fail_since_file="/var/lib/client-sim/spoke-fail-since"
+    if [[ -f "$fail_since_file" ]]; then
+        log "AUTO-REPAIR: Spoke contact restored — clearing offline timer"
+        rm -f "$fail_since_file"
+    fi
+}
+
+trigger_spoke_reinstall() {
+    local state_dir="/var/lib/client-sim"
+    local installer_url="https://raw.githubusercontent.com/solutions-hpe/client-sim/main/proxmox/install-proxmox-agent.sh"
+    local installer_file="${state_dir}/install-proxmox-agent-repair.sh"
+    mkdir -p "$state_dir"
+
+    log "AUTO-REPAIR: Downloading installer from ${installer_url}..."
+    if ! curl -fsSL --connect-timeout 15 --max-time 60 "$installer_url" -o "$installer_file"; then
+        log "AUTO-REPAIR: Failed to download installer — will retry next cycle"
+        return 1
+    fi
+    if ! bash -n "$installer_file"; then
+        log "AUTO-REPAIR: Installer failed syntax check — aborting"
+        rm -f "$installer_file"
+        return 1
+    fi
+    chmod +x "$installer_file"
+    echo "$(date +%s)" > "${state_dir}/reinstall-last"
+    log "AUTO-REPAIR: Launching reinstaller — agent will restart"
+    nohup bash "$installer_file" >> /var/log/client-sim-proxmox-agent-repair.log 2>&1 &
+    sleep 3
+    log "AUTO-REPAIR: Exiting to allow installer to take over"
+    kill -TERM "$AGENT_SHELL_PID" 2>/dev/null || true
+    exit 0
+}
+
 curl_api() {
     local method="$1" path="$2" data="${3:-}"
     local args=(-sS --max-time 15 -X "$method" "${SERVER_URL}${path}" -H "Content-Type: application/json")
-    local response http_code body
+    local response http_code body curl_exit=0
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     [[ -n "$data" ]] && args+=(-d "$data")
-    response=$(curl "${args[@]}" -w $'\n%{http_code}') || return 1
+    response=$(curl "${args[@]}" -w $'\n%{http_code}') || curl_exit=$?
     http_code="${response##*$'\n'}"
     body="${response%$'\n'*}"
+    if [[ "$http_code" == "000" ]]; then
+        record_spoke_failure
+    elif [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        clear_spoke_failure
+    fi
+    if (( curl_exit != 0 )); then
+        log "curl_api ERROR: ${method} ${path} curl exited ${curl_exit} (HTTP ${http_code})"
+        return 1
+    fi
     if [[ "$http_code" =~ ^[0-9]{3}$ ]] && (( http_code >= 400 )); then
         log "curl_api ERROR: ${method} ${path} returned HTTP ${http_code}"
         return 1
