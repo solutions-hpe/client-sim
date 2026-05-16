@@ -168,12 +168,16 @@ done
 # Hub always runs in LXC container ID 1001. Read its IP from pct config.
 auto_detect_hub_url() {
     command -v pct &>/dev/null || { log "ERROR: pct not found — not running on Proxmox?"; return 1; }
+    if ! pct status 1001 &>/dev/null; then
+        log "ERROR: LXC container 1001 does not exist on this host."
+        return 1
+    fi
     local ct_ip
     ct_ip=$(pct config 1001 2>/dev/null \
         | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
         | head -1 || true)
     if [[ -z "$ct_ip" ]]; then
-        log "ERROR: Could not read IP from LXC 1001 — is the container configured?"
+        log "ERROR: LXC 1001 exists but has no IP configured (check net0 in pct config 1001)."
         return 1
     fi
     SERVER_URL="http://${ct_ip}:8000"
