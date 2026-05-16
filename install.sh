@@ -180,7 +180,7 @@ done
 printf "\n"
 printf "${COL_DIM}  Log    : %s${COL_RESET}\n" "$LOG"
 if $IS_PI; then
-  printf "${COL_DIM}  Platform: Raspberry Pi (raspberrypi-kernel-headers, no qemu-guest-agent)${COL_RESET}\n"
+  printf "${COL_DIM}  Platform: Raspberry Pi (raspberrypi-kernel-headers)${COL_RESET}\n"
 else
   printf "${COL_DIM}  Platform: Debian x86/VM (linux-headers-$(uname -r))${COL_RESET}\n"
 fi
@@ -340,14 +340,13 @@ PACKAGES=(
   "dnsutils"
   "network-manager"
   "network-manager-gnome"
+  "qemu-guest-agent"
 )
+
 # Pi already has a desktop environment (PIXEL/LXDE) — don't replace it
 if ! $IS_PI; then
   PACKAGES+=("lightdm" "lxde-core" "xorg")
 fi
-
-# qemu-guest-agent only needed in VM environments — skip on Raspberry Pi
-$IS_PI || PACKAGES+=("qemu-guest-agent")
 TOTAL_PKGS="${#PACKAGES[@]}"
 BATCH_SIZE=4
 INSTALLED_COUNT=0
