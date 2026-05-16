@@ -526,17 +526,29 @@ echo "  OK: ${SYSTEMD_DIR}/proxmox-watchdog.service"
 echo "  OK: ${SYSTEMD_DIR}/proxmox-watchdog.timer"
 
 echo "[3/6] Writing environment file..."
-# CLIENT_SIM_SERVER_URL is intentionally omitted — the spoke IP can change
-# (DHCP). The agent auto-detects the current IP from LXC 1001 on every start.
-# Remove any stale URL left by a previous install.
-sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
-cat > "$ENV_FILE" <<ENV
+# CLIENT_SIM_SERVER_URL is only persisted when --server was explicitly supplied.
+# When the spoke IP is auto-detected from LXC 1001, the IP can change via DHCP
+# so we never cache it — the agent detects it fresh on every start.
+# If auto-detected this run, scrub any stale URL left by a previous install.
+if [[ "$SERVER_SET" -eq 1 ]]; then
+    cat > "$ENV_FILE" <<ENV
+CLIENT_SIM_SERVER_URL=${SERVER_URL}
 CLIENT_SIM_API_KEY=${API_KEY}
 CLIENT_SIM_POLL_INTERVAL=${POLL_INTERVAL}
 CLIENT_SIM_REPO_BRANCH=${REPO_BRANCH}
 CLIENT_SIM_REPO_RAW=${REPO_RAW%/${REPO_BRANCH}}
 CLIENT_SIM_AGENT_PORT=${AGENT_PORT}
 ENV
+else
+    sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
+    cat > "$ENV_FILE" <<ENV
+CLIENT_SIM_API_KEY=${API_KEY}
+CLIENT_SIM_POLL_INTERVAL=${POLL_INTERVAL}
+CLIENT_SIM_REPO_BRANCH=${REPO_BRANCH}
+CLIENT_SIM_REPO_RAW=${REPO_RAW%/${REPO_BRANCH}}
+CLIENT_SIM_AGENT_PORT=${AGENT_PORT}
+ENV
+fi
 chmod 600 "$ENV_FILE"
 echo "  OK: $ENV_FILE"
 
