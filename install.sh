@@ -369,6 +369,7 @@ PACKAGES=(
   "network-manager"
   "network-manager-gnome"
   "qemu-guest-agent"
+  "python3-websockets"
 )
 
 # Pi already has a desktop environment (PIXEL/LXDE) — don't replace it
@@ -533,6 +534,25 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
       warn "No .txt files found in $LINUX_DIR"
     fi
 
+    # ── systemd units ────────────────────────────────────────────────────────
+    info "Installing client-sim systemd units"
+    unit_files=()
+    if compgen -G "*.service" &>/dev/null; then
+      unit_files+=( *.service )
+    fi
+    if compgen -G "*.timer" &>/dev/null; then
+      unit_files+=( *.timer )
+    fi
+    if (( ${#unit_files[@]} > 0 )); then
+      cp "${unit_files[@]}" /etc/systemd/system/ >>"$LOG" 2>&1
+      chmod 644 /etc/systemd/system/client-sim-agent.service \
+                /etc/systemd/system/client-sim-watchdog.service \
+                /etc/systemd/system/client-sim-watchdog.timer >>"$LOG" 2>&1 || true
+      ok "Systemd units installed"
+    else
+      warn "No client-sim systemd units found in $LINUX_DIR"
+    fi
+
     # ── VERSION file ─────────────────────────────────────────────────────────
     if [[ -f "VERSION" ]]; then
       cp VERSION /usr/local/scripts/VERSION >>"$LOG" 2>&1
@@ -581,6 +601,23 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
     find /usr/local/scripts -type f -name "*.sh"   -exec chmod 755 {} \; >>"$LOG" 2>&1
     find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} \; >>"$LOG" 2>&1
     ok "Permissions set on /usr/local/scripts"
+
+    if [[ -f /etc/systemd/system/client-sim-agent.service ]]; then
+      info "Enabling client-sim agent service"
+      systemctl daemon-reload >>"$LOG" 2>&1 || true
+      existing_agent_pid=$(cat /var/run/client-sim-ws-agent.pid 2>/dev/null || true)
+      if [[ "$existing_agent_pid" =~ ^[0-9]+$ ]] && \
+         ps -o args= -p "$existing_agent_pid" 2>/dev/null | grep -q '/usr/local/scripts/agent.sh'; then
+        kill "$existing_agent_pid" 2>/dev/null || true
+      fi
+      systemctl enable client-sim-agent.service >>"$LOG" 2>&1 || warn "Failed to enable client-sim-agent.service"
+      systemctl restart client-sim-agent.service >>"$LOG" 2>&1 || warn "Failed to restart client-sim-agent.service"
+      if [[ -f /etc/systemd/system/client-sim-watchdog.timer ]]; then
+        systemctl enable --now client-sim-watchdog.timer >>"$LOG" 2>&1 || warn "Failed to enable client-sim-watchdog.timer"
+        systemctl start client-sim-watchdog.service >>"$LOG" 2>&1 || true
+      fi
+      ok "Client-sim agent service configured"
+    fi
 
     cd "$HOME"
   else
@@ -900,6 +937,12 @@ lsmod | grep -qE '^(88|rtw|rtl)' \
 [[ -f /etc/rsyslog.d/10-rsyslog.conf ]] \
   && _hc_ok   "rsyslog config" \
   || _hc_warn "rsyslog config" "NOT INSTALLED"
+systemctl is-active --quiet client-sim-agent.service \
+  && _hc_ok   "Client agent" \
+  || _hc_warn "Client agent" "NOT ACTIVE"
+systemctl is-active --quiet client-sim-watchdog.timer \
+  && _hc_ok   "Agent watchdog timer" \
+  || _hc_warn "Agent watchdog timer" "NOT ACTIVE"
 
 echo ""
 echo "  ---- Driver State ----"

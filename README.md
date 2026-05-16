@@ -625,6 +625,8 @@ startup.sh
 
 That avoids hard-killing the process and lets the VM loop exit cleanly into its normal exec-restart path.
 
+On Linux clients, the websocket agent is intended to run under `client-sim-agent.service` and publish heartbeat data to `/var/lib/client-sim/agent-health.json`. `client-sim-watchdog.timer` runs `sys_mon.sh --check-once` every minute so a crashed, zombie, or stale agent is restarted even if the websocket process stops updating its health file.
+
 ### Adding a new inbox/agent command
 
 #### VM-side command (`linux/agent.sh`)

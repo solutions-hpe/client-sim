@@ -7,7 +7,7 @@ echo ------------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Check Logs Script
 #------------------------------------------------------------
-source /usr/local/scripts/sys_mon.sh &
+bash /usr/local/scripts/sys_mon.sh --log-monitor &
 #------------------------------------------------------------
 #Verify key settings changed - since this script is ran at startup
 #this is where you should put system changes you want to make sure 
