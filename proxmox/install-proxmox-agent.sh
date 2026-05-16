@@ -295,7 +295,11 @@ for iface in ifaces:
             sys.exit(0)
 " 2>/dev/null || true)
         else
-            ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^::' | head -1" 2>/dev/null || true)
+            ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1" 2>/dev/null || true)
+            # Fallback: any non-loopback, non-link-local IPv4
+            if [[ -z "$ip" ]]; then
+                ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|169\.|::)' | grep -E '^[0-9]+\.' | head -1" 2>/dev/null || true)
+            fi
         fi
 
         if [ -n "$ip" ]; then

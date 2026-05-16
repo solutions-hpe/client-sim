@@ -199,7 +199,11 @@ auto_detect_hub_url() {
     # If DHCP (or no static IP), read the actual assigned IP from inside the container
     if [[ -z "$ct_ip" ]]; then
         log "LXC 1001 has no static IP — reading DHCP-assigned address from inside container..."
-        ct_ip=$(pct exec 1001 -- hostname -I 2>/dev/null | awk '{print $1}' || true)
+        ct_ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1" 2>/dev/null || true)
+        # Fallback: any non-loopback, non-link-local IPv4
+        if [[ -z "$ct_ip" ]]; then
+            ct_ip=$(pct exec 1001 -- bash -c "hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|169\.|::)' | grep -E '^[0-9]+\.' | head -1" 2>/dev/null || true)
+        fi
     fi
     if [[ -z "$ct_ip" ]]; then
         log "ERROR: Could not determine IP for LXC 1001 (tried pct config and hostname -I)."
