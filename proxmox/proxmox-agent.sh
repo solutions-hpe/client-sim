@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.06"
+AGENT_VERSION="1.07"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -14,7 +14,7 @@ API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
 INBOX_INTERVAL="${CLIENT_SIM_INBOX_INTERVAL:-10}"
-SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-21600}"  # 6 hours
+SELF_UPDATE_INTERVAL="${CLIENT_SIM_SELF_UPDATE_INTERVAL:-3600}"   # 1 hour
 SELF_UPDATE_RETRY_INTERVAL="${CLIENT_SIM_SELF_UPDATE_RETRY_INTERVAL:-300}"  # 5 minutes after a failed update check
 STATE_FILE="/etc/client-sim-usb-state.conf"
 STATE_LOCK_FILE="${STATE_FILE}.lock"
@@ -1457,6 +1457,7 @@ usb_provision_loop() {
             _active_pids+=("$_pid")
             _all_pids+=("$_pid")
         done
+        local _prov_ok=0 _prov_fail=0
         for _i in "${!_all_pids[@]}"; do
             if ! wait "${_all_pids[$_i]}" 2>/dev/null; then
                 log "WARNING: A parallel provision job failed for VM ${_prov_vmids[$_i]}"
@@ -1464,12 +1465,19 @@ usb_provision_loop() {
                 unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]"
                 unset "STATE_BUS_TO_VMID[${_prov_buses[$_i]}]"
                 unset "STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]"
+                (( _prov_fail++ )) || true
+            else
+                (( _prov_ok++ )) || true
             fi
         done
         _state_changed=1
         save_state_file
         build_usb_state_json
         post_telemetry || true
+        # Signal caller to apply backoff when every spawned job failed.
+        if (( _prov_fail > 0 && _prov_ok == 0 )); then
+            return 2
+        fi
     fi
 
     [[ "$_state_changed" -eq 1 ]] && save_state_file
@@ -2520,6 +2528,8 @@ rm -f "$RESEED_LOCK_FILE"
 write_reclone_state_cache idle "[]"
 log "Proxmox agent starting. Server: $SERVER_URL"
 _LAST_SELF_UPDATE=0
+_PROV_FAIL_STREAK=0
+_PROV_COOLDOWN_UNTIL=0
 # Clean up stale provisioning flag files from any previous run.
 # These are /tmp files that survive service restarts; without cleanup they
 # make VMs appear permanently stuck in "provisioning" status.
@@ -2978,7 +2988,26 @@ while true; do
     fi
     refresh_usb_config || true
     if [[ "$AUTO_PROVISION" == "on" ]]; then
-        usb_provision_loop || log "WARNING: USB auto-provisioning loop failed"
+        _prov_now=$(date +%s)
+        if (( _prov_now < _PROV_COOLDOWN_UNTIL )); then
+            _remaining=$(( _PROV_COOLDOWN_UNTIL - _prov_now ))
+            log "Provision cooldown active (${_remaining}s remaining) — skipping provision cycle"
+            refresh_usb_telemetry_only || true
+        else
+            usb_provision_loop
+            _prov_rc=$?
+            if (( _prov_rc == 2 )); then
+                (( _PROV_FAIL_STREAK++ )) || true
+                log "WARNING: All provision jobs failed (streak=${_PROV_FAIL_STREAK})"
+                if (( _PROV_FAIL_STREAK >= 3 )); then
+                    log "WARNING: ${_PROV_FAIL_STREAK} consecutive all-fail cycles — pausing provisioning for 5 minutes"
+                    _PROV_COOLDOWN_UNTIL=$(( $(date +%s) + 300 ))
+                    _PROV_FAIL_STREAK=0
+                fi
+            else
+                _PROV_FAIL_STREAK=0
+            fi
+        fi
     else
         refresh_usb_telemetry_only || true
     fi
