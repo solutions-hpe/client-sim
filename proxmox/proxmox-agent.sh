@@ -14,7 +14,7 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 # Load persisted env (API key, etc.) before applying defaults
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" 2>/dev/null || true
 
-SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"  # Set by installer only when --server was explicit; blank = auto-detect
+SERVER_URL=""  # Never cached — always use --server arg or auto-detect from LXC 1001
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
@@ -212,7 +212,11 @@ auto_detect_hub_url() {
 if [[ -n "$SERVER_URL" ]]; then
     log "Using server: ${SERVER_URL}"
 else
-    log "No --server specified and no CLIENT_SIM_SERVER_URL in env — auto-detecting from LXC 1001..."
+    log "No --server specified — auto-detecting from LXC 1001..."
+    # Remove any stale cached URL from env file (IP may have changed via DHCP)
+    if [[ -f "$ENV_FILE" ]]; then
+        sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
+    fi
     if ! auto_detect_hub_url; then
         log "ERROR: Hub URL could not be determined."
         log "Usage: $0 --server https://<hub-ip>:8443"
