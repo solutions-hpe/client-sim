@@ -6,12 +6,14 @@ ENV_FILE="/etc/client-sim-proxmox-agent.env"
 AGENT_BIN="/usr/local/bin/client-sim-proxmox-agent"
 STATE_DIR="/var/lib/proxmox-watchdog"
 STATE_FILE="${STATE_DIR}/state"
+NET_FAIL_FILE="${STATE_DIR}/net-fail-since"   # epoch timestamp when gateway first went unreachable
 CRASH_BOOT_ID_FILE="${STATE_DIR}/os-crash-boot-id"   # tracks which boot we already reported
 HW_FAULT_LOG="/var/lib/client-sim/hw-faults.json"    # shared with the agent — crash events land here
 LOG_FILE="/var/log/proxmox-watchdog.log"
 INSTALLER_PATH="/opt/proxmox-agent-installer/install-proxmox-agent.sh"
 INSTALLER_TMP_PATH="/tmp/install-proxmox-agent-latest.sh"
 REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-main}"
+NET_DOWN_REBOOT_SECS=3600   # reboot after gateway unreachable for 60 minutes
 
 log_event() {
     local timestamp message
@@ -164,6 +166,51 @@ print(json.dumps({
 }
 
 
+# ── Network connectivity watchdog ──────────────────────────────────────────────
+# Pings the default gateway every watchdog tick. If the gateway has been
+# unreachable for NET_DOWN_REBOOT_SECS (60 min) the host is rebooted.
+check_network_gateway() {
+    local gw
+    gw=$(ip route show default 2>/dev/null | awk '/default via/{print $3; exit}' || true)
+    if [[ -z "$gw" ]]; then
+        log_event "NET_CHECK no default gateway found — skipping network watchdog"
+        # Clear any existing failure timer — no gateway to check
+        rm -f "$NET_FAIL_FILE"
+        return 0
+    fi
+
+    if ping -c 2 -W 3 -q "$gw" &>/dev/null; then
+        # Gateway reachable — clear failure timer
+        if [[ -f "$NET_FAIL_FILE" ]]; then
+            log_event "NET_RECOVERY gateway=${gw} — connectivity restored"
+            rm -f "$NET_FAIL_FILE"
+        fi
+        return 0
+    fi
+
+    # Gateway unreachable — record or extend outage
+    local now fail_since elapsed
+    now=$(date +%s)
+    if [[ -f "$NET_FAIL_FILE" ]]; then
+        fail_since=$(cat "$NET_FAIL_FILE" 2>/dev/null || echo "$now")
+    else
+        fail_since=$now
+        echo "$fail_since" > "$NET_FAIL_FILE"
+        log_event "NET_DOWN gateway=${gw} — starting outage timer"
+    fi
+
+    elapsed=$(( now - fail_since ))
+    log_event "NET_DOWN gateway=${gw} elapsed=${elapsed}s threshold=${NET_DOWN_REBOOT_SECS}s"
+
+    if (( elapsed >= NET_DOWN_REBOOT_SECS )); then
+        log_event "NET_REBOOT gateway=${gw} unreachable for ${elapsed}s — rebooting host"
+        report_event "net_reboot"
+        sync
+        /sbin/reboot || reboot || true
+    fi
+}
+
+
 read_agent_port() {
     if [[ -n "${CLIENT_SIM_AGENT_PORT:-}" ]]; then
         printf '%s\n' "$CLIENT_SIM_AGENT_PORT"
@@ -236,6 +283,9 @@ REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-$REPO_BRANCH}"
 # Check for OS-level crashes from the previous boot and record them into the
 # agent's hw-faults.json so they surface in the hub Hardware Faults panel.
 detect_and_report_os_crash || true
+
+# Check default gateway reachability — reboot if down for 60+ minutes.
+check_network_gateway || true
 
 load_state
 AGENT_PORT="$(read_agent_port)"
