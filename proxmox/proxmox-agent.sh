@@ -176,7 +176,7 @@ auto_detect_hub_url() {
         log "ERROR: Could not read IP from LXC 1001 — is the container configured?"
         return 1
     fi
-    SERVER_URL="https://${ct_ip}:8443"
+    SERVER_URL="http://${ct_ip}:8000"
     log "Auto-detected hub at ${SERVER_URL} (LXC 1001)"
     return 0
 }
