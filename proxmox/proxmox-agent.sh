@@ -187,11 +187,17 @@ auto_detect_hub_url() {
         return 1
     fi
     local ct_ip
+    # Try static IP from pct config first
     ct_ip=$(pct config 1001 2>/dev/null \
         | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
         | head -1 || true)
+    # If DHCP (or no static IP), read the actual assigned IP from inside the container
     if [[ -z "$ct_ip" ]]; then
-        log "ERROR: LXC 1001 exists but has no IP configured (check net0 in pct config 1001)."
+        log "LXC 1001 has no static IP — reading DHCP-assigned address from inside container..."
+        ct_ip=$(pct exec 1001 -- hostname -I 2>/dev/null | awk '{print $1}' || true)
+    fi
+    if [[ -z "$ct_ip" ]]; then
+        log "ERROR: Could not determine IP for LXC 1001 (tried pct config and hostname -I)."
         return 1
     fi
     SERVER_URL="http://${ct_ip}:8000"
