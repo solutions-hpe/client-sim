@@ -162,6 +162,7 @@ JSON
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --version|-v) echo "client-sim-proxmox-agent v${AGENT_VERSION}"; exit 0 ;;
         --server=*) SERVER_URL="${1#--server=}"; shift ;;
         --server)   SERVER_URL="${2:-}"; shift 2 ;;
         *) shift ;;
