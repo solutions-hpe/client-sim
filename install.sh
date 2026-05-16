@@ -49,6 +49,10 @@ fi
 if ! $IS_PI && grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
   IS_PI=true
 fi
+# Also catch Pi VMs — they run Raspberry Pi OS but have no Pi hardware signature
+if ! $IS_PI && grep -qiE "raspbian|raspberry pi os" /etc/os-release 2>/dev/null; then
+  IS_PI=true
+fi
 
 ###############################################################################
 # Logging
@@ -301,7 +305,7 @@ info "Pre-seeding debconf answers"
   echo "samba-common samba-common/smb.conf.upgrade boolean false"
   # rsyslog
   echo "rsyslog rsyslog/enable_all boolean false"
-  # display manager
+  # display manager — only pre-seed on non-Pi; Pi OS manages its own DM
   echo "lightdm shared/default-x-display-manager select lightdm"
   echo "gdm3 shared/default-x-display-manager select lightdm"
 } | debconf-set-selections >>"$LOG" 2>&1
@@ -336,10 +340,11 @@ PACKAGES=(
   "dnsutils"
   "network-manager"
   "network-manager-gnome"
-  "lightdm"
-  "lxde-core"
-  "xorg"
 )
+# Pi already has a desktop environment (PIXEL/LXDE) — don't replace it
+if ! $IS_PI; then
+  PACKAGES+=("lightdm" "lxde-core" "xorg")
+fi
 
 # qemu-guest-agent only needed in VM environments — skip on Raspberry Pi
 $IS_PI || PACKAGES+=("qemu-guest-agent")
@@ -398,9 +403,11 @@ begin_phase
 # ── LightDM autologin ────────────────────────────────────────────────────────
 # Write the autologin config AFTER lightdm is installed (Phase 2).
 # Without this block LightDM always shows the greeter — autologin never fires.
-info "Configuring LightDM autologin for $SIM_USER"
-mkdir -p /etc/lightdm/lightdm.conf.d
-cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
+# On Pi hardware/VMs, Pi OS manages its own display manager — skip this.
+if ! $IS_PI; then
+  info "Configuring LightDM autologin for $SIM_USER"
+  mkdir -p /etc/lightdm/lightdm.conf.d
+  cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<LIGHTDM_EOF
 [Seat:*]
 autologin-user=$SIM_USER
 autologin-user-timeout=0
@@ -408,7 +415,10 @@ autologin-session=LXDE
 user-session=LXDE
 greeter-session=lightdm-greeter
 LIGHTDM_EOF
-ok "LightDM autologin → $SIM_USER (session: LXDE)"
+  ok "LightDM autologin → $SIM_USER (session: LXDE)"
+else
+  ok "Pi platform — keeping native Pi OS desktop and display manager"
+fi
 
 if [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   info "Applying screen power settings to current session"
