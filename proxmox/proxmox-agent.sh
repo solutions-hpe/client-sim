@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.08"
+AGENT_VERSION="1.09"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -155,8 +155,79 @@ JSON
     atomic_write_file "$RECLONE_STATE_CACHE" "$payload"
 }
 
+# ── Argument parsing ──────────────────────────────────────────────────────────
+for arg in "$@"; do
+    case "$arg" in
+        --server=*) SERVER_URL="${arg#--server=}" ;;
+        --server)   shift; SERVER_URL="${1:-}" ;;
+    esac
+done
+
+# ── Auto-detect hub SERVER_URL from LXC container ─────────────────────────────
+# If SERVER_URL still not set, scan LXC containers for one running the hub.
+# Looks for containers whose hostname contains "hub" or whose IP responds on
+# the hub HTTPS port (8443). Falls back gracefully if pct is unavailable.
+auto_detect_hub_url() {
+    local candidate_ip="" candidate_url=""
+    if ! command -v pct &>/dev/null; then return 1; fi
+    while IFS= read -r line; do
+        local ctid
+        ctid=$(awk '{print $1}' <<< "$line")
+        [[ "$ctid" =~ ^[0-9]+$ ]] || continue
+        # Check hostname of container
+        local ct_hostname
+        ct_hostname=$(pct exec "$ctid" -- hostname 2>/dev/null || true)
+        if [[ "$ct_hostname" == *hub* ]]; then
+            # Get IP from container config (net0 line)
+            candidate_ip=$(pct config "$ctid" 2>/dev/null \
+                | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+                | head -1 || true)
+            [[ -n "$candidate_ip" ]] && break
+        fi
+    done < <(pct list 2>/dev/null | tail -n +2)
+
+    # Fallback: try each running container's IP on port 8443
+    if [[ -z "$candidate_ip" ]]; then
+        while IFS= read -r line; do
+            local ctid
+            ctid=$(awk '{print $1}' <<< "$line")
+            [[ "$ctid" =~ ^[0-9]+$ ]] || continue
+            local ct_ip
+            ct_ip=$(pct config "$ctid" 2>/dev/null \
+                | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+                | head -1 || true)
+            [[ -z "$ct_ip" ]] && continue
+            if curl -sk --max-time 3 "https://${ct_ip}:8443/health" | grep -q "ok" 2>/dev/null; then
+                candidate_ip="$ct_ip"
+                break
+            fi
+        done < <(pct list 2>/dev/null | grep running | tail -n +2)
+    fi
+
+    [[ -z "$candidate_ip" ]] && return 1
+    candidate_url="https://${candidate_ip}:8443"
+    log "Auto-detected hub at ${candidate_url} — set CLIENT_SIM_SERVER_URL to override"
+    SERVER_URL="$candidate_url"
+    # Persist for next run
+    mkdir -p "$(dirname "$ENV_FILE")"
+    if [[ -f "$ENV_FILE" ]]; then
+        if ! grep -q "^CLIENT_SIM_SERVER_URL=" "$ENV_FILE"; then
+            echo "CLIENT_SIM_SERVER_URL=${candidate_url}" >> "$ENV_FILE"
+        fi
+    else
+        echo "CLIENT_SIM_SERVER_URL=${candidate_url}" > "$ENV_FILE"
+    fi
+    return 0
+}
+
 if [[ -z "$SERVER_URL" ]]; then
-    log "ERROR: CLIENT_SIM_SERVER_URL not set."
+    log "SERVER_URL not set — attempting LXC auto-detection..."
+    auto_detect_hub_url || true
+fi
+
+if [[ -z "$SERVER_URL" ]]; then
+    log "ERROR: CLIENT_SIM_SERVER_URL not set and hub could not be auto-detected."
+    log "Usage: $0 [--server https://<hub-ip>:8443]"
     exit 1
 fi
 
