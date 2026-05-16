@@ -172,6 +172,20 @@ auto_detect_hub_url() {
         log "ERROR: LXC container 1001 does not exist on this host."
         return 1
     fi
+    # Wait for container to reach running state (e.g. after a restore)
+    local wait_secs=0 max_wait=120
+    while [[ $wait_secs -lt $max_wait ]]; do
+        local ct_status
+        ct_status=$(pct status 1001 2>/dev/null | awk '{print $2}' || true)
+        [[ "$ct_status" == "running" ]] && break
+        log "LXC 1001 is '${ct_status:-unknown}' — waiting for it to come online... (${wait_secs}s/${max_wait}s)"
+        sleep 5
+        (( wait_secs += 5 ))
+    done
+    if [[ $wait_secs -ge $max_wait ]]; then
+        log "ERROR: LXC 1001 did not reach running state within ${max_wait}s."
+        return 1
+    fi
     local ct_ip
     ct_ip=$(pct config 1001 2>/dev/null \
         | grep -oP 'ip=\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
