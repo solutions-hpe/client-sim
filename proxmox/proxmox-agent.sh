@@ -2994,8 +2994,8 @@ while true; do
             log "Provision cooldown active (${_remaining}s remaining) — skipping provision cycle"
             refresh_usb_telemetry_only || true
         else
-            usb_provision_loop
-            _prov_rc=$?
+            _prov_rc=0
+            usb_provision_loop || _prov_rc=$?
             if (( _prov_rc == 2 )); then
                 (( _PROV_FAIL_STREAK++ )) || true
                 log "WARNING: All provision jobs failed (streak=${_PROV_FAIL_STREAK})"
