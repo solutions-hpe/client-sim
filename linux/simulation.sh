@@ -320,7 +320,7 @@ fi
 #End Setting up simulation load
 #------------------------------------------------------------
 echo Kill Switch is $kill_switch | tee -a ${LOG_FILE}
-if [ $kill_switch == "off" ]; then
+if [ "$kill_switch" != "on" ]; then
  for z in {1..100}; do
   #------------------------------------------------------------
   #SSID Incorrect Password Simulation or Auth Failure Simulation
