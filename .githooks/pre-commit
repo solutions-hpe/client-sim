@@ -52,18 +52,33 @@ echo "[pre-commit] Syntax checks passed ✓"
 # ── Version bump ──────────────────────────────────────────────────────────────
 # Skip on main — the post-merge hook owns versioning there.
 _current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-if [[ "$_current_branch" == "main" ]]; then
-    echo "[pre-commit] On main branch — version bump managed by post-merge hook"
-    exit 0
-fi
 
 # Skip the bump if every staged change is a .conf file — conf changes are
 # propagated to clients independently via the API diff check in update.sh,
 # so they don't need a VERSION increment.
-
 staged_non_conf=$(git diff --cached --name-only --diff-filter=ACM | grep -v '\.conf$' || true)
 if [[ -z "$staged_non_conf" ]]; then
     echo "[pre-commit] Only .conf files staged — skipping version bump"
+    exit 0
+fi
+
+# On main: only bump linux/VERSION when linux/ scripts are staged.
+# The post-merge hook handles installer/agent version bumps on merges.
+if [[ "$_current_branch" == "main" ]]; then
+    staged_linux=$(git diff --cached --name-only --diff-filter=ACM | grep '^linux/' | grep -v '\.conf$' || true)
+    if [[ -z "$staged_linux" ]]; then
+        echo "[pre-commit] On main — no linux/ script changes, skipping version bump"
+        exit 0
+    fi
+    current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
+    if [[ -z "$current" ]]; then
+        echo "[pre-commit] WARNING: $LINUX_VER_FILE not found — skipping version bump"
+        exit 0
+    fi
+    new=$(awk -v v="$current" 'BEGIN { printf "%.2f", v + 0.01 }')
+    echo "[pre-commit] Bumping linux/VERSION $current → $new (direct commit to main)"
+    echo "$new" > "$LINUX_VER_FILE"
+    git add "$LINUX_VER_FILE"
     exit 0
 fi
 
