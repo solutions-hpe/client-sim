@@ -11,7 +11,7 @@ log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-agent.log"
 
 mkdir -p "$(dirname "$HEALTH_FILE")"
-touch "$debug" "$log" 2>/dev/null || true
+sudo touch "$debug" "$log" 2>/dev/null && sudo chmod a+w "$debug" "$log" 2>/dev/null || true
 
 echo "Agent Script $(date)" | tee -a "$debug"
 

@@ -284,8 +284,8 @@ connect_wifi 30
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a ${LOG_FILE}
-if [ $sim_phy == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ $sim_phy == "wireless" ]; then ea_down; fi
+if [ "$sim_phy" == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
+if [ "$sim_phy" == "wireless" ]; then ea_down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
@@ -295,7 +295,7 @@ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
-if [ $? -eq 0 ] && [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then
+if [ $? -eq 0 ] && [ "$sim_phy" == "wireless" ] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a ${LOG_FILE}
 else
   echo Network connection failed | tee -a ${LOG_FILE}

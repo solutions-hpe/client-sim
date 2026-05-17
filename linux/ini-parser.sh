@@ -20,11 +20,11 @@
 # show_config_errors      - should we show config errors                           #
 # -------------------------------------------------------------------------------- #
 
-declare case_sensitive_sections
-declare case_sensitive_keys
-declare default_to_uppercase
-declare show_config_warnings
-declare show_config_errors
+declare case_sensitive_sections=""
+declare case_sensitive_keys=""
+declare default_to_uppercase=""
+declare show_config_warnings=""
+declare show_config_errors=""
 
 # -------------------------------------------------------------------------------- #
 # Default Section                                                                  #
@@ -266,6 +266,11 @@ function unescape_string()
 
 function process_ini_file()
 {
+    # Reset all section data from any previous call to prevent value accumulation
+    for _reset_s in "${sections[@]}"; do
+        eval "unset ${_reset_s}_keys ${_reset_s}_values"
+    done
+    sections=()
     local line_number=0
     local section="${DEFAULT_SECTION}"
     local key_array_name=''
@@ -341,6 +346,7 @@ function get_value()
         if [[ "${keys[${i}]}" = "${key}" ]]; then
             orig=$(unescape_string "${values[${i}]}")
             printf '%s' "${orig}"
+            return  # Return first match only — prevents "offoff" doubling on re-parse
         fi
     done
 }
