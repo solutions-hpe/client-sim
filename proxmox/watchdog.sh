@@ -9,6 +9,7 @@ STATE_FILE="${STATE_DIR}/state"
 NET_FAIL_FILE="${STATE_DIR}/net-fail-since"   # epoch timestamp when gateway first went unreachable
 CRASH_BOOT_ID_FILE="${STATE_DIR}/os-crash-boot-id"   # tracks which boot we already reported
 HW_FAULT_LOG="/var/lib/client-sim/hw-faults.json"    # shared with the agent — crash events land here
+EVENT_CACHE_FILE="${STATE_DIR}/pending-events.json"   # events that failed to send (network down)
 LOG_FILE="/var/log/proxmox-watchdog.log"
 INSTALLER_PATH="/opt/proxmox-agent-installer/install-proxmox-agent.sh"
 INSTALLER_TMP_PATH="/tmp/install-proxmox-agent-latest.sh"
@@ -37,6 +38,87 @@ save_state() {
 
 iso_timestamp() {
     date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+# ── Offline event cache ────────────────────────────────────────────────────────
+# When curl fails (network down), events are written to EVENT_CACHE_FILE so
+# they can be replayed on the next successful connection.
+
+cache_event() {
+    local payload="$1"
+    local tmp
+    tmp="${EVENT_CACHE_FILE}.tmp.$$"
+    python3 - "$payload" "$EVENT_CACHE_FILE" "$tmp" <<'PY' 2>/dev/null || true
+import json, sys
+from pathlib import Path
+
+payload_str, cache_path, tmp_path = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    event = json.loads(payload_str)
+except Exception:
+    event = {"raw": payload_str}
+
+p = Path(cache_path)
+try:
+    existing = json.loads(p.read_text())
+    events = existing if isinstance(existing, list) else []
+except Exception:
+    events = []
+
+events.append(event)
+events = events[-100:]   # cap at 100 entries
+Path(tmp_path).write_text(json.dumps(events))
+Path(tmp_path).rename(cache_path)
+PY
+}
+
+flush_cached_events() {
+    [[ -f "$EVENT_CACHE_FILE" ]] || return 0
+    [[ -n "${CLIENT_SIM_SERVER_URL:-}" ]] || return 0
+
+    local -a curl_args=(-sS --max-time 5 -X POST \
+        "${CLIENT_SIM_SERVER_URL%/}/api/proxmox/watchdog_event" \
+        -H "Content-Type: application/json")
+    [[ -n "${CLIENT_SIM_API_KEY:-}" ]] && curl_args+=(-H "X-API-Key: ${CLIENT_SIM_API_KEY}")
+
+    python3 - "$EVENT_CACHE_FILE" <<'PY' 2>/dev/null || { return 0; }
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+try:
+    events = json.loads(p.read_text())
+    if isinstance(events, list):
+        for e in events:
+            print(json.dumps(e))
+except Exception:
+    pass
+PY
+    local sent=0 failed=0 event_json
+    while IFS= read -r event_json; do
+        if curl "${curl_args[@]}" -d "$event_json" >/dev/null 2>&1; then
+            (( sent++ )) || true
+        else
+            (( failed++ )) || true
+            break   # network still down — stop trying
+        fi
+    done < <(python3 - "$EVENT_CACHE_FILE" <<'PY' 2>/dev/null || true
+import json, sys
+from pathlib import Path
+try:
+    events = json.loads(Path(sys.argv[1]).read_text())
+    for e in (events if isinstance(events, list) else []):
+        print(json.dumps(e))
+except Exception:
+    pass
+PY
+)
+
+    if (( sent > 0 && failed == 0 )); then
+        rm -f "$EVENT_CACHE_FILE"
+        log_event "CACHE_FLUSHED sent=${sent} events from offline cache"
+    elif (( sent > 0 )); then
+        log_event "CACHE_PARTIAL sent=${sent} failed=${failed} — will retry next tick"
+    fi
 }
 
 # ── OS crash detection ─────────────────────────────────────────────────────────
@@ -182,8 +264,12 @@ check_network_gateway() {
     if ping -c 2 -W 3 -q "$gw" &>/dev/null; then
         # Gateway reachable — clear failure timer
         if [[ -f "$NET_FAIL_FILE" ]]; then
-            log_event "NET_RECOVERY gateway=${gw} — connectivity restored"
+            local fail_since elapsed
+            fail_since=$(cat "$NET_FAIL_FILE" 2>/dev/null || echo "$(date +%s)")
+            elapsed=$(( $(date +%s) - fail_since ))
+            log_event "NET_RECOVERY gateway=${gw} outage_duration=${elapsed}s — connectivity restored"
             rm -f "$NET_FAIL_FILE"
+            report_event "net_recovery"
         fi
         return 0
     fi
@@ -197,6 +283,7 @@ check_network_gateway() {
         fail_since=$now
         echo "$fail_since" > "$NET_FAIL_FILE"
         log_event "NET_DOWN gateway=${gw} — starting outage timer"
+        report_event "net_down"
     fi
 
     elapsed=$(( now - fail_since ))
@@ -204,7 +291,23 @@ check_network_gateway() {
 
     if (( elapsed >= NET_DOWN_REBOOT_SECS )); then
         log_event "NET_REBOOT gateway=${gw} unreachable for ${elapsed}s — rebooting host"
-        report_event "net_reboot"
+        # Cache event to disk before rebooting — curl will fail with network down,
+        # but the cache file survives the reboot and will be flushed on reconnection.
+        local ts hostname reboot_payload
+        ts=$(iso_timestamp)
+        hostname=$(hostname -f 2>/dev/null || hostname)
+        reboot_payload=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'event': 'net_reboot',
+    'service': '${SERVICE_NAME}',
+    'hostname': sys.argv[1],
+    'timestamp': sys.argv[2],
+    'failure_count': 0,
+    'detail': 'Gateway ${gw} unreachable for ${elapsed}s — host rebooted by watchdog',
+}))" "$hostname" "$ts" 2>/dev/null || echo '{"event":"net_reboot"}')
+        cache_event "$reboot_payload" || true
+        report_event "net_reboot"   # best-effort live send (likely fails when network is down)
         sync
         /sbin/reboot || reboot || true
     fi
@@ -243,7 +346,14 @@ PY
     curl_args=(-sS --max-time 5 -X POST "${CLIENT_SIM_SERVER_URL%/}/api/proxmox/watchdog_event" -H "Content-Type: application/json")
     [[ -n "${CLIENT_SIM_API_KEY:-}" ]] && curl_args+=(-H "X-API-Key: ${CLIENT_SIM_API_KEY}")
     curl_args+=(-d "$payload")
-    curl "${curl_args[@]}" >/dev/null 2>&1 || true
+    if curl "${curl_args[@]}" >/dev/null 2>&1; then
+        # Delivery succeeded — flush any events that were cached while offline
+        flush_cached_events || true
+    else
+        # Delivery failed — cache for replay on next successful tick
+        cache_event "$payload" || true
+        log_event "CACHE_QUEUED event=${event} (spoke unreachable, will retry)"
+    fi
 }
 
 reinstall_agent() {
@@ -286,6 +396,9 @@ detect_and_report_os_crash || true
 
 # Check default gateway reachability — reboot if down for 60+ minutes.
 check_network_gateway || true
+
+# Flush any events cached during previous offline periods.
+flush_cached_events || true
 
 load_state
 AGENT_PORT="$(read_agent_port)"

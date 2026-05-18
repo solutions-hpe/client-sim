@@ -7308,13 +7308,14 @@ async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
     service = str(body.get("service", "") or "").strip()
     hostname = str(body.get("hostname", "") or "").strip()
     timestamp = str(body.get("timestamp", "") or "").strip()
+    detail = str(body.get("detail", "") or "").strip()
     try:
         failure_count = max(0, int(body.get("failure_count", 0) or 0))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="failure_count must be an integer")
 
-    if not all((event, service, hostname, timestamp)):
-        raise HTTPException(status_code=400, detail="event, service, hostname, and timestamp are required")
+    if not all((event, hostname, timestamp)):
+        raise HTTPException(status_code=400, detail="event, hostname, and timestamp are required")
 
     entry = {
         "event": event,
@@ -7323,17 +7324,34 @@ async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
         "timestamp": timestamp,
         "failure_count": failure_count,
     }
+    if detail:
+        entry["detail"] = detail
     proxmox_watchdog_log.append(entry)
     if len(proxmox_watchdog_log) > PROXMOX_WATCHDOG_LOG_MAX:
         del proxmox_watchdog_log[:len(proxmox_watchdog_log) - PROXMOX_WATCHDOG_LOG_MAX]
 
+    detail_suffix = f" detail={detail[:120]}" if detail else ""
     log_line = (
         f"[{timestamp}] WATCHDOG event={event} service={service} "
-        f"hostname={hostname} failure_count={failure_count}"
+        f"hostname={hostname} failure_count={failure_count}{detail_suffix}"
     )
     proxmox_log_buffer.append(log_line)
     if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
         del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+
+    # For network-related events, also store in hw_faults so they surface in the hub panel
+    if event in {"net_reboot", "net_down"}:
+        hw_faults = proxmox_state.get("hw_faults") or {"faults": []}
+        hw_faults.setdefault("faults", []).append({
+            "type": event,
+            "check": "network_watchdog",
+            "message": detail or f"Gateway unreachable — {event}",
+            "hostname": hostname,
+            "ts": timestamp,
+        })
+        hw_faults["faults"] = hw_faults["faults"][-100:]
+        proxmox_state["hw_faults"] = hw_faults
+
     await broadcast({"type": "proxmox_log_update", "lines": [log_line]})
     return {"ok": True}
 
