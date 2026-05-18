@@ -781,6 +781,7 @@ settings: dict[str, Any] = {
     "relay_poll_interval": _clamp_relay_interval(_persisted.get("relay_poll_interval", _persisted.get("relay_interval", RELAY_INTERVAL_DEFAULT))),
     "relay_onboarding_psk": _persisted.get("relay_onboarding_psk", ""),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
+    "proxmox_api_token": _persisted.get("proxmox_api_token", ""),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
     "vm_image_1_template_id": str(_persisted.get("vm_image_1_template_id", _persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100")))),
@@ -4457,7 +4458,126 @@ async def _relay_proxmox_progress_to_hub(message: dict[str, Any]) -> None:
     await _relay_ws_send_json(outbound)
 
 
-async def _wait_for_fd_readable(fd: int) -> None:
+# ── VNC relay ─────────────────────────────────────────────────────────────────
+
+_vnc_sessions: dict[str, asyncio.Queue] = {}
+
+
+async def _relay_vnc_to_hub(message: dict[str, Any]) -> None:
+    """Forward a VNC frame/control message back to the hub."""
+    if _relay_ws_send_json is None:
+        return
+    outbound = dict(message)
+    if "spoke_id" not in outbound and _relay_ws_spoke_id:
+        outbound["spoke_id"] = _relay_ws_spoke_id
+    await _relay_ws_send_json(outbound)
+
+
+async def _handle_vnc_proxy_request(message: dict[str, Any]) -> None:
+    """Open a WebSocket to Proxmox vncwebsocket and relay frames to/from hub."""
+    request_id = str(message.get("request_id") or "").strip()
+    vmid = int(message.get("vmid") or 0)
+    vmtype = str(message.get("vmtype") or "qemu").strip().lower()
+
+    if not request_id or not vmid:
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "Missing request_id or vmid"})
+        return
+
+    proxmox_host = str(proxmox_ws_hostname or "").strip()
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+
+    if not proxmox_host:
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "Proxmox host unknown — no agent connected"})
+        return
+    if not api_token:
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "Proxmox API token not configured on spoke"})
+        return
+
+    # Ask Proxmox to create a VNC ticket via REST
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    node = proxmox_host.split(".")[0]
+    vncproxy_url = f"https://{proxmox_host}:8006/api2/json/nodes/{node}/{vmtype}/{vmid}/vncproxy"
+    headers = {"Authorization": f"PVEAPIToken={api_token}"}
+
+    try:
+        if httpx is None:
+            raise RuntimeError("httpx not installed")
+        async with httpx.AsyncClient(verify=False) as client:
+            resp = await client.post(vncproxy_url, headers=headers, json={"websocket": 1}, timeout=10)
+        if resp.status_code != 200:
+            await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": f"Proxmox vncproxy returned {resp.status_code}: {resp.text[:200]}"})
+            return
+        body = resp.json()
+        ticket = body["data"]["ticket"]
+        port = body["data"]["port"]
+    except Exception as exc:
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": f"Proxmox vncproxy call failed: {exc}"})
+        return
+
+    # Register an inbound queue so browser→proxmox frames can be forwarded
+    inbound_queue: asyncio.Queue = asyncio.Queue()
+    _vnc_sessions[request_id] = inbound_queue
+
+    import urllib.parse as _urlparse
+    params = _urlparse.urlencode({"port": port, "vncticket": ticket})
+    ws_path = f"/api2/json/nodes/{node}/{vmtype}/{vmid}/vncwebsocket?{params}"
+    ws_url = f"wss://{proxmox_host}:8006{ws_path}"
+
+    if websockets is None:
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "websockets library not installed"})
+        _vnc_sessions.pop(request_id, None)
+        return
+
+    try:
+        connect_kwargs: dict[str, Any] = {
+            "ssl": ssl_ctx,
+            "open_timeout": 20,
+            "max_size": None,
+        }
+        # Use correct keyword for this version of websockets
+        import inspect as _inspect
+        hdr_key = "additional_headers" if "additional_headers" in _inspect.signature(websockets.connect).parameters else "extra_headers"
+        connect_kwargs[hdr_key] = headers
+
+        await _relay_vnc_to_hub({"type": "vnc_proxy_response", "request_id": request_id})
+
+        async with websockets.connect(ws_url, **connect_kwargs) as px_ws:
+
+            async def proxmox_to_hub() -> None:
+                async for raw in px_ws:
+                    data = raw if isinstance(raw, bytes) else raw.encode()
+                    await _relay_vnc_to_hub({
+                        "type": "vnc_frame_to_browser",
+                        "request_id": request_id,
+                        "data": __import__("base64").b64encode(data).decode(),
+                    })
+
+            async def hub_to_proxmox() -> None:
+                while True:
+                    msg = await inbound_queue.get()
+                    if msg is None:
+                        break
+                    raw = __import__("base64").b64decode(msg.get("data", ""))
+                    await px_ws.send(raw)
+
+            t1 = asyncio.create_task(proxmox_to_hub())
+            t2 = asyncio.create_task(hub_to_proxmox())
+            try:
+                done, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                await asyncio.gather(t1, t2, return_exceptions=True)
+            finally:
+                pass
+    except Exception as exc:
+        logger.warning("VNC relay error for request %s: %s", request_id, exc)
+        await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": str(exc)})
+    finally:
+        _vnc_sessions.pop(request_id, None)
+        await _relay_vnc_to_hub({"type": "vnc_disconnect", "request_id": request_id})
     loop = asyncio.get_running_loop()
     future = loop.create_future()
 
@@ -5457,6 +5577,18 @@ async def relay_ws_loop() -> None:
                             relay_state.update({"connected": True, "error": None})
                         elif msg_type.startswith("shell_"):
                             await _handle_shell_relay_message(message)
+                        elif msg_type == "vnc_proxy_request":
+                            asyncio.create_task(_handle_vnc_proxy_request(message))
+                        elif msg_type == "vnc_frame_to_proxmox":
+                            req_id = str(message.get("request_id") or "").strip()
+                            q = _vnc_sessions.get(req_id)
+                            if q is not None:
+                                q.put_nowait(message)
+                        elif msg_type == "vnc_disconnect":
+                            req_id = str(message.get("request_id") or "").strip()
+                            q = _vnc_sessions.get(req_id)
+                            if q is not None:
+                                q.put_nowait(None)
                 finally:
                     await _close_all_shell_sessions(notify_exit=False)
                     if _relay_ws_send_json is send_json:
