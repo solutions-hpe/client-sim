@@ -4578,7 +4578,81 @@ async def _handle_vnc_proxy_request(message: dict[str, Any]) -> None:
     finally:
         _vnc_sessions.pop(request_id, None)
         await _relay_vnc_to_hub({"type": "vnc_disconnect", "request_id": request_id})
-    loop = asyncio.get_running_loop()
+
+
+# ── Log relay ──────────────────────────────────────────────────────────────────
+
+async def _handle_log_fetch(message: dict[str, Any]) -> None:
+    """Fetch log lines from journal/agent/watchdog/install and send back to hub."""
+    request_id = str(message.get("request_id") or "").strip()
+    source = str(message.get("source") or "journal").strip().lower()
+    lines = min(max(int(message.get("lines") or 200), 10), 2000)
+
+    if not request_id:
+        return
+
+    async def _send_response(log_lines: list[str], error: str | None = None) -> None:
+        if _relay_ws_send_json is None:
+            return
+        out: dict[str, Any] = {
+            "type": "log_fetch_response",
+            "request_id": request_id,
+            "source": source,
+        }
+        if error:
+            out["error"] = error
+        else:
+            out["lines"] = log_lines
+        if _relay_ws_spoke_id:
+            out["spoke_id"] = _relay_ws_spoke_id
+        await _relay_ws_send_json(out)
+
+    try:
+        if source == "agent":
+            log_lines = [str(l) for l in proxmox_log_buffer[-lines:]]
+            if not log_lines:
+                log_lines = ["[INFO] No Proxmox agent logs yet."]
+            await _send_response(log_lines)
+            return
+
+        if source == "watchdog":
+            log_path = Path("/var/log/proxmox-watchdog.log")
+        elif source == "install":
+            log_path = Path("/var/log/client-sim-dashboard-install.log")
+        else:
+            log_path = None
+
+        if log_path is not None:
+            if not log_path.exists():
+                await _send_response([f"[INFO] {log_path} does not exist yet."])
+                return
+            proc = await asyncio.create_subprocess_exec(
+                "tail", "-n", str(lines), str(log_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            text = stdout.decode("utf-8", errors="replace").strip()
+            await _send_response(text.splitlines() if text else [f"[INFO] {log_path} is empty."])
+            return
+
+        # journal
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", "client-sim-dashboard", "--no-pager", "-n", str(lines),
+            "--output=short-iso",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        text = stdout.decode("utf-8", errors="replace").strip()
+        if not text:
+            err = stderr.decode("utf-8", errors="replace").strip()
+            await _send_response([f"[WARN] Journal unavailable: {err or 'no output'}"])
+            return
+        await _send_response(text.splitlines())
+
+    except Exception as exc:
+        await _send_response([], error=str(exc))
     future = loop.create_future()
 
     def _ready() -> None:
@@ -5589,6 +5663,8 @@ async def relay_ws_loop() -> None:
                             q = _vnc_sessions.get(req_id)
                             if q is not None:
                                 q.put_nowait(None)
+                        elif msg_type == "log_fetch":
+                            asyncio.create_task(_handle_log_fetch(message))
                 finally:
                     await _close_all_shell_sessions(notify_exit=False)
                     if _relay_ws_send_json is send_json:
@@ -8963,13 +9039,14 @@ async def api_all_clients_control(overrides: dict[str, str]) -> dict[str, Any]:
 
 JOURNAL_UNIT = "client-sim-dashboard"
 INSTALL_LOG_PATH = Path("/var/log/client-sim-dashboard-install.log")
+WATCHDOG_LOG_PATH = Path("/var/log/proxmox-watchdog.log")
 LOG_STREAM_KEEPALIVE_SECS = 15
 LOG_STREAM_POLL_SECS = 1
 
 
 def _normalize_log_source(source: str) -> str:
     normalized = (source or "journal").strip().lower()
-    if normalized not in {"journal", "install", "agent"}:
+    if normalized not in {"journal", "install", "agent", "watchdog"}:
         raise HTTPException(status_code=400, detail=f"Unsupported log source: {source}")
     return normalized
 
@@ -8980,6 +9057,8 @@ def _log_source_hint(source: str, detail: str | None = None) -> str:
         return "[INFO] No Proxmox agent logs yet — logs arrive on the next agent telemetry poll (≤60s after activity)."
     if source == "install":
         return f"[INFO] Install log {INSTALL_LOG_PATH} is not available on this spoke yet. Start an install or update to create it{detail_text}"
+    if source == "watchdog":
+        return f"[INFO] Watchdog log {WATCHDOG_LOG_PATH} is not available on this host yet{detail_text}"
     return f"[WARN] Live service journal for {JOURNAL_UNIT} is unavailable on this spoke{detail_text}"
 
 
@@ -9006,11 +9085,12 @@ async def api_logs_history(
                 log_lines = [_log_source_hint("agent")]
             return PlainTextResponse("\n".join(log_lines))
 
-        if source == "install":
-            if not INSTALL_LOG_PATH.exists():
-                return PlainTextResponse(_log_source_hint("install"))
+        if source in {"install", "watchdog"}:
+            log_path = INSTALL_LOG_PATH if source == "install" else WATCHDOG_LOG_PATH
+            if not log_path.exists():
+                return PlainTextResponse(_log_source_hint(source))
             proc = await asyncio.create_subprocess_exec(
-                "tail", "-n", str(lines), str(INSTALL_LOG_PATH),
+                "tail", "-n", str(lines), str(log_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
