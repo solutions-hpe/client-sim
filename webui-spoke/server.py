@@ -7384,7 +7384,8 @@ async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
     service = str(body.get("service", "") or "").strip()
     hostname = str(body.get("hostname", "") or "").strip()
     timestamp = str(body.get("timestamp", "") or "").strip()
-    detail = str(body.get("detail", "") or "").strip()
+    detail_raw = body.get("detail", "") or ""
+    detail = json.dumps(detail_raw) if isinstance(detail_raw, dict) else str(detail_raw).strip()
     try:
         failure_count = max(0, int(body.get("failure_count", 0) or 0))
     except (TypeError, ValueError):
@@ -7415,13 +7416,13 @@ async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
     if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
         del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
 
-    # For network-related events, also store in hw_faults so they surface in the hub panel
-    if event in {"net_reboot", "net_down"}:
+    # For network-related events and startup, also store in hw_faults so they surface in the hub panel
+    if event in {"net_reboot", "net_down", "watchdog_started"}:
         hw_faults = proxmox_state.get("hw_faults") or {"faults": []}
         hw_faults.setdefault("faults", []).append({
             "type": event,
-            "check": "network_watchdog",
-            "message": detail or f"Gateway unreachable — {event}",
+            "check": "network_watchdog" if event != "watchdog_started" else "watchdog_startup",
+            "message": detail or f"Gateway unreachable — {event}" if event != "watchdog_started" else f"Watchdog started — boot_time={detail_raw.get('boot_time','?') if isinstance(detail_raw, dict) else '?'}",
             "hostname": hostname,
             "ts": timestamp,
         })

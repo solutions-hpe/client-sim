@@ -8,6 +8,7 @@ STATE_DIR="/var/lib/proxmox-watchdog"
 STATE_FILE="${STATE_DIR}/state"
 NET_FAIL_FILE="${STATE_DIR}/net-fail-since"   # epoch timestamp when gateway first went unreachable
 CRASH_BOOT_ID_FILE="${STATE_DIR}/os-crash-boot-id"   # tracks which boot we already reported
+STARTUP_BOOT_ID_FILE="${STATE_DIR}/startup-boot-id"  # tracks which boot we already sent startup event
 HW_FAULT_LOG="/var/lib/client-sim/hw-faults.json"    # shared with the agent — crash events land here
 EVENT_CACHE_FILE="${STATE_DIR}/pending-events.json"   # events that failed to send (network down)
 LOG_FILE="/var/log/proxmox-watchdog.log"
@@ -325,6 +326,57 @@ read_agent_port() {
     printf '9105\n'
 }
 
+# ── Boot startup event ────────────────────────────────────────────────────────
+# Fires exactly once per boot (keyed on kernel boot ID). Sends immediately;
+# if the network is not yet up, caches to disk for replay on next tick.
+report_boot_startup() {
+    local boot_id uptime_secs boot_time_iso timestamp payload
+    [[ -n "${CLIENT_SIM_SERVER_URL:-}" ]] || return 0
+
+    boot_id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '-')" || return 0
+    [[ -z "$boot_id" ]] && return 0
+
+    # Already reported startup for this boot — skip
+    if [[ -f "$STARTUP_BOOT_ID_FILE" ]] && [[ "$(cat "$STARTUP_BOOT_ID_FILE" 2>/dev/null)" == "$boot_id" ]]; then
+        return 0
+    fi
+
+    # Compute approximate boot time from uptime
+    uptime_secs=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)
+    boot_time_iso="$(date -u -d "@$(( $(date +%s) - uptime_secs ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || iso_timestamp)"
+    timestamp="$(iso_timestamp)"
+
+    payload=$(python3 - "$SERVICE_NAME" "$(hostname -f 2>/dev/null || hostname)" "$timestamp" "$boot_time_iso" "$uptime_secs" <<'PY'
+import json, sys
+print(json.dumps({
+    "event": "watchdog_started",
+    "service": sys.argv[1],
+    "hostname": sys.argv[2],
+    "timestamp": sys.argv[3],
+    "detail": {
+        "boot_time": sys.argv[4],
+        "uptime_secs": int(sys.argv[5]),
+    },
+}))
+PY
+)
+    local -a curl_args
+    curl_args=(-sS --max-time 5 -X POST "${CLIENT_SIM_SERVER_URL%/}/api/proxmox/watchdog_event" -H "Content-Type: application/json")
+    [[ -n "${CLIENT_SIM_API_KEY:-}" ]] && curl_args+=(-H "X-API-Key: ${CLIENT_SIM_API_KEY}")
+    curl_args+=(-d "$payload")
+
+    if curl "${curl_args[@]}" >/dev/null 2>&1; then
+        log_event "STARTUP_EVENT boot_id=${boot_id} boot_time=${boot_time_iso} uptime=${uptime_secs}s"
+        flush_cached_events || true
+    else
+        cache_event "$payload" || true
+        log_event "STARTUP_EVENT_CACHED boot_id=${boot_id} (network not ready, will retry)"
+    fi
+
+    # Mark this boot as reported regardless — if cached, flush will replay it
+    printf '%s\n' "$boot_id" > "$STARTUP_BOOT_ID_FILE"
+}
+
 report_event() {
     local event="$1"
     local timestamp payload
@@ -389,6 +441,9 @@ if [[ -f "$ENV_FILE" ]]; then
     source "$ENV_FILE"
 fi
 REPO_BRANCH="${CLIENT_SIM_REPO_BRANCH:-$REPO_BRANCH}"
+
+# Fire a one-per-boot startup event immediately (cached if network not yet up).
+report_boot_startup || true
 
 # Check for OS-level crashes from the previous boot and record them into the
 # agent's hw-faults.json so they surface in the hub Hardware Faults panel.
