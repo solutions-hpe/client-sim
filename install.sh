@@ -78,7 +78,7 @@ warn() { WARN_COUNT=$(( WARN_COUNT + 1 )); echo "[$(ts)] WARN: $*" | tee -a "$LO
 err()  { ERR_COUNT=$(( ERR_COUNT + 1 ));  echo "[$(ts)] ERR:  $*" | tee -a "$LOG" >&2; }
 
 ###############################################################################
-# PROGRESS TRACKING
+# PHASE TRACKING
 ###############################################################################
 PHASE_NAMES=(
   "User Provisioning"
@@ -91,18 +91,8 @@ PHASE_NAMES=(
   "WLAN Drivers"
   "Health Check"
 )
-PHASE_WEIGHTS=( 4 12 5 2 8 5 3 10 49 2 )
 
 CURRENT_PHASE=0
-CURRENT_PROGRESS=0
-
-# ── Terminal helpers ─────────────────────────────────────────────────────────
-TERM_WIDTH=80
-if command -v tput &>/dev/null && tput cols &>/dev/null 2>&1; then
-  TERM_WIDTH="$(tput cols)"
-fi
-BAR_WIDTH=$(( TERM_WIDTH - 30 ))
-[[ "$BAR_WIDTH" -lt 20 ]] && BAR_WIDTH=20
 
 COL_RESET="\033[0m"
 COL_GREEN="\033[0;32m"
@@ -112,55 +102,22 @@ COL_YELLOW="\033[1;33m"
 COL_BOLD="\033[1m"
 COL_DIM="\033[2m"
 
-# ── Draw progress bar ────────────────────────────────────────────────────────
-draw_bar() {
-  local pct="$1" label="$2"
-  local filled=$(( pct * BAR_WIDTH / 100 ))
-  local empty=$(( BAR_WIDTH - filled ))
-  local bar=""
-
-  for (( i=0; i<filled; i++ )); do bar+="█"; done
-  for (( i=0; i<empty;  i++ )); do bar+="░"; done
-
-  printf "\r${COL_BOLD}%-20s${COL_RESET} %s ${COL_BOLD}%3d%%${COL_RESET}" \
-    "${label:0:20}" "$bar" "$pct"
-}
-
-# ── Phase control ────────────────────────────────────────────────────────────
 begin_phase() {
   PHASE_START=$(date +%s)
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
-  draw_bar "$CURRENT_PROGRESS" "$name"
-  echo ""
-  info "Phase $((CURRENT_PHASE+1))/${#PHASE_NAMES[@]}: $name"
+  printf "\n${COL_BOLD}──── Phase $((CURRENT_PHASE+1))/${#PHASE_NAMES[@]}: %s ────${COL_RESET}\n" "$name" | tee -a "$LOG"
 }
 
 end_phase() {
   local elapsed=$(( $(date +%s) - PHASE_START ))
-  local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
-  CURRENT_PROGRESS=$(( CURRENT_PROGRESS + weight ))
-  [[ "$CURRENT_PROGRESS" -gt 100 ]] && CURRENT_PROGRESS=100
   local name="${PHASE_NAMES[$CURRENT_PHASE]:-Unknown}"
-  draw_bar "$CURRENT_PROGRESS" "$name"
-  printf "  ${COL_GREEN}✓${COL_RESET}  ${COL_DIM}(%ds)${COL_RESET}\n" "$elapsed"
+  printf "${COL_GREEN}✓${COL_RESET} %s complete ${COL_DIM}(%ds)${COL_RESET}\n" "$name" "$elapsed" | tee -a "$LOG"
   CURRENT_PHASE=$(( CURRENT_PHASE + 1 ))
 }
 
-# ── Sub-step progress within a phase ────────────────────────────────────────
-phase_step() {
-  local step="$1" total="$2"
-  local weight="${PHASE_WEIGHTS[$CURRENT_PHASE]:-0}"
-  local prev_weight=0
-  for (( i=0; i<CURRENT_PHASE; i++ )); do
-    prev_weight=$(( prev_weight + PHASE_WEIGHTS[i] ))
-  done
-  local frac_pct=$(( prev_weight + (step * weight / total) ))
-  draw_bar "$frac_pct" "${PHASE_NAMES[$CURRENT_PHASE]:-}"
-}
+phase_step() { :; }   # no-op — progress bar removed
 
-
-trap 'tput cnorm 2>/dev/null || true' EXIT
-trap 'echo; echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; tput cnorm 2>/dev/null || true; exit 130' INT
+trap 'echo; printf "${COL_RED}Installation cancelled by user.${COL_RESET}\n"; exit 130' INT
 
 ###############################################################################
 # Startup banner
@@ -177,12 +134,6 @@ echo
 
 
 # ── Pre-flight summary ───────────────────────────────────────────────────────
-printf "${COL_DIM}  Phases : ${COL_RESET}"
-for (( i=0; i<${#PHASE_NAMES[@]}; i++ )); do
-  [[ $i -gt 0 ]] && printf "${COL_DIM} →${COL_RESET} "
-  printf "${COL_DIM}%s${COL_RESET}" "${PHASE_NAMES[$i]}"
-done
-printf "\n"
 printf "${COL_DIM}  Log    : %s${COL_RESET}\n" "$LOG"
 if $IS_PI; then
   printf "${COL_DIM}  Platform: Raspberry Pi (raspberrypi-kernel-headers)${COL_RESET}\n"
@@ -900,8 +851,6 @@ end_phase
 ###############################################################################
 begin_phase
 
-tput cnorm 2>/dev/null || true
-
 echo ""
 {
 # Helper functions for colored health check rows (output goes to tee below)
@@ -960,12 +909,6 @@ echo "============================================="
 } | tee -a "$LOG"
 
 end_phase
-
-###############################################################################
-# FINAL PROGRESS BAR — 100%
-###############################################################################
-draw_bar 100 "Complete"
-printf "  ${COL_GREEN}✓${COL_RESET}\n\n"
 
 ###############################################################################
 # END
