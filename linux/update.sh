@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.08
+version=.09
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -49,9 +49,15 @@ copy_local_files() {
 
     # Copy all .sh files except update.sh first — update.sh is copied last so
     # that if bash re-reads this file after the copy it doesn't hit a parse error.
+    # Track success: VERSION is only committed if all .sh copies succeed, so a
+    # partial failure leaves local VERSION unchanged and the next cycle retries.
+    local _copy_ok=true
     for _f in "${sh_files[@]}"; do
         [[ "$(basename "$_f")" == "update.sh" ]] && continue
-        sudo cp "$_f" /usr/local/scripts/
+        if ! sudo cp "$_f" /usr/local/scripts/; then
+            echo "ERROR: failed to copy $(basename "$_f") — aborting VERSION commit" | tee -a "$debug" "$log"
+            _copy_ok=false
+        fi
     done
     # Never copy kill_switch.txt — gkill_switch is always fetched live at runtime
     local filtered_txt=()
@@ -104,8 +110,14 @@ EOF
         sed -i '/nm-applet/d' "$_lxsession_user"
       fi
     fi
-    if [[ -f "$src_dir/VERSION" ]]; then
-        sudo cp "$src_dir/VERSION" /usr/local/scripts/VERSION
+    # Only commit VERSION if all .sh copies succeeded — ensures next update cycle
+    # retries the full sync rather than treating a partial copy as complete.
+    if [[ "$_copy_ok" == true && -f "$src_dir/VERSION" ]]; then
+        sudo install -m 644 "$src_dir/VERSION" /usr/local/scripts/VERSION.new \
+            && sudo mv /usr/local/scripts/VERSION.new /usr/local/scripts/VERSION \
+            || echo "ERROR: VERSION commit failed" | tee -a "$debug" "$log"
+    elif [[ -f "$src_dir/VERSION" ]]; then
+        echo "Skipping VERSION commit — one or more script copies failed" | tee -a "$debug" "$log"
     fi
     # update.sh: atomic inode swap (install to .new + mv) instead of cp.
     # cp truncates the existing file in place (same inode); bash has that inode
