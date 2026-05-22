@@ -314,6 +314,7 @@ PACKAGES=(
   "dkms"
   "rsyslog"
   "firefox-esr"
+  "cpulimit"
   "iperf3"
   "net-tools"
   "dnsutils"
