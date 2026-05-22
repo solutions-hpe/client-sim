@@ -9,7 +9,7 @@ On boot, three GNOME terminal windows are launched via `.desktop` files in
 ```
 ┌─ taskbar (45px) ──────────────────────────────────────────────────────────┐
 ├─ Dashboard (logview) ────────┬─ Journal (journalctl) ────────────────────┤
-│                              │  88x15+500+0                               │
+│                              │  88x16+500+0                               │
 │  50x47+0+0                   ├───────────────────────────────────────────┤
 │                              │  Simulation (startup)                      │
 │                              │  88x20+500+400                             │
@@ -23,7 +23,7 @@ On boot, three GNOME terminal windows are launched via `.desktop` files in
 | Window | File | Geometry |
 |--------|------|----------|
 | Dashboard | `linux/logview.desktop` | `50x47+0+0` |
-| Journal (`journalctl -f`) | `linux/journalctl.desktop` | `88x15+500+0` |
+| Journal (`journalctl -f`) | `linux/journalctl.desktop` | `88x16+500+0` |
 | Simulation (`startup.sh`) | `linux/startup.desktop` | `88x20+500+400` |
 
 ---
@@ -59,9 +59,9 @@ terminal_height_px = (rows × row_height_px) + chrome_px
                    = (rows × ~20) + 48
 ```
 
-### Journal window (88x15+500+0)
-- Height: (15 × 20) + 48 = **348 px**
-- WM places at y≈45 (below taskbar), ends at y≈393
+### Journal window (88x16+500+0)
+- Height: (16 × 20) + 48 = **368 px**
+- WM places at y≈45 (below taskbar), ends at y≈413
 
 ### Simulation window (88x20+500+400)
 - Starts at y=400 (~7px gap below journal)
