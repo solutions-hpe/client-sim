@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.13
+version=.14
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -133,12 +133,12 @@ copy_local_files() {
     # the old content cleanly, then the next `source update.sh` gets the new file.
     if [[ -f "$src_dir/update.sh" ]]; then
         cp "$src_dir/update.sh" /usr/local/scripts/update.sh.new \
-            && chmod 755 /usr/local/scripts/update.sh.new \
+            && chmod a+rx /usr/local/scripts/update.sh.new \
             && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
             || true
     fi
-    chmod 755 /usr/local/scripts/*.sh 2>/dev/null || true
-    chmod a+w "$log" "$debug" 2>/dev/null || true
+    chmod a+rx /usr/local/scripts/*.sh 2>/dev/null || true
+    chmod a+rw "$log" "$debug" 2>/dev/null || true
 }
 
 #------------------------------------------------------------
@@ -460,11 +460,11 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
             # update.sh: atomic mv to avoid bash re-read corruption (same fix as copy_local_files)
             if [[ -f "linux/update.sh" ]]; then
                 cp linux/update.sh /usr/local/scripts/update.sh.new \
-                    && chmod 755 /usr/local/scripts/update.sh.new \
+                    && chmod a+rx /usr/local/scripts/update.sh.new \
                     && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
                     || true
             fi
-            chmod 755 /usr/local/scripts/*.sh 2>/dev/null || true
+            chmod a+rx /usr/local/scripts/*.sh 2>/dev/null || true
             echo "GitHub sync succeeded" | tee -a "$debug" "$log"
             source_found=true
         fi

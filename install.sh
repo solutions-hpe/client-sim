@@ -426,12 +426,10 @@ begin_phase
 
 info "Preparing /usr/local/scripts"
 mkdir -p /usr/local/scripts
-chown root:"$SIM_USER" /usr/local/scripts
-chmod 775 /usr/local/scripts
+chmod a+rwx /usr/local/scripts
 
 touch /usr/local/scripts/sim.log
-chown "$SIM_USER":"$SIM_USER" /usr/local/scripts/sim.log
-chmod 664 /usr/local/scripts/sim.log
+chmod a+rw /usr/local/scripts/sim.log
 
 # Write installer version to sim.log (from original script)
 echo "Installer Version $VERSION" | tee /usr/local/scripts/sim.log >>"$LOG"
@@ -548,9 +546,9 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
 
     # ── Final permissions ────────────────────────────────────────────────────
     info "Setting permissions on /usr/local/scripts"
-    find /usr/local/scripts -type d                -exec chmod 755 {} \; >>"$LOG" 2>&1
-    find /usr/local/scripts -type f -name "*.sh"   -exec chmod 755 {} \; >>"$LOG" 2>&1
-    find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type d                -exec chmod a+rwx {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f -name "*.sh"   -exec chmod a+rx  {} \; >>"$LOG" 2>&1
+    find /usr/local/scripts -type f ! -name "*.sh" -exec chmod a+rw  {} \; >>"$LOG" 2>&1
     ok "Permissions set on /usr/local/scripts"
 
     if [[ -f /etc/systemd/system/client-sim-agent.service ]]; then
