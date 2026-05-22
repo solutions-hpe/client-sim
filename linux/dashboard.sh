@@ -179,16 +179,18 @@ get_gateway_status() {
 }
 #------------------------------------------------------------
 # Helper: map a script filename to its simulation config flag.
-# Returns "always" for infrastructure scripts that always show.
+# "always" = show regardless (key infrastructure).
+# "off"    = hide unless currently running (unknown/untracked scripts).
 #------------------------------------------------------------
 get_script_flag() {
   case "$1" in
+    agent.sh)       echo "always"       ;;
     dns_fail.sh)    echo "$dns_fail"    ;;
     download.sh)    echo "$download"    ;;
     iperf.sh)       echo "$iperf"       ;;
     ping_test.sh)   echo "$ping_test"   ;;
     www_traffic.sh) echo "$www_traffic" ;;
-    *)              echo "always"       ;;
+    *)              echo "off"          ;;
   esac
 }
 #------------------------------------------------------------
