@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.07
+version=.08
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -165,25 +165,6 @@ check_api_up() {
     echo "API confirmed UP" | tee -a "$debug"
     return 0
 }
-
-#============================================================
-# Wait for API server on first boot with exponential backoff
-#============================================================
-if [[ "$web_server" == "on" && -n "$server_url" ]]; then
-    _api_wait_retries=20
-    _api_wait_count=0
-    _backoff=1
-    while ! check_api_up "$server_url" 2>/dev/null; do
-        _api_wait_count=$((_api_wait_count + 1))
-        if [[ $_api_wait_count -ge $_api_wait_retries ]]; then
-            echo "API not reachable after $_api_wait_count attempts — proceeding without server" | tee -a "$debug" "$log"
-            break
-        fi
-        echo "API not ready (attempt $_api_wait_count/$_api_wait_retries) — retrying with backoff..." | tee -a "$debug"
-        sleep $((_backoff + RANDOM % 3))
-        _backoff=$(( _backoff < 60 ? _backoff * 2 : 60 ))
-    done
-fi
 
 #============================================================
 # TIER 1 — Web Server
