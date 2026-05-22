@@ -318,7 +318,7 @@ PACKAGES=(
   "net-tools"
   "dnsutils"
   "smbclient"
-  "python3-pip"
+  "jq"
   "qemu-guest-agent"
   # Network-disruptive — install last so connection stays up for all prior downloads
   "rfkill"
@@ -359,19 +359,14 @@ info "Running autoremove"
 apt_run autoremove -y --quiet=2
 ok "Core dependencies installed"
 
-# ── python3 websockets — apt first, pip3 fallback ───────────────────────────
-# python3-websockets can hang apt on some OS versions (post-install hook);
-# try apt with a short timeout, fall back to pip3 if it fails.
+# ── python3-websockets — only extra Python dep; python3 is pre-installed ────
+# All other python3 usage (JSON parsing) replaced with jq.
+# websockets is needed solely for the async WebSocket loop in agent.sh.
 info "Installing python3 websockets library"
 APT_TIMEOUT=60
-if apt_run install -y --quiet python3-websockets >>"$LOG" 2>&1; then
-  ok "Installed python3-websockets (apt)"
-else
-  warn "apt install of python3-websockets timed out or failed — trying pip3"
-  pip3 install --break-system-packages --quiet websockets >>"$LOG" 2>&1 \
-    && ok "Installed websockets (pip3)" \
-    || warn "Could not install websockets via pip3 (non-fatal, agent.sh will fail to start)"
-fi
+apt_run install -y --quiet python3-websockets \
+  && ok "Installed python3-websockets" \
+  || warn "Could not install python3-websockets — agent.sh hub connection will be unavailable"
 APT_TIMEOUT=300
 
 info "Restarting network stack"
@@ -381,16 +376,6 @@ systemctl restart networking 2>/dev/null || true
 sleep 3
 ok "Network stack restarted"
 end_phase
-
-###############################################################################
-# Live GNOME terminal for installer log
-###############################################################################
-if [[ -n "${DISPLAY:-}" ]] && command -v gnome-terminal &>/dev/null; then
-  gnome-terminal --geometry=80x15+0+477 -- tail -f "$LOG" &
-  ok "Live log terminal launched"
-else
-  warn "No DISPLAY detected — skipping live terminal"
-fi
 
 ###############################################################################
 # PHASE 3 — DISPLAY MANAGER & POWER MANAGEMENT

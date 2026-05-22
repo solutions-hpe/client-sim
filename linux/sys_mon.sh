@@ -39,35 +39,18 @@ service_exists() {
 }
 
 health_age_secs() {
-  python3 - "$HEALTH_FILE" <<'PY' 2>/dev/null || echo 999999
-import json
-import pathlib
-import sys
-import time
-
-path = pathlib.Path(sys.argv[1])
-if not path.exists():
-    print(999999)
-    raise SystemExit(0)
-
-try:
-    data = json.loads(path.read_text())
-except Exception:
-    print(999999)
-    raise SystemExit(0)
-
-values = []
-for key in ("last_heartbeat", "last_message_received", "last_status_sent", "updated_at", "last_connect"):
-    value = data.get(key)
-    if isinstance(value, (int, float)):
-        values.append(float(value))
-
-if not values:
-    print(999999)
-    raise SystemExit(0)
-
-print(max(0, int(time.time() - max(values))))
-PY
+  [[ -f "$HEALTH_FILE" ]] || { echo 999999; return; }
+  local max_ts
+  max_ts=$(jq -r '
+    [.last_heartbeat, .last_message_received, .last_status_sent, .updated_at, .last_connect]
+    | map(select(. != null and (type == "number")))
+    | if length == 0 then empty else max end
+  ' "$HEALTH_FILE" 2>/dev/null) || { echo 999999; return; }
+  [[ -z "$max_ts" || "$max_ts" == "null" ]] && { echo 999999; return; }
+  local now age
+  now=$(date +%s)
+  age=$(( now - ${max_ts%.*} ))
+  echo $(( age < 0 ? 0 : age ))
 }
 
 agent_expected() {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# agent.sh — Client websocket agent — v1.01
+# agent.sh — Client websocket agent — v1.02
 # Launches a background websocket client that streams status and receives commands.
 
 set -u
@@ -59,11 +59,11 @@ hostname_val=$(hostname)
 
 handle_command() {
   local raw_cmd="${1:-}"
-  python3 - "$raw_cmd" <<'PY'
-import json, sys
-cmd = json.loads(sys.argv[1] or '{}')
-print(cmd.get('id',''), cmd.get('action',''), json.dumps(cmd.get('args', {})), sep='\t')
-PY
+  local cmd_id action args_json
+  cmd_id=$(printf '%s' "$raw_cmd"    | jq -r '.id     // ""' 2>/dev/null || true)
+  action=$(printf '%s' "$raw_cmd"    | jq -r '.action // ""' 2>/dev/null || true)
+  args_json=$(printf '%s' "$raw_cmd" | jq -c '.args   // {}' 2>/dev/null || echo '{}')
+  printf '%s\t%s\t%s\n' "$cmd_id" "$action" "$args_json"
 }
 
 run_command() {
@@ -74,7 +74,7 @@ run_command() {
     parsed_cmd=$'\t\t'
   fi
   IFS=$'\t' read -r cmd_id action args_json <<< "$parsed_cmd"
-  if ! arg_value=$(printf '%s' "$args_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('value',''))" 2>/dev/null); then
+  if ! arg_value=$(printf '%s' "$args_json" | jq -r '.value // ""' 2>/dev/null); then
     log_warning "$raw_cmd"
     arg_value=""
   fi
@@ -127,15 +127,12 @@ run_command() {
       ;;
   esac
 
-  python3 - <<PY
-import json
-print(json.dumps({
-  "id": ${cmd_id@Q},
-  "status": ${status@Q},
-  "message": ${message@Q},
-  "reboot": ${reboot_now@Q}
-}))
-PY
+  jq -n \
+    --arg id      "$cmd_id" \
+    --arg status  "$status" \
+    --arg message "$message" \
+    --arg reboot  "$reboot_now" \
+    '{id:$id, status:$status, message:$message, reboot:$reboot}'
 }
 
 if [[ "${1:-}" == "--handle-command" ]]; then
