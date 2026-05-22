@@ -922,6 +922,10 @@
           <!-- Certified devices table -->
           <div class="settings-section">
             <div class="settings-section-title">Certified Devices</div>
+            <!-- Hub-managed notice: shown when this spoke is under hub control — hide locally to avoid confusion -->
+            <div id="usb-hub-managed-notice" style="display:none;margin-bottom:8px;padding:6px 10px;background:var(--bg-secondary);border-left:3px solid var(--accent-blue);border-radius:4px;font-size:0.82rem;color:var(--text-secondary);">
+              🔒 USB allowlist is managed by the Hub. To make changes, edit the device list from the Hub UI.
+            </div>
             <div class="table-scroll">
               <table class="data-table" id="usb-vidpid-table">
                 <thead>
@@ -930,7 +934,8 @@
                 <tbody id="usb-vidpid-tbody"></tbody>
               </table>
             </div>
-            <div class="form-row" style="margin-top:8px;align-items:flex-end;">
+            <!-- Add Device form: hidden by JS when hub-managed so users aren't tempted to add locally -->
+            <div id="usb-add-device-form" class="form-row" style="margin-top:8px;align-items:flex-end;">
               <div class="form-group" style="flex:1;">
                 <label class="form-label" for="new-vidpid">VID:PID</label>
                 <input id="new-vidpid" class="form-input" type="text" placeholder="e.g. 2357:012d"

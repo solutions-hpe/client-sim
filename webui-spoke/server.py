@@ -5218,13 +5218,16 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     for key, value in config_payload.items():
         if key in HUB_RELAY_KEYS or key in {"command", "config", "config_version", "__config_version", "central_api", "central_config", "notifications", *HUB_NOTIFICATION_KEY_MAP.keys()}:
             continue
-        # usb_vidpids and usb_ignored_vidpids are locally managed on each spoke.
-        # Only apply a hub-pushed value if it is non-empty, so that stale empty
-        # registration values stored in spoke.config don't wipe locally configured VID:PIDs.
+        # USB allowlist control: when this spoke is under hub management, the hub owns
+        # usb_vidpids and usb_ignored_vidpids — apply whatever the hub sends (even empty,
+        # so the hub can clear the list).  When the spoke is running locally (not hub_managed),
+        # these two keys are locally owned and we skip any hub-pushed value so that a stale
+        # registration snapshot stored in spoke.config doesn't overwrite the locally configured VIDs.
         if key in {"usb_vidpids", "usb_ignored_vidpids"}:
-            incoming = _parse_json_list(value) if value is not None else []
-            if not incoming:
+            if not settings.get("hub_managed"):
+                # Spoke is not hub-managed — leave the local allowlist untouched.
                 continue
+            # Hub-managed: fall through and let the hub value replace the local one.
         if key in {"usb_auto_provision", "reclone_schedule_enabled", "spoke_tls"}:
             settings[key] = _normalize_relay_enabled(value)
         elif value is None:

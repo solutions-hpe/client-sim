@@ -636,6 +636,9 @@ function mergeSettings(next = {}) {
     hub_isolation_timeout: next.hub_isolation_timeout ?? currentSettings.hub_isolation_timeout ?? ((next.hub_isolation_timeout_min ?? currentSettings.hub_isolation_timeout_min ?? 60) * 60), // Keep the server timeout in seconds so relay payloads and saves share one authoritative value.
     hub_isolation_timeout_min: next.hub_isolation_timeout_min ?? (next.hub_isolation_timeout != null ? Math.max(5, Math.round(Number(next.hub_isolation_timeout) / 60)) : currentSettings.hub_isolation_timeout_min ?? 60), // Maintain a minutes copy so the setup form can render and save the timeout without repeated conversion boilerplate.
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
+    // hub_managed: true when this spoke is under hub control (set server-side on every config_update).
+    // Used to lock locally-editable fields that the hub now owns (e.g. USB allowlist).
+    hub_managed: next.hub_managed ?? currentSettings.hub_managed ?? false,
     repo_sync_interval: next.repo_sync_interval ?? currentSettings.repo_sync_interval ?? 300,
     usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
     usb_missing_timeout: next.usb_missing_timeout ?? currentSettings.usb_missing_timeout ?? '60',
@@ -1728,6 +1731,8 @@ function formatUiDate(value) {
 function renderUsbVidPidTable() {
   if (!usbVidPidTbody) return;
   usbVidPidTbody.innerHTML = '';
+  // When hub-managed, the hub owns this list — disable all local edits so users know to change it from the hub.
+  const hubOwned = Boolean(currentSettings.hub_managed);
   const devices = parseJsonList(currentSettings.usb_vidpids);
   devices.forEach((device) => {
     const tr = document.createElement('tr');
@@ -1735,18 +1740,29 @@ function renderUsbVidPidTable() {
     removeBtn.type = 'button';
     removeBtn.className = 'btn-icon';
     removeBtn.textContent = '✕';
-    removeBtn.addEventListener('click', () => removeVidPid(device.vidpid));
+    // Disable removal when hub-managed — only the hub may modify the allowlist.
+    removeBtn.disabled = hubOwned;
+    if (hubOwned) removeBtn.title = 'Managed by Hub — edit from the Hub UI';
+    if (!hubOwned) removeBtn.addEventListener('click', () => removeVidPid(device.vidpid));
     tr.innerHTML = `<td>${escHtml(device.vidpid || '—')}</td><td>${escHtml(device.type || 'wireless')}</td><td>${escHtml(device.label || '—')}</td>`;
     const actionTd = document.createElement('td');
     actionTd.appendChild(removeBtn);
     tr.appendChild(actionTd);
     usbVidPidTbody.appendChild(tr);
   });
+  // Show or hide the "Managed by Hub" notice banner above the table.
+  const hubNotice = document.getElementById('usb-hub-managed-notice');
+  if (hubNotice) hubNotice.style.display = hubOwned ? '' : 'none';
+  // Lock or unlock the Add Device form based on hub management state.
+  const addForm = document.getElementById('usb-add-device-form');
+  if (addForm) addForm.style.display = hubOwned ? 'none' : '';
 }
 
 function renderIgnoredUsbList() {
   if (!usbIgnoredList) return;
   usbIgnoredList.innerHTML = '';
+  // When hub-managed, the hub owns the ignored list too — local removes are disabled.
+  const hubOwned = Boolean(currentSettings.hub_managed);
   const ignored = parseJsonList(currentSettings.usb_ignored_vidpids);
   if (!ignored.length) {
     usbIgnoredList.textContent = 'No ignored devices.';
@@ -1759,23 +1775,28 @@ function renderIgnoredUsbList() {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = ' ✕';
-    button.addEventListener('click', async () => {
-      // Re-read from currentSettings each click to avoid stale closure
-      const current = parseJsonList(currentSettings.usb_ignored_vidpids);
-      currentSettings.usb_ignored_vidpids = serializeJsonList(current.filter((item) => item !== vidpid));
-      renderIgnoredUsbList();
-      renderUsbSummary(latestProxmoxData);
-      try {
-        await requestJson('/api/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(collectUsbSettingsPayload()),
-        });
-        showNotification(`${vidpid} removed from ignored devices`, 'success');
-      } catch (err) {
-        showNotification(`Error saving: ${err.message}`, 'error');
-      }
-    });
+    // When hub-managed, disable the remove button so the hub remains the authority.
+    button.disabled = hubOwned;
+    if (hubOwned) button.title = 'Managed by Hub — edit from the Hub UI';
+    if (!hubOwned) {
+      button.addEventListener('click', async () => {
+        // Re-read from currentSettings each click to avoid stale closure
+        const current = parseJsonList(currentSettings.usb_ignored_vidpids);
+        currentSettings.usb_ignored_vidpids = serializeJsonList(current.filter((item) => item !== vidpid));
+        renderIgnoredUsbList();
+        renderUsbSummary(latestProxmoxData);
+        try {
+          await requestJson('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collectUsbSettingsPayload()),
+          });
+          showNotification(`${vidpid} removed from ignored devices`, 'success');
+        } catch (err) {
+          showNotification(`Error saving: ${err.message}`, 'error');
+        }
+      });
+    }
     badge.appendChild(button);
     usbIgnoredList.appendChild(badge);
   });
