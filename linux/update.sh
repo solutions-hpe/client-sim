@@ -71,23 +71,17 @@ copy_local_files() {
         filtered_txt+=("$_t")
     done
     (( ${#filtered_txt[@]} )) && cp --remove-destination "${filtered_txt[@]}" /usr/local/scripts/
-    # Deploy .desktop files — update geometry/content for files that already exist
-    # in /etc/xdg/autostart/. Updating an existing file is safe (no new process
-    # is launched). New files are only deployed if the target doesn't exist yet
-    # (self-heal). /etc/xdg/autostart is root-owned so sudo -n is required here.
+    # Deploy .desktop files to the user autostart dir (~/.config/autostart/).
+    # LXDE/Pi OS reads both /etc/xdg/autostart/ (system, root-owned) and
+    # ~/.config/autostart/ (user, no sudo needed). User dir takes precedence,
+    # so updates land here without requiring sudo cp to the system dir.
+    _user_autostart="$HOME/.config/autostart"
+    mkdir -p "$_user_autostart"
     for _d in "${desktop_files[@]}"; do
         _dname=$(basename "$_d")
-        _dtarget="/etc/xdg/autostart/$_dname"
-        if [[ -f "$_dtarget" ]]; then
-            sudo -n cp --remove-destination "$_d" "$_dtarget" 2>/dev/null \
-                && echo "Updated $_dname" | tee -a "$debug" \
-                || echo "WARNING: could not update $_dname (no sudo)" | tee -a "$debug"
-        else
-            # Self-heal: deploy if missing (covers first-install and accidental deletion)
-            sudo -n cp "$_d" "$_dtarget" 2>/dev/null \
-                && echo "Restored missing $_dname" | tee -a "$debug" \
-                || echo "WARNING: could not restore $_dname (no sudo)" | tee -a "$debug"
-        fi
+        cp -f "$_d" "$_user_autostart/$_dname" \
+            && echo "Updated $_dname" | tee -a "$debug" \
+            || echo "WARNING: could not update $_dname" | tee -a "$debug"
     done
     (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
@@ -422,14 +416,11 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 sh_files=( *.sh )
                 txt_files=( *.txt )
                 [[ -f "10-rsyslog.conf" ]] && sudo -n cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf 2>/dev/null || true
-                # Deploy .desktop files — update existing, self-heal missing
+                # Deploy .desktop files to user autostart dir (no sudo needed)
+                _user_autostart="$HOME/.config/autostart"
+                mkdir -p "$_user_autostart"
                 for _d in "${desktop_files[@]}"; do
-                    _dtarget="/etc/xdg/autostart/$_d"
-                    if [[ -f "$_dtarget" ]]; then
-                        sudo -n cp --remove-destination "$_d" "$_dtarget" 2>/dev/null || true
-                    else
-                        sudo -n cp "$_d" "$_dtarget" 2>/dev/null || true
-                    fi
+                    cp -f "$_d" "$_user_autostart/$_d" 2>/dev/null || true
                 done
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
