@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.08
+version=.09
 # WHY: dashboard.sh is a read-only live monitor. It runs in its own terminal
 # window (launched by startup.desktop) so the operator can always see
 # what's happening without interrupting the simulation loop in the other pane.
@@ -13,6 +13,7 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 # Simulation Dashboard (Read-only live monitor)
 #------------------------------------------------------------
 refresh_rate=5
+CACHE_DIR="/tmp/client-sim-dash"
 
 # Terminal colors — degrade gracefully if tput is unavailable (e.g. SSH without TERM)
 GRN=$(tput setaf 2 2>/dev/null || true)
@@ -72,9 +73,7 @@ for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
 #------------------------------------------------------------
-# Helper: webUI API reachability
-# WHY: Clients heartbeat to the webUI server; if the API is unreachable the
-# operator needs to know immediately — heartbeats and config updates will fail.
+# Helper: webUI API reachability — reads from cache (no blocking curl).
 #------------------------------------------------------------
 get_api_status() {
   if [[ "$web_server" != "on" ]]; then
@@ -86,92 +85,116 @@ get_api_status() {
     return
   fi
   local http_code
-  http_code=$(curl -o /dev/null -s -w "%{http_code}" \
-    --connect-timeout 2 --max-time 3 \
-    "${server_url%/}/api/health" 2>/dev/null)
+  http_code=$(cat "$CACHE_DIR/api_code" 2>/dev/null)
   if [[ "$http_code" == "200" ]]; then
     echo "${GRN}CONNECTED${RST} (${server_url})"
+  elif [[ -z "$http_code" ]]; then
+    echo "${YLW}Checking...${RST}"
   else
     echo "${RED}UNREACHABLE${RST} (${server_url})"
   fi
 }
 #------------------------------------------------------------
-# Heartbeat: POST current client state to the webUI API every dashboard refresh.
-# WHY: Keeps the server's client list alive independent of the simulation loop,
-# which may have long-running steps between iterations.
+# Background cache worker — runs all slow network I/O (nmcli, ping, curl)
+# and writes results to $CACHE_DIR. The display loop reads these files
+# instantly, eliminating all visible blocking pauses on refresh.
+# Also sends the heartbeat POST from here so it never blocks rendering.
 #------------------------------------------------------------
-send_heartbeat() {
-  [[ "$web_server" != "on" ]] && return 0
-  [[ -z "$server_url" ]] && return 0
+run_cache_worker() {
+  mkdir -p "$CACHE_DIR"
+  while true; do
+    # WiFi SSID
+    nmcli -t -f active,ssid dev wifi 2>/dev/null \
+      | awk -F: '$1=="yes"{print $2}' \
+      > "$CACHE_DIR/wifi_ssid" 2>/dev/null || true
 
-  local connected_ssid gateway_reachable=false
-  local active_sims_json="[]"
-  connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
-  local dfgw
-  dfgw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
-  [[ -n "$dfgw" ]] && ping -c1 -W1 "$dfgw" >/dev/null 2>&1 && gateway_reachable=true
+    # Default gateway + reachability
+    local gw
+    gw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+    echo "$gw" > "$CACHE_DIR/gateway"
+    if [[ -n "$gw" ]] && ping -c1 -W1 "$gw" >/dev/null 2>&1; then
+      echo "up" > "$CACHE_DIR/gateway_ok"
+    else
+      echo "down" > "$CACHE_DIR/gateway_ok"
+    fi
 
-  # Build active simulations list from flags
-  local active_sims=()
-  [[ "$dhcp_fail"   == "on" ]] && active_sims+=("dhcp_fail")
-  [[ "$dns_fail"    == "on" ]] && active_sims+=("dns_fail")
-  [[ "$assoc_fail"  == "on" ]] && active_sims+=("assoc_fail")
-  [[ "$port_flap"   == "on" ]] && active_sims+=("port_flap")
-  [[ "$ping_test"   == "on" ]] && active_sims+=("ping_test")
-  [[ "$download"    == "on" ]] && active_sims+=("download")
-  [[ "$iperf"       == "on" ]] && active_sims+=("iperf")
-  [[ "$www_traffic" == "on" ]] && active_sims+=("www_traffic")
-  [[ "$ssidpw_fail" == "on" ]] && active_sims+=("ssidpw_fail")
-  [[ "$auth_fail"   == "on" ]] && active_sims+=("auth_fail")
-  if [[ ${#active_sims[@]} -gt 0 ]]; then
-    active_sims_json=$(printf '"%s",' "${active_sims[@]}" | sed 's/,$//')
-    active_sims_json="[$active_sims_json]"
-  fi
+    # API health check
+    if [[ "$web_server" == "on" && -n "$server_url" ]]; then
+      local http_code
+      http_code=$(curl -o /dev/null -s -w "%{http_code}" \
+        --connect-timeout 2 --max-time 3 \
+        "${server_url%/}/api/health" 2>/dev/null)
+      echo "$http_code" > "$CACHE_DIR/api_code"
+    fi
 
-  local ssid_json="null"
-  [[ -n "$connected_ssid" ]] && ssid_json="\"$connected_ssid\""
+    # Heartbeat POST — reads from cache files so no extra nmcli/ping calls
+    if [[ "$web_server" == "on" && -n "$server_url" ]]; then
+      local connected_ssid gateway_reachable=false active_sims_json="[]"
+      connected_ssid=$(cat "$CACHE_DIR/wifi_ssid" 2>/dev/null)
+      [[ "$(cat "$CACHE_DIR/gateway_ok" 2>/dev/null)" == "up" ]] && gateway_reachable=true
 
-  curl -s -X POST "${server_url%/}/api/status" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"hostname\": \"$HOSTNAME\",
-      \"simulation_id\": \"$simulation_id\",
-      \"platform\": \"linux\",
-      \"iteration\": 0,
-      \"connected_ssid\": $ssid_json,
-      \"gateway_reachable\": $gateway_reachable,
-      \"active_simulations\": $active_sims_json,
-      \"config\": {
-        \"kill_switch\": \"$kill_switch\",
-        \"sim_load\": \"$sim_load\",
-        \"ssid\": \"$ssid\",
-        \"wsite\": \"$wsite\"
-      },
-      \"errors\": []
-    }" >/dev/null 2>&1 || true
+      local active_sims=()
+      [[ "$dhcp_fail"   == "on" ]] && active_sims+=("dhcp_fail")
+      [[ "$dns_fail"    == "on" ]] && active_sims+=("dns_fail")
+      [[ "$assoc_fail"  == "on" ]] && active_sims+=("assoc_fail")
+      [[ "$port_flap"   == "on" ]] && active_sims+=("port_flap")
+      [[ "$ping_test"   == "on" ]] && active_sims+=("ping_test")
+      [[ "$download"    == "on" ]] && active_sims+=("download")
+      [[ "$iperf"       == "on" ]] && active_sims+=("iperf")
+      [[ "$www_traffic" == "on" ]] && active_sims+=("www_traffic")
+      [[ "$ssidpw_fail" == "on" ]] && active_sims+=("ssidpw_fail")
+      [[ "$auth_fail"   == "on" ]] && active_sims+=("auth_fail")
+      if [[ ${#active_sims[@]} -gt 0 ]]; then
+        active_sims_json=$(printf '"%s",' "${active_sims[@]}" | sed 's/,$//')
+        active_sims_json="[$active_sims_json]"
+      fi
+
+      local ssid_json="null"
+      [[ -n "$connected_ssid" ]] && ssid_json="\"$connected_ssid\""
+
+      curl -s -X POST "${server_url%/}/api/status" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"hostname\": \"$HOSTNAME\",
+          \"simulation_id\": \"$simulation_id\",
+          \"platform\": \"linux\",
+          \"iteration\": 0,
+          \"connected_ssid\": $ssid_json,
+          \"gateway_reachable\": $gateway_reachable,
+          \"active_simulations\": $active_sims_json,
+          \"config\": {
+            \"kill_switch\": \"$kill_switch\",
+            \"sim_load\": \"$sim_load\",
+            \"ssid\": \"$ssid\",
+            \"wsite\": \"$wsite\"
+          },
+          \"errors\": []
+        }" >/dev/null 2>&1 || true
+    fi
+
+    sleep "$refresh_rate"
+  done
 }
 
 get_wifi_status() {
-  local connected_ssid
-  connected_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}')
-  if [[ -n "$connected_ssid" ]]; then
-    echo "${GRN}CONNECTED${RST} ($connected_ssid)"
+  local ssid
+  ssid=$(cat "$CACHE_DIR/wifi_ssid" 2>/dev/null)
+  if [[ -n "$ssid" ]]; then
+    echo "${GRN}CONNECTED${RST} ($ssid)"
   else
     echo "${RED}DISCONNECTED${RST}"
   fi
 }
 #------------------------------------------------------------
-# Helper: gateway reachability with color
-# WHY: Pings once with 1s timeout so the dashboard refresh isn't delayed.
+# Helper: gateway reachability — reads from cache (no blocking ping).
 #------------------------------------------------------------
 get_gateway_status() {
-  local gw
-  gw=$(ip route | grep -oP 'default via \K\S+' | head -n1)
+  local gw ok
+  gw=$(cat "$CACHE_DIR/gateway" 2>/dev/null)
+  ok=$(cat "$CACHE_DIR/gateway_ok" 2>/dev/null)
   if [[ -z "$gw" ]]; then
     echo "${RED}NO ROUTE${RST}"
-    return
-  fi
-  if ping -c1 -W1 "$gw" >/dev/null 2>&1; then
+  elif [[ "$ok" == "up" ]]; then
     echo "${GRN}ONLINE${RST} ($gw)"
   else
     echo "${RED}OFFLINE${RST} ($gw)"
@@ -185,6 +208,7 @@ get_gateway_status() {
 get_script_flag() {
   case "$1" in
     agent.sh)       echo "always"       ;;
+    update.sh)      echo "always"       ;;
     dns_fail.sh)    echo "$dns_fail"    ;;
     download.sh)    echo "$download"    ;;
     iperf.sh)       echo "$iperf"       ;;
@@ -253,8 +277,13 @@ get_sim_status() {
 #------------------------------------------------------------
 # Main dashboard loop
 # WHY: clear+redraw every refresh_rate seconds gives a live view without
-# needing curses or a separate UI framework.
+# needing curses or a separate UI framework. All slow network I/O is handled
+# by the background cache worker — the display loop only reads local files.
 #------------------------------------------------------------
+trap 'kill "$_cache_pid" 2>/dev/null; rm -rf "$CACHE_DIR"' EXIT
+run_cache_worker &
+_cache_pid=$!
+
 while true; do
   clear
   # Re-detect the WiFi adapter each refresh.
@@ -302,6 +331,5 @@ while true; do
   printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
   printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
-  send_heartbeat
   sleep "$refresh_rate"
 done
