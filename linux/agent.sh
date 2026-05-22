@@ -1,10 +1,10 @@
 #!/bin/bash
-# agent.sh — Client websocket agent
+# agent.sh — Client websocket agent — v1.01
 # Launches a background websocket client that streams status and receives commands.
 
 set -u
 
-PID_FILE="/var/run/client-sim-ws-agent.pid"
+PID_FILE="/tmp/client-sim-ws-agent.pid"
 STATUS_FILE="/usr/local/scripts/client-status.json"
 HEALTH_FILE="/var/lib/client-sim/agent-health.json"
 log="/usr/local/scripts/sim.log"
