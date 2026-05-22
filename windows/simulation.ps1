@@ -383,7 +383,6 @@ while ($true) {
     $script:sim_load = get_value 'simulation' 'sim_load'
     $script:public_repo = get_value 'simulation' 'public_repo'
     $script:repo_location = get_value 'simulation' 'repo_location'
-    $script:vh_server = get_value 'simulation' 'vh_server'
     $script:site_based_ssid = get_value 'simulation' 'site_based_ssid'
     $script:iperf_bw = get_value 'simulation' 'iperf_bw'
     $script:auth_fail = get_value 'simulation' 'auth_fail'
@@ -416,15 +415,14 @@ while ($true) {
     $script:dns_bad_record_1 = get_value 'address' 'dns_bad_record_1'
     $script:dns_bad_record_2 = get_value 'address' 'dns_bad_record_2'
     $script:dns_bad_record_3 = get_value 'address' 'dns_bad_record_3'
-    $script:vh_server_address = get_value 'address' 'vh_server_addr'
     $script:iperf_server = get_value 'address' 'iperf_server'
 
     Apply-UserOverrides -Section $script:username -Names @(
-        'kill_switch','sim_load','public_repo','repo_location','vh_server','site_based_ssid','iperf_bw',
+        'kill_switch','sim_load','public_repo','repo_location','site_based_ssid','iperf_bw',
         'wsite','sim_phy','ssid','ssidpw','dhcp_fail','dns_fail','assoc_fail','port_flap','ping_test',
         'download','iperf','www_traffic','ssidpw_fail','auth_fail','smb_address','ping_address',
         'dns_latency_1','dns_latency_2','dns_latency_3','dns_bad_ip_1','dns_bad_ip_2','dns_bad_ip_3',
-        'dns_bad_record_1','dns_bad_record_2','dns_bad_record_3','vh_server_addr','iperf_server'
+        'dns_bad_record_1','dns_bad_record_2','dns_bad_record_3','iperf_server'
     )
 
     if (Test-Path -LiteralPath $killSwitchPath) {
@@ -463,7 +461,7 @@ while ($true) {
     if ($script:sim_phy -eq 'ethernet' -and $wladapter) {
         Disable-NetAdapter -Name $wladapter.Name -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
     }
-    if ($script:sim_phy -eq 'wireless' -and $script:vh_server -eq 'off' -and $eadapter) {
+    if ($script:sim_phy -eq 'wireless' -and $eadapter) {
         Disable-NetAdapter -Name $eadapter.Name -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
     }
 
@@ -474,9 +472,6 @@ while ($true) {
     } else {
         Write-SimDebug 'Network connection failed'
         Write-SimDebug 'In Pre-Simulation'
-        if ($script:vh_server -eq 'on') {
-            . 'C:\Scripts\vhconnect.ps1'
-        }
         Start-Sleep -Seconds 15
         $wladapter = Get-WifiAdapter
         [void](Connect-Wifi)
@@ -535,9 +530,6 @@ while ($true) {
                     Write-SimDebug 'Network connection failed'
                     Write-SimDebug 'In Simulation Loop'
                     Write-SimDebug 'Attempting to reset adapter'
-                    if ($script:vh_server -eq 'on') {
-                        . 'C:\Scripts\vhconnect.ps1'
-                    }
                     Start-Sleep -Seconds 15
                     $wladapter = Get-WifiAdapter
                     Remove-WifiProfile -ProfileName (Get-TargetSsid)
