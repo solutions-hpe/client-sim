@@ -1,65 +1,44 @@
 #!/bin/bash
-version=.03
-echo apt update Script Version $version | tee -a /usr/local/scripts/sim.log
-echo $(date) | tee -a /usr/local/scripts/sim.log
+version=.04
+log="/usr/local/scripts/sim.log"
+echo "apt update Script Version $version" | tee -a "$log"
+echo "$(date)" | tee -a "$log"
 #------------------------------------------------------------
-sudo apt update
+# Ensure dpkg is in a clean state before doing anything
+#------------------------------------------------------------
 sudo dpkg --configure -a
-echo Running system updates | tee -a /tmp/client-sim.log
-sudo dkpg --configure -a
-sudo DEBIAN_FRONTEND=noninteractive apt update
-# --- Kernel / build support ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+#------------------------------------------------------------
+# Keep installed packages current
+#------------------------------------------------------------
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade \
   linux-headers-$(uname -r) \
-  dkms
-# --- Core system utilities ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  dkms \
   bash \
   coreutils \
-  util-linux \
-  procps \
-  sudo \
   ca-certificates \
   rsyslog \
-  sysstat
-# --- Networking (Raspberry Pi OS–compatible stack) ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
   network-manager \
+  network-manager-gnome \
   wpasupplicant \
-  systemd-resolved \
   net-tools \
   dnsutils \
   iw \
   wireless-tools \
   rfkill \
-  iperf3
-# --- Remove conflicting network stacks ---
-sudo DEBIAN_FRONTEND=noninteractive apt purge -y \
-  dhcpcd5 \
-  ifupdown \
-  connman \
-  netplan.io
-# --- Admin / utility tools (from your list) ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  iperf3 \
   git \
   wget \
   smbclient \
-  qemu-guest-agent
-# --- Python (Pi‑compatible expectations) ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  qemu-guest-agent \
   python3 \
-  python3-pip \
-  python3-venv \
-  python-is-python3 \
-  python3-smbus
-# --- Hardware / I2C ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
-  i2c-tools
-# --- Optional browser (remove if truly headless) ---
-sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+  python3-websockets \
+  jq \
+  cpulimit \
   firefox-esr
-# --- Cleanup ---
-sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y --purge
-sudo DEBIAN_FRONTEND=noninteractive apt autoclean
-sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-smbus
-sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y
+#------------------------------------------------------------
+# Cleanup
+#------------------------------------------------------------
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean
+echo "apt update complete" | tee -a "$log"
