@@ -40,14 +40,20 @@ _return_or_exit() {
 # which launches one instance via XDG autostart.
 # lxsession's system autostart may also launch @nm-applet, giving two icons.
 # This function runs unconditionally every update cycle to ensure:
-#   1. Any stale ~/.config/autostart/nm-applet.desktop we deployed is removed
+#   1. ~/.config/autostart/nm-applet.desktop is set to Hidden=true, which
+#      tells the XDG autostart mechanism to skip the system nm-applet.desktop
 #   2. The lxsession user override file suppresses @nm-applet
 # Changes take effect on the next LXDE session start (reboot).
 #------------------------------------------------------------
 suppress_nm_applet() {
     local _user_autostart="$HOME/.config/autostart"
     mkdir -p "$_user_autostart"
-    rm -f "$_user_autostart/nm-applet.desktop"
+    # Override the system nm-applet.desktop with Hidden=true so XDG autostart
+    # skips it. Removing this file would re-enable the system version.
+    cat > "$_user_autostart/nm-applet.desktop" << 'EOF'
+[Desktop Entry]
+Hidden=true
+EOF
 
     local _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
     local _lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
@@ -110,10 +116,6 @@ copy_local_files() {
             && echo "Updated $_dname" | tee -a "$debug" \
             || echo "WARNING: could not update $_dname" | tee -a "$debug"
     done
-    # Remove any stale nm-applet.desktop we may have previously deployed —
-    # the system package (network-manager-gnome) already provides one in
-    # /etc/xdg/autostart/. Having both causes a duplicate tray icon.
-    rm -f "$_user_autostart/nm-applet.desktop"
     suppress_nm_applet
     (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
