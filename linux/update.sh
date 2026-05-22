@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.12
+version=.13
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -71,25 +71,24 @@ copy_local_files() {
         filtered_txt+=("$_t")
     done
     (( ${#filtered_txt[@]} )) && cp --remove-destination "${filtered_txt[@]}" /usr/local/scripts/
-    # .desktop files are NOT deployed by update.sh — the installer owns them.
-    # Deploying them here caused a double-invocation bug: if dex or a session
-    # manager processes /etc/xdg/autostart/ while the simulation is already
-    # running (via startup.desktop / lxsession autostart), a second startup.sh
-    # process would launch, hit the lock guard, and trigger "; systemctl reboot".
-    #
-    # EXCEPTION — self-heal: if startup.desktop was accidentally removed (e.g. by
-    # a v2.50-2.54 bug that called `sudo rm -f /etc/xdg/autostart/startup.desktop`),
-    # restore it here so the simulation terminal reappears on next reboot.
-    if [[ ! -f /etc/xdg/autostart/startup.desktop ]]; then
-        echo "$(date): update.sh: startup.desktop missing — restoring" | tee -a "$debug"
-        sudo -n tee /etc/xdg/autostart/startup.desktop >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=StartUp
-Comment=Simulation Script Startup
-Exec=gnome-terminal --geometry=88x24+510+430 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
-EOF
-    fi
+    # Deploy .desktop files — update geometry/content for files that already exist
+    # in /etc/xdg/autostart/. Updating an existing file is safe (no new process
+    # is launched). New files are only deployed if the target doesn't exist yet
+    # (self-heal). /etc/xdg/autostart is root-owned so sudo -n is required here.
+    for _d in "${desktop_files[@]}"; do
+        _dname=$(basename "$_d")
+        _dtarget="/etc/xdg/autostart/$_dname"
+        if [[ -f "$_dtarget" ]]; then
+            sudo -n cp --remove-destination "$_d" "$_dtarget" 2>/dev/null \
+                && echo "Updated $_dname" | tee -a "$debug" \
+                || echo "WARNING: could not update $_dname (no sudo)" | tee -a "$debug"
+        else
+            # Self-heal: deploy if missing (covers first-install and accidental deletion)
+            sudo -n cp "$_d" "$_dtarget" 2>/dev/null \
+                && echo "Restored missing $_dname" | tee -a "$debug" \
+                || echo "WARNING: could not restore $_dname (no sudo)" | tee -a "$debug"
+        fi
+    done
     (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
@@ -423,7 +422,15 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 sh_files=( *.sh )
                 txt_files=( *.txt )
                 [[ -f "10-rsyslog.conf" ]] && sudo -n cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf 2>/dev/null || true
-                (( ${#desktop_files[@]} )) && sudo -n cp "${desktop_files[@]}" /etc/xdg/autostart/ 2>/dev/null || true
+                # Deploy .desktop files — update existing, self-heal missing
+                for _d in "${desktop_files[@]}"; do
+                    _dtarget="/etc/xdg/autostart/$_d"
+                    if [[ -f "$_dtarget" ]]; then
+                        sudo -n cp --remove-destination "$_d" "$_dtarget" 2>/dev/null || true
+                    else
+                        sudo -n cp "$_d" "$_dtarget" 2>/dev/null || true
+                    fi
+                done
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
                     [[ "$_f" == "update.sh" ]] && continue
