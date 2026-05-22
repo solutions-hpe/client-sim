@@ -178,20 +178,40 @@ get_gateway_status() {
   fi
 }
 #------------------------------------------------------------
+# Helper: map a script filename to its simulation config flag.
+# Returns "always" for infrastructure scripts that always show.
+#------------------------------------------------------------
+get_script_flag() {
+  case "$1" in
+    dns_fail.sh)    echo "$dns_fail"    ;;
+    download.sh)    echo "$download"    ;;
+    iperf.sh)       echo "$iperf"       ;;
+    ping_test.sh)   echo "$ping_test"   ;;
+    www_traffic.sh) echo "$www_traffic" ;;
+    *)              echo "always"       ;;
+  esac
+}
+#------------------------------------------------------------
 # Helper: simulation process table
 # Excluded scripts are infrastructure — we only show simulation workers.
+# Scripts whose config flag is "off" and are not running are hidden.
 #------------------------------------------------------------
 get_sim_status() {
   local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
   printf "  %s%-12s %-22s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
   printf "  %-12s %-22s %-10s\n" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
-    local script_name pid runtime
+    local script_name pid runtime script_flag
     script_name=$(basename "$s")
     for e in "${exclude[@]}"; do
       [[ "$script_name" == "$e" ]] && continue 2
     done
+    script_flag=$(get_script_flag "$script_name")
     pid=$(pgrep -f "$script_name" | head -n 1)
+    # Hide scripts whose flag is off and are not currently running
+    if [[ "$script_flag" != "always" && "$script_flag" != "on" && -z "$pid" ]]; then
+      continue
+    fi
     if [[ -n "$pid" ]]; then
       runtime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
       printf "  %s%-12s%s %-22s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$runtime"
@@ -240,20 +260,14 @@ while true; do
   col=0
   for i in "${!flag_labels[@]}"; do
     val="${flag_values[$i]}"
+    [[ "$val" != "on" ]] && continue
     label="${flag_labels[$i]}"
-    if [[ "$val" == "on" ]]; then
-      badge="${YLW}[ON] ${RST}"
-    else
-      badge="${GRN}[off]${RST}"
-    fi
-    printf "  %-14s %b   " "$label:" "$badge"
+    printf "  %-14s %b   " "$label:" "${YLW}[ON] ${RST}"
     (( col++ ))
-    if (( col % 2 == 0 )); then
-      printf "\n"
-    fi
+    if (( col % 2 == 0 )); then printf "\n"; fi
   done
-  # Newline if last row had only one column
-  (( ${#flag_labels[@]} % 2 != 0 )) && printf "\n"
+  (( col % 2 != 0 )) && printf "\n"
+  (( col == 0 )) && printf "  ${GRN}None active${RST}\n"
   echo ""
   printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
