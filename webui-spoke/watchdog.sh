@@ -14,13 +14,14 @@ PORT="${PORT:-8000}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 FAILURE_COUNT=0
 INSTALLED_VERSION=""
+SCHEME="http"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE"
 }
 
 load_port() {
-  local env_port env_branch env_inst_ver
+  local env_port env_branch env_inst_ver env_tls
 
   if [[ ! -f "$ENV_FILE" ]]; then
     return
@@ -39,6 +40,12 @@ load_port() {
   env_inst_ver=$(awk -F= '/^INSTALLER_VERSION=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
   if [[ -n "$env_inst_ver" ]]; then
     INSTALLED_VERSION="$env_inst_ver"
+  fi
+
+  # Read SPOKE_TLS to use the correct scheme for health checks
+  env_tls=$(awk -F= '/^SPOKE_TLS=/{print $2; exit}' "$ENV_FILE" | tr -d '"[:space:]')
+  if [[ "$env_tls" == "on" || "$env_tls" == "true" || "$env_tls" == "1" ]]; then
+    SCHEME="https"
   fi
 }
 
@@ -95,7 +102,7 @@ main() {
     reasons+=("systemd_inactive")
   fi
 
-  if ! curl -sf --max-time 5 "http://localhost:${PORT}${HEALTH_PATH}" >/dev/null; then
+  if ! curl -sf --max-time 5 --insecure "${SCHEME}://localhost:${PORT}${HEALTH_PATH}" >/dev/null; then
     reasons+=("health_check_failed")
   fi
 
