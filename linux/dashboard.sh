@@ -41,6 +41,7 @@ iperf_bw=$(get_value 'simulation' 'iperf_bw')
 auth_fail=$(get_value 'simulation' 'auth_fail')
 ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
 allow_offline=$(get_value 'simulation' 'allow_offline')
+web_server=$(get_value 'simulation' 'web_server')
 #------------------------------------------------------------
 # Device-specific settings
 #------------------------------------------------------------
@@ -66,7 +67,7 @@ apply_override() {
 }
 override_keys=(kill_switch sim_load github_repo repo_location site_based_ssid iperf_bw \
   wsite sim_phy ssid dhcp_fail dns_fail assoc_fail port_flap ping_test download iperf \
-  www_traffic ssidpw_fail auth_fail)
+  www_traffic ssidpw_fail auth_fail web_server)
 for key in "${override_keys[@]}"; do
   apply_override "$key"
 done
