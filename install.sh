@@ -318,7 +318,7 @@ PACKAGES=(
   "net-tools"
   "dnsutils"
   "smbclient"
-  "python3-websockets"
+  "python3-pip"
   "qemu-guest-agent"
   # Network-disruptive — install last so connection stays up for all prior downloads
   "rfkill"
@@ -358,6 +358,21 @@ done
 info "Running autoremove"
 apt_run autoremove -y --quiet=2
 ok "Core dependencies installed"
+
+# ── python3 websockets — apt first, pip3 fallback ───────────────────────────
+# python3-websockets can hang apt on some OS versions (post-install hook);
+# try apt with a short timeout, fall back to pip3 if it fails.
+info "Installing python3 websockets library"
+APT_TIMEOUT=60
+if apt_run install -y --quiet python3-websockets >>"$LOG" 2>&1; then
+  ok "Installed python3-websockets (apt)"
+else
+  warn "apt install of python3-websockets timed out or failed — trying pip3"
+  pip3 install --break-system-packages --quiet websockets >>"$LOG" 2>&1 \
+    && ok "Installed websockets (pip3)" \
+    || warn "Could not install websockets via pip3 (non-fatal, agent.sh will fail to start)"
+fi
+APT_TIMEOUT=300
 
 info "Restarting network stack"
 systemctl restart NetworkManager 2>/dev/null || true
