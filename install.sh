@@ -357,6 +357,13 @@ done
 info "Running autoremove"
 apt_run autoremove -y --quiet=2
 ok "Core dependencies installed"
+
+info "Restarting network stack"
+systemctl restart NetworkManager 2>/dev/null || true
+sleep 3
+systemctl restart networking 2>/dev/null || true
+sleep 3
+ok "Network stack restarted"
 end_phase
 
 ###############################################################################
