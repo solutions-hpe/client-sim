@@ -121,7 +121,7 @@ copy_local_files() {
     # retries the full sync rather than treating a partial copy as complete.
     if [[ "$_copy_ok" == true && -f "$src_dir/VERSION" ]]; then
         cp "$src_dir/VERSION" /usr/local/scripts/VERSION.new \
-            && mv /usr/local/scripts/VERSION.new /usr/local/scripts/VERSION \
+            && mv -f /usr/local/scripts/VERSION.new /usr/local/scripts/VERSION \
             || echo "ERROR: VERSION commit failed" | tee -a "$debug" "$log"
     elif [[ -f "$src_dir/VERSION" ]]; then
         echo "Skipping VERSION commit — one or more script copies failed" | tee -a "$debug" "$log"
@@ -134,7 +134,7 @@ copy_local_files() {
     if [[ -f "$src_dir/update.sh" ]]; then
         cp "$src_dir/update.sh" /usr/local/scripts/update.sh.new \
             && chmod a+rx /usr/local/scripts/update.sh.new \
-            && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+            && mv -f /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
             || true
     fi
     chmod a+rx /usr/local/scripts/*.sh 2>/dev/null || true
@@ -212,7 +212,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                     echo "simulation.conf changed — updating" | tee -a "$debug" "$log"
                     # Atomic write: mv is atomic on the same filesystem, prevents
                     # simulation.sh reading a partial file during rapid_update cycles
-                    mv -- "$_cfg_tmp" /usr/local/scripts/simulation.conf
+                    mv -f -- "$_cfg_tmp" /usr/local/scripts/simulation.conf
                 else
                     echo "simulation.conf unchanged" | tee -a "$debug"
                 fi
@@ -230,7 +230,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             if [[ "$_ov_code" == "200" && -s "$_ov_tmp" ]]; then
                 if ! diff -q "$_ov_tmp" /usr/local/scripts/user-overrides.conf >/dev/null 2>&1; then
                     echo "user-overrides.conf changed — updating" | tee -a "$debug" "$log"
-                    mv -- "$_ov_tmp" /usr/local/scripts/user-overrides.conf
+                    mv -f -- "$_ov_tmp" /usr/local/scripts/user-overrides.conf
                 else
                     echo "user-overrides.conf unchanged" | tee -a "$debug"
                 fi
@@ -461,7 +461,7 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
             if [[ -f "linux/update.sh" ]]; then
                 cp linux/update.sh /usr/local/scripts/update.sh.new \
                     && chmod a+rx /usr/local/scripts/update.sh.new \
-                    && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+                    && mv -f /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
                     || true
             fi
             chmod a+rx /usr/local/scripts/*.sh 2>/dev/null || true
