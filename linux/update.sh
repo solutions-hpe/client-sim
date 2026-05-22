@@ -83,6 +83,10 @@ copy_local_files() {
             && echo "Updated $_dname" | tee -a "$debug" \
             || echo "WARNING: could not update $_dname" | tee -a "$debug"
     done
+    # Remove any stale nm-applet.desktop we may have previously deployed —
+    # the system package (network-manager-gnome) already provides one in
+    # /etc/xdg/autostart/. Having both causes a duplicate tray icon.
+    rm -f "$_user_autostart/nm-applet.desktop"
     (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
@@ -422,6 +426,7 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 for _d in "${desktop_files[@]}"; do
                     cp -f "$_d" "$_user_autostart/$_d" 2>/dev/null || true
                 done
+                rm -f "$_user_autostart/nm-applet.desktop"
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
                     [[ "$_f" == "update.sh" ]] && continue

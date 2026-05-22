@@ -1,6 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Network Manager Applet
-Comment=Network connection tray icon
-Exec=nm-applet
-NoDisplay=true
