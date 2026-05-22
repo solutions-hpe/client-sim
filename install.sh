@@ -338,27 +338,25 @@ for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
   [[ "$INSTALLED_COUNT" -gt "$TOTAL_PKGS" ]] && INSTALLED_COUNT="$TOTAL_PKGS"
 
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
-  info "Installing: ${BATCH[*]}"
-  info "Batch install start [$(ts)]: ${BATCH[*]}"
+  info "Installing ($INSTALLED_COUNT/$TOTAL_PKGS): ${BATCH[*]}"
   if ! apt_run install -y --quiet \
       -o Dpkg::Options::="--force-confdef" \
       -o Dpkg::Options::="--force-confold" \
       "${BATCH[@]}"; then
-    warn "Batch install failed or timed out: ${BATCH[*]} — retrying individually"
+    warn "Batch install failed — retrying individually"
     for pkg in "${BATCH[@]}"; do
-      info "Retrying individual install: $pkg"
+      info "  Retrying: $pkg"
       APT_TIMEOUT=180
       apt_run install -y --quiet \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
         "$pkg" \
-        && ok "Installed: $pkg" \
-        || warn "Failed to install: $pkg (non-fatal, continuing)"
+        && ok "  Installed: $pkg" \
+        || warn "  Failed: $pkg (non-fatal, continuing)"
       APT_TIMEOUT=300
     done
-    info "Installing: ${BATCH[*]}"
   fi
-  info "Batch install end   [$(ts)]: ${BATCH[*]}"
+  ok "Done ($INSTALLED_COUNT/$TOTAL_PKGS)"
 done
 info "Running autoremove"
 apt_run autoremove -y --quiet=2
