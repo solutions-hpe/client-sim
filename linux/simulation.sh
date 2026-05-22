@@ -418,13 +418,7 @@ if [ "$kill_switch" != "on" ]; then
    #Running ping simulation
    #------------------------------------------------------------
    if [[ "$ping_test" == "on" ]]; then
-    echo $(date) | tee -a ${LOG_FILE}
-    echo ------------------------------| tee -a ${LOG_FILE}
-    echo Ping Address: $ping_address | tee -a ${LOG_FILE}
-    echo Ping Payload: $rn_ping_size | tee -a ${LOG_FILE}
-    echo Ping Count: $rn | tee -a ${LOG_FILE}
-    echo ------------------------------| tee -a ${LOG_FILE}
-    ping -c $rn $ping_address -s $rn_ping_size &
+    run_simulation "ping_test.sh" 30
    fi
    #------------------------------------------------------------
    #End Ping Simulation
