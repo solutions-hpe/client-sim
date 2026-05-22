@@ -222,6 +222,7 @@ HUB_RELAY_KEYS = {
     "relay_spoke_hostname",
     "relay_spoke_name",
     "hub_tls_verify",
+    "hub_isolation_timeout",  # Allow the isolation timeout through the relay settings gate because operators configure this safeguard from the Hub setup card.
 }
 HUB_LOCAL_ALLOWED_KEYS = HUB_RELAY_KEYS | {"relay_tenant_hint"}
 HUB_NOTIFICATION_KEY_MAP = {
@@ -773,6 +774,7 @@ settings: dict[str, Any] = {
     "relay_server_url": _persisted.get("relay_server_url", _persisted.get("relay_url", "")),
     "hub_tls_verify": _normalize_relay_enabled(_persisted.get("hub_tls_verify", "off")),
     "hub_managed": bool(_persisted.get("hub_managed", False)),
+    "hub_isolation_timeout": int(_persisted.get("hub_isolation_timeout", 3600)),  # Persist the configurable hub isolation window in seconds so the safeguard survives restarts.
     "relay_spoke_name": _persisted.get("relay_spoke_name", ""),
     "relay_tenant_hint": _persisted.get("relay_tenant_hint", _persisted.get("relay_tenant_id", "")),
     "relay_api_key": _persisted.get("relay_api_key", _persisted.get("relay_token", "")),
@@ -892,6 +894,7 @@ def _get_cached_settings() -> dict[str, Any]:
         "session_timeout_minutes": int(settings.get("session_timeout_minutes", 30)),
         "github_token_configured": bool(settings.get("github_token")),
         "hub_managed": bool(settings.get("hub_managed", False)),
+        "hub_isolation_timeout": int(settings.get("hub_isolation_timeout", 3600)),  # Expose the stored isolation timeout so the setup form can render the current safeguard value.
         "central_api": _public_central_api_settings(),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
@@ -2217,6 +2220,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["update_checker"] = asyncio.create_task(check_for_update())
     background_tasks["webui_refresh"] = asyncio.create_task(periodic_webui_refresh())
     background_tasks["relay"] = asyncio.create_task(relay_loop())
+    background_tasks["hub_isolation_monitor"] = asyncio.create_task(hub_isolation_monitor())  # Watch the timeout in the background so the UI updates when isolation flips without waiting for another relay message.
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
@@ -2772,6 +2776,7 @@ class SettingsUpdate(BaseModel):
     relay_spoke_id: str | None = None
     relay_tenant_id: str | None = None
     relay_poll_interval: int | None = None
+    hub_isolation_timeout: int | None = None  # Accept a caller-supplied isolation timeout so the setup UI can tune when stale hub contact pauses config pushes.
     admin_password: str | None = None
     session_timeout_minutes: int | None = None
     auth_provider: str | None = None
@@ -4127,13 +4132,51 @@ async def broadcast_full_state() -> None:
     await broadcast({"type": "full_state", "clients": await current_clients()})
 
 
-def _relay_status_payload() -> dict[str, Any]:
-    return dict(relay_state)
+def _hub_isolated() -> bool:  # Compute whether hub-driven config pushes must pause so every safeguard check shares one helper.
+    return bool(  # Evaluate the isolation rule in one expression so every caller uses the same last-sync timeout test.
+        settings.get("hub_managed")  # Only hub-managed spokes should self-protect because self-managed spokes do not accept hub config pushes.
+        and settings.get("relay_enabled") == "on"  # Only an enabled relay can be isolated because disabled hub connectivity should not trigger this safeguard.
+        and relay_state.get("last_sync")  # A real last check-in is required so the timeout compares against known hub contact instead of guessing.
+        and (time.time() - float(relay_state["last_sync"])) > int(settings.get("hub_isolation_timeout", 3600))  # Enter isolation after the configured no-contact window so stale hubs stop changing live config.
+    )  # Share one boolean source of truth so every relay path evaluates isolation consistently.
+
+
+def _relay_status_payload() -> dict[str, Any]:  # Build the relay status payload once so REST and websocket updates expose identical isolation data.
+    return {  # Merge relay, spoke, and isolation fields so the browser can render complete hub status from one payload.
+        **dict(relay_state),  # Preserve the existing relay status fields so current UI behavior keeps working.
+        "spoke_id": settings.get("relay_spoke_id", ""),  # Include the spoke identifier so live relay broadcasts keep the setup status grid populated.
+        "api_key_configured": bool(settings.get("relay_api_key")),  # Include API key state so relay status broadcasts do not clear the approval indicator.
+        "spoke_name": settings.get("relay_spoke_name", ""),  # Include the display name so relay consumers always have the active spoke label.
+        "hub_isolated": _hub_isolated(),  # Publish the current isolation flag so the browser can pause hub-push messaging in the UI immediately.
+        "hub_last_checkin": relay_state.get("last_sync"),  # Publish the last successful check-in timestamp so the UI and telemetry share one source of truth.
+        "hub_isolation_timeout": int(settings.get("hub_isolation_timeout", 3600)),  # Publish the configured timeout so clients can explain why isolation was triggered.
+    }  # Return one enriched relay payload so every broadcast and endpoint exposes isolation details consistently.
 
 
 async def _broadcast_relay_state() -> None:
     _save_relay_state()
     await broadcast({"type": "relay_status", **_relay_status_payload()})
+
+
+def _hub_config_isolation_result(task_type: str) -> dict[str, Any]:  # Build a consistent skip result so every blocked hub config push is acknowledged the same way.
+    return {  # Return a structured ack payload so the hub can tell a deliberate isolation skip from a transport failure.
+        "success": False,  # Mark the ack as non-success so the hub can distinguish a safeguard skip from an applied config change.
+        "skipped": True,  # Flag the result as skipped so operators can see the spoke deliberately ignored the push.
+        "reason": "hub_isolated",  # Identify the exact safeguard reason so downstream tooling can explain the skip clearly.
+        "task_type": task_type,  # Echo the original command type so the hub knows which config action was paused.
+        "detail": "Hub isolated — config pushes paused until contact resumes",  # Explain the safeguard outcome so the hub UI does not look like a silent failure.
+        "timestamp": datetime.now(timezone.utc).isoformat(),  # Stamp the skip result so operators can correlate it with outage timing.
+    }  # Return one reusable skip payload so every blocked hub config ack stays consistent.
+
+
+async def hub_isolation_monitor() -> None:  # Poll isolation state so the UI updates even when no relay message arrives to trigger a broadcast.
+    last_isolated = _hub_isolated()  # Capture the initial state so the monitor only broadcasts when isolation actually changes.
+    while True:  # Keep watching in the background so timeout expiry and recovery both reach the UI automatically.
+        await asyncio.sleep(60)  # Re-check once per minute so the safeguard flips even when no hub message arrives to trigger a relay broadcast.
+        current_isolated = _hub_isolated()  # Recompute isolation from last_sync so timeout expiry and recovery both use the live source of truth.
+        if current_isolated != last_isolated:  # Only broadcast on state changes so the monitor updates the UI without creating noisy relay traffic.
+            last_isolated = current_isolated  # Remember the new state so the next loop only announces another real transition.
+            await _broadcast_relay_state()  # Push the changed isolation state to browsers immediately so banners and status text stay accurate.
 
 
 async def _broadcast_update_state() -> None:
@@ -4339,6 +4382,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
         "hostname": socket.gethostname(),
         "clients": clients_snapshot,
         "timestamp": time.time(),
+        "hub_isolated": _hub_isolated(),  # Export the current isolation state so the hub can see when this spoke has paused config pushes.
+        "hub_last_checkin": relay_state.get("last_sync"),  # Export the last successful check-in timestamp so the hub can reason about isolation timing.
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
         "proxmox": {
             "connected": bool(proxmox_state.get("connected", False)),
@@ -4899,6 +4944,12 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                 await ack_fn(cmd_id, "executed", _hub_reseed_block_result())
             continue
 
+        if cmd_type in {"config_update", "config_clear"} and _hub_isolated():  # Skip new hub config pushes during isolation so the spoke keeps its current config until hub contact recovers.
+            result = _hub_config_isolation_result(cmd_type)  # Reuse one explicit skip payload so the hub can see the safeguard blocked the command intentionally.
+            if cmd_id:  # Only ack when the hub supplied a command ID so skipped pushes do not linger in the inbox.
+                await ack_fn(cmd_id, "executed", result)  # Ack the skipped command so the hub inbox does not keep replaying a push we refuse while isolated.
+            continue  # Stop before any config mutation because isolation means the current config must keep running unchanged.
+
         if cmd_type == "config_update":
             result = await _apply_hub_config(payload_data)
             if cmd_id:
@@ -4909,6 +4960,7 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
             settings["hub_managed"] = False
             _save_settings()
             await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+            await _broadcast_relay_state()  # Broadcast the cleared hub-managed state so any isolation banner disappears as soon as config control returns locally.
             logger.info("Hub config cleared — spoke is now self-managed")
             if cmd_id:
                 await ack_fn(cmd_id, "executed", {
@@ -5059,6 +5111,8 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
     raw_config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
     config_payload = raw_config if isinstance(raw_config, dict) else {}
     config_version = int(payload.get("config_version") or payload.get("__config_version") or 0)
+    if _hub_isolated():  # Refuse fresh hub config while isolated so the spoke keeps running its last known-good config during hub outages.
+        return _hub_config_isolation_result("config_update")  # Return an explicit skip result so callers can ack the safeguard instead of pretending the config applied.
     changed: list[str] = []
     settings["hub_managed"] = True
 
@@ -5245,6 +5299,7 @@ async def relay_sync_once() -> None:
         async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc:
             telemetry_resp = await hc.post(f"{base}/telemetry", json=telemetry, headers=headers)
             telemetry_resp.raise_for_status()
+            relay_state.update({"connected": True, "last_sync": time.time(), "error": None})  # Count the successful telemetry POST immediately so isolation clears before we evaluate any newly fetched hub commands.
             resp = await hc.get(f"{base}/inbox", headers=headers)
             # In centralized mode, get Central data from hub instead of polling directly
             if settings.get("hub_aruba_polling_mode") == "centralized":
@@ -5307,6 +5362,18 @@ async def relay_sync_once() -> None:
                         ack_resp.raise_for_status()
                 continue
 
+            if cmd_type in {"config_update", "config_clear"} and _hub_isolated():  # Skip new hub config pushes during isolation so the spoke freezes hub-driven changes until contact is healthy again.
+                result = _hub_config_isolation_result(cmd_type)  # Build one consistent safeguard ack so the hub can see the command was intentionally paused.
+                if cmd_id:  # Only send an ack when the hub gave us an ID so skipped commands are retired cleanly.
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:  # Open a short-lived ack client so the skipped command is recorded immediately by the hub.
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={  # Post the skip result so the hub knows isolation paused this config push on purpose.
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue  # Stop before any config mutation because isolated spokes must keep their current config unchanged.
+
             # ── config_update: apply hub-pushed config and ack ─────────────
             if cmd_type == "config_update":
                 result = await _apply_hub_config(payload_data)
@@ -5324,6 +5391,7 @@ async def relay_sync_once() -> None:
                 settings["hub_managed"] = False
                 _save_settings()
                 await broadcast({"type": "settings_update", "settings": await api_settings_get()})
+                await _broadcast_relay_state()  # Broadcast the cleared hub-managed state so isolation status resets immediately after the hub releases control.
                 logger.info("Hub config cleared — spoke is now self-managed")
                 if cmd_id:
                     async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
@@ -5517,7 +5585,7 @@ async def relay_sync_once() -> None:
             await broadcast({"type": "commands_update", "commands": serialized_commands})
             await _push_pending_commands_for_targets(queued_targets)
 
-        relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+        relay_state.update({"connected": True, "error": None})  # Keep the relay marked healthy after processing commands because last_sync was already set at the successful telemetry POST.
         _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response else None
@@ -5623,7 +5691,7 @@ async def relay_ws_loop() -> None:
                     while True:
                         telemetry = await _build_relay_telemetry_payload(spoke_id)
                         await send_json({"type": "telemetry", "payload": telemetry})
-                        relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+                        relay_state.update({"connected": True, "error": None})  # Mark the websocket live on send while waiting for telemetry_ack because only the ack should advance last_sync.
                         _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
                         await _broadcast_relay_state()
                         await asyncio.sleep(interval)
@@ -6696,6 +6764,11 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["relay_poll_interval"] = _clamp_relay_interval(update.relay_poll_interval)
         relay_config_changed = True
 
+    if update.hub_isolation_timeout is not None:  # Accept timeout edits from the setup UI so operators can tune when stale hub contact pauses pushes.
+        settings["hub_isolation_timeout"] = max(300, min(86400, int(update.hub_isolation_timeout)))  # Clamp the safeguard window so operators stay within the supported 5-minute to 24-hour range.
+        relay_config_changed = True  # Treat timeout edits as relay changes so isolation status is re-broadcast immediately when the threshold moves.
+        _save_settings()  # Persist the new timeout right away so the safeguard survives crashes even before the handler reaches its shared save call.
+
     if update.admin_password is not None:
         settings["admin_password"] = update.admin_password.strip()
         _spoke_sessions.clear()
@@ -7090,13 +7163,8 @@ async def api_repo_status() -> dict[str, Any]:
 
 
 @app.get("/api/relay/status")
-async def api_relay_status_endpoint() -> dict[str, Any]:
-    return {
-        **relay_state,
-        "spoke_id": settings.get("relay_spoke_id", ""),
-        "api_key_configured": bool(settings.get("relay_api_key")),
-        "spoke_name": settings.get("relay_spoke_name", ""),
-    }
+async def api_relay_status_endpoint() -> dict[str, Any]:  # Serve the enriched relay payload so on-demand status checks match websocket broadcasts exactly.
+    return _relay_status_payload()  # Reuse the shared relay payload so the REST endpoint matches broadcasted isolation, spoke, and check-in fields exactly.
 
 
 @app.get("/api/relay/diag")
@@ -9224,6 +9292,7 @@ async def api_init() -> dict[str, Any]:
             "relay_server_url": settings.get("relay_server_url", ""),
             "hub_tls_verify": settings.get("hub_tls_verify", "off"),
             "hub_managed": bool(settings.get("hub_managed", False)),
+            "hub_isolation_timeout": int(settings.get("hub_isolation_timeout", 3600)),  # Include the timeout in init settings so the setup form has the correct safeguard value before a separate settings fetch finishes.
         },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),

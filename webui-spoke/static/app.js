@@ -73,6 +73,8 @@ let currentSettings = {
   relay_spoke_name: '',
   relay_spoke_id: '',
   relay_poll_interval: 60,
+  hub_isolation_timeout: 3600, // Keep the server-side timeout in seconds so relay status rendering can reuse the authoritative safeguard value.
+  hub_isolation_timeout_min: 60, // Keep the setup default in minutes so the Hub form shows the required 60-minute timeout before settings load.
   relay_api_key_configured: false,
   repo_sync_interval: 300,
   usb_vidpids: '[]',
@@ -341,6 +343,22 @@ function applyGkillSwitch(value) {
   renderSimDisabledBanner();
 }
 
+function updateHubIsolationBanner(isolated, lastSyncTs, timeoutSecs) { // Toggle the header isolation banner so operators immediately know hub config pushes are paused.
+  const banner = document.getElementById('hub-isolation-banner'); // Look up the dedicated banner element so relay updates can reuse one rendering path.
+  if (!banner) return; // Exit safely when the header element is missing so status updates never throw.
+  if (isolated) { // Render the warning only while isolated because recovery should remove the alert automatically.
+    const effectiveTimeoutSecs = Number.isFinite(Number(timeoutSecs)) ? Number(timeoutSecs) : 3600; // Fall back to the default timeout so the warning stays meaningful even if the server omits the field.
+    const minutesAgo = lastSyncTs ? Math.max(1, Math.floor((Date.now() / 1000 - Number(lastSyncTs)) / 60)) : Math.max(1, Math.floor(effectiveTimeoutSecs / 60)); // Convert the last check-in timestamp into elapsed minutes so the banner matches the requested copy.
+    banner.textContent = `⚠ Hub isolated — last contact ${minutesAgo}m ago. Config pushes paused.`; // Show the required warning text so operators know the spoke froze hub-driven config changes intentionally.
+    banner.title = `Hub config pushes pause after ${Math.max(5, Math.round(effectiveTimeoutSecs / 60))} minutes without successful hub contact.`; // Add hover context so operators can see which timeout triggered the safeguard.
+    banner.style.display = ''; // Reveal the banner while isolated so the warning is visible from every tab.
+    return; // Stop after rendering the warning because the recovery hide path below should not run.
+  } // End the isolated branch so the recovery cleanup below is explicit.
+  banner.textContent = ''; // Clear stale warning text on recovery so old outage data does not linger in the header.
+  banner.title = ''; // Clear the tooltip on recovery so the header reflects the healthy state.
+  banner.style.display = 'none'; // Hide the banner after recovery so the header returns to its normal layout.
+} // Finish the banner helper so every relay status update can reuse the same isolation rendering logic.
+
 function setRelayStatus(data = {}) {
   const stateText = document.getElementById('relay-state-text');
   const lastTime = document.getElementById('relay-last-time');
@@ -348,18 +366,22 @@ function setRelayStatus(data = {}) {
   const dot = document.getElementById('relay-indicator');
   const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
   const apikeyStatus = document.getElementById('relay-apikey-status');
+  const isolationStatus = document.getElementById('relay-isolation-status'); // Cache the setup-grid isolation field so relay status updates can show the safeguard state alongside other hub health details.
+  const lastCheckin = data.hub_last_checkin ?? data.last_sync; // Prefer the explicit hub check-in timestamp so the setup grid and banner share the same isolation source of truth.
 
   const isNameConflict = data.registration_status === 'name_conflict' || (data.error || '').startsWith('name_conflict:');
   if (stateText) stateText.textContent = !data.enabled ? 'Disabled' : data.connected ? '✓ Connected' : isNameConflict ? '✗ Name conflict' : data.error ? '✗ Error' : data.registration_status === 'pending' ? 'Pending approval' : 'Enabled';
-  if (lastTime) lastTime.textContent = data.last_sync ? new Date(data.last_sync * 1000).toLocaleTimeString() : '—';
+  if (lastTime) lastTime.textContent = lastCheckin ? new Date(lastCheckin * 1000).toLocaleTimeString() : '—'; // Show the last successful hub check-in time so operators can see when isolation started counting from.
   if (lastError) lastError.textContent = data.error || '—';
-  if (spokeIdDisplay) spokeIdDisplay.textContent = data.spoke_id || data.spoke_id || '—';
+  if (spokeIdDisplay) spokeIdDisplay.textContent = data.spoke_id || currentSettings.relay_spoke_id || '—'; // Preserve the known spoke ID during live updates so relay broadcasts never blank the setup status grid.
   if (apikeyStatus) apikeyStatus.textContent = data.api_key_configured ? '✓ Received' : 'Pending approval';
+  if (isolationStatus) isolationStatus.textContent = data.hub_isolated ? '⚠ Isolated' : 'Normal'; // Show whether hub pushes are paused so the setup grid reflects the safeguard state immediately.
+  updateHubIsolationBanner(data.hub_isolated, lastCheckin, data.hub_isolation_timeout); // Sync the header banner with the latest relay isolation data so every UI surface updates together.
 
   if (dot) {
     dot.className = data.connected ? 'ind-dot green' : 'ind-dot red';
     dot.title = data.connected
-      ? `Hub connected — last sync: ${new Date((data.last_sync || 0) * 1000).toLocaleTimeString()}`
+      ? `Hub connected — last sync: ${new Date((lastCheckin || 0) * 1000).toLocaleTimeString()}` // Reuse the last successful check-in timestamp in the tooltip so the header reflects the same time shown in setup.
       : `Hub disconnected: ${data.error || 'unknown'}`;
   }
 }
@@ -453,6 +475,7 @@ const relaySpokeName = document.getElementById('relay-spoke-name-input');
 const relayServerUrlInput = document.getElementById('relay-server-url-input');
 const relayTenantHintInput = document.getElementById('relay-tenant-hint-input');
 const relayMsg = document.getElementById('relay-message');
+const hubIsolationTimeoutInput = document.getElementById('hub-isolation-timeout-input'); // Cache the isolation timeout input so the Hub setup card can load and save the safeguard threshold.
 
 // Notifications + sync interval
 const syncIntervalInput  = document.getElementById('sync-interval-input');
@@ -610,6 +633,8 @@ function mergeSettings(next = {}) {
     relay_spoke_name: next.relay_spoke_name ?? currentSettings.relay_spoke_name ?? '',
     relay_spoke_id: next.relay_spoke_id ?? currentSettings.relay_spoke_id ?? '',
     relay_poll_interval: next.relay_poll_interval ?? currentSettings.relay_poll_interval ?? 60,
+    hub_isolation_timeout: next.hub_isolation_timeout ?? currentSettings.hub_isolation_timeout ?? ((next.hub_isolation_timeout_min ?? currentSettings.hub_isolation_timeout_min ?? 60) * 60), // Keep the server timeout in seconds so relay payloads and saves share one authoritative value.
+    hub_isolation_timeout_min: next.hub_isolation_timeout_min ?? (next.hub_isolation_timeout != null ? Math.max(5, Math.round(Number(next.hub_isolation_timeout) / 60)) : currentSettings.hub_isolation_timeout_min ?? 60), // Maintain a minutes copy so the setup form can render and save the timeout without repeated conversion boilerplate.
     relay_api_key_configured: next.relay_api_key_configured ?? currentSettings.relay_api_key_configured ?? false,
     repo_sync_interval: next.repo_sync_interval ?? currentSettings.repo_sync_interval ?? 300,
     usb_vidpids: next.usb_vidpids ?? currentSettings.usb_vidpids ?? '[]',
@@ -1093,6 +1118,7 @@ function applySettingsToUI(s) {
   setInputValueIfIdle(relayServerUrlInput, settings.relay_server_url || '');
   setInputValueIfIdle(relaySpokeName, settings.relay_spoke_name || '');
   setInputValueIfIdle(relayTenantHintInput, settings.relay_tenant_hint || '');
+  setInputValueIfIdle(hubIsolationTimeoutInput, String(Math.max(5, Math.round(Number(settings.hub_isolation_timeout ?? ((settings.hub_isolation_timeout_min ?? 60) * 60)) / 60)))); // Convert the stored seconds timeout into minutes so the Hub setup input shows the editable safeguard value.
   const spokeIdDisplay = document.getElementById('relay-spoke-id-display');
   if (spokeIdDisplay) spokeIdDisplay.textContent = settings.relay_spoke_id || '—';
   const apikeyStatus = document.getElementById('relay-apikey-status');
@@ -4975,6 +5001,7 @@ async function _autoSaveRelay() {
     relay_server_url: relayServerUrlInput?.value?.trim() || '',
     relay_spoke_name: relaySpokeName?.value?.trim() || '',
     relay_tenant_hint: relayTenantHintInput?.value?.trim() || '',
+    hub_isolation_timeout: (parseInt(hubIsolationTimeoutInput?.value, 10) || 60) * 60, // Convert the minutes input back to seconds so the API stores the safeguard in the server's source-of-truth unit.
   };
   const pskVal = pskInput?.value?.trim();
   if (pskVal) payload.relay_onboarding_psk = pskVal;
@@ -4994,8 +5021,8 @@ async function _autoSaveRelay() {
 }
 
 if (relayEnabledSelect) relayEnabledSelect.addEventListener('change', _autoSaveRelay);
-[relayServerUrlInput, relaySpokeName, relayTenantHintInput].forEach((el) => {
-  if (el) el.addEventListener('blur', _autoSaveRelay);
+[relayServerUrlInput, relaySpokeName, relayTenantHintInput, hubIsolationTimeoutInput].forEach((el) => { // Include the timeout input so leaving that field saves the safeguard alongside the other hub settings.
+  if (el) el.addEventListener('blur', _autoSaveRelay); // Auto-save the timeout on blur so the setup form persists the safeguard with the same behavior as the other hub fields.
 });
 
 // Registration diagnostics button

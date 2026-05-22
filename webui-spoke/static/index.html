@@ -62,6 +62,7 @@
         </div>
         <span id="relay-indicator" class="ind-dot grey" title="Hub not configured" style="display:none;"></span>
         <span id="gkill-indicator" class="gkill-banner" style="display:none;"></span>
+        <!-- Shows when hub config pushes are paused so operators can spot isolation immediately from the header. --><span id="hub-isolation-banner" class="gkill-banner" style="display:none;background:#b45309;color:#fff;"></span>
         <div class="ws-status" aria-live="polite">
           <span id="ws-dot" class="status-dot offline"></span>
           <span class="repo-label">API Status:</span>
@@ -1094,6 +1095,7 @@
                     <input id="relay-tenant-hint-input" type="text" data-key="relay_tenant_hint" placeholder="e.g. abc123-tenant-id">
                   </div>
                 </div>
+                <!-- Adds the isolation timeout control so operators can tune when missing hub contact pauses future config pushes. --><div class="form-row"><div class="form-group"><label>Hub Isolation Timeout (min) <span class="form-hint-inline">(pause hub config pushes if unreachable longer than this)</span></label><input id="hub-isolation-timeout-input" type="number" min="5" max="1440" data-key="hub_isolation_timeout_min" placeholder="60"></div></div>
                 <div class="form-row">
                   <div class="form-group" style="flex:2;">
                     <label>Onboarding PSK <span class="form-hint-inline">(optional — enables auto-approval without superadmin review)</span></label>
@@ -1121,6 +1123,7 @@
                   <span class="setup-status-label">Last Sync</span>
                   <span id="relay-last-time" class="setup-status-value">—</span>
                 </div>
+                <!-- Shows whether the spoke is currently isolating hub pushes so the setup status grid explains paused config updates. --><div class="setup-status-item"><span class="setup-status-label">Isolation</span><span id="relay-isolation-status" class="setup-status-value">—</span></div>
                 <div class="setup-status-item">
                   <span class="setup-status-label">Last Error</span>
                   <span id="relay-last-error" class="setup-status-value muted">—</span>
