@@ -329,34 +329,28 @@ if ! $IS_PI; then
   PACKAGES+=("raspberrypi-ui-mods" "raspberrypi-artwork" "lightdm" "lxde-core" "xorg")
 fi
 TOTAL_PKGS="${#PACKAGES[@]}"
-BATCH_SIZE=4
 INSTALLED_COUNT=0
 
-for (( i=0; i<TOTAL_PKGS; i+=BATCH_SIZE )); do
-  BATCH=( "${PACKAGES[@]:$i:$BATCH_SIZE}" )
-  INSTALLED_COUNT=$(( i + ${#BATCH[@]} ))
-  [[ "$INSTALLED_COUNT" -gt "$TOTAL_PKGS" ]] && INSTALLED_COUNT="$TOTAL_PKGS"
-
+for pkg in "${PACKAGES[@]}"; do
+  INSTALLED_COUNT=$(( INSTALLED_COUNT + 1 ))
   phase_step "$INSTALLED_COUNT" "$TOTAL_PKGS"
-  info "Installing ($INSTALLED_COUNT/$TOTAL_PKGS): ${BATCH[*]}"
-  if ! apt_run install -y --quiet \
+  info "Installing ($INSTALLED_COUNT/$TOTAL_PKGS): $pkg"
+  if apt_run install -y --quiet \
       -o Dpkg::Options::="--force-confdef" \
       -o Dpkg::Options::="--force-confold" \
-      "${BATCH[@]}"; then
-    warn "Batch install failed — retrying individually"
-    for pkg in "${BATCH[@]}"; do
-      info "  Retrying: $pkg"
-      APT_TIMEOUT=180
-      apt_run install -y --quiet \
-        -o Dpkg::Options::="--force-confdef" \
-        -o Dpkg::Options::="--force-confold" \
-        "$pkg" \
-        && ok "  Installed: $pkg" \
-        || warn "  Failed: $pkg (non-fatal, continuing)"
-      APT_TIMEOUT=300
-    done
+      "$pkg"; then
+    ok "Installed: $pkg"
+  else
+    warn "Failed: $pkg — retrying"
+    APT_TIMEOUT=180
+    apt_run install -y --quiet \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      "$pkg" \
+      && ok "Installed: $pkg" \
+      || warn "Could not install: $pkg (non-fatal, continuing)"
+    APT_TIMEOUT=300
   fi
-  ok "Done ($INSTALLED_COUNT/$TOTAL_PKGS)"
 done
 info "Running autoremove"
 apt_run autoremove -y --quiet=2
