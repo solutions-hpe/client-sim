@@ -304,23 +304,25 @@ else
 fi
 
 PACKAGES=(
+  # Safe — no network impact
   "gnome-terminal"
   "wget"
-  "$KERNEL_HEADERS"
   "git"
-  "smbclient"
+  "build-essential"
+  "$KERNEL_HEADERS"
+  "dkms"
   "rsyslog"
-  "rfkill"
   "firefox-esr"
   "iperf3"
-  "dkms"
-  "build-essential"
   "net-tools"
   "dnsutils"
+  "smbclient"
+  "python3-websockets"
+  "qemu-guest-agent"
+  # Network-disruptive — install last so connection stays up for all prior downloads
+  "rfkill"
   "network-manager"
   "network-manager-gnome"
-  "qemu-guest-agent"
-  "python3-websockets"
 )
 
 # Pi already has a desktop environment (PIXEL/LXDE) — don't replace it
