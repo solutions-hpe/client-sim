@@ -11,7 +11,7 @@ log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-agent.log"
 
 mkdir -p "$(dirname "$HEALTH_FILE")"
-sudo touch "$debug" "$log" 2>/dev/null && sudo chmod a+w "$debug" "$log" 2>/dev/null || true
+touch "$debug" "$log" 2>/dev/null && chmod a+w "$debug" "$log" 2>/dev/null || true
 
 echo "Agent Script $(date)" | tee -a "$debug"
 
@@ -108,8 +108,13 @@ run_command() {
       fi
       ;;
     update_now)
-      bash /usr/local/scripts/update.sh
-      message="Update triggered"
+      if bash /usr/local/scripts/update.sh; then
+        message="Update completed successfully"
+      else
+        status="failed"
+        message="Update failed — check debug-agent.log"
+        echo "update_now: update.sh exited non-zero" | tee -a "$debug"
+      fi
       ;;
     kill_switch)
       ks_val="${arg_value:-on}"

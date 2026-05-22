@@ -253,6 +253,7 @@ function Connect-Wifi {
     Write-SimDebug "Attempting to connect to $targetSsid"
     netsh wlan add profile filename="$profilePath" user=all 2>&1 | Tee-Object -FilePath $debugPath -Append | Out-Null
     netsh wlan connect name="$targetSsid" interface="$($adapter.Name)" 2>&1 | Tee-Object -FilePath $debugPath -Append | Out-Null
+    Remove-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
 
     if ((Get-ConnectedSsid) -eq $targetSsid) {

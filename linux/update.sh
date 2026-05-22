@@ -429,7 +429,9 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 _user_autostart="$HOME/.config/autostart"
                 mkdir -p "$_user_autostart"
                 for _d in "${desktop_files[@]}"; do
-                    cp -f "$_d" "$_user_autostart/$_d" 2>/dev/null || true
+                    cp -f "$_d" "$_user_autostart/$_d" \
+                        && echo "Updated $_d" | tee -a "$debug" \
+                        || echo "WARNING: could not deploy $_d to autostart" | tee -a "$debug"
                 done
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do

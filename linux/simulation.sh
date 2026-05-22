@@ -299,8 +299,7 @@ mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
-ping -c2 $dfgw
-if [[ $? -eq 0 ]] && [[ "$sim_phy" == "wireless" ]] && [[ -n ${wladapter} ]]; then
+if ping -c2 "$dfgw" && [[ "$sim_phy" == "wireless" ]] && [[ -n "${wladapter}" ]]; then
  echo Successful network connection | tee -a ${LOG_FILE}
 else
   echo Network connection failed | tee -a ${LOG_FILE}
@@ -367,8 +366,7 @@ if [ "$kill_switch" != "on" ]; then
    #If SSID Incorrect Password Sim is not triggered then check
    #for the other simualtions
    #------------------------------------------------------------
-   ping -c2 $dfgw
-    if [ $? -ne 0 ]; then
+   if ! ping -c2 "$dfgw"; then
      echo Attempting to reset adapter | tee -a ${LOG_FILE}
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
@@ -378,8 +376,7 @@ if [ "$kill_switch" != "on" ]; then
      sleep 15
     fi
     dfgw=$(ip route | grep -oP 'default via \K\S+')
-    ping -c2 $dfgw
-    if [ $? -eq 0 ]; then
+    if ping -c2 "$dfgw"; then
      echo Successful network connection | tee -a ${LOG_FILE}
     else
     echo Connection failed muiltiple times | tee -a ${LOG_FILE}
