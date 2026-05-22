@@ -63,7 +63,7 @@ if [[ -n ${tempvar} ]]; then sim_phy=$tempvar; fi
 #------------------------------------------------------------
 #Configuring Syslog Server
 #------------------------------------------------------------
-if [ $syslog == "on" ]; then
+if [[ "$syslog" == "on" ]]; then
   #Ensure the remote syslog line exists, replace if different
   if grep -q '^\*\.\*@' /etc/rsyslog.conf; then
     sudo sed -i "s|^\*\.\*@.*|*.*@${syslog_server}|" /etc/rsyslog.conf
@@ -114,7 +114,7 @@ echo -----------------------------| tee -a /usr/local/scripts/sim.log
 #------------------------------------------------------------
 #Running Updates
 #------------------------------------------------------------
-if [ $rapid_update != "on" ]; then
+if [[ "$rapid_update" != "on" ]]; then
  echo Updating Simulation from repo | tee -a /usr/local/scripts/sim.log
  source '/usr/local/scripts/update.sh'
 else

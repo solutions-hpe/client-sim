@@ -30,6 +30,9 @@ delete_matching_connections() {
 
 init_simulation_context() {
   process_ini_file '/usr/local/scripts/simulation.conf'
+  if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
+    process_ini_file '/usr/local/scripts/user-overrides.conf'
+  fi
   username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
   site_based_num=$(get_value 'simulation' 'site_based_num')
   require_config_value "simulation.site_based_num" "$site_based_num"
@@ -83,6 +86,7 @@ ssidpw_fail=$(get_value 'simulation' 'ssidpw_fail')
 allow_offline=$(get_value 'simulation' 'allow_offline')
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
+server_url="${server_url:-http://169.253.1.1:8000}"
 #------------------------------------------------------------
 #Device Specific Simulation settings
 #------------------------------------------------------------
@@ -139,7 +143,7 @@ echo Hostname: $HOSTNAME | tee -a ${LOG_FILE}
 echo Site: $wsite | tee -a ${LOG_FILE}
 echo Site Based SSID: $site_based_ssid | tee -a ${LOG_FILE}
 echo Phy: $sim_phy | tee -a ${LOG_FILE}
-if [ $sim_phy == "wireless" ] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a ${LOG_FILE}; fi
+if [[ "$sim_phy" == "wireless" ]] && [[ -n ${wladapter} ]]; then echo Adapter: $wladapter | tee -a ${LOG_FILE}; fi
 echo Simulation Load: $sim_load | tee -a ${LOG_FILE}
 echo Kill Switch: $kill_switch | tee -a ${LOG_FILE}
 echo DHCP Fail: $dhcp_fail | tee -a ${LOG_FILE}
@@ -244,7 +248,7 @@ connect_wifi() {
   nmcli radio wifi off
   nmcli radio wifi on
   sleep 15
-  if [ $site_based_ssid == "on" ]; then
+  if [[ "$site_based_ssid" == "on" ]]; then
     nmcli -w $1 device wifi connect $wsite"-"$ssid password $ssidpw
   else
     nmcli -w $1 device wifi connect $ssid password $ssidpw
@@ -259,7 +263,7 @@ manage_connection() {
   nmcli radio wifi off
   nmcli radio wifi on
   sleep 15
-  if [ $site_based_ssid == "on" ]; then
+  if [[ "$site_based_ssid" == "on" ]]; then
     nmcli -w $wait_time connection $action $wsite"-"$ssid
   else
     nmcli -w $wait_time connection $action $ssid
@@ -284,8 +288,8 @@ connect_wifi 30
 #Dumping Current Device List
 #------------------------------------------------------------
 echo Disabling unused interface | tee -a ${LOG_FILE}
-if [ "$sim_phy" == "ethernet" ]; then sudo ip link set dev $wladapter down; fi
-if [ "$sim_phy" == "wireless" ]; then ea_down; fi
+if [[ "$sim_phy" == "ethernet" ]]; then sudo ip link set dev $wladapter down; fi
+if [[ "$sim_phy" == "wireless" ]]; then ea_down; fi
 mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
 mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
 #------------------------------------------------------------
@@ -295,7 +299,7 @@ wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
 sudo rfkill unblock wifi; sudo rfkill unblock all
 dfgw=$(ip route | grep -oP 'default via \K\S+')
 ping -c2 $dfgw
-if [ $? -eq 0 ] && [ "$sim_phy" == "wireless" ] && [[ -n ${wladapter} ]]; then
+if [[ $? -eq 0 ]] && [[ "$sim_phy" == "wireless" ]] && [[ -n ${wladapter} ]]; then
  echo Successful network connection | tee -a ${LOG_FILE}
 else
   echo Network connection failed | tee -a ${LOG_FILE}
@@ -308,10 +312,10 @@ fi
 #------------------------------------------------------------
 #Begin Setting up simulation load
 #------------------------------------------------------------
-if [ $sim_load -lt $rn_sim_load ]; then
+if [[ "$sim_load" -lt "$rn_sim_load" ]]; then
   echo Simulation load under threshold | tee -a ${LOG_FILE}
   echo Skipping Simulations but staying associated | tee -a ${LOG_FILE}
-  if [ $ssidpw_fail != "on" ] && [[ -n ${wladapter} ]]; then
+  if [[ "$ssidpw_fail" != "on" ]] && [[ -n ${wladapter} ]]; then
     manage_connection up 180
   fi
   sleep 5
@@ -329,7 +333,7 @@ if [ "$kill_switch" != "on" ]; then
   #both need to be constantly connecting so we trigger insights
   #------------------------------------------------------------
   if [[ ($ssidpw_fail == "on" || $auth_fail == "on") && -n ${wladapter} ]]; then
-    if [ $ssidpw_fail == "on" ]; then
+    if [[ "$ssidpw_fail" == "on" ]]; then
      for i in {1..100}; do
       echo Running SSID Incorrect Password | tee -a ${LOG_FILE}
       ssidpw="$(get_value $simulation_id 'ssidpw')""_fail"
@@ -338,7 +342,7 @@ if [ "$kill_switch" != "on" ]; then
       connect_wifi 5
      done
     fi
-    if [ $auth_fail == "on" ]; then
+    if [[ "$auth_fail" == "on" ]]; then
      echo Running Auth Failure | tee -a ${LOG_FILE}
      for i in {1..100}; do
       echo Enable/Disable WLAN interface | tee -a ${LOG_FILE}
@@ -363,10 +367,7 @@ if [ "$kill_switch" != "on" ]; then
    #for the other simualtions
    #------------------------------------------------------------
    ping -c2 $dfgw
-   if [ $? -eq 0 ]; then
-    echo Successful network connection | tee -a ${LOG_FILE}
-    else
-     echo Network connection failed | tee -a ${LOG_FILE}
+    if [ $? -eq 0 ]; then
      echo Attempting to reset adapter | tee -a ${LOG_FILE}
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
@@ -396,7 +397,7 @@ if [ "$kill_switch" != "on" ]; then
    #------------------------------------------------------------
    #Running WWW Traffic Simulation
    #------------------------------------------------------------
-    if [ $www_traffic == "on" ]; then
+    if [[ "$www_traffic" == "on" ]]; then
      echo Running WWW Traffic simulation
      wwwfile=($(< /usr/local/scripts/websites.txt))
      rn_www=$((RANDOM % ${#wwwfile[@]}))
@@ -415,7 +416,7 @@ if [ "$kill_switch" != "on" ]; then
    #------------------------------------------------------------
    #Running ping simulation
    #------------------------------------------------------------
-   if [ $ping_test == "on" ]; then
+   if [[ "$ping_test" == "on" ]]; then
     echo $(date) | tee -a ${LOG_FILE}
     echo ------------------------------| tee -a ${LOG_FILE}
     echo Ping Address: $ping_address | tee -a ${LOG_FILE}
@@ -429,19 +430,19 @@ if [ "$kill_switch" != "on" ]; then
 
     #Running iPerf simulation
     #------------------------------------------------------------
-    if [ $iperf == "on" ]; then
+    if [[ "$iperf" == "on" ]]; then
      run_simulation "iperf.sh" 30
     fi
     #------------------------------------------------------------
     #Running download simulation
     #------------------------------------------------------------
-    if [ $download == "on" ]; then
+    if [[ "$download" == "on" ]]; then
      run_simulation "download.sh" 30
     fi
     #------------------------------------------------------------
     #Running DNS Fail simulation
     #------------------------------------------------------------
-    if [ $dns_fail == "on" ]; then
+    if [[ "$dns_fail" == "on" ]]; then
      run_simulation "dns_fail.sh" 30
     fi
    #------------------------------------------------------------
@@ -451,7 +452,7 @@ if [ "$kill_switch" != "on" ]; then
    #------------------------------------------------------------
    #Running update to either the cloud repo or local SMB repo
    #------------------------------------------------------------
-   if [ $rapid_update == "on" ]; then source '/usr/local/scripts/update.sh'; fi
+   if [[ "$rapid_update" == "on" ]]; then source '/usr/local/scripts/update.sh'; fi
    #------------------------------------------------------------
    #End Script Updates
    #------------------------------------------------------------
@@ -484,7 +485,7 @@ pkill -f firefox &
 #------------------------------------------------------------
 echo Running Updates | tee -a ${LOG_FILE}
 bash /usr/local/scripts/apt_update.sh &
-if [ $allow_offline == "yes" ]; then
+if [[ "$allow_offline" == "yes" ]]; then
   #------------------------------------------------------------
   #Bringing all interfaces down to make it look like the device is offline.
   #Otherwise they get triggered as IOT since they are always connected.

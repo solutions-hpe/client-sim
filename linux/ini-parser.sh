@@ -53,7 +53,7 @@ sections=()
 local_case_sensitive_sections=true
 local_case_sensitive_keys=true
 local_default_to_uppercase=false
-local_show_config_warnings=true
+local_show_config_warnings=false
 local_show_config_errors=true
 
 # -------------------------------------------------------------------------------- #
@@ -104,7 +104,7 @@ function in_array()
     local haystack="${1}[@]"
     local needle=${2}
 
-    for i in ${!haystack}; do
+    for i in ${!haystack:-}; do
         if [[ ${i} == "${needle}" ]]; then
             return 0
         fi

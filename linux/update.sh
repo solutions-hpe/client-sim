@@ -17,6 +17,7 @@ process_ini_file '/usr/local/scripts/simulation.conf'
 #------------------------------------------------------------
 web_server=$(get_value 'simulation' 'web_server')
 server_url=$(get_value 'server' 'server_url')
+server_url="${server_url:-http://169.253.1.1:8000}"
 smb_repo=$(get_value 'simulation' 'smb_repo')
 smb_address=$(get_value 'address' 'smb_address')
 github_repo=$(get_value 'simulation' 'github_repo')
@@ -119,6 +120,8 @@ EOF
     sudo chmod 755 /usr/local/scripts
     sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
     sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
+    # Re-open log files to all users — the find above resets them to 644.
+    sudo chmod a+w "$log" "$debug" 2>/dev/null || true
 }
 
 #------------------------------------------------------------

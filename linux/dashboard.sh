@@ -27,7 +27,7 @@ username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
 site_based_num=$(get_value 'simulation' 'site_based_num')
 server_url=$(get_value 'server' 'server_url')
-web_server=$(get_value 'simulation' 'web_server')
+server_url="${server_url:-http://169.253.1.1:8000}"
 simulation_id=s
 simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
 kill_switch=$(get_value 'simulation' 'kill_switch')
