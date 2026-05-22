@@ -36,25 +36,11 @@ _return_or_exit() {
 
 #------------------------------------------------------------
 # Suppress duplicate nm-applet tray icon.
-# network-manager-gnome ships /etc/xdg/autostart/nm-applet.desktop
-# which launches one instance via XDG autostart.
-# lxsession's system autostart may also launch @nm-applet, giving two icons.
-# This function runs unconditionally every update cycle to ensure:
-#   1. ~/.config/autostart/nm-applet.desktop is set to Hidden=true, which
-#      tells the XDG autostart mechanism to skip the system nm-applet.desktop
-#   2. The lxsession user override file suppresses @nm-applet
-# Changes take effect on the next LXDE session start (reboot).
+# linux/nm-applet.desktop (Hidden=true) is distributed to ~/.config/autostart/
+# by the API/GitHub sync, overriding the system /etc/xdg/autostart/nm-applet.desktop.
+# This function only needs to handle the lxsession side (@nm-applet in autostart).
 #------------------------------------------------------------
 suppress_nm_applet() {
-    local _user_autostart="$HOME/.config/autostart"
-    mkdir -p "$_user_autostart"
-    # Override the system nm-applet.desktop with Hidden=true so XDG autostart
-    # skips it. Removing this file would re-enable the system version.
-    cat > "$_user_autostart/nm-applet.desktop" << 'EOF'
-[Desktop Entry]
-Hidden=true
-EOF
-
     local _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
     local _lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
     if [ -f "$_lxsession_sys" ]; then
@@ -445,7 +431,6 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 for _d in "${desktop_files[@]}"; do
                     cp -f "$_d" "$_user_autostart/$_d" 2>/dev/null || true
                 done
-                rm -f "$_user_autostart/nm-applet.desktop"
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
                     [[ "$_f" == "update.sh" ]] && continue
