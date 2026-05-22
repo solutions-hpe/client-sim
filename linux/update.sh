@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.09
+version=.10
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -47,6 +47,11 @@ copy_local_files() {
     local desktop_files=( "$src_dir"/*.desktop )
     local conf_files=( "$src_dir"/simulation.conf )
 
+    # /usr/local/scripts is chown root:sim-user chmod 775 — group-writable without
+    # sudo. All copies to that directory use plain cp/mv/chmod to avoid sudo
+    # password prompts hanging in non-interactive (no-TTY) contexts.
+    # sudo is reserved only for system dirs (/etc, /var) that require root.
+
     # Copy all .sh files except update.sh first — update.sh is copied last so
     # that if bash re-reads this file after the copy it doesn't hit a parse error.
     # Track success: VERSION is only committed if all .sh copies succeed, so a
@@ -54,7 +59,7 @@ copy_local_files() {
     local _copy_ok=true
     for _f in "${sh_files[@]}"; do
         [[ "$(basename "$_f")" == "update.sh" ]] && continue
-        if ! sudo cp "$_f" /usr/local/scripts/; then
+        if ! cp "$_f" /usr/local/scripts/; then
             echo "ERROR: failed to copy $(basename "$_f") — aborting VERSION commit" | tee -a "$debug" "$log"
             _copy_ok=false
         fi
@@ -65,7 +70,7 @@ copy_local_files() {
         [[ "$(basename "$_t")" == "kill_switch.txt" ]] && continue
         filtered_txt+=("$_t")
     done
-    (( ${#filtered_txt[@]} ))  && sudo cp "${filtered_txt[@]}"  /usr/local/scripts/
+    (( ${#filtered_txt[@]} )) && cp "${filtered_txt[@]}" /usr/local/scripts/
     # .desktop files are NOT deployed by update.sh — the installer owns them.
     # Deploying them here caused a double-invocation bug: if dex or a session
     # manager processes /etc/xdg/autostart/ while the simulation is already
@@ -77,7 +82,7 @@ copy_local_files() {
     # restore it here so the simulation terminal reappears on next reboot.
     if [[ ! -f /etc/xdg/autostart/startup.desktop ]]; then
         echo "$(date): update.sh: startup.desktop missing — restoring" | tee -a "$debug"
-        sudo tee /etc/xdg/autostart/startup.desktop >/dev/null <<'EOF'
+        sudo -n tee /etc/xdg/autostart/startup.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=StartUp
@@ -85,19 +90,22 @@ Comment=Simulation Script Startup
 Exec=gnome-terminal --geometry=88x28+580+430 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
 EOF
     fi
-    (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
+    (( ${#conf_files[@]} )) && cp "${conf_files[@]}" /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
-        sudo cp "$src_dir/user-overrides.conf" /usr/local/scripts/user-overrides.conf
+        cp "$src_dir/user-overrides.conf" /usr/local/scripts/user-overrides.conf
     fi
 
+    # System config files — these dirs are root-owned, sudo required
     if [[ -f "$src_dir/10-rsyslog.conf" ]]; then
-        sudo cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf
+        sudo -n cp "$src_dir/10-rsyslog.conf" /etc/rsyslog.d/10-rsyslog.conf 2>/dev/null || \
+            echo "WARNING: could not update rsyslog.conf (no sudo)" | tee -a "$debug"
     fi
     # Deploy polkit rule to suppress NM graphical auth dialogs
     if [[ -f "$src_dir/50-client-sim-nm.rules" ]]; then
-        sudo mkdir -p /etc/polkit-1/rules.d
-        sudo cp "$src_dir/50-client-sim-nm.rules" /etc/polkit-1/rules.d/50-client-sim-nm.rules
+        sudo -n mkdir -p /etc/polkit-1/rules.d 2>/dev/null
+        sudo -n cp "$src_dir/50-client-sim-nm.rules" /etc/polkit-1/rules.d/50-client-sim-nm.rules 2>/dev/null || \
+            echo "WARNING: could not update polkit rules (no sudo)" | tee -a "$debug"
     fi
     # Suppress nm-applet in lxsession autostart
     _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
@@ -113,27 +121,25 @@ EOF
     # Only commit VERSION if all .sh copies succeeded — ensures next update cycle
     # retries the full sync rather than treating a partial copy as complete.
     if [[ "$_copy_ok" == true && -f "$src_dir/VERSION" ]]; then
-        sudo install -m 644 "$src_dir/VERSION" /usr/local/scripts/VERSION.new \
-            && sudo mv /usr/local/scripts/VERSION.new /usr/local/scripts/VERSION \
+        cp "$src_dir/VERSION" /usr/local/scripts/VERSION.new \
+            && mv /usr/local/scripts/VERSION.new /usr/local/scripts/VERSION \
             || echo "ERROR: VERSION commit failed" | tee -a "$debug" "$log"
     elif [[ -f "$src_dir/VERSION" ]]; then
         echo "Skipping VERSION commit — one or more script copies failed" | tee -a "$debug" "$log"
     fi
-    # update.sh: atomic inode swap (install to .new + mv) instead of cp.
+    # update.sh: atomic inode swap (cp to .new + mv) instead of cp-in-place.
     # cp truncates the existing file in place (same inode); bash has that inode
-    # open and reads garbled content as the new bytes stream in.  mv replaces
+    # open and reads garbled content as the new bytes stream in. mv replaces
     # the directory entry atomically — bash keeps the old fd and finishes reading
     # the old content cleanly, then the next `source update.sh` gets the new file.
     if [[ -f "$src_dir/update.sh" ]]; then
-        sudo install -m 755 "$src_dir/update.sh" /usr/local/scripts/update.sh.new \
-            && sudo mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+        cp "$src_dir/update.sh" /usr/local/scripts/update.sh.new \
+            && chmod 755 /usr/local/scripts/update.sh.new \
+            && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
             || true
     fi
-    sudo chmod 755 /usr/local/scripts
-    sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
-    sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
-    # Re-open log files to all users — the find above resets them to 644.
-    sudo chmod a+w "$log" "$debug" 2>/dev/null || true
+    chmod 755 /usr/local/scripts/*.sh 2>/dev/null || true
+    chmod a+w "$log" "$debug" 2>/dev/null || true
 }
 
 #------------------------------------------------------------
@@ -406,8 +412,8 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
             # Scripts are current but configs/ may have changed. Always apply
             # simulation.conf (and user-overrides.conf) so config tweaks like
             # kill_switch propagate without requiring a script version bump.
-            [[ -f "configs/simulation.conf" ]]    && sudo cp "configs/simulation.conf"    /usr/local/scripts/simulation.conf
-            [[ -f "configs/user-overrides.conf" ]] && sudo cp "configs/user-overrides.conf" /usr/local/scripts/user-overrides.conf
+            [[ -f "configs/simulation.conf" ]]     && cp "configs/simulation.conf"     /usr/local/scripts/simulation.conf
+            [[ -f "configs/user-overrides.conf" ]]  && cp "configs/user-overrides.conf"  /usr/local/scripts/user-overrides.conf
             source_found=true
         else
             echo "Update available ($local_ver → $remote_ver) — copying files..." | tee -a "$debug" "$log"
@@ -416,12 +422,12 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 desktop_files=( *.desktop )
                 sh_files=( *.sh )
                 txt_files=( *.txt )
-                [[ -f "10-rsyslog.conf" ]] && sudo cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf
-                (( ${#desktop_files[@]} )) && sudo cp "${desktop_files[@]}" /etc/xdg/autostart/
+                [[ -f "10-rsyslog.conf" ]] && sudo -n cp 10-rsyslog.conf /etc/rsyslog.d/10-rsyslog.conf 2>/dev/null || true
+                (( ${#desktop_files[@]} )) && sudo -n cp "${desktop_files[@]}" /etc/xdg/autostart/ 2>/dev/null || true
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
                     [[ "$_f" == "update.sh" ]] && continue
-                    sudo cp "$_f" /usr/local/scripts/
+                    cp "$_f" /usr/local/scripts/
                 done
                 # Never copy kill_switch.txt — gkill_switch always fetched live
                 _filtered_txt=()
@@ -429,16 +435,16 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                     [[ "$_t" == "kill_switch.txt" ]] && continue
                     _filtered_txt+=("$_t")
                 done
-                (( ${#_filtered_txt[@]} ))  && sudo cp "${_filtered_txt[@]}"  /usr/local/scripts/
-                [[ -f "VERSION" ]]         && sudo cp VERSION               /usr/local/scripts/VERSION
+                (( ${#_filtered_txt[@]} )) && cp "${_filtered_txt[@]}" /usr/local/scripts/
+                [[ -f "VERSION" ]] && cp VERSION /usr/local/scripts/VERSION
                 cd ..
             else
                 echo "WARNING: linux directory not found" | tee -a "$debug"
             fi
 
             if cd configs 2>/dev/null; then
-                [[ -f "simulation.conf" ]]    && sudo cp simulation.conf    /usr/local/scripts/simulation.conf
-                [[ -f "user-overrides.conf" ]] && sudo cp user-overrides.conf /usr/local/scripts/user-overrides.conf
+                [[ -f "simulation.conf" ]]     && cp simulation.conf     /usr/local/scripts/simulation.conf
+                [[ -f "user-overrides.conf" ]] && cp user-overrides.conf /usr/local/scripts/user-overrides.conf
                 cd ..
             else
                 echo "WARNING: configs directory not found" | tee -a "$debug"
@@ -446,13 +452,12 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
 
             # update.sh: atomic mv to avoid bash re-read corruption (same fix as copy_local_files)
             if [[ -f "linux/update.sh" ]]; then
-                sudo install -m 755 linux/update.sh /usr/local/scripts/update.sh.new \
-                    && sudo mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
+                cp linux/update.sh /usr/local/scripts/update.sh.new \
+                    && chmod 755 /usr/local/scripts/update.sh.new \
+                    && mv /usr/local/scripts/update.sh.new /usr/local/scripts/update.sh \
                     || true
             fi
-            sudo chmod 755 /usr/local/scripts
-            sudo find /usr/local/scripts -type f -name "*.sh" -exec chmod 755 {} +
-            sudo find /usr/local/scripts -type f ! -name "*.sh" -exec chmod 644 {} +
+            chmod 755 /usr/local/scripts/*.sh 2>/dev/null || true
             echo "GitHub sync succeeded" | tee -a "$debug" "$log"
             source_found=true
         fi
