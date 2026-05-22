@@ -1,5 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Update
-Comment=Simulation Update
-#Exec=gnome-terminal --geometry=35x15+0+525 -- bash -c "/usr/local/scripts/update.sh" &
