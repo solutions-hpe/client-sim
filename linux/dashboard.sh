@@ -179,8 +179,8 @@ get_gateway_status() {
 }
 #------------------------------------------------------------
 # Helper: map a script filename to its simulation config flag.
-# "always" = show regardless (key infrastructure).
-# "off"    = hide unless currently running (unknown/untracked scripts).
+# "always" = Infrastructure section (always shown).
+# "off"    = hide unless currently running.
 #------------------------------------------------------------
 get_script_flag() {
   case "$1" in
@@ -194,33 +194,61 @@ get_script_flag() {
   esac
 }
 #------------------------------------------------------------
-# Helper: simulation process table
-# Excluded scripts are infrastructure — we only show simulation workers.
-# Scripts whose config flag is "off" and are not running are hidden.
+# Helper: print one script row
+#------------------------------------------------------------
+print_script_row() {
+  local script_name="$1" pid runtime
+  pid=$(pgrep -f "$script_name" | head -n 1)
+  if [[ -n "$pid" ]]; then
+    runtime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
+    printf "  %s%-12s%s %-22s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$runtime"
+  else
+    printf "  %s%-12s%s %-22s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "-"
+  fi
+}
+#------------------------------------------------------------
+# Helper: simulation process table — two sections:
+#   Infrastructure: always-shown scripts (agent.sh etc.)
+#   Simulations:    flag-controlled scripts (only shown when flag=on)
+# Any untracked script that is running also appears in Simulations.
 #------------------------------------------------------------
 get_sim_status() {
   local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
-  printf "  %s%-12s %-22s %-10s%s\n" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
-  printf "  %-12s %-22s %-10s\n" "──────────" "──────────────────────" "───────"
+  local hdr="  %s%-12s %-22s %-10s%s\n"
+  local div="  %-12s %-22s %-10s\n"
+
+  # ── Infrastructure ──────────────────────────────────────
+  printf "  %sInfrastructure:%s\n" "$BOLD" "$RST"
+  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
+  printf "$div" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
-    local script_name pid runtime script_flag
+    local script_name script_flag
     script_name=$(basename "$s")
-    for e in "${exclude[@]}"; do
-      [[ "$script_name" == "$e" ]] && continue 2
-    done
+    for e in "${exclude[@]}"; do [[ "$script_name" == "$e" ]] && continue 2; done
     script_flag=$(get_script_flag "$script_name")
+    [[ "$script_flag" == "always" ]] && print_script_row "$script_name"
+  done
+
+  echo ""
+
+  # ── Simulations ─────────────────────────────────────────
+  printf "  %sSimulations:%s\n" "$BOLD" "$RST"
+  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
+  printf "$div" "──────────" "──────────────────────" "───────"
+  local shown=0
+  for s in /usr/local/scripts/*.sh; do
+    local script_name script_flag pid
+    script_name=$(basename "$s")
+    for e in "${exclude[@]}"; do [[ "$script_name" == "$e" ]] && continue 2; done
+    script_flag=$(get_script_flag "$script_name")
+    [[ "$script_flag" == "always" ]] && continue
     pid=$(pgrep -f "$script_name" | head -n 1)
-    # Hide scripts whose flag is off and are not currently running
-    if [[ "$script_flag" != "always" && "$script_flag" != "on" && -z "$pid" ]]; then
-      continue
-    fi
-    if [[ -n "$pid" ]]; then
-      runtime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
-      printf "  %s%-12s%s %-22s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$runtime"
-    else
-      printf "  %s%-12s%s %-22s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "-"
+    if [[ "$script_flag" == "on" || -n "$pid" ]]; then
+      print_script_row "$script_name"
+      (( shown++ ))
     fi
   done
+  (( shown == 0 )) && printf "  ${GRN}None active${RST}\n"
 }
 #------------------------------------------------------------
 # Main dashboard loop
