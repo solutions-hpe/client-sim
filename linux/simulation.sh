@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.93
+version=.95
 LOG_FILE=/tmp/sim.log
 
 echo $(date) | tee -a ${LOG_FILE}
@@ -29,10 +29,11 @@ delete_matching_connections() {
 }
 
 init_simulation_context() {
+  # Load simulation.conf only — process_ini_file resets ALL section data on each
+  # call, so a second call for user-overrides.conf would wipe [simulation]/[s0-s9].
+  # Username-section overrides are defined in simulation.conf; apply_override()
+  # reads them from there via get_value $username.
   process_ini_file '/usr/local/scripts/simulation.conf'
-  if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
-    process_ini_file '/usr/local/scripts/user-overrides.conf'
-  fi
   username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
   site_based_num=$(get_value 'simulation' 'site_based_num')
   require_config_value "simulation.site_based_num" "$site_based_num"
