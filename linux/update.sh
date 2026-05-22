@@ -35,6 +35,33 @@ _return_or_exit() {
 }
 
 #------------------------------------------------------------
+# Suppress duplicate nm-applet tray icon.
+# network-manager-gnome ships /etc/xdg/autostart/nm-applet.desktop
+# which launches one instance via XDG autostart.
+# lxsession's system autostart may also launch @nm-applet, giving two icons.
+# This function runs unconditionally every update cycle to ensure:
+#   1. Any stale ~/.config/autostart/nm-applet.desktop we deployed is removed
+#   2. The lxsession user override file suppresses @nm-applet
+# Changes take effect on the next LXDE session start (reboot).
+#------------------------------------------------------------
+suppress_nm_applet() {
+    local _user_autostart="$HOME/.config/autostart"
+    mkdir -p "$_user_autostart"
+    rm -f "$_user_autostart/nm-applet.desktop"
+
+    local _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
+    local _lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
+    if [ -f "$_lxsession_sys" ]; then
+        mkdir -p "$(dirname "$_lxsession_user")"
+        if [ ! -f "$_lxsession_user" ]; then
+            grep -v 'nm-applet' "$_lxsession_sys" > "$_lxsession_user" || true
+        elif grep -q 'nm-applet' "$_lxsession_user"; then
+            sed -i '/nm-applet/d' "$_lxsession_user"
+        fi
+    fi
+}
+
+#------------------------------------------------------------
 # Helper: copy files from a local directory into /usr/local/scripts
 # Called after a successful web or SMB sync
 #------------------------------------------------------------
@@ -87,6 +114,7 @@ copy_local_files() {
     # the system package (network-manager-gnome) already provides one in
     # /etc/xdg/autostart/. Having both causes a duplicate tray icon.
     rm -f "$_user_autostart/nm-applet.desktop"
+    suppress_nm_applet
     (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
@@ -103,17 +131,6 @@ copy_local_files() {
         sudo -n mkdir -p /etc/polkit-1/rules.d 2>/dev/null
         sudo -n cp "$src_dir/50-client-sim-nm.rules" /etc/polkit-1/rules.d/50-client-sim-nm.rules 2>/dev/null || \
             echo "WARNING: could not update polkit rules (no sudo)" | tee -a "$debug"
-    fi
-    # Suppress nm-applet in lxsession autostart
-    _lxsession_sys="/etc/xdg/lxsession/LXDE-pi/autostart"
-    _lxsession_user="$HOME/.config/lxsession/LXDE-pi/autostart"
-    if [ -f "$_lxsession_sys" ]; then
-      mkdir -p "$(dirname "$_lxsession_user")"
-      if [ ! -f "$_lxsession_user" ]; then
-        grep -v 'nm-applet' "$_lxsession_sys" > "$_lxsession_user" || true
-      elif grep -q 'nm-applet' "$_lxsession_user"; then
-        sed -i '/nm-applet/d' "$_lxsession_user"
-      fi
     fi
     # Only commit VERSION if all .sh copies succeeded — ensures next update cycle
     # retries the full sync rather than treating a partial copy as complete.
@@ -499,5 +516,11 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
         bash /usr/local/scripts/agent.sh
     fi
 fi
+
+#============================================================
+# Always run nm-applet suppression — ensures it takes effect even
+# when the device was already up to date and copy_local_files() didn't run
+#============================================================
+suppress_nm_applet
 
 echo "Update complete" | tee -a "$debug"
