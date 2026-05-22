@@ -318,7 +318,6 @@ PACKAGES=(
   "net-tools"
   "dnsutils"
   "smbclient"
-  "jq"
   "qemu-guest-agent"
   # Network-disruptive — install last so connection stays up for all prior downloads
   "rfkill"
@@ -358,6 +357,15 @@ done
 info "Running autoremove"
 apt_run autoremove -y --quiet=2
 ok "Core dependencies installed"
+
+# ── jq — JSON processor used by agent.sh and sys_mon.sh ─────────────────────
+# Pulled out of main loop: can hang on some OS versions. Short timeout + non-fatal.
+info "Installing jq"
+APT_TIMEOUT=60
+apt_run install -y --quiet jq \
+  && ok "Installed jq" \
+  || warn "Could not install jq — agent.sh JSON parsing will fall back to python3"
+APT_TIMEOUT=300
 
 # ── python3-websockets — only extra Python dep; python3 is pre-installed ────
 # All other python3 usage (JSON parsing) replaced with jq.

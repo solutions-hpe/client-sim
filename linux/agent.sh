@@ -1,5 +1,5 @@
 #!/bin/bash
-# agent.sh — Client websocket agent — v1.02
+# agent.sh — Client websocket agent — v1.03
 # Launches a background websocket client that streams status and receives commands.
 
 set -u
@@ -60,9 +60,15 @@ hostname_val=$(hostname)
 handle_command() {
   local raw_cmd="${1:-}"
   local cmd_id action args_json
-  cmd_id=$(printf '%s' "$raw_cmd"    | jq -r '.id     // ""' 2>/dev/null || true)
-  action=$(printf '%s' "$raw_cmd"    | jq -r '.action // ""' 2>/dev/null || true)
-  args_json=$(printf '%s' "$raw_cmd" | jq -c '.args   // {}' 2>/dev/null || echo '{}')
+  if command -v jq &>/dev/null; then
+    cmd_id=$(printf '%s' "$raw_cmd"    | jq -r '.id     // ""' 2>/dev/null || true)
+    action=$(printf '%s' "$raw_cmd"    | jq -r '.action // ""' 2>/dev/null || true)
+    args_json=$(printf '%s' "$raw_cmd" | jq -c '.args   // {}' 2>/dev/null || echo '{}')
+  else
+    cmd_id=$(printf '%s' "$raw_cmd"  | python3 -c "import json,sys; d=json.loads(sys.stdin.read() or '{}'); print(d.get('id',''))" 2>/dev/null || true)
+    action=$(printf '%s' "$raw_cmd"  | python3 -c "import json,sys; d=json.loads(sys.stdin.read() or '{}'); print(d.get('action',''))" 2>/dev/null || true)
+    args_json=$(printf '%s' "$raw_cmd" | python3 -c "import json,sys; d=json.loads(sys.stdin.read() or '{}'); print(json.dumps(d.get('args',{})))" 2>/dev/null || echo '{}')
+  fi
   printf '%s\t%s\t%s\n' "$cmd_id" "$action" "$args_json"
 }
 
@@ -75,8 +81,7 @@ run_command() {
   fi
   IFS=$'\t' read -r cmd_id action args_json <<< "$parsed_cmd"
   if ! arg_value=$(printf '%s' "$args_json" | jq -r '.value // ""' 2>/dev/null); then
-    log_warning "$raw_cmd"
-    arg_value=""
+    arg_value=$(printf '%s' "$args_json" | python3 -c "import json,sys; d=json.loads(sys.stdin.read() or '{}'); print(d.get('value',''))" 2>/dev/null || true)
   fi
   status="completed"
   message=""
@@ -127,12 +132,16 @@ run_command() {
       ;;
   esac
 
-  jq -n \
-    --arg id      "$cmd_id" \
-    --arg status  "$status" \
-    --arg message "$message" \
-    --arg reboot  "$reboot_now" \
-    '{id:$id, status:$status, message:$message, reboot:$reboot}'
+  if command -v jq &>/dev/null; then
+    jq -n \
+      --arg id      "$cmd_id" \
+      --arg status  "$status" \
+      --arg message "$message" \
+      --arg reboot  "$reboot_now" \
+      '{id:$id, status:$status, message:$message, reboot:$reboot}'
+  else
+    python3 -c "import json; print(json.dumps({'id':'$cmd_id','status':'$status','message':'$message','reboot':'$reboot_now'}))"
+  fi
 }
 
 if [[ "${1:-}" == "--handle-command" ]]; then
