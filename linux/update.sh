@@ -212,7 +212,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                     echo "simulation.conf changed — updating" | tee -a "$debug" "$log"
                     # Atomic write: mv is atomic on the same filesystem, prevents
                     # simulation.sh reading a partial file during rapid_update cycles
-                    sudo mv "$_cfg_tmp" /usr/local/scripts/simulation.conf
+                    mv -- "$_cfg_tmp" /usr/local/scripts/simulation.conf
                 else
                     echo "simulation.conf unchanged" | tee -a "$debug"
                 fi
@@ -230,7 +230,7 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
             if [[ "$_ov_code" == "200" && -s "$_ov_tmp" ]]; then
                 if ! diff -q "$_ov_tmp" /usr/local/scripts/user-overrides.conf >/dev/null 2>&1; then
                     echo "user-overrides.conf changed — updating" | tee -a "$debug" "$log"
-                    sudo mv "$_ov_tmp" /usr/local/scripts/user-overrides.conf
+                    mv -- "$_ov_tmp" /usr/local/scripts/user-overrides.conf
                 else
                     echo "user-overrides.conf unchanged" | tee -a "$debug"
                 fi
@@ -298,11 +298,11 @@ if [[ "$web_server" == "on" && -n "$server_url" ]]; then
                 # scripts and configs (e.g. per-device simulation.conf) when the
                 # API is temporarily unavailable on the next boot.
                 API_CACHE="/usr/local/scripts/.api-cache"
-                sudo mkdir -p "$API_CACHE"
-                sudo cp -r "$tmp_web"/. "$API_CACHE/"
-                sudo chmod 755 "$API_CACHE"
-                sudo find "$API_CACHE" -type f -name "*.sh" -exec chmod 755 {} +
-                sudo find "$API_CACHE" -type f ! -name "*.sh" -exec chmod 644 {} +
+                mkdir -p "$API_CACHE"
+                cp -r "$tmp_web"/. "$API_CACHE/"
+                chmod a+rwx "$API_CACHE"
+                find "$API_CACHE" -type f -name "*.sh" -exec chmod a+rx {} +
+                find "$API_CACHE" -type f ! -name "*.sh" -exec chmod a+rw {} +
                 echo "API cache updated at $API_CACHE" | tee -a "$debug"
                 # Also copy API files into the local git repo clone so that the
                 # GitHub fallback tier finds the latest version already in place
