@@ -2172,7 +2172,11 @@ function renderRecloneStatus(recloneState = latestRecloneState || {}) {
   const total = Number(state.total || 0);
   const done = Number(state.completed || 0) + Number(state.failed || 0);
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const isActive = status === 'running' || done > 0;
+  // The progress panel is only meaningful while a run is actively in progress.
+  // Once the run ends (completed / failed / interrupted), the state resets to
+  // idle and the tile should disappear rather than lingering at the last
+  // progress value (e.g. "3 / 9 VMs (33%)").
+  const isActive = status === 'running';
   recloneProgressWrap.classList.toggle('hidden', !isActive);
 
   // Type label

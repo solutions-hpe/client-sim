@@ -3905,6 +3905,8 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             reclone_state["failed"] += 1
         finally:
             reclone_state["current_vm"] = None
+            # Capture a last_run summary before resetting so the UI can show
+            # "Last run: X completed, Y failed" even after the tile goes idle.
             reclone_state["last_run"] = {
                 "timestamp": iso_utcnow(),
                 "completed": reclone_state["completed"],
@@ -3913,6 +3915,36 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
             }
             if reclone_state["status"] != "running":
                 reclone_state["started_at"] = None
+
+            # Once the run has reached a terminal state (completed / failed),
+            # reset all counters and the log back to idle so the Fleet Reclone
+            # tile disappears and shows 0 instead of lingering at the last
+            # progress value.  The last_run summary we just captured above is
+            # preserved so the "Last run" line in the UI still reflects what
+            # happened.
+            terminal_statuses = {"completed", "failed", "interrupted"}
+            if reclone_state["status"] in terminal_statuses:
+                saved_last_run = reclone_state["last_run"]
+                saved_auto_log = reclone_state.get("auto_recovery_log") or []
+                reclone_state.update({
+                    "status": "idle",
+                    "type": None,
+                    "total": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "current_vm": None,
+                    "log": [],
+                    "started_at": None,
+                    "last_run": saved_last_run,
+                    "auto_recovery_log": saved_auto_log,
+                })
+                logger.info(
+                    "Rolling reclone: terminal state reached — reset to idle "
+                    "(completed=%d, failed=%d)",
+                    saved_last_run.get("completed", 0),
+                    saved_last_run.get("failed", 0),
+                )
+
             await _broadcast_reclone_state()
             await _broadcast_proxmox_state()
 
@@ -7418,6 +7450,42 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
     _update_provision_run_state(enriched_vms, new_usb, now)
     _prev_usb_by_vmid = new_by_vmid
+
+    # Auto-reset a stale reclone run to idle when:
+    #   • The run is in a non-running terminal/interrupted state
+    #     (interrupted, failed — "completed" is already reset in _run_rolling_reclone)
+    #   • The Proxmox agent now reports zero reclone-eligible VMs, which means
+    #     any VMs that were part of the interrupted run have since been deleted.
+    # This prevents the Fleet Reclone tile from staying stuck at "3/9" indefinitely
+    # after an operator cleans up VMs outside the normal reclone flow.
+    _stale_reclone_statuses = {"interrupted", "failed"}
+    if reclone_state.get("status") in _stale_reclone_statuses:
+        eligible_after_update = _reclone_targets_for_run()
+        if not eligible_after_update:
+            logger.info(
+                "Fleet Reclone: detected stale '%s' run with 0 eligible VMs — "
+                "auto-resetting to idle",
+                reclone_state["status"],
+            )
+            saved_last_run = reclone_state.get("last_run")
+            saved_auto_log = reclone_state.get("auto_recovery_log") or []
+            reclone_state.update({
+                "status": "idle",
+                "type": None,
+                "total": 0,
+                "completed": 0,
+                "failed": 0,
+                "current_vm": None,
+                "log": [],
+                "started_at": None,
+                "last_run": saved_last_run,
+                "auto_recovery_log": saved_auto_log,
+            })
+            # Persist the reset and push a reclone_update WS message so any
+            # connected browser sees the tile clear immediately without waiting
+            # for the next proxmox_update broadcast.
+            _save_reclone_state()
+            await _broadcast_reclone_state()
 
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
