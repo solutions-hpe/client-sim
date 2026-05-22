@@ -231,20 +231,21 @@ time_ago() {
   fi
 }
 #------------------------------------------------------------
-# Helper: print one script row — tracks last-run timestamp in cache
+# Helper: print one script row — tracks last-run timestamp in cache.
+# RUNTIME column shows elapsed time when running, "Xm ago" when stopped.
 #------------------------------------------------------------
 print_script_row() {
-  local script_name="$1" pid runtime last_run_str
+  local script_name="$1" pid runtime display_time
   local last_run_file="$CACHE_DIR/last-run-${script_name}"
   pid=$(pgrep -f "$script_name" | head -n 1)
   if [[ -n "$pid" ]]; then
     runtime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
     date +%s > "$last_run_file"
-    last_run_str="now"
-    printf "  %s%-12s%s %-22s %-10s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$runtime" "$last_run_str"
+    display_time="$runtime"
+    printf "  %s%-12s%s %-22s %-10s\n" "$GRN" "[RUNNING]" "$RST" "$script_name" "$display_time"
   else
-    last_run_str=$(time_ago "$(cat "$last_run_file" 2>/dev/null)")
-    printf "  %s%-12s%s %-22s %-10s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "-" "$last_run_str"
+    display_time=$(time_ago "$(cat "$last_run_file" 2>/dev/null)")
+    printf "  %s%-12s%s %-22s %-10s\n" "$RED" "[STOPPED]" "$RST" "$script_name" "$display_time"
   fi
 }
 #------------------------------------------------------------
@@ -255,13 +256,13 @@ print_script_row() {
 #------------------------------------------------------------
 get_sim_status() {
   local exclude=("dashboard.sh" "install.sh" "simulation.sh" "ini-parser.sh" "sys_mon.sh" "startup.sh")
-  local hdr="  %s%-12s %-22s %-10s %-10s%s\n"
-  local div="  %-12s %-22s %-10s %-10s\n"
+  local hdr="  %s%-12s %-22s %-10s%s\n"
+  local div="  %-12s %-22s %-10s\n"
 
   # ── Infrastructure ──────────────────────────────────────
   printf "  %sInfrastructure:%s\n" "$BOLD" "$RST"
-  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "LAST RUN" "$RST"
-  printf "$div" "──────────" "──────────────────────" "───────" "────────"
+  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
+  printf "$div" "──────────" "──────────────────────" "───────"
   for s in /usr/local/scripts/*.sh; do
     local script_name script_flag
     script_name=$(basename "$s")
@@ -274,8 +275,8 @@ get_sim_status() {
 
   # ── Simulations ─────────────────────────────────────────
   printf "  %sSimulations:%s\n" "$BOLD" "$RST"
-  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "LAST RUN" "$RST"
-  printf "$div" "──────────" "──────────────────────" "───────" "────────"
+  printf "$hdr" "$BOLD" "STATUS" "SCRIPT" "RUNTIME" "$RST"
+  printf "$div" "──────────" "──────────────────────" "───────"
   local shown=0
   for s in /usr/local/scripts/*.sh; do
     local script_name script_flag pid
