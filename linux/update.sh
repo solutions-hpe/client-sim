@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.05
+version=.07
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -76,7 +76,7 @@ copy_local_files() {
 Type=Application
 Name=StartUp
 Comment=Simulation Script Startup
-Exec=gnome-terminal --geometry=80x15+1180+525 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
+Exec=gnome-terminal --geometry=88x28+580+430 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
 EOF
     fi
     (( ${#conf_files[@]} ))    && sudo cp "${conf_files[@]}"    /usr/local/scripts/
