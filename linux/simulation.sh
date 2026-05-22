@@ -409,7 +409,7 @@ if [ "$kill_switch" != "on" ]; then
      echo Simulation Load: $sim_load | tee -a ${LOG_FILE}
      echo Website: $url | tee -a ${LOG_FILE}
      echo ------------------------------| tee -a ${LOG_FILE}
-     firefox --headless $url &
+     cpulimit -l 25 -- firefox-esr --headless "$url" &
      www_traffic=off
     fi
    #------------------------------------------------------------
