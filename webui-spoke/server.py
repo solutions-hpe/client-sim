@@ -2562,7 +2562,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 class SpokeAuthMiddleware(BaseHTTPMiddleware):
     _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
     # Paths accessible by simulation client devices (no browser session required)
-    _PUBLIC_PATHS = ("/ws", "/ws/client", "/ws/proxmox", "/api/health", "/api/status")
+    _PUBLIC_PATHS = ("/ws", "/ws/client", "/ws/proxmox", "/api/health", "/api/status", "/api/client/key")
     # Proxmox agent registration endpoints (no key yet at this stage)
     _PROXMOX_PUBLIC_PATHS = ("/api/proxmox/register", "/api/proxmox/key")
 
@@ -8980,6 +8980,14 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
     if watchdog_changed:
         await _broadcast_proxmox_state()
     return {"status": "ok", "client": payload}
+
+
+@app.get("/api/client/key")
+async def api_client_key() -> dict[str, str]:
+    """Return the shared client API key so agents can authenticate to /ws/client.
+    This endpoint is intentionally public — agents need the key before they can connect.
+    The spoke URL itself acts as the first factor of access control."""
+    return {"client_api_key": str(settings.get("client_api_key", "") or "")}
 
 
 @app.get("/api/clients")

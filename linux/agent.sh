@@ -1,5 +1,5 @@
 #!/bin/bash
-# agent.sh — Client websocket agent — v1.03
+# agent.sh — Client websocket agent — v1.04
 # Launches a background websocket client that streams status and receives commands.
 
 set -u
@@ -229,8 +229,24 @@ except ImportError:
     write_health(state="fatal", connected=False, last_error=message, last_failure=time.time())
     sys.exit(1)
 
+try:
+    import urllib.request
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    key_url = server_url.rstrip('/') + "/api/client/key"
+    with urllib.request.urlopen(key_url, timeout=10, context=ctx) as resp:
+        client_api_key = json.loads(resp.read()).get("client_api_key", "")
+except Exception as exc:
+    log_message(f"[WARN] Could not fetch client_api_key from spoke: {exc!r}")
+    client_api_key = ""
+
+import urllib.parse
 ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
-ws_url += f"/ws/client?hostname={hostname}&platform={platform}"
+ws_url += f"/ws/client?hostname={urllib.parse.quote(hostname)}&platform={urllib.parse.quote(platform)}"
+if client_api_key:
+    ws_url += f"&api_key={urllib.parse.quote(client_api_key)}"
 
 
 def fallback_status():
