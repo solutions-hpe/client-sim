@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.04
+version=.05
 # WHY: dashboard.sh is a read-only live monitor. It runs in its own terminal
 # window (launched by startup.desktop) so the operator can always see
 # what's happening without interrupting the simulation loop in the other pane.
@@ -228,21 +228,30 @@ while true; do
     printf "  %sKill Sw:%s %s\n" "$BOLD" "$RST" "${RED}${BOLD}ENABLED — all simulations suspended${RST}"
   fi
   echo ""
-  # Ordered flag display using parallel arrays.
+  # Simulation flags table — 2-column layout so nothing wraps.
   # WHY: Bash associative arrays have no guaranteed iteration order so the
   # flags would appear in a different sequence every refresh. Parallel arrays
   # give consistent ordering so the operator can scan quickly.
   flag_labels=("Kill Switch" "DHCP Fail" "DNS Fail" "WWW Traffic" "iPerf" "Download" "Port Flap" "Bad SSID PW" "Auth Fail")
   flag_values=("$kill_switch" "$dhcp_fail" "$dns_fail" "$www_traffic" "$iperf" "$download" "$port_flap" "$ssidpw_fail" "$auth_fail")
-  flags_on=()
+  printf "  %sSimulations:%s\n" "$BOLD" "$RST"
+  local col=0
   for i in "${!flag_labels[@]}"; do
-    [[ "${flag_values[$i]}" == "on" ]] && flags_on+=("${flag_labels[$i]}")
+    local val="${flag_values[$i]}"
+    local label="${flag_labels[$i]}"
+    if [[ "$val" == "on" ]]; then
+      local badge="${YLW}[ON] ${RST}"
+    else
+      local badge="${GRN}[off]${RST}"
+    fi
+    printf "  %-14s %b   " "$label:" "$badge"
+    (( col++ ))
+    if (( col % 2 == 0 )); then
+      printf "\n"
+    fi
   done
-  if [[ ${#flags_on[@]} -gt 0 ]]; then
-    printf "  %s${YLW}Active Simulations:%s %s\n" "$BOLD" "$RST" "$(IFS=', '; echo "${flags_on[*]}")"
-  else
-    printf "  %sActive Simulations:%s ${GRN}none%s (staying associated only)\n" "$BOLD" "$RST" "$RST"
-  fi
+  # Newline if last row had only one column
+  (( ${#flag_labels[@]} % 2 != 0 )) && printf "\n"
   echo ""
   printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
