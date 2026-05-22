@@ -328,7 +328,6 @@ while true; do
   (( col % 2 != 0 )) && printf "\n"
   (( col == 0 )) && printf "  ${GRN}None active${RST}\n"
   echo ""
-  printf "%s  Script Status:%s\n" "$BOLD" "$RST"
   get_sim_status
   printf "%s%s%s\n" "$BOLD" "$(printf '═%.0s' $(seq 1 $(tput cols 2>/dev/null || echo 58)))" "$RST"
   sleep "$refresh_rate"
