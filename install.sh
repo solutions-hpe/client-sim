@@ -255,7 +255,6 @@ ok "Package lists updated"
 # giving them the same look as Pi OS hardware.
 if ! $IS_PI; then
   info "Adding Raspberry Pi apt repository for PIXEL desktop packages"
-  apt_run install -y --quiet gnupg curl >>"$LOG" 2>&1 || true
   curl -fsSL https://archive.raspberrypi.org/debian/raspberrypi.gpg.key \
     | gpg --dearmor -o /usr/share/keyrings/raspberrypi-archive-keyring.gpg \
     >>"$LOG" 2>&1
@@ -305,6 +304,8 @@ fi
 
 PACKAGES=(
   # Safe — no network impact
+  "gnupg"
+  "curl"
   "gnome-terminal"
   "wget"
   "git"
@@ -555,7 +556,7 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
     if [[ -f /etc/systemd/system/client-sim-agent.service ]]; then
       info "Enabling client-sim agent service"
       systemctl daemon-reload >>"$LOG" 2>&1 || true
-      existing_agent_pid=$(cat /var/run/client-sim-ws-agent.pid 2>/dev/null || true)
+      existing_agent_pid=$(cat /tmp/client-sim-ws-agent.pid 2>/dev/null || true)
       if [[ "$existing_agent_pid" =~ ^[0-9]+$ ]] && \
          ps -o args= -p "$existing_agent_pid" 2>/dev/null | grep -q '/usr/local/scripts/agent.sh'; then
         kill "$existing_agent_pid" 2>/dev/null || true
@@ -564,7 +565,6 @@ if retry git clone --depth=1 "$CLIENT_SIM_REPO" "$CLIENT_SIM_DIR" >>"$LOG" 2>&1;
       systemctl restart client-sim-agent.service >>"$LOG" 2>&1 || warn "Failed to restart client-sim-agent.service"
       if [[ -f /etc/systemd/system/client-sim-watchdog.timer ]]; then
         systemctl enable --now client-sim-watchdog.timer >>"$LOG" 2>&1 || warn "Failed to enable client-sim-watchdog.timer"
-        systemctl start client-sim-watchdog.service >>"$LOG" 2>&1 || true
       fi
       ok "Client-sim agent service configured"
     fi
