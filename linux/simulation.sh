@@ -368,7 +368,7 @@ if [ "$kill_switch" != "on" ]; then
    #for the other simualtions
    #------------------------------------------------------------
    ping -c2 $dfgw
-    if [ $? -eq 0 ]; then
+    if [ $? -ne 0 ]; then
      echo Attempting to reset adapter | tee -a ${LOG_FILE}
      sleep 15
      wladapter=$(ip -br a | grep "wlx\|wlan" | cut -d ' ' -f '1')
