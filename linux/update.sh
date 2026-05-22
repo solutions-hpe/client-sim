@@ -1,5 +1,5 @@
 #!/bin/bash
-version=.10
+version=.11
 pkill -f firefox
 log="/usr/local/scripts/sim.log"
 debug="/usr/local/scripts/debug-update.log"
@@ -59,7 +59,7 @@ copy_local_files() {
     local _copy_ok=true
     for _f in "${sh_files[@]}"; do
         [[ "$(basename "$_f")" == "update.sh" ]] && continue
-        if ! cp "$_f" /usr/local/scripts/; then
+        if ! cp --remove-destination "$_f" /usr/local/scripts/; then
             echo "ERROR: failed to copy $(basename "$_f") — aborting VERSION commit" | tee -a "$debug" "$log"
             _copy_ok=false
         fi
@@ -70,7 +70,7 @@ copy_local_files() {
         [[ "$(basename "$_t")" == "kill_switch.txt" ]] && continue
         filtered_txt+=("$_t")
     done
-    (( ${#filtered_txt[@]} )) && cp "${filtered_txt[@]}" /usr/local/scripts/
+    (( ${#filtered_txt[@]} )) && cp --remove-destination "${filtered_txt[@]}" /usr/local/scripts/
     # .desktop files are NOT deployed by update.sh — the installer owns them.
     # Deploying them here caused a double-invocation bug: if dex or a session
     # manager processes /etc/xdg/autostart/ while the simulation is already
@@ -90,10 +90,10 @@ Comment=Simulation Script Startup
 Exec=gnome-terminal --geometry=88x28+580+430 -- bash -c "/usr/local/scripts/startup.sh ; systemctl reboot"
 EOF
     fi
-    (( ${#conf_files[@]} )) && cp "${conf_files[@]}" /usr/local/scripts/
+    (( ${#conf_files[@]} )) && cp --remove-destination "${conf_files[@]}" /usr/local/scripts/
 
     if [[ -f "$src_dir/user-overrides.conf" ]]; then
-        cp "$src_dir/user-overrides.conf" /usr/local/scripts/user-overrides.conf
+        cp --remove-destination "$src_dir/user-overrides.conf" /usr/local/scripts/user-overrides.conf
     fi
 
     # System config files — these dirs are root-owned, sudo required
@@ -412,8 +412,8 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
             # Scripts are current but configs/ may have changed. Always apply
             # simulation.conf (and user-overrides.conf) so config tweaks like
             # kill_switch propagate without requiring a script version bump.
-            [[ -f "configs/simulation.conf" ]]     && cp "configs/simulation.conf"     /usr/local/scripts/simulation.conf
-            [[ -f "configs/user-overrides.conf" ]]  && cp "configs/user-overrides.conf"  /usr/local/scripts/user-overrides.conf
+            [[ -f "configs/simulation.conf" ]]     && cp --remove-destination "configs/simulation.conf"     /usr/local/scripts/simulation.conf
+            [[ -f "configs/user-overrides.conf" ]]  && cp --remove-destination "configs/user-overrides.conf"  /usr/local/scripts/user-overrides.conf
             source_found=true
         else
             echo "Update available ($local_ver → $remote_ver) — copying files..." | tee -a "$debug" "$log"
@@ -427,7 +427,7 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                 # Copy all .sh except update.sh first; update.sh copied last
                 for _f in "${sh_files[@]}"; do
                     [[ "$_f" == "update.sh" ]] && continue
-                    cp "$_f" /usr/local/scripts/
+                    cp --remove-destination "$_f" /usr/local/scripts/
                 done
                 # Never copy kill_switch.txt — gkill_switch always fetched live
                 _filtered_txt=()
@@ -435,16 +435,16 @@ if [[ "$source_found" == false && "$github_repo" == "on" ]]; then
                     [[ "$_t" == "kill_switch.txt" ]] && continue
                     _filtered_txt+=("$_t")
                 done
-                (( ${#_filtered_txt[@]} )) && cp "${_filtered_txt[@]}" /usr/local/scripts/
-                [[ -f "VERSION" ]] && cp VERSION /usr/local/scripts/VERSION
+                (( ${#_filtered_txt[@]} )) && cp --remove-destination "${_filtered_txt[@]}" /usr/local/scripts/
+                [[ -f "VERSION" ]] && cp --remove-destination VERSION /usr/local/scripts/VERSION
                 cd ..
             else
                 echo "WARNING: linux directory not found" | tee -a "$debug"
             fi
 
             if cd configs 2>/dev/null; then
-                [[ -f "simulation.conf" ]]     && cp simulation.conf     /usr/local/scripts/simulation.conf
-                [[ -f "user-overrides.conf" ]] && cp user-overrides.conf /usr/local/scripts/user-overrides.conf
+                [[ -f "simulation.conf" ]]     && cp --remove-destination simulation.conf     /usr/local/scripts/simulation.conf
+                [[ -f "user-overrides.conf" ]] && cp --remove-destination user-overrides.conf /usr/local/scripts/user-overrides.conf
                 cd ..
             else
                 echo "WARNING: configs directory not found" | tee -a "$debug"
