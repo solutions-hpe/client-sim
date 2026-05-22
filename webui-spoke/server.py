@@ -4409,6 +4409,10 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
             "hw_faults": proxmox_state.get("hw_faults") or {},
             "hw_last_reset": proxmox_state.get("hw_last_reset"),
+            # T3 IoT PCI devices found on this Proxmox node — list of {id, vidpid, name} dicts.
+            # Used by the hub to classify this spoke as a T3 host and render per-node counts.
+            "t3_pci_devices": list(proxmox_state.get("t3_pci_devices") or []),
+            "t3_pci_count": len(proxmox_state.get("t3_pci_devices") or []),
         },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
@@ -7354,6 +7358,17 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
     proxmox_state["vh_devices"] = body.get("vh_devices", {})
+
+    # T3 PCI devices — store the raw list from the agent and compute a filtered list
+    # of devices matching the T3 target VID:PIDs (currently just 168c:0034).
+    # T3_VIDPIDS defines which PCI vendor:device IDs qualify a node as a T3 host.
+    T3_VIDPIDS: set[str] = {"168c:0034"}
+    raw_pci: list[dict[str, Any]] = body.get("t3_pci_devices") or []
+    # Normalize: keep only dicts with a vidpid field, lower-case for consistent matching.
+    proxmox_state["t3_pci_devices"] = [
+        d for d in raw_pci
+        if isinstance(d, dict) and str(d.get("vidpid", "")).strip().lower() in T3_VIDPIDS
+    ]
 
     # Hardware watchdog fault log + last reset reason (set by hw_watchdog_loop in agent)
     if "hw_faults" in body:

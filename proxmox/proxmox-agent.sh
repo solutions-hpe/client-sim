@@ -1700,6 +1700,61 @@ _find_vhclient() {
     return 1
 }
 
+# ── T3 PCI device collection ───────────────────────────────────────────────────
+# Scans the host PCI bus for devices that qualify as "T3" IoT adapters.
+# Currently targets VID:PID 168c:0034 (Qualcomm Atheros AR9462 802.11ac adapter).
+# Returns a JSON array of matching devices: [{id, vidpid, name}, ...].
+# An empty array means no T3 devices are present on this Proxmox node.
+collect_t3_pci_devices() {
+    # Target VID:PID for T3 classification — Qualcomm Atheros 802.11ac wireless adapter.
+    # This constant will expand to a configurable list in a future release.
+    local T3_VIDPID="168c:0034"
+
+    # lspci must be available; if not, report no devices (graceful degradation).
+    if ! command -v lspci &>/dev/null; then
+        echo "[]"
+        return
+    fi
+
+    # Use Python for reliable JSON construction and string escaping.
+    # lspci -n lists all PCI devices with numeric vendor:device IDs:
+    #   0000:01:00.0 0280: 168c:0034 (rev 01)
+    # lspci (without -n) gives the human-readable name for the same address.
+    python3 - "$T3_VIDPID" <<'PY'
+import subprocess, re, json, sys
+
+t3_vidpid = sys.argv[1] if len(sys.argv) > 1 else "168c:0034"
+
+try:
+    # -n: show numeric vendor:device IDs so we can do exact matching
+    raw = subprocess.check_output(["lspci", "-n"], text=True, timeout=10).splitlines()
+except Exception:
+    raw = []
+
+devices = []
+for line in raw:
+    # Parse: "0000:01:00.0 0280: 168c:0034 (rev 01)"
+    m = re.match(r'^(\S+)\s+\S+:\s+(\S+)', line)
+    if not m:
+        continue
+    addr = m.group(1)
+    # Strip any trailing revision/subdevice info from the VID:DID field
+    vidpid = m.group(2).lower().split()[0]
+    if vidpid != t3_vidpid.lower():
+        continue
+    # Fetch human-readable name for this specific address
+    try:
+        name_line = subprocess.check_output(["lspci", "-s", addr], text=True, timeout=5).strip()
+        # Remove the address prefix: "0000:01:00.0 Network controller: Qualcomm..."
+        name = re.sub(r'^\S+\s+', '', name_line, count=1)
+    except Exception:
+        name = ""
+    devices.append({"id": addr, "vidpid": vidpid, "name": name})
+
+print(json.dumps(devices))
+PY
+}
+
 collect_vh_devices() {
     local vhbin
     vhbin=$(_find_vhclient 2>/dev/null) || vhbin=""
@@ -2021,6 +2076,7 @@ print(json.dumps(out))
   "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
   "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
+  "t3_pci_devices": $(collect_t3_pci_devices 2>/dev/null || echo '[]'),
   "hw_faults": ${hw_faults_json},
   "hw_last_reset": ${hw_last_reset_json},
   "log_lines": $(collect_log_lines)

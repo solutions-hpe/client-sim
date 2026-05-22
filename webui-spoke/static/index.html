@@ -131,6 +131,7 @@
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
       <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-iot" role="tab">IoT (T3)</button>
       <button class="setup-subtab server-subtab" data-subtab="server-commands" role="tab">Command Queue</button>
       <button class="setup-subtab server-subtab" data-subtab="server-services" role="tab">Services</button>
       <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
@@ -310,13 +311,40 @@
       </div>
     </div>
 
+    <!-- IoT (T3) sub-tab — shows PCI devices on this Proxmox node that qualify as T3 IoT adapters -->
+    <div id="server-iot" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>IoT / T3 Devices</h2>
+          <div id="iot-stat-pills" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+        <p style="margin:0 0 12px;color:var(--muted);font-size:0.9rem;">
+          PCI devices on the Proxmox node that classify this host as a T3 (IoT-capable) node.
+          Currently scans for VID:PID <code>168c:0034</code> (Qualcomm Atheros AR9462 802.11ac adapter).
+        </p>
+        <table class="data-table" id="iot-pci-table">
+          <thead>
+            <tr>
+              <th>PCI Address</th>
+              <th>VID:PID</th>
+              <th>Device Name</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="iot-pci-tbody"></tbody>
+        </table>
+        <div id="iot-pci-empty" style="text-align:center;color:var(--muted);padding:32px;display:none;">
+          No T3 PCI devices detected on this Proxmox node.
+        </div>
+      </div>
+    </div>
+
     <!-- Command Queue sub-tab -->
     <div id="server-commands" class="setup-subpanel hidden">
       <div class="setup-card setup-section-gap" id="commands-card">
         <div class="setup-card-header">
           <h2>📨 Command Queue</h2>
         </div>
-        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
           <div class="form-group" style="min-width:160px;">
             <label>Target</label>
             <select id="cmd-target">

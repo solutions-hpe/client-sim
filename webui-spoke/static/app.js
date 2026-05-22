@@ -174,7 +174,7 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb', 'server-commands', 'server-services'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-iot', 'server-commands', 'server-services'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
@@ -439,7 +439,7 @@ const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab):not(.simtop-subtab)');
-const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-node):not(#server-commands):not(#server-services)');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-iot):not(#server-node):not(#server-commands):not(#server-services)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-table');
 const centralEmpty = document.getElementById('central-empty');
@@ -844,10 +844,9 @@ function renderServerTab(data) {
   }
 
   renderUsbSummary(latestProxmoxData);
+  renderIotT3Panel(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
   renderAutoProvisionStatus();
-
-  const vms = Array.isArray(latestProxmoxData.vms) ? latestProxmoxData.vms : [];
   const autoRecoveryPending = new Set(
     Array.isArray(latestProxmoxData.auto_recovery_pending) ? latestProxmoxData.auto_recovery_pending : []
   );
@@ -1983,6 +1982,50 @@ function renderTableRowsIncremental(tbody, items, keyFn, rowHtmlFn) {
   });
 
   existingRows.forEach((row) => row.remove());
+}
+
+// ── IoT / T3 Device panel ────────────────────────────────────────────────────
+// Renders the "IoT (T3)" subtab in the VM Server tab.
+// Reads proxmox_state.t3_pci_devices — a list of PCI devices on this Proxmox
+// node that match the T3 target VID:PIDs (currently 168c:0034).
+// Shows a table row per device and a count pill; an empty state when none found.
+function renderIotT3Panel(proxmoxData = latestProxmoxData) {
+  const tbody = document.getElementById('iot-pci-tbody');
+  const emptyMsg = document.getElementById('iot-pci-empty');
+  const statPills = document.getElementById('iot-stat-pills');
+  if (!tbody) return;
+
+  // t3_pci_devices is the filtered list of T3-qualifying PCI devices from the agent.
+  const devices = Array.isArray(proxmoxData?.t3_pci_devices) ? proxmoxData.t3_pci_devices : [];
+
+  // Update the stat pill in the card header showing total count.
+  if (statPills) {
+    const count = devices.length;
+    statPills.innerHTML = count > 0
+      ? `<span class="server-stat-pill" title="T3 PCI devices detected on this node">📡 ${count} T3 device${count !== 1 ? 's' : ''} detected</span>`
+      : `<span class="server-stat-pill" style="color:var(--muted)">No T3 devices</span>`;
+  }
+
+  // Show or hide the empty state message below the table.
+  if (emptyMsg) emptyMsg.style.display = devices.length ? 'none' : '';
+
+  if (!devices.length) {
+    tbody.innerHTML = '';
+    return;
+  }
+
+  // Render one row per T3 PCI device found on the Proxmox host.
+  tbody.innerHTML = devices.map((device) => {
+    const addr = escHtml(device.id || '—');       // PCI bus address e.g. 0000:01:00.0
+    const vidpid = escHtml(device.vidpid || '—'); // VID:PID e.g. 168c:0034
+    const name = escHtml(device.name || '—');     // Human-readable device name from lspci
+    return `<tr>
+      <td><code>${addr}</code></td>
+      <td><code>${vidpid}</code></td>
+      <td>${name}</td>
+      <td><span class="badge badge-green">Present</span></td>
+    </tr>`;
+  }).join('');
 }
 
 function renderUsbSummary(proxmoxData = latestProxmoxData) {
