@@ -1,13 +1,14 @@
 #!/bin/bash
-version=.07
+version=.08
 # WHY: dashboard.sh is a read-only live monitor. It runs in its own terminal
 # window (launched by startup.desktop) so the operator can always see
 # what's happening without interrupting the simulation loop in the other pane.
 source '/usr/local/scripts/ini-parser.sh'
+# Load simulation.conf only — process_ini_file resets ALL section data on every
+# call. A second call for user-overrides.conf would wipe [simulation]/[s0-s9].
+# Per-user overrides are defined in the [username] section of simulation.conf
+# and applied via apply_override() below.
 process_ini_file '/usr/local/scripts/simulation.conf'
-if [[ -f '/usr/local/scripts/user-overrides.conf' ]]; then
-  process_ini_file '/usr/local/scripts/user-overrides.conf'
-fi
 #------------------------------------------------------------
 # Simulation Dashboard (Read-only live monitor)
 #------------------------------------------------------------
