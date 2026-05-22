@@ -4,7 +4,7 @@
 
 set -u
 
-PID_FILE="/tmp/client-sim-ws-agent.pid"
+PID_FILE="/usr/local/scripts/client-sim-ws-agent.pid"
 STATUS_FILE="/usr/local/scripts/client-status.json"
 HEALTH_FILE="/var/lib/client-sim/agent-health.json"
 log="/usr/local/scripts/sim.log"
@@ -158,15 +158,18 @@ existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
 if pid_is_active "$existing_pid"; then
   exit 0
 fi
-rm -f "$PID_FILE"
+# Suppress errors: remove stale PID file before writing new one.
+rm -f "$PID_FILE" 2>/dev/null || true
 
 if [[ "${1:-}" != "--daemon" ]]; then
   nohup bash "$0" --daemon >/dev/null 2>&1 &
   echo $! > "$PID_FILE"
+  chmod a+rw "$PID_FILE" 2>/dev/null || true
   exit 0
 fi
 
 echo $$ > "$PID_FILE"
+chmod a+rw "$PID_FILE" 2>/dev/null || true
 
 python3 - "$0" "$server_url" "$hostname_val" "$platform" "$STATUS_FILE" "$HEALTH_FILE" "$debug" "$log" <<'PY'
 import asyncio
