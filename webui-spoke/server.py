@@ -2676,6 +2676,7 @@ proxmox_state: dict[str, Any] = {
     "missing_timeout_mins": 60,
     "agent_version": None,
     "pve_version": None,
+    "template_lock": "",
     "prov_summary": None,   # {"action": "provisioned"|"deleted", "count": N, "at": <unix ts>}
     "prov_run": _default_provision_run_state(),
 }
@@ -3772,6 +3773,21 @@ async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None
     return await _queue_command("proxmox", action, args, command_type=command_type)
 
 
+async def _queue_unlock_template_command(command_type: str = "unlock_template") -> dict[str, Any]:
+    return await _queue_proxmox_command("unlock_template", {}, command_type=command_type)
+
+
+def _unlock_template_result(cmd: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "success": True,
+        "queued": True,
+        "task_type": "unlock_template",
+        "detail": "Template unlock queued",
+        "command_id": cmd.get("id"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _proxmox_update_branch() -> str:
     branch = str(settings.get("repo_branch", REPO_BRANCH) or REPO_BRANCH).strip()
     return branch or REPO_BRANCH
@@ -4438,6 +4454,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "usb_count": len(present_usb) if present_usb else len(usb_state),
             "agent_version": proxmox_state.get("agent_version"),
             "pve_version": proxmox_state.get("pve_version"),
+            "template_lock": str(proxmox_state.get("template_lock") or ""),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
             "hw_faults": proxmox_state.get("hw_faults") or {},
             "hw_last_reset": proxmox_state.get("hw_last_reset"),
@@ -5067,6 +5084,16 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                 await ack_fn(cmd_id, "executed", result)
             continue
 
+        if cmd_type == "unlock_template":
+            try:
+                cmd = await _queue_unlock_template_command("unlock_template")
+                result = _unlock_template_result(cmd)
+            except Exception as exc:
+                result = {"success": False, "task_type": "unlock_template", "detail": str(exc)}
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
         if cmd_type == "clear_reclone_state":
             _status = reclone_state.get("status", "idle")
             if _status != "running":
@@ -5546,6 +5573,22 @@ async def relay_sync_once() -> None:
                     })
                 except Exception as exc:
                     result = {"success": False, "task_type": "proxmox_agent_command", "detail": str(exc)}
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": result,
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
+
+            if cmd_type == "unlock_template":
+                try:
+                    cmd = await _queue_unlock_template_command("unlock_template")
+                    result = _unlock_template_result(cmd)
+                except Exception as exc:
+                    result = {"success": False, "task_type": "unlock_template", "detail": str(exc)}
                 if cmd_id:
                     async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
                         ack_resp = await hc_ack.post(f"{base}/ack", json={
@@ -7453,6 +7496,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
+    proxmox_state["template_lock"] = str(body.get("template_lock", "") or "").strip()
     proxmox_state["vh_devices"] = body.get("vh_devices", {})
 
     # T3 PCI devices — store the raw list from the agent and compute a filtered list
@@ -7765,6 +7809,16 @@ async def api_proxmox_update_agent() -> dict[str, Any]:
         "source": cmd["args"].get("repo_raw"),
     }
 
+
+@app.post("/api/proxmox/unlock-template")
+async def api_proxmox_unlock_template() -> dict[str, Any]:
+    cmd = await _queue_unlock_template_command()
+    return {
+        "queued": True,
+        "id": cmd["id"],
+        "target": cmd["target"],
+        "action": cmd.get("action"),
+    }
 
 
 @app.delete("/api/proxmox/vms/{vmid}")
@@ -9649,7 +9703,7 @@ async def api_server_clear_cache() -> dict[str, Any]:
         proxmox_state.update({
             "connected": False, "last_seen": None, "node": {}, "vms": [],
             "unknown_usb": [], "usb_state": [], "present_usb": [],
-            "agent_version": None, "pve_version": None,
+            "agent_version": None, "pve_version": None, "template_lock": "",
             "prov_summary": None, "prov_run": _default_provision_run_state(),
         })
         _prev_usb_by_vmid = {}  # clear transition-detection snapshot so no phantom "failed" on next telemetry

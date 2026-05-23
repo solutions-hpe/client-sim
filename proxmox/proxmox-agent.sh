@@ -58,6 +58,7 @@ AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
 PROV_DIR=/tmp/client-sim-prov
 mkdir -p "$PROV_DIR"
+TEMPLATE_LOCK_STATUS_FILE="${PROV_DIR}/template_lock_status"
 IMAGE1_TEMPLATE_ID=100
 IMAGE2_TEMPLATE_ID=200
 IMAGE1_PCT=50
@@ -112,6 +113,36 @@ atomic_write_file() {
     {
         printf '%s\n' "$content"
     } > "$tmp_file" && mv "$tmp_file" "$target"
+}
+
+set_template_lock_status() {
+    atomic_write_file "$TEMPLATE_LOCK_STATUS_FILE" "${1:-}"
+}
+
+clear_template_lock_status() {
+    rm -f "$TEMPLATE_LOCK_STATUS_FILE" 2>/dev/null || true
+}
+
+probe_template_lock_status() {
+    local -A _seen_templates=()
+    local -a _messages=()
+    local _template_id _lock
+    for _template_id in "$IMAGE1_TEMPLATE_ID" "$IMAGE2_TEMPLATE_ID"; do
+        [[ -n "${_template_id:-}" ]] || continue
+        [[ -n "${_seen_templates[$_template_id]:-}" ]] && continue
+        _seen_templates["$_template_id"]=1
+        _lock=$(qm config "$_template_id" 2>/dev/null | awk '/^lock:/{print $2}' || true)
+        [[ -n "$_lock" ]] && _messages+=("template ${_template_id}: ${_lock}")
+    done
+    if [[ ${#_messages[@]} -gt 0 ]]; then
+        local _status
+        _status=$(IFS='; '; printf '%s' "${_messages[*]}")
+        set_template_lock_status "$_status"
+        printf '%s' "$_status"
+        return 0
+    fi
+    clear_template_lock_status
+    return 1
 }
 
 is_truthy() {
@@ -1172,31 +1203,17 @@ clone_vm_for_usb() {
     # Mark this VMID as actively provisioning so the UI can show "Spinning up"
     echo "$(date +%s)" > "${PROV_DIR}/${vmid}"
 
-    # Wait for template to be unlocked before cloning (Proxmox locks templates
-    # during backups, snapshots, or concurrent clone operations on LVM-thin).
-    # After 30s of waiting, attempt qm unlock to clear stale locks automatically.
-    local _lock_wait=0 _lock_max=120 _unlock_attempted=0
-    while [[ $_lock_wait -lt $_lock_max ]]; do
-        local _lock
-        _lock=$(qm config "$template_id" 2>/dev/null | awk '/^lock:/{print $2}')
-        [[ -z "$_lock" ]] && break
-        if [[ $_lock_wait -eq 0 ]]; then
-            log "WARNING: template $template_id is locked ($_lock) — waiting up to ${_lock_max}s before cloning VM $vmid"
-        fi
-        # After 30s, attempt to clear a stale lock (safe for templates; skip if backup lock)
-        if [[ $_lock_wait -ge 30 && $_unlock_attempted -eq 0 && "$_lock" != "backup" ]]; then
-            log "WARNING: template $template_id lock ($_lock) persists — attempting qm unlock $template_id"
-            qm unlock "$template_id" 2>/dev/null || true
-            _unlock_attempted=1
-        fi
-        sleep 5
-        _lock_wait=$(( _lock_wait + 5 ))
-    done
-    if [[ $_lock_wait -ge $_lock_max ]]; then
-        log "ERROR: template $template_id still locked after ${_lock_max}s — skipping clone of VM $vmid"
-        _teardown "template $template_id locked — clone of VM $vmid skipped"
+    # Fail fast when a template is locked so the UI can report the problem and
+    # offer a manual qm unlock instead of waiting/retrying in the background.
+    local _lock
+    _lock=$(qm config "$template_id" 2>/dev/null | awk '/^lock:/{print $2}' || true)
+    if [[ -n "$_lock" ]]; then
+        set_template_lock_status "template ${template_id}: ${_lock}"
+        log "ERROR: template $template_id is locked ($_lock) — run qm unlock $template_id or use the UI to clear"
+        _teardown "template $template_id locked ($_lock)"
         return 1
     fi
+    probe_template_lock_status >/dev/null 2>&1 || true
 
     # Clone — capture stderr so the real Proxmox error appears in the agent log
     local _clone_err
@@ -1932,7 +1949,7 @@ PY
 }
 
 collect_telemetry() {
-    local cpu_line mem_total mem_free mem_used storage_json vms_json
+    local cpu_line mem_total mem_free mem_used storage_json vms_json template_lock template_lock_json
     cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
     mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     mem_free=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
@@ -2086,6 +2103,9 @@ print(json.dumps(out))
         hw_last_reset_json=$(cat "$HW_RESET_RECORD" 2>/dev/null || printf 'null')
     fi
 
+    template_lock=$(probe_template_lock_status 2>/dev/null || true)
+    template_lock_json=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$template_lock" 2>/dev/null || printf '""')
+
     cat <<JSON
 {
   "node": {
@@ -2098,6 +2118,7 @@ print(json.dumps(out))
   "agent_version": "${AGENT_VERSION}",
   "reseed_in_progress": $([ -f "$RESEED_LOCK_FILE" ] && echo true || echo false),
   "pve_version": "${pve_version}",
+  "template_lock": ${template_lock_json},
   "missing_timeout_mins": ${MISSING_TIMEOUT},
   "vms": ${vms_json:-[]},
   "reclone_state": $(read_json_cache_or_default "$RECLONE_STATE_CACHE" '{"status":"idle","active_vmids":[]}'),
@@ -2695,6 +2716,28 @@ execute_vm_command() {
         provision_unassigned)
             log "provision_unassigned: running USB provision loop to assign dongles without VMs"
             usb_provision_loop || log "WARNING: provision_unassigned loop failed"
+            ;;
+        unlock_template)
+            local _unlock_failed=0
+            local -A _unlocked_templates=()
+            local _template_id
+            for _template_id in "$IMAGE1_TEMPLATE_ID" "$IMAGE2_TEMPLATE_ID"; do
+                [[ -n "${_template_id:-}" ]] || continue
+                [[ -n "${_unlocked_templates[$_template_id]:-}" ]] && continue
+                _unlocked_templates["$_template_id"]=1
+                if qm unlock "$_template_id" >>"$AGENT_LOG" 2>&1; then
+                    log "unlock_template: qm unlock $_template_id succeeded"
+                else
+                    log "ERROR: unlock_template: qm unlock $_template_id failed"
+                    _unlock_failed=1
+                fi
+            done
+            if probe_template_lock_status >/dev/null 2>&1; then
+                log "WARNING: unlock_template: one or more template locks remain"
+            else
+                log "unlock_template: cleared template lock status"
+            fi
+            [[ $_unlock_failed -eq 0 ]]
             ;;
         snapshot_vms)
             for vid in $(qm list | awk 'NR>1{print $1}'); do
