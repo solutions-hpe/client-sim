@@ -1172,6 +1172,32 @@ clone_vm_for_usb() {
     # Mark this VMID as actively provisioning so the UI can show "Spinning up"
     echo "$(date +%s)" > "${PROV_DIR}/${vmid}"
 
+    # Wait for template to be unlocked before cloning (Proxmox locks templates
+    # during backups, snapshots, or concurrent clone operations on LVM-thin).
+    # After 30s of waiting, attempt qm unlock to clear stale locks automatically.
+    local _lock_wait=0 _lock_max=120 _unlock_attempted=0
+    while [[ $_lock_wait -lt $_lock_max ]]; do
+        local _lock
+        _lock=$(qm config "$template_id" 2>/dev/null | awk '/^lock:/{print $2}')
+        [[ -z "$_lock" ]] && break
+        if [[ $_lock_wait -eq 0 ]]; then
+            log "WARNING: template $template_id is locked ($_lock) — waiting up to ${_lock_max}s before cloning VM $vmid"
+        fi
+        # After 30s, attempt to clear a stale lock (safe for templates; skip if backup lock)
+        if [[ $_lock_wait -ge 30 && $_unlock_attempted -eq 0 && "$_lock" != "backup" ]]; then
+            log "WARNING: template $template_id lock ($_lock) persists — attempting qm unlock $template_id"
+            qm unlock "$template_id" 2>/dev/null || true
+            _unlock_attempted=1
+        fi
+        sleep 5
+        _lock_wait=$(( _lock_wait + 5 ))
+    done
+    if [[ $_lock_wait -ge $_lock_max ]]; then
+        log "ERROR: template $template_id still locked after ${_lock_max}s — skipping clone of VM $vmid"
+        _teardown "template $template_id locked — clone of VM $vmid skipped"
+        return 1
+    fi
+
     # Clone — capture stderr so the real Proxmox error appears in the agent log
     local _clone_err
     _clone_err=$(timeout 600 qm clone "$template_id" "$vmid" --name "$full_name" 2>&1 >/dev/null)
