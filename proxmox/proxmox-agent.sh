@@ -1172,8 +1172,11 @@ clone_vm_for_usb() {
     # Mark this VMID as actively provisioning so the UI can show "Spinning up"
     echo "$(date +%s)" > "${PROV_DIR}/${vmid}"
 
-    # Clone
-    if ! timeout 600 qm clone "$template_id" "$vmid" --name "$full_name" 2>/dev/null; then
+    # Clone — capture stderr so the real Proxmox error appears in the agent log
+    local _clone_err
+    _clone_err=$(timeout 600 qm clone "$template_id" "$vmid" --name "$full_name" 2>&1 >/dev/null)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR: qm clone $template_id → $vmid failed: ${_clone_err:-<no output>}"
         _teardown "qm clone failed (template $template_id missing or VMID $vmid conflict)"
         return 1
     fi
