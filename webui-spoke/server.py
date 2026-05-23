@@ -5067,6 +5067,24 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                 await ack_fn(cmd_id, "executed", result)
             continue
 
+        if cmd_type == "clear_reclone_state":
+            _status = reclone_state.get("status", "idle")
+            if _status != "running":
+                saved_last_run = reclone_state.get("last_run")
+                saved_auto_log = reclone_state.get("auto_recovery_log") or []
+                reclone_state.update({
+                    "status": "idle", "type": None, "total": 0,
+                    "completed": 0, "failed": 0, "current_vm": None,
+                    "log": [], "started_at": None,
+                    "last_run": saved_last_run, "auto_recovery_log": saved_auto_log,
+                })
+                _save_reclone_state()
+                await _broadcast_reclone_state()
+            result = {"cleared": _status != "running", "previous_status": _status}
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
         if cmd_type == "proxmox_reclone_all":
             try:
                 concurrency = int(payload_data.get("concurrency", 0) or 0)
@@ -5535,6 +5553,28 @@ async def relay_sync_once() -> None:
                             "status": "executed",
                             "result": result,
                         }, headers=headers)
+                        ack_resp.raise_for_status()
+                continue
+
+            if cmd_type == "clear_reclone_state":
+                _status = reclone_state.get("status", "idle")
+                if _status != "running":
+                    saved_last_run = reclone_state.get("last_run")
+                    saved_auto_log = reclone_state.get("auto_recovery_log") or []
+                    reclone_state.update({
+                        "status": "idle", "type": None, "total": 0,
+                        "completed": 0, "failed": 0, "current_vm": None,
+                        "log": [], "started_at": None,
+                        "last_run": saved_last_run, "auto_recovery_log": saved_auto_log,
+                    })
+                    _save_reclone_state()
+                    await _broadcast_reclone_state()
+                result = {"cleared": _status != "running", "previous_status": _status}
+                if cmd_id:
+                    async with httpx.AsyncClient(verify=False, timeout=10) as cli:
+                        ack_resp = await cli.post(f"{hub_base}/api/{hub_tenant_id}/spokes/{hub_spoke_id}/ack",
+                            json={"command_id": cmd_id, "status": "executed", "result": result},
+                            headers=headers)
                         ack_resp.raise_for_status()
                 continue
 
@@ -7306,9 +7346,33 @@ async def api_proxmox_reclone_all() -> dict[str, Any]:
     return {"status": "started", "vm_count": len(eligible), "unassigned_dongles": len(unassigned_dongles)}
 
 
-@app.get("/api/proxmox/reclone-status")
-async def api_proxmox_reclone_status() -> dict[str, Any]:
-    return dict(reclone_state)
+@app.post("/api/proxmox/reclone-state/clear")
+async def api_proxmox_reclone_state_clear() -> dict[str, Any]:
+    """Clear a stale failed/interrupted reclone state, resetting to idle.
+    The last_run summary is preserved so the UI can still show what happened."""
+    status = reclone_state.get("status", "idle")
+    if status == "running":
+        raise HTTPException(status_code=409, detail="Cannot clear reclone state while a reclone is running")
+    saved_last_run = reclone_state.get("last_run")
+    saved_auto_log = reclone_state.get("auto_recovery_log") or []
+    reclone_state.update({
+        "status": "idle",
+        "type": None,
+        "total": 0,
+        "completed": 0,
+        "failed": 0,
+        "current_vm": None,
+        "log": [],
+        "started_at": None,
+        "last_run": saved_last_run,
+        "auto_recovery_log": saved_auto_log,
+    })
+    _save_reclone_state()
+    await _broadcast_reclone_state()
+    return {"cleared": True, "previous_status": status}
+
+
+
 
 
 async def _authorize_proxmox_agent(hostname: str, api_key: str, client_ip: str, now: float) -> tuple[str | None, JSONResponse | None]:
@@ -7461,11 +7525,25 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     _stale_reclone_statuses = {"interrupted", "failed"}
     if reclone_state.get("status") in _stale_reclone_statuses:
         eligible_after_update = _reclone_targets_for_run()
-        if not eligible_after_update:
+        # Also clear if every VM that previously failed is now running — the
+        # operator may have fixed them outside the reclone flow (e.g. by starting
+        # them manually) and the stale "Failed" badge is no longer meaningful.
+        failed_vmids_in_log = {
+            str(e.get("vmid"))
+            for e in (reclone_state.get("log") or [])
+            if e.get("status") == "failed" and e.get("vmid") is not None
+        }
+        running_vmids = {
+            str(v.get("vmid"))
+            for v in enriched_vms
+            if str(v.get("status", "")).lower() == "running" and v.get("vmid") is not None
+        }
+        all_failed_now_running = bool(failed_vmids_in_log) and failed_vmids_in_log.issubset(running_vmids)
+        if not eligible_after_update or all_failed_now_running:
+            reason = "0 eligible VMs" if not eligible_after_update else "all previously failed VMs are now running"
             logger.info(
-                "Fleet Reclone: detected stale '%s' run with 0 eligible VMs — "
-                "auto-resetting to idle",
-                reclone_state["status"],
+                "Fleet Reclone: detected stale '%s' run (%s) — auto-resetting to idle",
+                reclone_state["status"], reason,
             )
             saved_last_run = reclone_state.get("last_run")
             saved_auto_log = reclone_state.get("auto_recovery_log") or []
@@ -7486,6 +7564,37 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             # for the next proxmox_update broadcast.
             _save_reclone_state()
             await _broadcast_reclone_state()
+
+    # Auto-trigger provision_unassigned when usb_auto_provision is enabled and
+    # certified unassigned dongles are physically present.  Only queued when no
+    # provision run is active and no provision_unassigned command is already
+    # pending in the proxmox command queue.
+    if settings.get("usb_auto_provision") == "on" and reclone_state.get("status") != "running":
+        prov_run = proxmox_state.get("prov_run") or {}
+        if not prov_run.get("running"):
+            unassigned = _proxmox_unassigned_present_usb()
+            if unassigned:
+                certified_set = {
+                    str(v).strip().lower()
+                    for v in _parse_json_list(settings.get("usb_vidpids", "[]"))
+                    if str(v).strip()
+                }
+                certified_unassigned = [
+                    u for u in unassigned
+                    if str(u.get("vidpid", "")).strip().lower() in certified_set
+                ]
+                if certified_unassigned:
+                    has_pending = any(
+                        c.get("action") == "provision_unassigned"
+                        and c.get("status") not in {"completed", "failed", "expired"}
+                        for c in commands
+                    )
+                    if not has_pending:
+                        await _queue_proxmox_command("provision_unassigned", {}, command_type="auto-provision")
+                        logger.info(
+                            "Auto-provisioning: detected %d unassigned certified dongle(s) — queued provision_unassigned",
+                            len(certified_unassigned),
+                        )
 
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
