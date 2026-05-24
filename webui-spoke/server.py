@@ -93,6 +93,26 @@ def _detect_own_vmid() -> int | None:
 
 WEBUI_VMID: int | None = _detect_own_vmid()
 
+# VMIDs that must never be started, stopped, rebooted, recloned, snapshotted,
+# or deleted through this UI.  1001 is the conventional spoke-container VMID;
+# WEBUI_VMID covers whatever container we detect ourselves running in.
+_HARDCODED_PROTECTED_VMIDS: frozenset[int] = frozenset({1001})
+
+
+def _is_protected_vmid(vmid: int | str | None) -> bool:
+    """Return True if this VMID must never be touched by any UI action."""
+    if vmid is None:
+        return False
+    try:
+        v = int(vmid)
+    except (TypeError, ValueError):
+        return False
+    if v in _HARDCODED_PROTECTED_VMIDS:
+        return True
+    if WEBUI_VMID is not None and v == WEBUI_VMID:
+        return True
+    return False
+
 # ── Credential encryption ─────────────────────────────────────────────────────
 # Fernet symmetric encryption for sensitive fields in settings.json.
 # Key is generated once at install time and stored in .secret_key (chmod 600).
@@ -2997,6 +3017,16 @@ def _enqueue_command_locked(target: str, action: str, args: dict[str, Any] | Non
     if target == "proxmox" and normalized_action == "delete_vm":
         normalized_args = _prepare_delete_vm_args(normalized_args)
 
+    # Block all single-VM actions on protected VMIDs (start, stop, reboot, snapshot, reclone)
+    _VM_ACTIONS = {"start_vm", "stop_vm", "reboot_vm", "snapshot_vm", "reclone_vm", "delete_vm"}
+    if target == "proxmox" and normalized_action in _VM_ACTIONS:
+        vmid = normalized_args.get("vmid")
+        if _is_protected_vmid(vmid):
+            raise HTTPException(
+                status_code=403,
+                detail=f"VM {vmid} is protected and cannot be managed from this UI",
+            )
+
     now = time.time()
     expired, purged = _cleanup_commands_locked(now)
     existing = _find_active_duplicate_command_locked(target, normalized_action, normalized_args)
@@ -3445,8 +3475,8 @@ def _prepare_delete_vm_args(args: dict[str, Any] | None) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"VM {vmid} was not found in Proxmox inventory")
     if vm.get("is_template"):
         raise HTTPException(status_code=400, detail="Templates cannot be deleted from the VM list")
-    if WEBUI_VMID is not None and vmid == WEBUI_VMID:
-        raise HTTPException(status_code=403, detail="Cannot delete the container running this service")
+    if _is_protected_vmid(vmid):
+        raise HTTPException(status_code=403, detail=f"VM {vmid} is protected and cannot be managed from this UI")
 
     prepared = dict(args)
     prepared["vmid"] = vmid
@@ -3724,14 +3754,9 @@ def _update_provision_run_state(vms: list[dict[str, Any]], usb_state: list[dict[
 def _guest_supports_reclone(vm: dict[str, Any]) -> bool:
     if vm.get("is_template"):
         return False
-    if WEBUI_VMID is not None:
-        try:
-            if int(vm.get("vmid", -1)) == WEBUI_VMID:
-                return False
-        except (TypeError, ValueError):
-            return False
+    if _is_protected_vmid(vm.get("vmid")):
+        return False
     return bool(vm.get("reclone_supported"))
-
 
 
 def _reclone_targets_for_run() -> list[dict[str, Any]]:
@@ -3739,7 +3764,11 @@ def _reclone_targets_for_run() -> list[dict[str, Any]]:
         [
             dict(vm)
             for vm in proxmox_state.get("vms") or []
-            if vm.get("vmid") is not None and _guest_supports_reclone(vm)
+            if (
+                vm.get("vmid") is not None
+                and _guest_supports_reclone(vm)
+                and int(vm.get("vmid", 0)) > 9000  # only auto-provisioned sim clients
+            )
         ],
         key=lambda vm: int(vm.get("vmid", 0)),
     )

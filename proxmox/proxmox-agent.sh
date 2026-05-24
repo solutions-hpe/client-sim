@@ -2091,7 +2091,12 @@ def config_text(kind, vmid):
         return ''
 
 
+PROTECTED_VMIDS = {1001}
+
 def reclone_info(kind, vmid):
+    # Hard failsafe: these VMIDs can never be recloned regardless of config
+    if vmid in PROTECTED_VMIDS:
+        return None, False, [], None, False, 'Protected system VM — cannot be managed from this UI', False
     text = config_text(kind, vmid)
     source_vmid = None
     for line in text.splitlines():
