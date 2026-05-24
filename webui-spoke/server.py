@@ -2653,7 +2653,7 @@ clients: dict[str, dict[str, Any]] = _load_client_history()
 commands: list[dict[str, Any]] = []
 COMMAND_MAX = 100                 # keep last N commands in memory
 COMMAND_EXPIRE_SECS = 300         # pending/delivered commands expire after 5 minutes
-COMMAND_RESULT_RETENTION_SECS = 60  # keep ACK'd/expired results briefly so the UI can show them
+COMMAND_RESULT_RETENTION_SECS = 86400  # keep completed/expired results for 24 hours
 
 ws_connections: list[WebSocket] = []
 client_ws_connections: dict[str, WebSocket] = {}
