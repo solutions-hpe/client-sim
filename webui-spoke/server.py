@@ -5060,6 +5060,12 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
             asyncio.create_task(_run_self_update())
             continue
 
+        if cmd_type == "refresh_webui":
+            asyncio.create_task(refresh_webui_frontend())
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", {"task_type": "refresh_webui", "detail": "WebUI refresh triggered"})
+            continue
+
         if cmd_type == "proxmox_agent_update":
             try:
                 result = await _queue_proxmox_agent_update()
@@ -5545,6 +5551,18 @@ async def relay_sync_once() -> None:
                         }, headers=headers)
                         ack_resp.raise_for_status()
                 asyncio.create_task(_run_self_update())
+                continue
+
+            if cmd_type == "refresh_webui":
+                asyncio.create_task(refresh_webui_frontend())
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": {"task_type": "refresh_webui", "detail": "WebUI refresh triggered"},
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
                 continue
 
             if cmd_type == "proxmox_agent_update":
