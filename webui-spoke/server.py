@@ -241,7 +241,7 @@ OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "300"))
 MAX_CLIENT_ERRORS = 50
 SYNC_INTERVAL = 300
 HEARTBEAT_INTERVAL = 30
-RELAY_INTERVAL_DEFAULT = 30   # base interval; jitter adds 0–30s
+RELAY_INTERVAL_DEFAULT = 5    # base interval in seconds
 CENTRAL_POLL_INTERVAL = 900   # 15 minutes
 HUB_RELAY_KEYS = {
     "relay_server_url",
@@ -677,7 +677,7 @@ def _clamp_relay_interval(value: Any) -> int:
         interval = int(value)
     except (TypeError, ValueError):
         interval = RELAY_INTERVAL_DEFAULT
-    return max(30, min(86400, interval))
+    return max(5, min(86400, interval))
 
 
 def _relay_registration_status_from_settings() -> str:
