@@ -4313,6 +4313,7 @@ async def _hub_self_register(server_url: str) -> None:
         "spoke_name": spoke_name,
         "tenant_id_hint": (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip(),
         "onboarding_psk": settings.get("relay_onboarding_psk", "").strip(),
+        "api_key": settings.get("relay_api_key", "").strip(),
         "config": _build_registration_config(),
     }
     _relay_diag_append("register_attempt", url=f"{server_url}/api/spokes/register",
