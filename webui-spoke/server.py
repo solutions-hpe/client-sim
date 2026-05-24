@@ -5146,13 +5146,11 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
         if cmd_type == "clear_reclone_state":
             _status = reclone_state.get("status", "idle")
             if _status != "running":
-                saved_last_run = reclone_state.get("last_run")
-                saved_auto_log = reclone_state.get("auto_recovery_log") or []
                 reclone_state.update({
                     "status": "idle", "type": None, "total": 0,
                     "completed": 0, "failed": 0, "current_vm": None,
                     "log": [], "started_at": None,
-                    "last_run": saved_last_run, "auto_recovery_log": saved_auto_log,
+                    "last_run": None, "auto_recovery_log": [],
                 })
                 _save_reclone_state()
                 await _broadcast_reclone_state()
@@ -5663,13 +5661,11 @@ async def relay_sync_once() -> None:
             if cmd_type == "clear_reclone_state":
                 _status = reclone_state.get("status", "idle")
                 if _status != "running":
-                    saved_last_run = reclone_state.get("last_run")
-                    saved_auto_log = reclone_state.get("auto_recovery_log") or []
                     reclone_state.update({
                         "status": "idle", "type": None, "total": 0,
                         "completed": 0, "failed": 0, "current_vm": None,
                         "log": [], "started_at": None,
-                        "last_run": saved_last_run, "auto_recovery_log": saved_auto_log,
+                        "last_run": None, "auto_recovery_log": [],
                     })
                     _save_reclone_state()
                     await _broadcast_reclone_state()
@@ -7470,8 +7466,6 @@ async def api_proxmox_reclone_state_clear() -> dict[str, Any]:
     status = reclone_state.get("status", "idle")
     if status == "running":
         raise HTTPException(status_code=409, detail="Cannot clear reclone state while a reclone is running")
-    saved_last_run = reclone_state.get("last_run")
-    saved_auto_log = reclone_state.get("auto_recovery_log") or []
     reclone_state.update({
         "status": "idle",
         "type": None,
@@ -7481,8 +7475,8 @@ async def api_proxmox_reclone_state_clear() -> dict[str, Any]:
         "current_vm": None,
         "log": [],
         "started_at": None,
-        "last_run": saved_last_run,
-        "auto_recovery_log": saved_auto_log,
+        "last_run": None,
+        "auto_recovery_log": [],
     })
     _save_reclone_state()
     await _broadcast_reclone_state()
