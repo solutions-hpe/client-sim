@@ -4241,6 +4241,30 @@ def _hub_isolated() -> bool:  # Compute whether hub-driven config pushes must pa
     )  # Share one boolean source of truth so every relay path evaluates isolation consistently.
 
 
+def _revert_hub_managed_if_auth_failure(status_code: int | None, reason: str) -> bool:
+    """Immediately revert hub_managed to False when the hub returns a definitive auth/not-found error.
+
+    A 401 (wrong key), 403 (wrong PSK or forbidden), or 404 (tenant deleted) means the hub cannot
+    recognise this spoke anymore — waiting for the isolation timeout would leave the spoke stuck in
+    a read-only hub-managed state indefinitely.  Reverting immediately restores local control.
+
+    Returns True if hub_managed was cleared so callers can log/broadcast the change.
+    """
+    if not settings.get("hub_managed"):
+        return False
+    if status_code not in (401, 403, 404):
+        return False
+    settings["hub_managed"] = False
+    _save_settings()
+    logger.warning(
+        "hub_managed reverted to local control — hub auth failure (HTTP %s): %s",
+        status_code,
+        reason,
+    )
+    _relay_diag_append("hub_managed_reverted", status_code=status_code, reason=reason)
+    return True
+
+
 def _relay_status_payload() -> dict[str, Any]:  # Build the relay status payload once so REST and websocket updates expose identical isolation data.
     return {  # Merge relay, spoke, and isolation fields so the browser can render complete hub status from one payload.
         **dict(relay_state),  # Preserve the existing relay status fields so current UI behavior keeps working.
@@ -5794,6 +5818,7 @@ async def relay_sync_once() -> None:
                 method=exc.request.method if exc.request else "",
                 url=str(exc.request.url) if exc.request else "",
             )
+            _revert_hub_managed_if_auth_failure(status_code, f"relay sync HTTP {status_code}")
             _save_settings()
             await _hub_check_approval(server_url, spoke_id)
         else:
@@ -5941,8 +5966,10 @@ async def relay_ws_loop() -> None:
                 relay_registration_refresh_needed = True
                 settings["relay_api_key"] = ""
                 settings["relay_tenant_id"] = ""
+                _revert_hub_managed_if_auth_failure(status_code, f"websocket handshake HTTP {status_code}")
                 _save_settings()
             if status_code == 404:
+                _revert_hub_managed_if_auth_failure(status_code, "websocket handshake HTTP 404 (tenant not found)")
                 await relay_sync_once()
                 await asyncio.sleep(interval)
             else:
