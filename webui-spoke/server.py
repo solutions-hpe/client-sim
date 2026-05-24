@@ -577,6 +577,17 @@ def _load_reclone_state() -> None:
             reclone_state["log"] = list(reclone_state.get("log") or []) + [log_entry]
             reclone_state["log"] = reclone_state["log"][-200:]
             changed = True
+        if reclone_state.get("status") == "completed":
+            last_run = reclone_state.get("last_run") or {}
+            ts = _parse_ts(last_run.get("timestamp"))
+            if ts and (time.time() - ts) >= 8 * 3600:
+                reclone_state.update({
+                    "status": "idle", "type": None, "total": 0,
+                    "completed": 0, "failed": 0, "current_vm": None,
+                    "log": [], "started_at": None, "last_run": None,
+                    "auto_recovery_log": [],
+                })
+                changed = True
         if changed:
             _save_reclone_state()
         logger.info("Restored reclone state from disk")
@@ -6615,6 +6626,20 @@ async def heartbeat_check() -> None:
                         changed = True
             if changed:
                 await broadcast_full_state()
+
+            # Auto-reset reclone state after 8 hours on successful completion
+            if reclone_state.get("status") == "completed":
+                last_run = reclone_state.get("last_run") or {}
+                ts = _parse_ts(last_run.get("timestamp"))
+                if ts and (time.time() - ts) >= 8 * 3600:
+                    reclone_state.update({
+                        "status": "idle", "type": None, "total": 0,
+                        "completed": 0, "failed": 0, "current_vm": None,
+                        "log": [], "started_at": None, "last_run": None,
+                        "auto_recovery_log": [],
+                    })
+                    await _broadcast_reclone_state()
+
             _update_service_health("heartbeat", ok=True)
         except asyncio.CancelledError:
             raise
