@@ -111,6 +111,16 @@ def _is_protected_vmid(vmid: int | str | None) -> bool:
         return True
     if WEBUI_VMID is not None and v == WEBUI_VMID:
         return True
+    # Check user-configured protected VMIDs from settings (comma-separated)
+    raw = str(settings.get("protected_vmids", "") or "")
+    for part in raw.split(","):
+        part = part.strip()
+        if part:
+            try:
+                if int(part) == v:
+                    return True
+            except ValueError:
+                pass
     return False
 
 # ── Credential encryption ─────────────────────────────────────────────────────
@@ -819,6 +829,7 @@ settings: dict[str, Any] = {
     "reclone_schedule_enabled": _normalize_relay_enabled(_persisted.get("reclone_schedule_enabled", "off")),
     "reclone_schedule_cron": _persisted.get("reclone_schedule_cron", "sunday 02:00"),
     "reclone_concurrency": str(_persisted.get("reclone_concurrency", "1")),
+    "protected_vmids": str(_persisted.get("protected_vmids", "")),
     "l1_vlan_start": str(_persisted.get("l1_vlan_start", "100")),
     "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
     "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
@@ -2833,6 +2844,7 @@ class SettingsUpdate(BaseModel):
     reclone_schedule_enabled: str | None = None
     reclone_schedule_cron: str | None = None
     reclone_concurrency: str | None = None
+    protected_vmids: str | None = None
     l1_vlan_start: str | None = None
     l1_vlan_end: str | None = None
     spoke_tls: str | None = None
@@ -4272,6 +4284,7 @@ def _build_registration_config() -> dict[str, Any]:
         "reclone_schedule_enabled": settings.get("reclone_schedule_enabled", "off"),
         "reclone_schedule_cron": settings.get("reclone_schedule_cron", "sunday 02:00"),
         "reclone_concurrency": settings.get("reclone_concurrency", "1"),
+        "protected_vmids": settings.get("protected_vmids", ""),
         "vm_image_1_template_id": settings.get("vm_image_1_template_id", "100"),
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", "200"),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
@@ -7137,6 +7150,19 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.reclone_concurrency is not None:
         settings["reclone_concurrency"] = str(max(1, int(update.reclone_concurrency.strip() or "1")))
+
+    if update.protected_vmids is not None:
+        # Normalize to a clean comma-separated list of integers, drop non-numeric entries
+        raw = str(update.protected_vmids or "")
+        parsed = []
+        for part in raw.split(","):
+            part = part.strip()
+            if part:
+                try:
+                    parsed.append(str(int(part)))
+                except ValueError:
+                    pass
+        settings["protected_vmids"] = ", ".join(parsed)
 
     if update.l1_vlan_start is not None:
         settings["l1_vlan_start"] = str(max(1, min(4094, int(update.l1_vlan_start.strip() or "100"))))
