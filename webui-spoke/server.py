@@ -9649,6 +9649,7 @@ async def api_init() -> dict[str, Any]:
         "relay": _relay_status_payload(),
         "installer_version": INSTALLER_VERSION,
         "app_version": APP_VERSION,
+        "hostname": socket.gethostname(),
         "kill_switch": gkill_switch_state["value"],
         "local_kill_switch": _read_local_kill_switch(),
     }
