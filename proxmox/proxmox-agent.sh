@@ -34,6 +34,12 @@ USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
 PROGRESS_EVENT_QUEUE_DIR="/var/lib/client-sim/progress-events"
+SERVER_URL_AUTO_DETECTED=0
+HUB_CONTACT_LOSS_REDETECT_SECS=300
+HUB_STATE_DIR="/var/lib/client-sim"
+HUB_LAST_SUCCESS_FILE="${HUB_STATE_DIR}/hub-last-success"
+HUB_SERVER_URL_FILE="${HUB_STATE_DIR}/hub-server-url"
+HUB_REDETECT_LOCK_FILE="${HUB_STATE_DIR}/hub-redetect.lock"
 
 # ── Hardware Watchdog ──────────────────────────────────────────────────────────
 HW_WATCHDOG_INTERVAL="${CLIENT_SIM_HW_WATCHDOG_INTERVAL:-60}"   # seconds between scans
@@ -113,6 +119,78 @@ atomic_write_file() {
     {
         printf '%s\n' "$content"
     } > "$tmp_file" && mv "$tmp_file" "$target"
+}
+
+persist_runtime_server_url() {
+    [[ -n "${SERVER_URL:-}" ]] || return 0
+    mkdir -p "$HUB_STATE_DIR"
+    atomic_write_file "$HUB_SERVER_URL_FILE" "$SERVER_URL"
+}
+
+refresh_runtime_server_url() {
+    [[ "${SERVER_URL_AUTO_DETECTED:-0}" -eq 1 ]] || return 0
+    [[ -f "$HUB_SERVER_URL_FILE" ]] || return 0
+    local runtime_url
+    runtime_url=$(tr -d '[:space:]' < "$HUB_SERVER_URL_FILE" 2>/dev/null || true)
+    [[ -n "$runtime_url" ]] && SERVER_URL="$runtime_url"
+}
+
+mark_hub_contact_success() {
+    mkdir -p "$HUB_STATE_DIR"
+    printf '%s\n' "$(date +%s)" > "$HUB_LAST_SUCCESS_FILE"
+}
+
+last_hub_contact_ts() {
+    local now ts
+    now=$(date +%s)
+    [[ -f "$HUB_LAST_SUCCESS_FILE" ]] || { printf '%s\n' "$now"; return 0; }
+    ts=$(tr -d '[:space:]' < "$HUB_LAST_SUCCESS_FILE" 2>/dev/null || true)
+    [[ "$ts" =~ ^[0-9]+$ ]] || ts="$now"
+    printf '%s\n' "$ts"
+}
+
+maybe_redetect_hub_url() {
+    [[ "${SERVER_URL_AUTO_DETECTED:-0}" -eq 1 ]] || return 0
+    mkdir -p "$HUB_STATE_DIR"
+    local now last_success
+    now=$(date +%s)
+    last_success=$(last_hub_contact_ts)
+    (( now - last_success >= HUB_CONTACT_LOSS_REDETECT_SECS )) || return 0
+
+    if command -v flock >/dev/null 2>&1; then
+        (
+            flock -n 200 || exit 0
+            local locked_now locked_last
+            locked_now=$(date +%s)
+            locked_last=$(last_hub_contact_ts)
+            (( locked_now - locked_last >= HUB_CONTACT_LOSS_REDETECT_SECS )) || exit 0
+            log "[agent] Connectivity lost >5min, re-detecting IP..."
+            auto_detect_hub_url || true
+            persist_runtime_server_url
+            printf '%s\n' "$locked_now" > "$HUB_LAST_SUCCESS_FILE"
+        ) 200>"$HUB_REDETECT_LOCK_FILE"
+        return 0
+    fi
+
+    log "[agent] Connectivity lost >5min, re-detecting IP..."
+    auto_detect_hub_url || true
+    persist_runtime_server_url
+    printf '%s\n' "$now" > "$HUB_LAST_SUCCESS_FILE"
+}
+
+record_hub_contact_result() {
+    local http_code="${1:-}" curl_exit="${2:-0}"
+    if [[ "$http_code" =~ ^[0-9]{3}$ ]] && [[ "$http_code" != "000" ]]; then
+        mark_hub_contact_success
+        if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            clear_spoke_failure
+        fi
+        return 0
+    fi
+    if [[ -z "$http_code" || "$http_code" == "000" || "$curl_exit" != "0" ]]; then
+        record_spoke_failure
+        maybe_redetect_hub_url
+    fi
 }
 
 set_template_lock_status() {
@@ -244,6 +322,8 @@ auto_detect_hub_url() {
         return 1
     fi
     SERVER_URL="http://${ct_ip}:8000"
+    SERVER_URL_AUTO_DETECTED=1
+    persist_runtime_server_url
     log "Auto-detected hub at ${SERVER_URL} (LXC 1001)"
     return 0
 }
@@ -343,6 +423,7 @@ trigger_spoke_reinstall() {
 
 curl_api() {
     local method="$1" path="$2" data="${3:-}"
+    refresh_runtime_server_url
     local args=(-sS --max-time 15 -X "$method" "${SERVER_URL}${path}" -H "Content-Type: application/json")
     local response http_code body curl_exit=0
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
@@ -350,11 +431,7 @@ curl_api() {
     response=$(curl "${args[@]}" -w $'\n%{http_code}') || curl_exit=$?
     http_code="${response##*$'\n'}"
     body="${response%$'\n'*}"
-    if [[ "$http_code" == "000" ]]; then
-        record_spoke_failure
-    elif [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-        clear_spoke_failure
-    fi
+    record_hub_contact_result "$http_code" "$curl_exit"
     if (( curl_exit != 0 )); then
         log "curl_api ERROR: ${method} ${path} curl exited ${curl_exit} (HTTP ${http_code})"
         return 1
@@ -433,10 +510,16 @@ clear_api_key() {
 
 curl_api_status() {
     local method="$1" path="$2" data="${3:-}"
+    refresh_runtime_server_url
     local args=(-sS --max-time 15 -X "$method" "${SERVER_URL}${path}" -H "Content-Type: application/json" -w $'\n%{http_code}')
+    local response http_code curl_exit=0
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     [[ -n "$data" ]] && args+=(-d "$data")
-    curl "${args[@]}"
+    response=$(curl "${args[@]}") || curl_exit=$?
+    http_code="${response##*$'\n'}"
+    record_hub_contact_result "$http_code" "$curl_exit"
+    printf '%s' "$response"
+    (( curl_exit == 0 ))
 }
 
 post_progress_event() {
@@ -563,14 +646,20 @@ handle_auth_failure() {
 }
 
 register_and_wait_for_key() {
-    local my_hostname response approved key poll_response poll_approved poll_key
+    local my_hostname response response_with_status approved key status poll_response poll_with_status poll_approved poll_key poll_status
     my_hostname=$(hostname)
     log "No API key found. Registering with server..."
 
     while true; do
-        response=$(curl -sS --max-time 10 -X POST "${SERVER_URL}/api/proxmox/register" \
+        refresh_runtime_server_url
+        response_with_status=$(curl -sS --max-time 10 -X POST "${SERVER_URL}/api/proxmox/register" \
             -H "Content-Type: application/json" \
-            -d "{\"hostname\":\"$my_hostname\"}" 2>/dev/null || echo '{}')
+            -d "{\"hostname\":\"$my_hostname\"}" \
+            -w $'\n%{http_code}' 2>/dev/null || true)
+        status="${response_with_status##*$'\n'}"
+        response="${response_with_status%$'\n'*}"
+        [[ "$response" == "$response_with_status" ]] && response='{}'
+        record_hub_contact_result "$status"
 
         approved=$(json_field "$response" approved)
         key=$(json_field "$response" key)
@@ -584,8 +673,14 @@ register_and_wait_for_key() {
         log "Pending approval... checking again in 30s"
         sleep 30
 
-        poll_response=$(curl -sS --max-time 10 \
-            "${SERVER_URL}/api/proxmox/key?hostname=$my_hostname" 2>/dev/null || echo '{}')
+        refresh_runtime_server_url
+        poll_with_status=$(curl -sS --max-time 10 \
+            "${SERVER_URL}/api/proxmox/key?hostname=$my_hostname" \
+            -w $'\n%{http_code}' 2>/dev/null || true)
+        poll_status="${poll_with_status##*$'\n'}"
+        poll_response="${poll_with_status%$'\n'*}"
+        [[ "$poll_response" == "$poll_with_status" ]] && poll_response='{}'
+        record_hub_contact_result "$poll_status"
         poll_approved=$(json_field "$poll_response" approved)
         poll_key=$(json_field "$poll_response" key)
 
@@ -2872,19 +2967,36 @@ start_proxmox_ws_client() {
     local poll_hostname script_path
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
     script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$PROGRESS_EVENT_QUEUE_DIR" <<'PY' &
-import asyncio, contextlib, json, sys
+    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$PROGRESS_EVENT_QUEUE_DIR" "$HUB_SERVER_URL_FILE" "$HUB_LAST_SUCCESS_FILE" <<'PY' &
+import asyncio, contextlib, json, sys, time
 from pathlib import Path
-script_path, server_url, api_key, hostname, telemetry_interval, progress_queue_dir = sys.argv[1:7]
+script_path, default_server_url, api_key, hostname, telemetry_interval, progress_queue_dir, server_url_file, last_success_file = sys.argv[1:9]
 telemetry_interval = max(1, int(float(telemetry_interval or 3)))
 queue_dir = Path(progress_queue_dir)
 queue_dir.mkdir(parents=True, exist_ok=True)
+server_url_path = Path(server_url_file)
+last_success_path = Path(last_success_file)
 try:
     import websockets
 except ImportError:
     sys.exit(1)
-ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
-ws_url += f"/ws/proxmox?hostname={hostname}&api_key={api_key}"
+def load_server_url():
+    try:
+        raw = server_url_path.read_text(encoding='utf-8').strip()
+        if raw:
+            return raw
+    except Exception:
+        pass
+    return default_server_url
+def build_ws_url(server_url):
+    ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
+    return ws_url + f"/ws/proxmox?hostname={hostname}&api_key={api_key}"
+def touch_success():
+    try:
+        last_success_path.parent.mkdir(parents=True, exist_ok=True)
+        last_success_path.write_text(str(int(time.time())), encoding='utf-8')
+    except Exception:
+        pass
 async def collect_telemetry():
     proc = await asyncio.create_subprocess_exec(
         'bash', script_path, '--collect-telemetry',
@@ -2940,6 +3052,7 @@ async def send_progress_events(ws):
                 event_file.unlink()
             continue
         await ws.send(json.dumps(payload))
+        touch_success()
         with contextlib.suppress(FileNotFoundError):
             event_file.unlink()
 async def send_loop(ws):
@@ -2948,18 +3061,21 @@ async def send_loop(ws):
         payload = await collect_telemetry()
         if payload is not None:
             await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
+            touch_success()
         await send_progress_events(ws)
         await asyncio.sleep(telemetry_interval)
 async def main():
     backoff = 1
     while True:
         try:
-            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+            async with websockets.connect(build_ws_url(load_server_url()), ping_interval=20, ping_timeout=10) as ws:
                 backoff = 1
                 await ws.send(json.dumps({'type': 'sync'}))
+                touch_success()
                 sender = asyncio.create_task(send_loop(ws))
                 try:
                     async for message in ws:
+                        touch_success()
                         try:
                             payload = json.loads(message)
                         except Exception:
@@ -3013,11 +3129,13 @@ process_inbox() {
     local response_with_status response status poll_hostname
     local -a args
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
+    refresh_runtime_server_url
     args=(-sS --max-time 15 -G "${SERVER_URL}/api/inbox" --data-urlencode "hostname=${poll_hostname}" -w $'\n%{http_code}')
     [[ -n "$API_KEY" ]] && args+=(-H "X-API-Key: $API_KEY")
     response_with_status=$(curl "${args[@]}" 2>/dev/null || true)
     status="${response_with_status##*$'\n'}"
     response="${response_with_status%$'\n'*}"
+    record_hub_contact_result "$status"
     case "$status" in
         200) ;;
         202|401|403)
@@ -3283,6 +3401,8 @@ if [[ "$HW_WATCHDOG_ENABLED" -eq 1 ]]; then
 fi
 
 while true; do
+    refresh_runtime_server_url
+    maybe_redetect_hub_url || true
     if [[ "$AUTO_PROVISION" == "on" ]] && [[ -f "$RESEED_LOCK_FILE" ]]; then
         log "Reseed in progress — skipping auto-provisioning cycle"
         sleep 5
