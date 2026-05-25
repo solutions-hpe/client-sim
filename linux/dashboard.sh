@@ -27,11 +27,12 @@ RST=$(tput sgr0 2>/dev/null || true)
 # WHY: username is used by apply_override() to check per-device config sections.
 username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
-site_based_num=$(get_value 'simulation' 'site_based_num')
 server_url=$(get_value 'server' 'server_url')
 server_url="${server_url:-http://169.253.1.1:8000}"
-simulation_id=s
-simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
+bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
+simulation_id="s${bucket}"
+user_sim_id=$(get_value "$username" 'simulation_id')
+[[ -n "$user_sim_id" ]] && simulation_id="$user_sim_id"
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')

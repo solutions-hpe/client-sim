@@ -25,14 +25,11 @@ $username = ($env:COMPUTERNAME -split '-')[0]
 . 'C:\Scripts\ini-parser.ps1'
 $global:iniConfig = Parse-IniFile 'C:\Scripts\simulation.conf'
 
-$site_based_num = [int](get_value 'simulation' 'site_based_num')
 $hostname = $env:COMPUTERNAME
-if ($site_based_num -gt 0 -and $hostname.Length -ge $site_based_num) {
-    $lastN = $hostname.Substring($hostname.Length - $site_based_num)
-} else {
-    $lastN = $hostname
-}
-$simulation_id = if ($lastN.Length -gt 0) { 's' + $lastN[0] } else { 's0' }
+$bucketNum = [System.Math]::Abs([System.BitConverter]::ToInt32([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hostname)), 0)) % 10
+$simulation_id = "s$bucketNum"
+$userSimId = get_value $username 'simulation_id'
+if (-not [string]::IsNullOrWhiteSpace($userSimId)) { $simulation_id = $userSimId }
 
 $reboot_schedule = [int](get_value 'simulation' 'reboot_schedule')
 $repo_location = get_value 'simulation' 'repo_location'

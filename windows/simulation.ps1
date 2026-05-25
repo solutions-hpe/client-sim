@@ -371,13 +371,12 @@ while ($true) {
 
     $script:username = ($env:COMPUTERNAME -split '-')[0]
     $hostname = $env:COMPUTERNAME
-    $site_based_num = [int](get_value 'simulation' 'site_based_num')
-    if ($site_based_num -gt 0 -and $hostname.Length -ge $site_based_num) {
-        $lastN = $hostname.Substring($hostname.Length - $site_based_num)
-    } else {
-        $lastN = $hostname
-    }
-    $script:simulation_id = if ($lastN.Length -gt 0) { 's' + $lastN[0] } else { 's0' }
+    # Hash hostname to assign bucket — no VMID required.
+    $bucketNum = [System.Math]::Abs([System.BitConverter]::ToInt32([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hostname)), 0)) % 10
+    $script:simulation_id = "s$bucketNum"
+    # Allow user-overrides.conf to pin a specific bucket.
+    $userSimId = get_value $script:username 'simulation_id'
+    if (-not [string]::IsNullOrWhiteSpace($userSimId)) { $script:simulation_id = $userSimId }
 
     $script:kill_switch = get_value 'simulation' 'kill_switch'
     $script:rapid_update = get_value 'simulation' 'rapid_update'

@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [Unreleased] — 2026-05-25
+
+### Changed
+
+#### Hostname and bucket assignment — VMID removed from client hostnames
+
+- **Client hostnames** are now the person name only (e.g. `jsmith`) instead of `jsmith-90001`. The Proxmox VMID is retained internally for state management but is no longer embedded in the guest hostname.
+- **Bucket assignment** (`s0`–`s9`) is now derived from `zlib.crc32(hostname) % 10` instead of extracting a digit from the VMID. This distributes clients evenly across all 10 buckets regardless of how VMIDs are allocated.
+- **`simulation_id` user override** — operators can pin any user to a specific bucket by adding `simulation_id=sX` to their section in `user-overrides.conf`. The hash is the default; the override wins if set. This replaces the old `site_based_num` escape hatch.
+- **MAC address suffix** — the wireless adapter MAC suffix is now `bc:07:1d:XX:XX:XX` where the last 3 octets are derived from `zlib.crc32(username)`, giving each VM a stable, unique MAC without VMID dependency.
+- **`site_based_num` removed** — the config key and all associated digit-extraction logic have been removed from `simulation.conf`, `user-overrides.conf`, and all client scripts (Linux and Windows). No migration needed; the key is simply ignored if present in an old config.
+
+#### Files changed
+- `linux/simulation.sh`, `linux/startup.sh`, `linux/dashboard.sh` — hash bucket, `simulation_id` override, new MAC formula
+- `windows/simulation.ps1`, `windows/startup.ps1`, `windows/dashboard.ps1` — SHA256 hash bucket (PowerShell-native), `simulation_id` override
+- `webui-spoke/server.py` — `zlib.crc32` bucket for configured-client display; hostname stored as name only
+- `proxmox/proxmox-agent.sh` — hostname set to `vm_name` only; `get_full_hostname()` helper reads actual name from Proxmox; L1 VLAN bucket uses hostname hash
+- `proxmox/clone.sh` — all clone/config/re-create modes set hostname to `vm_name` only
+- `configs/simulation.conf`, `configs/user-overrides.conf` — `site_based_num` removed; `simulation_id` documented as optional override key
+- `configs/README.md`, `README.md`, `webui-spoke/CLIENT_API.md` — documentation updated throughout
+
+---
+
 ## [1.0.0] — 2026-05-13
 
 Initial stable production release of the spoke-side platform on `main`. Legacy script history remains below for earlier simulation components.

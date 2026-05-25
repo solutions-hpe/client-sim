@@ -23,6 +23,7 @@ import subprocess
 import termios
 import time
 import uuid
+import zlib
 from dataclasses import asdict, dataclass
 
 import acme as spoke_acme
@@ -425,7 +426,6 @@ _sim_conf_cache: dict[str, Any] = {
     "sim_mtime": -1.0,
     "client_mtime": -1.0,
     "simulations": {},
-    "site_based_num": 2,
 }
 
 
@@ -1054,7 +1054,6 @@ GLOBAL_SECTION_KEYS = {
     "repo_location",
     "repo_branch",
     "site_based_ssid",
-    "site_based_num",
     "reboot_schedule",
     "allow_offline",
     "ssidpw_fail",
@@ -8758,17 +8757,14 @@ async def api_simulations() -> dict[str, Any]:
     if (sim_mtime == _sim_conf_cache["sim_mtime"] and
             client_mtime == _sim_conf_cache["client_mtime"]):
         simulations: dict[str, dict[str, Any]] = copy.deepcopy(_sim_conf_cache["simulations"])
-        site_based_num: int = _sim_conf_cache["site_based_num"]
     else:
         simulations = {}
-        site_based_num = 2
 
         # ── Parse simulation.conf ─────────────────────────────────────
         if sim_conf_path.exists():
             try:
                 parser = configparser.ConfigParser()
                 parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
-                site_based_num = int(parser.get("simulation", "site_based_num", fallback="2"))
 
                 # Per-bucket test keys (read from [sN] sections)
                 _BUCKET_TEST_KEYS = [
@@ -8821,14 +8817,12 @@ async def api_simulations() -> dict[str, Any]:
                     if not vm_name:
                         continue
 
-                    # Extract the Nth-from-last digit (same math as startup.sh)
-                    digit_idx = -(site_based_num)
-                    digit = vmid_str[digit_idx] if len(vmid_str) >= site_based_num else vmid_str[-1]
-                    sim_id = f"s{digit}"
+                    # Hash the vm_name to assign bucket — matches zlib.crc32 used by clients.
+                    sim_id = f"s{zlib.crc32(vm_name.encode()) % 10}"
 
                     if sim_id in simulations:
                         simulations[sim_id]["configured_clients"].append({
-                            "hostname": f"{vm_name}-{vmid}",
+                            "hostname": vm_name,
                             "vmid": vmid,
                             "username": vm_name,
                             "reporting": False,
@@ -8842,7 +8836,6 @@ async def api_simulations() -> dict[str, Any]:
             "sim_mtime": sim_mtime,
             "client_mtime": client_mtime,
             "simulations": copy.deepcopy(simulations),
-            "site_based_num": site_based_num,
         })
 
     # ── Match active clients + compute Central PASS/FAIL ─────────
@@ -8890,7 +8883,6 @@ async def api_simulations() -> dict[str, Any]:
                 sim["central_pass_fail"] = {"firing": False, "count": 0, "check_name": check_id, "ts": None}
 
     return {
-        "site_based_num": site_based_num,
         "simulations": list(simulations.values()),
     }
 
@@ -8973,12 +8965,10 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
     # --- Load simulation profile ---
     wsite = ""
     central_site = ""
-    site_based_num = 2
     if sim_conf_path.exists():
         try:
             p = _cp.ConfigParser()
             p.read_string(sim_conf_path.read_text(encoding="utf-8"))
-            site_based_num = int(p.get("simulation", "site_based_num", fallback="2"))
             if p.has_section(sim_id):
                 wsite = p.get(sim_id, "wsite", fallback="")
         except Exception:
@@ -9001,12 +8991,10 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
                 vm_name = cp.get(section, "vm_name", fallback="").strip()
                 if not vm_name:
                     continue
-                digit = vmid_str[-(site_based_num)] if len(vmid_str) >= site_based_num else vmid_str[-1]
-                if f"s{digit}" != sim_id:
+                if f"s{zlib.crc32(vm_name.encode()) % 10}" != sim_id:
                     continue
-                hostname = f"{vm_name}-{vmid_str}"
-                configured[hostname] = {
-                    "hostname": hostname,
+                configured[vm_name] = {
+                    "hostname": vm_name,
                     "vmid": int(vmid_str),
                     "api_online": False,
                     "api_last_seen": None,

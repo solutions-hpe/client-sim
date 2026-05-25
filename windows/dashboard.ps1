@@ -7,19 +7,12 @@ $scriptRoot = 'C:\Scripts'
 $excludeScripts = @('dashboard.ps1','startup.ps1','simulation.ps1','ini-parser.ps1','sys_mon.ps1')
 
 function Get-SimulationId {
-    $siteBasedNum = [int](get_value 'simulation' 'site_based_num')
     $hostname = $env:COMPUTERNAME
-    if ($siteBasedNum -gt 0 -and $hostname.Length -ge $siteBasedNum) {
-        $lastN = $hostname.Substring($hostname.Length - $siteBasedNum)
-    } else {
-        $lastN = $hostname
-    }
-
-    if ($lastN.Length -gt 0) {
-        return 's' + $lastN[0]
-    }
-
-    return 's0'
+    $bucketNum = [System.Math]::Abs([System.BitConverter]::ToInt32([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hostname)), 0)) % 10
+    $username = ($hostname -split '-')[0]
+    $userSimId = get_value $username 'simulation_id'
+    if (-not [string]::IsNullOrWhiteSpace($userSimId)) { return $userSimId }
+    return "s$bucketNum"
 }
 
 function Apply-Override {

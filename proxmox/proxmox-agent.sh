@@ -747,6 +747,13 @@ get_vm_name() {
     printf '%s' "${name:-sim-client}"
 }
 
+# Read the full hostname (Proxmox VM name) directly from qm config so we never
+# have to reconstruct it from vm_name + vmid — hostname no longer contains the VMID.
+get_full_hostname() {
+    local vmid="$1"
+    qm config "$vmid" 2>/dev/null | awk '/^name:/{print $2; exit}'
+}
+
 device_name_from_sysfs() {
     local dev="$1" manufacturer="" product="" name
     [[ -f "$dev/manufacturer" ]] && manufacturer=$(tr -d '\n' < "$dev/manufacturer")
@@ -1277,7 +1284,9 @@ clone_vm_for_usb() {
 
     local vm_name
     vm_name=$(get_vm_name "$vmid")
-    local full_name="${vm_name}-${vmid}"
+    # Hostname is the assigned name only — VMID is intentionally excluded.
+    # Every VM gets a unique name from the name list, so no suffix is needed.
+    local full_name="${vm_name}"
 
     # Helper: destroy this VM and free its slot so the next loop retries
     _teardown() {
@@ -1322,10 +1331,12 @@ clone_vm_for_usb() {
     timeout 30 qm set "$vmid" --onboot 1 --startup "order=2,up=60" 2>/dev/null || true
     timeout 30 qm set "$vmid" -usb0 "host=$bus_path" 2>/dev/null || true
 
-    # L1 VLAN NIC: check if simulation.conf has l1=yes for this VM's bucket
-    # Bucket is determined by (vmid % 100) // 10 (matches startup.sh site_based_num=2 logic)
+    # L1 VLAN NIC: check if simulation.conf has l1=yes for this VM's bucket.
+    # Bucket is determined by a cksum hash of the full hostname, matching the
+    # hash-based bucket assignment logic in simulation.sh.
     _check_l1_vlan() {
-        local bucket_digit=$(( (vmid % 100) / 10 ))
+        local bucket_digit
+        bucket_digit=$(( $(printf '%s' "$full_name" | cksum | cut -d' ' -f1) % 10 ))
         local sim_conf
         sim_conf=$(curl_api GET "/api/config" "" 2>/dev/null || true)
         [[ -z "$sim_conf" ]] && return
@@ -1448,9 +1459,8 @@ provision_vm() {
 _expire_vm_pending_commands() {
     local vmid="$1"
     local _destroy_hostname
-    _destroy_hostname=$(get_vm_name "$vmid" 2>/dev/null || true)
+    _destroy_hostname=$(get_full_hostname "$vmid" 2>/dev/null || true)
     if [[ -n "$_destroy_hostname" ]]; then
-        curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}-${vmid}" "" >/dev/null 2>&1 || true
         curl_api DELETE "/api/commands/pending?target=${_destroy_hostname}" "" >/dev/null 2>&1 || true
     fi
 }
@@ -1503,10 +1513,10 @@ _destroy_vm_qm_only() {
 # State file updates are handled by the parent after all jobs complete.
 _reclone_parallel_job() {
     local vmid="$1" bus_path="$2" product_name="$3" saved_image="$4" device_type="$5"
-    local _vm_name
-    _vm_name=$(get_vm_name "$vmid")
+    local _vm_hostname
+    _vm_hostname=$(get_full_hostname "$vmid" 2>/dev/null || true)
     # Expire stale client inbox commands before destroying so the new VM doesn't inherit them
-    curl_api DELETE "/api/commands/pending?target=${_vm_name}-${vmid}" "" >/dev/null 2>&1 || true
+    [[ -n "$_vm_hostname" ]] && curl_api DELETE "/api/commands/pending?target=${_vm_hostname}" "" >/dev/null 2>&1 || true
     write_reclone_state_cache "running" "[${vmid}]" "stopping"
     _destroy_vm_qm_only "$vmid"
     write_reclone_state_cache "running" "[${vmid}]" "cloning"
@@ -1571,9 +1581,9 @@ reclone_vm_instance() {
     # "pending" and will be delivered to the replacement VM with the same hostname,
     # causing it to reboot immediately after calling home.
     local _client_hostname
-    _client_hostname="${vm_name}-${vmid}"
-    curl_api DELETE "/api/commands/pending?target=${_client_hostname}" "" >/dev/null 2>&1 || true
-    log "Expired pending client commands for ${_client_hostname} before reclone"
+    _client_hostname=$(get_full_hostname "$vmid" 2>/dev/null || true)
+    [[ -n "$_client_hostname" ]] && curl_api DELETE "/api/commands/pending?target=${_client_hostname}" "" >/dev/null 2>&1 || true
+    log "Expired pending client commands for ${_client_hostname:-vmid $vmid} before reclone"
 
     destroy_vm "$vmid"
     clone_vm_for_usb "$vmid" "$bus_path" "$product_name" "$saved_image" "$device_type"

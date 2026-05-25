@@ -236,7 +236,7 @@ Resolution order on a client VM is:
 
 ```text
 [simulation] globals
-  -> [s0]-[s9] bucket profile selected from VMID digits
+  -> [s0]-[s9] bucket profile selected by zlib.crc32(hostname) % 10
   -> [username] override from user-overrides.conf
   -> usb-phy-override.conf for sim_phy when provisioned by Proxmox agent
 ```
@@ -254,7 +254,6 @@ Resolution order on a client VM is:
 | `[simulation]` | `smb_repo` | `off` | Enable SMB as a fallback update source |
 | `[simulation]` | `vh_server` | `off` | Start/use VirtualHere workflow |
 | `[simulation]` | `site_based_ssid` | `on` | Prefix `wsite-` to the SSID when connecting |
-| `[simulation]` | `site_based_num` | `2` | Which VMID digit selects bucket `s0`-`s9` |
 | `[simulation]` | `reboot_schedule` | `300` | Base reboot schedule in minutes |
 | `[simulation]` | `allow_offline` | `no` | Take interfaces down for a random offline period between 100-iteration cycles |
 | `[simulation]` | `ssidpw_fail` | `off` | Global default for wrong-PSK simulation |
@@ -313,7 +312,7 @@ These keys are valid in `[s0]`-`[s9]` bucket sections and in `[username]` sectio
 | `repo_branch` | `main` in examples | User-specific branch override |
 | `vh_server` | `off` in examples | User-specific VirtualHere override |
 | `site_based_ssid` | `on` in examples | User-specific SSID prefix override |
-| `site_based_num` | `2` in examples | User-specific bucket-digit override |
+| `simulation_id` | unset | Pin to a specific bucket (`s0`–`s9`), overriding the hostname hash |
 | `reboot_schedule` | `300` in examples | User-specific reboot timing override |
 | `iperf_bw` | `1k` in examples | User-specific iPerf target |
 | `smb_address` | `//nas/scripts` in examples | User-specific SMB fallback path override |

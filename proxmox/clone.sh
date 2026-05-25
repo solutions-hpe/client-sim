@@ -125,14 +125,16 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
 
         vmid=$((start_vmid + idx))
         dev="${devices[$idx]}"
+        vm_name=$(get_value "c${vmid}" 'vm_name')
+        vm_name="${vm_name:-sim-client}"
 
-        echo "Creating VM $vmid for USB device $dev"
+        echo "Creating VM $vmid ($vm_name) for USB device $dev"
 
         # Destroy any existing VM at this ID so clone is idempotent
         qm stop "$vmid" 2>/dev/null
         qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null
 
-        qm clone "$tpl_id" "$vmid" --name "${vm_name}-${vmid}"
+        qm clone "$tpl_id" "$vmid" --name "${vm_name}"
         # Enable autostart; startup order 2 with 60s up-delay so the WebUI LXC
         # (order 1) is fully ready before clients try to connect to the API.
         qm set "$vmid" --onboot 1 --startup "order=2,up=60"
@@ -147,7 +149,7 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
             (( elapsed >= timeout )) && break
         done
 
-        qm guest exec "$vmid" -- hostnamectl set-hostname "${vm_name}-${vmid}"
+        qm guest exec "$vmid" -- hostnamectl set-hostname "${vm_name}"
         qm guest exec "$vmid" -- reboot
 
         # USB assignment goes into config now; device is available after reboot
@@ -167,11 +169,12 @@ fi
 if [[ "$cmd" == "re-create" ]]; then
     for (( i=start_vmid; i<=end_vmid; i++ )); do
         vm_name=$(get_value "c${i}" 'vm_name')
+        vm_name="${vm_name:-sim-client}"
 
         qm stop "$i"
         qm destroy "$i" --skiplock --purge --destroy-unreferenced-disks
 
-        qm clone "$tpl_id" "$i" --name "${vm_name}-${i}" --pool "$pool_name"
+        qm clone "$tpl_id" "$i" --name "${vm_name}" --pool "$pool_name"
         qm set "$i" --onboot 1 --startup "order=2,up=60"
         qm start "$i"
         sleep "$sleep_time"
@@ -197,7 +200,8 @@ fi
 if [[ "$cmd" == "config" ]]; then
     for (( i=start_vmid; i<=end_vmid; i++ )); do
         vm_name=$(get_value "c${i}" 'vm_name')
-        qm guest exec "$i" -- hostnamectl set-hostname "${vm_name}-${i}"
+        vm_name="${vm_name:-sim-client}"
+        qm guest exec "$i" -- hostnamectl set-hostname "${vm_name}"
         qm guest exec "$i" -- reboot
     done
 fi

@@ -102,8 +102,8 @@ Content-Type: application/json
 
 ```json
 {
-  "hostname":           "client-01",
-  "simulation_id":      "slynch",
+  "hostname":           "jsmith",
+  "simulation_id":      "s4",
   "platform":           "linux",
   "iteration":          42,
   "connected_ssid":     "HPE-Corp",
@@ -128,8 +128,8 @@ Content-Type: application/json
 
 | Field | Type | Description |
 |---|---|---|
-| `hostname` | string | Device hostname — used as the unique client key |
-| `simulation_id` | string | Section name from `simulation.conf` (e.g. `s0`, `slynch`) |
+| `hostname` | string | Device hostname (person name only, e.g. `jsmith`) — used as the unique client key |
+| `simulation_id` | string | Bucket section from `simulation.conf` (e.g. `s0`–`s9`) — assigned by hashing the hostname; can be pinned via `user-overrides.conf` |
 | `platform` | string | `linux` or `windows` |
 | `iteration` | int | Simulation loop counter |
 | `connected_ssid` | string \| null | Currently associated SSID (blank if disconnected) |

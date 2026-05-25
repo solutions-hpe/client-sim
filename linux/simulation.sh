@@ -35,10 +35,13 @@ init_simulation_context() {
   # reads them from there via get_value $username.
   process_ini_file '/usr/local/scripts/simulation.conf'
   username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
-  site_based_num=$(get_value 'simulation' 'site_based_num')
-  require_config_value "simulation.site_based_num" "$site_based_num"
-  simulation_id=s
-  simulation_id+=$(echo "$HOSTNAME" | rev | cut -c 1-"$site_based_num" | rev | cut -c 1-1)
+  # Hash the hostname to assign a bucket — no VMID required.
+  bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
+  simulation_id="s${bucket}"
+  # Allow user-overrides.conf to pin a specific bucket via simulation_id key.
+  # This must happen before the bucket config is read below.
+  user_sim_id=$(get_value "$username" 'simulation_id')
+  [[ -n "$user_sim_id" ]] && simulation_id="$user_sim_id"
   require_config_value "username" "$username"
   require_config_value "simulation_id" "$simulation_id"
 }
@@ -291,8 +294,7 @@ connect_wifi 30
 echo Disabling unused interface | tee -a ${LOG_FILE}
 if [[ "$sim_phy" == "ethernet" ]]; then sudo ip link set dev $wladapter down; fi
 if [[ "$sim_phy" == "wireless" ]]; then ea_down; fi
-mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
-mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
+mac_id=$(python3 -c "import zlib; h=zlib.crc32('${username}'.encode())&0xFFFFFF; print(f'bc:07:1d:{h>>16:02x}:{(h>>8)&0xff:02x}:{h&0xff:02x}')")
 #------------------------------------------------------------
 #Checking to see if the default gateway is reachable
 #------------------------------------------------------------

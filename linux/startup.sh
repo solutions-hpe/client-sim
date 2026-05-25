@@ -44,9 +44,10 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
-site_based_num=$(get_value 'simulation' 'site_based_num')
-simulation_id=s
-simulation_id+=$(echo $HOSTNAME | rev | cut -c 1-$site_based_num | rev | cut -c 1-1)
+bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
+simulation_id="s${bucket}"
+user_sim_id=$(get_value "$username" 'simulation_id')
+[[ -n "$user_sim_id" ]] && simulation_id="$user_sim_id"
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
 sim_phy=$(get_value $simulation_id 'sim_phy')
@@ -106,8 +107,7 @@ if [[ -n ${eadapter} ]]; then echo Wired Adapter name $eadapter | tee -a /usr/lo
 #------------------------------------------------------------
 #Changing the MAC Address of the wireless adapter
 #------------------------------------------------------------
-mac_id=$(echo $HOSTNAME | rev | cut -c 3-4 | rev)
-mac_id="${mac_id}:$(echo $HOSTNAME | rev | cut -c 1-2 | rev)"
+mac_id=$(python3 -c "import zlib; h=zlib.crc32('${username}'.encode())&0xFFFFFF; print(f'bc:07:1d:{h>>16:02x}:{(h>>8)&0xff:02x}:{h&0xff:02x}')")
 if [[ -n ${wladapter} ]]; then sudo ip link set dev $wladapter up; fi
 if [[ -n ${eadapter} ]]; then sudo ip link set dev $eadapter up; fi
 echo -----------------------------| tee -a /usr/local/scripts/sim.log

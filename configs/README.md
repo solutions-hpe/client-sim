@@ -14,47 +14,24 @@ configs/
 
 ## How it works — the big picture
 
-Each client VM is named `<username>-<vmid>` (e.g. `slynch-90001`).  
-On startup, the client extracts its own hostname and uses the VMID digits to
-determine which simulation profile to run. No database, no API call — pure math.
+Each client VM is named after a person (e.g. `jsmith`). On startup, the client
+hashes its own hostname to deterministically assign itself to one of 10 simulation
+buckets — no VMID, no database, no API call.
 
 ```
-Hostname:  slynch-90001
-              │       │
-              │       └─ VMID = 90001
-              └───────── username (from client-setup.conf)
-
-site_based_num = 2
-  → extract the 2nd-to-last digit of 90001  →  "0"
-  → simulation bucket = s0
-  → client runs the [s0] profile from simulation.conf
+Hostname:  jsmith
+    │
+    └─ zlib.crc32("jsmith") % 10  →  bucket index 0–9
+                                   →  simulation bucket = s4
+                                   →  client runs the [s4] profile from simulation.conf
 ```
 
-The `site_based_num` setting controls the grouping size:
+The hash distributes names evenly across all 10 buckets. The first 10 names in
+the fleet, for example, land in 8 different buckets — far better than the old
+VMID-digit approach, which put all VMs on a single host into only 2–3 buckets.
 
-| site_based_num | Digit extracted | Clients per bucket | Max clients |
-|:--------------:|:---------------:|:------------------:|:-----------:|
-| 2              | tens (x0-x9)    | ~10                | ~100        |
-| 3              | hundreds        | ~100               | ~1,000      |
-| 4              | thousands       | ~1,000             | ~10,000     |
-
-**Example — site_based_num = 2:**
-
-| VMID range  | Digit | Bucket | Profile        |
-|-------------|:-----:|--------|----------------|
-| 90001–90009 | 0     | s0     | DNS Fail — MIA |
-| 90011–90019 | 1     | s1     | Normal Traffic |
-| 90021–90029 | 2     | s2     | DNS Fail + iPerf |
-| …           | …     | …      | …              |
-
-**Example — site_based_num = 3 (100 clients per bucket):**
-
-| VMID range    | Digit | Bucket |
-|---------------|:-----:|--------|
-| 90001–90099   | 0     | s0     |
-| 90101–90199   | 1     | s1     |
-| 90201–90299   | 2     | s2     |
-| …             | …     | …      |
+To override the bucket for a specific user, add `simulation_id=sX` to their
+section in `user-overrides.conf`. This takes precedence over the hash.
 
 ---
 
@@ -82,7 +59,6 @@ vh_server=off            # on = start VirtualHere USB server daemon
 site_based_ssid=on       # on  = prepend wsite to the SSID name when connecting.
                          #       e.g. wsite=MIA + ssid=PSK → connects to "MIA-PSK"
                          # off = connect to ssid exactly as written (e.g. "PSK")
-site_based_num=2         # see table above — controls bucket group size
 reboot_schedule=300      # minutes until client schedules a reboot (+ up to 600s jitter)
 allow_offline=on         # on = after each 100-iteration cycle, bring all network interfaces
                          #      down for a random 1 second to 4 hours before restarting.
@@ -132,7 +108,7 @@ syslog_server=169.253.1.5
 ### [s0]–[s9] — Simulation bucket profiles
 
 There are exactly 10 buckets (`s0` through `s9`). Each bucket defines the full
-simulation behaviour for the clients whose VMID digit maps to it.
+simulation behaviour for the clients whose hostname hash maps to it.
 
 ```ini
 [s0]
@@ -175,12 +151,12 @@ sim_phy=wireless        # wireless or wired
 
 Each alert or insight in Aruba Central has a minimum number of clients that must
 be exhibiting the behaviour before the alert fires. The bucket system handles
-this automatically — assign enough consecutive VMID groups so the total client
-count meets or exceeds the threshold.
+this automatically — assign enough buckets so the total client count meets or
+exceeds the threshold.
 
-**Example:** DNS failure requires 10 clients → assign 1 bucket (10 clients per bucket
-with `site_based_num=2`). If it required 25 clients, assign 3 buckets (s0, s1, s2)
-all with `dns_fail=on`. Over-provisioning is fine — more clients = stronger signal.
+**Example:** DNS failure requires 10 clients → assign 1 bucket. If it required
+25 clients, assign 3 buckets (s0, s1, s2) all with `dns_fail=on`.
+Over-provisioning is fine — more clients = stronger signal.
 
 #### Linking a simulation to a Central alert (PASS/FAIL)
 
@@ -205,8 +181,8 @@ Available Checks**. The check IDs listed there are the strings to use here.
 ## user-overrides.conf
 
 This file pins individual users to a custom simulation regardless of which
-bucket their VMID falls in. It is loaded **after** `simulation.conf`, so any
-key defined here wins over the bucket profile.
+bucket their hostname hash selects. It is loaded **after** `simulation.conf`,
+so any key defined here wins over the bucket profile.
 
 ```ini
 # Pin slynch to run ssidpw_fail instead of his bucket profile
@@ -236,26 +212,24 @@ Keys not listed here fall through to the bucket (`[sX]`) value or the global
 ```
 [simulation] globals
       ↓
-[sX] bucket profile  (determined by VMID digit + site_based_num)
+[sX] bucket profile  (s0–s9, determined by zlib.crc32(hostname) % 10)
       ↓
-[username] override  (from user-overrides.conf)
+[username] override  (from user-overrides.conf — can also pin simulation_id)
 ```
 
 ---
 
-## Scaling to larger deployments
+## Pinning a user to a specific bucket
 
-Change `site_based_num` in `[simulation]` to scale the bucket group size. You
-do **not** need to change `[s0]`–`[s9]` — the same 10 profiles work at any scale.
+Add `simulation_id=sX` to the user's section in `user-overrides.conf`:
 
-```
-site_based_num=2  →  10 clients per bucket  →  up to ~100 clients
-site_based_num=3  →  100 clients per bucket →  up to ~1,000 clients
-site_based_num=4  →  1,000 clients/bucket   →  up to ~10,000 clients
+```ini
+[jsmith]
+simulation_id=s7   # force jsmith into bucket s7 regardless of name hash
 ```
 
-When scaling up, also update `client-setup.conf` (in `proxmox/`) with the
-additional VMID → username mappings.
+This is useful when you need a specific user to always run a particular simulation,
+or when you want to balance client counts across buckets precisely.
 
 ---
 
