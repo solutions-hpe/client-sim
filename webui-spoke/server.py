@@ -7426,6 +7426,25 @@ async def api_relay_status_endpoint() -> dict[str, Any]:  # Serve the enriched r
     return _relay_status_payload()  # Reuse the shared relay payload so the REST endpoint matches broadcasted isolation, spoke, and check-in fields exactly.
 
 
+@app.post("/api/relay/revert-local")
+async def api_relay_revert_local() -> dict[str, Any]:
+    """Immediately revert hub_managed to False, restoring local control.
+
+    Use when the hub tenant has been deleted or the hub is permanently unreachable.
+    The spoke will stop accepting hub config pushes and allow local settings changes.
+    """
+    was_managed = bool(settings.get("hub_managed"))
+    settings["hub_managed"] = False
+    settings["relay_api_key"] = ""
+    settings["relay_tenant_id"] = ""
+    _save_settings()
+    await _broadcast_relay_state()
+    await broadcast({"type": "settings_update", "settings": _public_settings()})
+    logger.info("hub_managed manually reverted to local control by operator")
+    _relay_diag_append("hub_managed_reverted", status_code=None, reason="manual operator revert via /api/relay/revert-local")
+    return {"status": "ok", "was_managed": was_managed, "message": "Reverted to local control — hub_managed cleared"}
+
+
 @app.get("/api/relay/diag")
 async def api_relay_diag() -> dict[str, Any]:
     """Return registration diagnostics: config summary, live hub reachability, and registration log."""
