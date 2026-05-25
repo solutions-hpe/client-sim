@@ -2226,6 +2226,9 @@ async def central_poller() -> None:
         while True:
             try:
                 if settings.get("hub_aruba_polling_mode") == "centralized":
+                    # Polling is delegated to the hub — mark health ok so the
+                    # UI doesn't show a stale warning, then sleep until next check.
+                    _update_service_health("central_poller", ok=True)
                     await asyncio.sleep(300)
                     continue
                 await _poll_central_once(client)
