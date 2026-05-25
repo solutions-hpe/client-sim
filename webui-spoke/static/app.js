@@ -1156,6 +1156,7 @@ function applySettingsToUI(s) {
   }
   renderCentralOverview();
   renderChecksList(); // Refresh sim tab whenever settings change (monitored checks may have changed)
+  renderSpokeMonitoredItems();
   renderUsbSummary(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
   renderAutoProvisionStatus();
@@ -4190,7 +4191,56 @@ function connectWebSocket() {
 }
 
 // ── Simulations top-level tabs ──────────────────────────────────────────
-const simTopPanels = ['simtop-checks', 'simtop-hardware', 'simtop-clients'];
+const simTopPanels = ['simtop-checks', 'simtop-hardware', 'simtop-clients', 'simtop-insights'];
+
+function renderSpokeMonitoredItems() {
+  const checks   = (currentSettings.monitored_checks || []);
+  const DEST = {
+    site:    'spoke-monitored-checks-content',
+    alert:   'spoke-monitored-hardware-content',
+    client:  'spoke-monitored-clients-content',
+    insight: 'spoke-monitored-insights-content',
+  };
+  const LABELS = { site: 'Monitored Sites', alert: 'Monitored Alerts', client: 'Monitored Clients', insight: 'Monitored Insights' };
+  const byType = { site: [], alert: [], client: [], insight: [] };
+  checks.forEach((c) => { if (byType[c.type]) byType[c.type].push(c); });
+
+  const makeTable = (items, type) => {
+    if (!items.length) return '';
+    const rows = items.map((item) => {
+      const isOk = !item.consecutive_failures;
+      const dot  = isOk ? 'check-dot dot-pass' : 'check-dot dot-fail';
+      const lastSeen = item.last_seen ? new Date(item.last_seen * 1000).toLocaleString() : '—';
+      const badge = isOk
+        ? `<span class="badge badge-success">Reporting</span>`
+        : `<span class="badge badge-failure">Missing (${item.consecutive_failures || 0})</span>`;
+      return `<tr>
+        <td><span class="${dot}"></span></td>
+        <td><strong>${escHtml(item.name || item.identifier || '—')}</strong></td>
+        <td>${escHtml(item.identifier || '—')}</td>
+        <td>${badge}</td>
+        <td style="color:var(--muted);font-size:0.8rem;">${escHtml(lastSeen)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="setup-card" style="margin-bottom:1rem;">
+      <h4 style="margin:0 0 0.5rem;color:var(--muted);font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;">${escHtml(LABELS[type])}</h4>
+      <div style="overflow-x:auto;"><table class="data-table">
+        <thead><tr><th></th><th>Name</th><th>Identifier</th><th>Status</th><th>Last Seen</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div></div>`;
+  };
+
+  Object.entries(DEST).forEach(([type, id]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = makeTable(byType[type], type);
+  });
+
+  const insightsEl = document.getElementById('spoke-monitored-insights-content');
+  if (insightsEl && !byType.insight.length) {
+    insightsEl.innerHTML = `<div class="empty-state">No monitored insights. Add insights via <strong>Central API → Insights</strong> using the Monitor button.</div>`;
+  }
+}
 
 function activateSimTopTab(tabId = 'simtop-checks') {
   document.querySelectorAll('.simtop-subtab').forEach((btn) => {
@@ -4204,6 +4254,7 @@ function activateSimTopTab(tabId = 'simtop-checks') {
   });
   if (tabId === 'simtop-hardware') renderHwPanel();
   if (tabId === 'simtop-clients') renderCcPanel();
+  renderSpokeMonitoredItems();
 }
 
 document.querySelectorAll('.simtop-subtab').forEach((btn) => {
