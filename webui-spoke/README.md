@@ -437,15 +437,44 @@ Use for the HPE GreenLake-based Central platform.
 Required fields:
 
 - `api_version=new_central`
-- `cluster_url`
-- `client_id`
-- `client_secret`
+- `cluster_url` — e.g. `https://us1.api.central.arubanetworks.com`
+- `client_id` / `client_secret` — GreenLake service account credentials
+- `customer_id` — the **GreenLake workspace ID** (used in the auth URL, not the Classic Central customer ID)
+
+Authentication uses the HPE GreenLake token service with a `client_credentials` grant:
+
+```
+POST https://global.api.greenlake.hpe.com/authorization/v2/oauth2/{customer_id}/token
+grant_type=client_credentials
+```
+
+Tokens are short-lived (~15 minutes) and refreshed automatically. Do **not** send a `scope` parameter — this causes an `unauthorized_request` error.
 
 Example cluster URLs:
 
 - US: `https://us1.api.central.arubanetworks.com`
 - EU: `https://eu1.api.central.arubanetworks.com`
-- Internal: `https://internal.api.central.arubanetworks.com`
+
+**Browse endpoints used by the spoke in distributed mode:**
+
+| Method | Path | Filter |
+|---|---|---|
+| `GET` | `/network-notifications/v1/alerts` | `$filter=status eq 'Active' and siteName eq '<site>'` |
+| `GET` | `/network-notifications/v1/insights` | paginated, filtered client-side |
+| `GET` | `/network-monitoring/v1/devices` | `$filter=siteName eq '<site>'` |
+| `GET` | `/network-monitoring/v1/clients` | `$filter=siteName eq '<site>'` |
+| `GET` | `/network-monitoring/v1alpha1/sites-health` | no filter — all sites |
+
+#### Distributed mode — browse data collection
+
+In **distributed mode** (spoke assigned to specific site(s) via `site_mappings`), each spoke runs `_fetch_nc_browse_for_spoke()` after every Central poll cycle. This function:
+
+1. Iterates over its assigned Central site names (`site_mappings.values()`)
+2. Fetches alerts, insights, devices, and clients filtered to those sites only
+3. Stores results in module-level variables (`central_browse_alerts`, `central_browse_insights`, `central_browse_devices_by_site`, `central_browse_clients_by_site`)
+4. Includes all four datasets in the telemetry payload under the `central` key
+
+The hub collects browse data from every spoke's telemetry and merges them into a single multi-site view — the DFW spoke feeds DFW data, the MIA spoke feeds MIA data, and so on. This avoids hub-side API fan-out and prevents hitting the Central rate limit (10 calls/second globally across all tokens).
 
 ### Site mapping and checks
 

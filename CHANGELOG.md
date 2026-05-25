@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased] — 2026-05-25
 
+### Added
+
+#### Spoke distributed Central API browse (New Central / GreenLake mode)
+
+In distributed mode, each spoke now fetches its own Central API browse data filtered to its assigned site(s) and includes it in the telemetry payload. The hub aggregates browse data from all spokes into a unified multi-site view.
+
+- **`_fetch_nc_browse_for_spoke(client)`** — new async function called after each `_poll_central_once()` when `api_version = new_central`. Iterates over all `site_mappings.values()` (the Central site names assigned to this spoke) and fetches:
+  - `/network-notifications/v1/alerts` — filtered by `$filter=status eq 'Active' and siteName eq '<site>'`, up to 20 pages per site
+  - `/network-notifications/v1/insights` — all insights, filtered client-side to the spoke's sites, up to 10 pages
+  - `/network-monitoring/v1/devices` — filtered by `$filter=siteName eq '<site>'`, up to 20 pages
+  - `/network-monitoring/v1/clients` — filtered by `$filter=siteName eq '<site>'`, up to 50 pages
+- **Module-level browse variables** — `central_browse_alerts`, `central_browse_insights`, `central_browse_devices_by_site`, `central_browse_clients_by_site` store the latest results and are included in the telemetry payload under the `central` key
+- **Token refresh** — 401 responses trigger an automatic token refresh before retry (same pattern as the main poll loop)
+
+#### Files changed
+- `webui-spoke/server.py` — `_fetch_nc_browse_for_spoke()`, four new module-level browse variables, telemetry `central` block updated
+
 ### Changed
 
 #### Hostname and bucket assignment — VMID removed from client hostnames
