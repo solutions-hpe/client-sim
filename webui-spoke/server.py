@@ -1094,6 +1094,11 @@ CLIENT_COUNT_DROP_PCT = 25.0  # percent drop that triggers alert
 central_history: list[dict[str, Any]] = []   # in-memory 24-h window
 central_auth_error: str | None = None          # last auth/token failure message
 history_lock = asyncio.Lock()
+# Browse data for distributed mode — populated each poll cycle (new_central only)
+central_browse_alerts: list[dict[str, Any]] = []
+central_browse_insights: list[dict[str, Any]] = []
+central_browse_devices_by_site: dict[str, list[dict[str, Any]]] = {}
+central_browse_clients_by_site: dict[str, dict[str, Any]] = {}
 # Serialise all git operations (fetch, reset, add, commit, push) on REPO_DIR.
 # Running two git commands concurrently on the same repo creates .git/index.lock
 # conflicts that cause the sync background task to hang indefinitely.
@@ -1663,6 +1668,178 @@ async def central_token_manager() -> None:
 
 
 # ── Aruba Central poll loop ───────────────────────────────────────────────────
+
+async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
+    """Fetch new_central browse data (alerts, insights, devices, clients) filtered to
+    this spoke's assigned sites.  Results are stored in the module-level
+    central_browse_* variables so they can be included in the telemetry sent to hub."""
+    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site
+
+    site_mappings: dict[str, str] = settings.get("site_mappings", {})
+    if not site_mappings:
+        return
+
+    # Collect the Central site names this spoke is responsible for
+    central_sites: list[str] = [s for s in site_mappings.values() if s]
+    if not central_sites:
+        return
+
+    cfg = _central_cfg()
+    base_url = cfg["cluster_url"].rstrip("/")
+    headers = _central_headers()
+
+    def _sev_map(s: str) -> str:
+        s = (s or "").lower()
+        return "error" if s == "critical" else "warning" if s in ("major", "minor") else "info"
+
+    new_alerts: list[dict[str, Any]] = []
+    new_insights: list[dict[str, Any]] = []
+    new_devices_by_site: dict[str, list[dict[str, Any]]] = {}
+    new_clients_by_site: dict[str, dict[str, Any]] = {}
+
+    for central_site in central_sites:
+        # ── Alerts for this site ──────────────────────────────────────────────
+        try:
+            filt = f"status eq 'Active' and siteName eq '{central_site}'"
+            cursor: str | None = None
+            seen: set[tuple[str, str]] = set()
+            for _ in range(20):  # max 20 pages per site
+                params: dict[str, Any] = {"limit": 100, "$filter": filt}
+                if cursor:
+                    params["next"] = cursor
+                resp = await client.get(f"{base_url}/network-notifications/v1/alerts", headers=headers, params=params, timeout=30)
+                if resp.status_code == 401 and _can_refresh():
+                    ok, _ = await _refresh_central_token(client)
+                    if ok:
+                        headers = _central_headers()
+                    resp = await client.get(f"{base_url}/network-notifications/v1/alerts", headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    break
+                body = resp.json()
+                for item in body.get("items", []):
+                    name = (item.get("name") or item.get("alertType") or "").strip()
+                    site = (item.get("siteName") or central_site).strip()
+                    key = (name.lower(), site.lower())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    new_alerts.append({
+                        "name": name,
+                        "site": site,
+                        "severity": _sev_map(item.get("severity") or ""),
+                        "category": item.get("category") or "",
+                        "device_type": item.get("deviceType") or "",
+                        "detail": item.get("summary") or "",
+                        "ts": item.get("createdAt") or "",
+                    })
+                cursor = body.get("next")
+                if not cursor:
+                    break
+        except Exception as exc:
+            logger.warning("NC browse alerts fetch failed for site %s: %s", central_site, exc)
+
+        # ── Insights for this site ────────────────────────────────────────────
+        try:
+            cursor = None
+            for _ in range(10):
+                params = {"limit": 100}
+                if cursor:
+                    params["next"] = cursor
+                resp = await client.get(f"{base_url}/network-notifications/v1/insights", headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    break
+                body = resp.json()
+                for item in body.get("items", []):
+                    for site_info in (item.get("impactedSites") or [{"siteName": central_site}]):
+                        site = (site_info.get("siteName") or "").strip()
+                        if site.lower() != central_site.lower():
+                            continue
+                        ts_raw = item.get("timestamp") or item.get("ts") or ""
+                        try:
+                            ts_val = datetime.utcfromtimestamp(int(ts_raw) / 1000).isoformat() if str(ts_raw).isdigit() else str(ts_raw)
+                        except Exception:
+                            ts_val = str(ts_raw)
+                        new_insights.append({
+                            "name": (item.get("name") or item.get("title") or "").strip(),
+                            "category": item.get("category") or "",
+                            "description": item.get("description") or "",
+                            "site": site,
+                            "device_count": site_info.get("impactedDeviceCount") or item.get("impactedDeviceCount") or 0,
+                            "client_count": site_info.get("impactedClientCount") or item.get("impactedClientCount") or 0,
+                            "ts": ts_val,
+                        })
+                cursor = body.get("next")
+                if not cursor:
+                    break
+        except Exception as exc:
+            logger.warning("NC browse insights fetch failed for site %s: %s", central_site, exc)
+
+        # ── Devices for this site ─────────────────────────────────────────────
+        try:
+            cursor = None
+            site_devs: list[dict[str, Any]] = []
+            for _ in range(20):
+                params = {"limit": 100, "$filter": f"siteName eq '{central_site}'"}
+                if cursor:
+                    params["next"] = cursor
+                resp = await client.get(f"{base_url}/network-monitoring/v1/devices", headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    break
+                body = resp.json()
+                for dev in body.get("items", []):
+                    site_devs.append({
+                        "name": dev.get("name") or dev.get("hostname") or "",
+                        "serial": dev.get("serialNumber") or "",
+                        "type": dev.get("deviceType") or "",
+                        "model": dev.get("model") or "",
+                        "status": (dev.get("status") or "").upper(),
+                        "ip": dev.get("ipAddress") or dev.get("ip") or "",
+                        "firmware": dev.get("firmwareVersion") or "",
+                        "site": central_site,
+                    })
+                cursor = body.get("next")
+                if not cursor:
+                    break
+            if site_devs:
+                new_devices_by_site[central_site] = site_devs
+        except Exception as exc:
+            logger.warning("NC browse devices fetch failed for site %s: %s", central_site, exc)
+
+        # ── Clients for this site ─────────────────────────────────────────────
+        try:
+            filt = f"status eq 'Connected' and siteName eq '{central_site}'"
+            cursor = None
+            total = wired = wireless = 0
+            for _ in range(50):
+                params = {"limit": 100, "$filter": filt}
+                if cursor:
+                    params["next"] = cursor
+                resp = await client.get(f"{base_url}/network-monitoring/v1/clients", headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    break
+                body = resp.json()
+                for c in body.get("items", []):
+                    total += 1
+                    conn = (c.get("clientConnectionType") or "").lower()
+                    if conn == "wired":
+                        wired += 1
+                    else:
+                        wireless += 1
+                cursor = body.get("next")
+                if not cursor:
+                    break
+            new_clients_by_site[central_site] = {"total": total, "wired": wired, "wireless": wireless}
+        except Exception as exc:
+            logger.warning("NC browse clients fetch failed for site %s: %s", central_site, exc)
+
+    central_browse_alerts = new_alerts
+    central_browse_insights = new_insights
+    central_browse_devices_by_site = new_devices_by_site
+    central_browse_clients_by_site = new_clients_by_site
+    logger.info("NC browse fetch complete: %d alerts, %d insights, %d sites with devices, %d sites with clients",
+                len(new_alerts), len(new_insights), len(new_devices_by_site), len(new_clients_by_site))
+
+
 async def _poll_central_once(client: httpx.AsyncClient) -> None:
     """Single poll cycle: fetch alerts + insights per mapped site, evaluate checks."""
     if not _central_ready() or not central_token.get("access_token"):
@@ -1939,6 +2116,14 @@ async def _poll_central_once(client: httpx.AsyncClient) -> None:
 
     await broadcast({"type": "central_update", "status": _central_status_payload(), "wireless_clients": dict(central_wireless_clients), "hardware_alerts": _hw_alerts_payload(), "client_count_status": _client_count_payload(), "ts": now, "token_state": _central_token_state()})
     _save_state_cache()
+    # In distributed mode with new_central, also fetch browse data (alerts, insights,
+    # devices, clients) filtered to this spoke's assigned sites so the hub can assemble
+    # a complete multi-site view.
+    if _is_new_central_api():
+        try:
+            await _fetch_nc_browse_for_spoke(client)
+        except Exception as exc:
+            logger.warning("NC browse fetch failed: %s", exc)
 
 
 def _central_status_payload() -> dict[str, Any]:
@@ -4567,6 +4752,10 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                 "site_mappings": dict(settings.get("site_mappings", {})),
                 "monitored_checks": list(settings.get("monitored_checks", [])),
                 "hardware_checks": list(settings.get("hardware_checks", [])),
+                "central_alerts": list(central_browse_alerts),
+                "central_insights": list(central_browse_insights),
+                "central_devices_by_site": dict(central_browse_devices_by_site),
+                "central_clients_by_site": dict(central_browse_clients_by_site),
             },
             "reclone_state": {
                 k: v for k, v in reclone_state.items() if k != "log" and k != "auto_recovery_log"
