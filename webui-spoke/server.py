@@ -5906,9 +5906,10 @@ async def relay_ws_loop() -> None:
                     while True:
                         telemetry = await _build_relay_telemetry_payload(spoke_id)
                         await send_json({"type": "telemetry", "payload": telemetry})
-                        relay_state.update({"connected": True, "error": None})  # Mark the websocket live on send while waiting for telemetry_ack because only the ack should advance last_sync.
+                        # Do NOT set connected=True here — wait for telemetry_ack from the hub.
+                        # Setting connected on send would mask auth failures where the hub
+                        # accepts the TCP/WS handshake but rejects the spoke with a close frame.
                         _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
-                        await _broadcast_relay_state()
                         await asyncio.sleep(interval)
 
                 _relay_ws_send_json = send_json
@@ -5979,7 +5980,21 @@ async def relay_ws_loop() -> None:
             relay_state.update({"connected": False, "error": str(exc)})
             _debug_event("relay_sync_fail", str(exc)[:200])
             await _broadcast_relay_state()
-            if any(token in str(exc).lower() for token in ["connection refused", "404", "not found"]):
+            # Detect WebSocket close codes 4401/4403 sent by the hub when auth fails.
+            # The hub accepts the HTTP upgrade then closes with an application-level code,
+            # so these never reach WebSocketInvalidStatus — they arrive here as generic exceptions.
+            exc_str = str(exc).lower()
+            ws_close_code = getattr(exc, "code", None) or getattr(exc, "rcvd", None)
+            ws_close_int = int(ws_close_code.code) if hasattr(ws_close_code, "code") else (int(ws_close_code) if isinstance(ws_close_code, int) else None)
+            if ws_close_int in (4401, 4403) or "4401" in exc_str or "4403" in exc_str:
+                relay_registration_refresh_needed = True
+                settings["relay_api_key"] = ""
+                settings["relay_tenant_id"] = ""
+                _revert_hub_managed_if_auth_failure(401, f"websocket closed with code {ws_close_int or 'auth'}: hub rejected credentials")
+                _save_settings()
+                await asyncio.sleep(min(backoff, 30))
+                backoff = min(backoff * 2, 30)
+            elif any(token in exc_str for token in ["connection refused", "404", "not found"]):
                 await relay_sync_once()
                 await asyncio.sleep(interval)
             else:
