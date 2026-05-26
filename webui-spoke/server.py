@@ -6604,6 +6604,7 @@ async def refresh_webui_frontend() -> None:
         "static/style.css",
         "static/js/main.js",
         "static/js/state.js",
+        "static/js/utils.js",
         "static/js/websocket.js",
         "static/js/nav.js",
         "static/js/agent-log.js",
