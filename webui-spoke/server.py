@@ -6597,14 +6597,33 @@ async def refresh_webui_frontend() -> None:
 
     logger.info("webui refresh: deployed=%s  remote=%s — downloading updated files", local_ver, remote_ver)
 
-    # Download app.js and style.css
-    for rel_path in ("static/app.js", "static/style.css"):
+    # All frontend files to download (rel path from repo root)
+    # Includes legacy app.js for backward compat and the new ES module tree
+    frontend_files = [
+        "static/app.js",
+        "static/style.css",
+        "static/js/main.js",
+        "static/js/state.js",
+        "static/js/websocket.js",
+        "static/js/nav.js",
+        "static/js/agent-log.js",
+        "static/js/hub/dashboard.js",
+        "static/js/hub/admin.js",
+        "static/js/hub/central.js",
+        "static/js/spoke/dashboard.js",
+        "static/js/spoke/central.js",
+    ]
+    for rel_path in frontend_files:
         url = f"{raw_base}/{rel_path}"
-        dest = STATIC_DIR / Path(rel_path).name
+        # Preserve subdirectory structure under STATIC_DIR
+        # rel_path is like "static/js/hub/dashboard.js" → dest is STATIC_DIR/js/hub/dashboard.js
+        rel_to_static = Path(rel_path).relative_to("static")
+        dest = STATIC_DIR / rel_to_static
+        dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             with _urllib_req.urlopen(url, timeout=30) as resp:
                 dest.write_bytes(resp.read())
-            logger.info("webui refresh: updated %s", dest.name)
+            logger.info("webui refresh: updated %s", rel_to_static)
         except Exception as exc:
             logger.error("webui refresh: failed to download %s: %s", rel_path, exc)
             return  # abort — partial update is worse than stale
@@ -10604,6 +10623,7 @@ async def root(request: Request):
     # hard-refresh required.
     html = html.replace('href="/static/style.css"', f'href="/static/style.css?v={APP_VERSION}"')
     html = html.replace('src="/static/app.js"', f'src="/static/app.js?v={APP_VERSION}"')
+    html = html.replace('src="/static/js/main.js"', f'src="/static/js/main.js?v={APP_VERSION}"')
     return HTMLResponse(content=html)
 
 
