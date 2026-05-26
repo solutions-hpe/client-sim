@@ -2872,6 +2872,9 @@ _shell_sessions: dict[str, dict[str, Any]] = {}
 _repo_ver: str | None = None
 _proxmox_reseed_in_progress = False
 
+# Hub-synced monitored items — fetched each relay cycle, cached here
+_hub_monitored_items: dict[str, Any] = {"items": [], "has_sites": False, "assigned_sites": []}
+
 
 def _relay_diag_append(event: str, **kwargs: Any) -> None:
     """Append one entry to relay_diag_log, keeping the list capped."""
@@ -5668,6 +5671,14 @@ async def relay_sync_once() -> None:
                     pass
                 except Exception as _feed_exc:
                     logger.debug("Central feed fetch failed: %s", _feed_exc)
+            # Fetch hub-managed monitored items filtered to this spoke's assigned sites
+            try:
+                global _hub_monitored_items
+                mon_resp = await hc.get(f"{base}/monitored-items", headers=headers, timeout=10)
+                if mon_resp.status_code == 200:
+                    _hub_monitored_items = mon_resp.json()
+            except Exception as _mon_exc:
+                logger.debug("Monitored items fetch failed: %s", _mon_exc)
             resp.raise_for_status()
             remote_cmds = _parse_upstream_json(resp)
 
@@ -7615,6 +7626,12 @@ async def api_repo_status() -> dict[str, Any]:
 @app.get("/api/relay/status")
 async def api_relay_status_endpoint() -> dict[str, Any]:  # Serve the enriched relay payload so on-demand status checks match websocket broadcasts exactly.
     return _relay_status_payload()  # Reuse the shared relay payload so the REST endpoint matches broadcasted isolation, spoke, and check-in fields exactly.
+
+
+@app.get("/api/relay/monitored-items")
+async def api_relay_monitored_items() -> dict[str, Any]:
+    """Return hub-synced monitored items for this spoke (fetched each relay cycle)."""
+    return _hub_monitored_items
 
 
 @app.post("/api/relay/revert-local")
