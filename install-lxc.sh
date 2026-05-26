@@ -580,7 +580,7 @@ else
 fi
 
 ###############################################################################
-# STEP 5c — cs-webui frontend (app.js, style.css, index.html from cs-webui repo)
+# STEP 5c — cs-webui frontend (modular JS files, style.css, index.html from cs-webui repo)
 #
 # Files are fetched from cs-webui at the same branch as the spoke repo so dev
 # work on main automatically pulls the main version of the unified frontend.
@@ -589,14 +589,28 @@ fi
 ###############################################################################
 info "Fetching cs-webui frontend from cs-webui repo (branch: ${REPO_BRANCH})..."
 SHARED_STATIC_DIR="${INSTALL_DIR}/static"
-mkdir -p "$SHARED_STATIC_DIR"
+mkdir -p "$SHARED_STATIC_DIR/js/spoke"
 _cw_raw="${CS_WEBUI_REPO_RAW}/${REPO_BRANCH}"
+
+# Download legacy app.js (still used for backwards compat) and style.css
 for _sf in static/app.js static/style.css; do
   _dest="${SHARED_STATIC_DIR}/$(basename "${_sf}")"
   if curl -sSf --max-time 30 "${_cw_raw}/${_sf}" -o "${_dest}" >>"$LOG" 2>&1; then
     ok "Downloaded $(basename ${_sf}) from cs-webui:${REPO_BRANCH}"
   else
     warn "Could not fetch $(basename ${_sf}) from cs-webui — keeping existing file if present"
+  fi
+done
+
+# Download modular ES6 JavaScript files
+for _sf in static/js/main.js static/js/state.js static/js/websocket.js static/js/nav.js static/js/agent-log.js static/js/utils.js static/js/spoke/dashboard.js static/js/spoke/central.js; do
+  _dest="${SHARED_STATIC_DIR}/$(echo ${_sf} | sed 's|^static/||')"
+  _dest_dir="$(dirname "${_dest}")"
+  mkdir -p "${_dest_dir}"
+  if curl -sSf --max-time 30 "${_cw_raw}/${_sf}" -o "${_dest}" >>"$LOG" 2>&1; then
+    ok "Downloaded $(basename ${_sf}) from cs-webui:${REPO_BRANCH}"
+  else
+    warn "Could not fetch ${_sf} from cs-webui — keeping existing file if present"
   fi
 done
 # Fetch index.html from templates/ and inject WEBUI_MODE=spoke
