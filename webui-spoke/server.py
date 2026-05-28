@@ -4232,6 +4232,9 @@ async def auto_recovery_check() -> None:
                     continue
                 if int(vmid) <= 9000 or vm.get("is_template"):
                     continue
+                # Skip VMs that are being intentionally deleted
+                if int(vmid) in _pending_delete_vmids:
+                    continue
                 last_seen = _parse_ts(vm.get("last_seen"))
                 if last_seen is None or (now - last_seen) <= timeout_hours * 3600:
                     continue
@@ -7952,7 +7955,17 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     # any VMID that has disappeared from the agent has been successfully deleted.
     if _pending_delete_vmids:
         telemetry_vmids = {int(v.get("vmid")) for v in enriched_vms if v.get("vmid") is not None}
+        confirmed_deleted = _pending_delete_vmids - telemetry_vmids
         _pending_delete_vmids.intersection_update(telemetry_vmids)
+        # Cancel any pending auto-recovery reclone commands for confirmed-deleted VMIDs
+        if confirmed_deleted:
+            for cmd in commands:
+                if (cmd.get("action") == "reclone_vm"
+                        and cmd.get("type") == "auto-recovery"
+                        and cmd.get("status") in {"pending", "delivered"}
+                        and int(cmd.get("args", {}).get("vmid", -1)) in confirmed_deleted):
+                    cmd["status"] = "cancelled"
+                    cmd["error"] = "VM was deleted — auto-recovery cancelled"
 
     # Detect provisioning/teardown completions for summary tracking
     global _prev_usb_by_vmid
