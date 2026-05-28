@@ -25,6 +25,7 @@ SELF_UPDATE_RETRY_INTERVAL="${CLIENT_SIM_SELF_UPDATE_RETRY_INTERVAL:-300}"  # 5 
 SPOKE_OFFLINE_REINSTALL_SECS=3600
 STATE_FILE="/etc/client-sim-usb-state.conf"
 STATE_LOCK_FILE="${STATE_FILE}.lock"
+EXCLUDED_BUS_FILE="/etc/client-sim-excluded-buses.conf"
 AGENT_PORT="${CLIENT_SIM_AGENT_PORT:-9105}"
 HEALTH_STALE_SECS="${CLIENT_SIM_AGENT_HEALTH_STALE_SECS:-180}"
 HEALTH_FILE="/var/lib/client-sim/agent-health.json"
@@ -101,7 +102,7 @@ end_vmid=$((start_vmid + MAX_USB_SLOTS - 1))
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
 declare -A STATE_VMID_TO_IMAGE
-declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS STATE_VIDPID_BY_BUS
+declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS STATE_VIDPID_BY_BUS STATE_EXCLUDED_BUS
 declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACKs
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
@@ -958,6 +959,24 @@ save_state_file() {
     ) 200>"$STATE_LOCK_FILE"
 }
 
+load_excluded_buses() {
+    STATE_EXCLUDED_BUS=()
+    [[ -f "$EXCLUDED_BUS_FILE" ]] || return 0
+    local _bus
+    while IFS= read -r _bus || [[ -n "$_bus" ]]; do
+        [[ -z "$_bus" || "$_bus" == '#'* ]] && continue
+        STATE_EXCLUDED_BUS["$_bus"]="1"
+    done < "$EXCLUDED_BUS_FILE"
+}
+
+save_excluded_buses() {
+    {
+        for _bus in "${!STATE_EXCLUDED_BUS[@]}"; do
+            printf '%s\n' "$_bus"
+        done | sort
+    } > "$EXCLUDED_BUS_FILE"
+}
+
 scan_usb_devices() {
     USB_NAME_BY_BUS=()
     USB_VIDPID_BY_BUS=()
@@ -1466,7 +1485,7 @@ _expire_vm_pending_commands() {
 }
 
 destroy_vm() {
-    local vmid="$1" guest_type="${2:-}"
+    local vmid="$1" guest_type="${2:-}" exclude_bus="${3:-0}"
     local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
     if [[ -z "$guest_type" ]]; then
         guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
@@ -1483,6 +1502,14 @@ destroy_vm() {
     if [[ -n "$bus_path" ]]; then
         unset "STATE_MISSING_BY_BUS[$bus_path]"
         unset "STATE_BUS_TO_VMID[$bus_path]"
+        if [[ "$exclude_bus" == "1" ]]; then
+            # Mark bus excluded so the provision loop won't immediately recreate the VM.
+            # The exclusion is cleared automatically when the USB dongle is unplugged.
+            load_excluded_buses
+            STATE_EXCLUDED_BUS["$bus_path"]="1"
+            save_excluded_buses
+            log "Bus $bus_path excluded from auto-provisioning after hub-initiated delete of VM $vmid"
+        fi
     fi
     unset "STATE_VMID_TO_BUS[$vmid]"
     unset "STATE_VMID_TO_IMAGE[$vmid]"
@@ -1601,6 +1628,20 @@ usb_provision_loop() {
     refresh_usb_config
     scan_usb_devices
     load_state_file
+    load_excluded_buses
+
+    # ── Auto-clear exclusions for buses whose dongles have been unplugged ─────
+    # Once a dongle is physically removed, its exclusion is cleared so that
+    # re-plugging the dongle provisions a fresh VM as expected.
+    local _excl_changed=0
+    for _excl_bus in "${!STATE_EXCLUDED_BUS[@]}"; do
+        if [[ -z "${PRESENT_BUSES[$_excl_bus]:-}" ]]; then
+            unset "STATE_EXCLUDED_BUS[$_excl_bus]"
+            _excl_changed=1
+            log "Bus $_excl_bus no longer present — cleared exclusion; will reprovision when re-plugged"
+        fi
+    done
+    (( _excl_changed )) && save_excluded_buses
 
     # ── Stale state cleanup: remove entries for VMIDs that no longer exist ────
     # Prevents dongles from being "stuck" assigned to a manually-deleted VM.
@@ -1676,6 +1717,7 @@ usb_provision_loop() {
 
     for bus_path in "${!PRESENT_BUSES[@]}"; do
         [[ -n "${STATE_BUS_TO_VMID[$bus_path]:-}" ]] && continue
+        [[ -n "${STATE_EXCLUDED_BUS[$bus_path]:-}" ]] && { log "Bus $bus_path is excluded from provisioning (hub-deleted); skipping"; continue; }
         vidpid="${PRESENT_BUSES[$bus_path]}"
         local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
         if [[ "$SIM_PHY" == "any" || "$_dtype" == "$SIM_PHY" ]]; then
@@ -2821,7 +2863,7 @@ execute_vm_command() {
                 destroy_lxc "$vmid"
             else
                 load_state_file
-                destroy_vm "$vmid"
+                destroy_vm "$vmid" "" "1"
             fi
             ;;
         reclone_vms|reseed)
@@ -3350,6 +3392,7 @@ PY
     # Parallel delete_vm: stop+destroy all selected guests concurrently, then update state once.
     if [[ ${#_del_vmids[@]} -gt 0 ]]; then
         load_state_file
+        load_excluded_buses
         local _del_pids=() _del_results=()
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
@@ -3377,11 +3420,15 @@ PY
                 unset "STATE_MISSING_BY_BUS[$_dbus]"
                 unset "STATE_BUS_TO_VMID[$_dbus]"
                 unset "STATE_VIDPID_BY_BUS[$_dbus]"
+                # Exclude bus from auto-provisioning so the VM isn't immediately recreated.
+                STATE_EXCLUDED_BUS["$_dbus"]="1"
+                log "Bus $_dbus excluded from auto-provisioning after hub-initiated delete of VM $_dvmid"
             fi
             unset "STATE_VMID_TO_BUS[$_dvmid]"
             unset "STATE_VMID_TO_IMAGE[$_dvmid]"
         done
         save_state_file
+        save_excluded_buses
         build_usb_state_json  # rebuild cache so post_telemetry doesn't report stale VMs
         for _di in "${!_del_vmids[@]}"; do
             local _status="${_del_results[$_di]:-failed}"
