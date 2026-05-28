@@ -4712,6 +4712,35 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
     present_usb = list(proxmox_state.get("present_usb", []))
     unknown_usb = list(proxmox_state.get("unknown_usb", []))
     clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
+
+    # Enrich the VM list with prov_status from usb_state so the hub can show
+    # provisioning status without a separate lookup. Also synthesize entries for
+    # VMs that are tracked in usb_state as "provisioning" but not yet present in
+    # the Proxmox VM list (mid-clone race window).
+    usb_by_vmid: dict[str, dict[str, Any]] = {
+        str(e.get("vmid")): e for e in usb_state if e.get("vmid") is not None
+    }
+    enriched_vms: list[dict[str, Any]] = []
+    existing_vmids: set[str] = set()
+    for vm in proxmox_vms:
+        enriched = dict(vm)
+        vmid_key = str(vm.get("vmid", ""))
+        usb_entry = usb_by_vmid.get(vmid_key)
+        enriched["prov_status"] = (usb_entry.get("prov_status") or "active") if usb_entry else "active"
+        existing_vmids.add(vmid_key)
+        enriched_vms.append(enriched)
+    # Add synthetic VM entries for usb_state slots still in "provisioning" that
+    # Proxmox hasn't surfaced yet (clone not complete).
+    for vmid_key, entry in usb_by_vmid.items():
+        if vmid_key not in existing_vmids and str(entry.get("prov_status", "")).lower() == "provisioning":
+            enriched_vms.append({
+                "vmid": entry.get("vmid"),
+                "name": entry.get("hostname") or f"VM {entry.get('vmid')}",
+                "status": "provisioning",
+                "type": "qemu",
+                "prov_status": "provisioning",
+            })
+
     return {
         "spoke_id": spoke_id,
         "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
@@ -4725,16 +4754,17 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "connected": bool(proxmox_state.get("connected", False)),
             "last_seen": proxmox_state.get("last_seen"),
             "node": dict(proxmox_state.get("node") or {}),
-            "vm_count": len(proxmox_vms),
-            "running_count": sum(1 for vm in proxmox_vms if vm.get("status") == "running"),
+            "vm_count": len(enriched_vms),
+            "running_count": sum(1 for vm in enriched_vms if vm.get("status") == "running"),
             "vms": [
                 {
                     "vmid": vm.get("vmid"),
                     "name": vm.get("name", ""),
                     "status": vm.get("status", ""),
                     "type": vm.get("type", ""),
+                    "prov_status": vm.get("prov_status", "active"),
                 }
-                for vm in proxmox_vms
+                for vm in enriched_vms
             ],
             "usb_state": usb_state,
             "present_usb": present_usb,
