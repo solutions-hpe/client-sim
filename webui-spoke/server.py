@@ -3223,12 +3223,14 @@ def _find_active_duplicate_command_locked(target: str, action: str, args: dict[s
     return None
 
 
-def _enqueue_command_locked(target: str, action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> tuple[dict[str, Any], bool, int, int]:
+def _enqueue_command_locked(target: str, action: str, args: dict[str, Any] | None = None, command_type: str | None = None, relay: bool = False) -> tuple[dict[str, Any], bool, int, int]:
     normalized_action = _normalize_command_action(action)
     normalized_type = _normalize_command_type(command_type)
     normalized_args = dict(args or {})
     if target == "proxmox" and normalized_action == "delete_vm":
-        normalized_args = _prepare_delete_vm_args(normalized_args)
+        # Hub relay commands use lenient validation — inventory may be stale or not yet loaded.
+        # The proxmox agent performs the real validation before executing the delete.
+        normalized_args = _prepare_delete_vm_args(normalized_args, strict=not relay)
 
     # Block all single-VM actions on protected VMIDs (start, stop, reboot, snapshot, reclone)
     _VM_ACTIONS = {"start_vm", "stop_vm", "reboot_vm", "snapshot_vm", "reclone_vm", "delete_vm"}
@@ -3668,7 +3670,7 @@ def _find_proxmox_vm(vmid: int) -> dict[str, Any] | None:
     return None
 
 
-def _prepare_delete_vm_args(args: dict[str, Any] | None) -> dict[str, Any]:
+def _prepare_delete_vm_args(args: dict[str, Any] | None, strict: bool = True) -> dict[str, Any]:
     if not isinstance(args, dict):
         raise HTTPException(status_code=422, detail="args must be an object")
     try:
@@ -3681,11 +3683,21 @@ def _prepare_delete_vm_args(args: dict[str, Any] | None) -> dict[str, Any]:
         # Allow re-delete of a VM that's already in pending-delete state (idempotent)
         if vmid in _pending_delete_vmids:
             return {"vmid": vmid, "vm_type": "qemu", "status": "deleting"}
-        # 503 only when the inventory has never been received (None), not when it's empty
-        # after a batch delete (which would be an empty list []).
-        if proxmox_state.get("vms") is None:
-            raise HTTPException(status_code=503, detail="No Proxmox VM inventory is available yet")
-        raise HTTPException(status_code=404, detail=f"VM {vmid} was not found in Proxmox inventory")
+        if strict:
+            # 503 only when the inventory has never been received (None), not when it's empty
+            # after a batch delete (which would be an empty list []).
+            if proxmox_state.get("vms") is None:
+                raise HTTPException(status_code=503, detail="No Proxmox VM inventory is available yet")
+            raise HTTPException(status_code=404, detail=f"VM {vmid} was not found in Proxmox inventory")
+        else:
+            # Relay mode: inventory may be stale or not yet loaded — pass through with a
+            # safe default vm_type so the proxmox agent can handle it (or report the error).
+            logger.warning(
+                "Hub relay delete_vm: VM %s not found in local inventory%s — forwarding anyway",
+                vmid,
+                " (inventory not loaded)" if proxmox_state.get("vms") is None else "",
+            )
+            return {"vmid": vmid, "vm_type": str(args.get("vm_type") or "qemu")}
     if vm.get("is_template"):
         raise HTTPException(status_code=400, detail="Templates cannot be deleted from the VM list")
     if _is_protected_vmid(vmid):
@@ -5442,20 +5454,29 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
 
         if not target or not action:
             continue
-        async with state_lock:
-            if target == "all":
-                target_hostnames = list(clients.keys())
-                queued_targets.extend(target_hostnames)
-                for hostname in target_hostnames:
-                    _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
-            else:
-                queued_targets.append(target)
-                _enqueue_command_locked(target, action, args, command_type=cmd_type)
-            serialized_commands = _serialize_commands()
-        commands_changed = True
-
-        if cmd_id:
-            await ack_fn(cmd_id, "queued", None)
+        try:
+            async with state_lock:
+                if target == "all":
+                    target_hostnames = list(clients.keys())
+                    queued_targets.extend(target_hostnames)
+                    for hostname in target_hostnames:
+                        _enqueue_command_locked(hostname, action, args, command_type=cmd_type, relay=True)
+                else:
+                    queued_targets.append(target)
+                    _enqueue_command_locked(target, action, args, command_type=cmd_type, relay=True)
+                serialized_commands = _serialize_commands()
+            commands_changed = True
+            if cmd_id:
+                await ack_fn(cmd_id, "queued", None)
+        except Exception as exc:
+            logger.warning("Hub relay: failed to enqueue %s/%s %s: %s", target, action, args, exc)
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", {
+                    "success": False,
+                    "task_type": cmd_type or action,
+                    "detail": str(exc),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
 
     if commands_changed and serialized_commands is not None:
         await broadcast({"type": "commands_update", "commands": serialized_commands})
@@ -5976,26 +5997,42 @@ async def relay_sync_once() -> None:
             # ── regular client/proxmox commands ────────────────────────────
             if not target or not action:
                 continue
-            async with state_lock:
-                if target == "all":
-                    target_hostnames = list(clients.keys())
-                    queued_targets.extend(target_hostnames)
-                    for hostname in target_hostnames:
-                        _enqueue_command_locked(hostname, action, args, command_type=cmd_type)
-                else:
-                    queued_targets.append(target)
-                    _enqueue_command_locked(target, action, args, command_type=cmd_type)
-                serialized_commands = _serialize_commands()
-            commands_changed = True
+            try:
+                async with state_lock:
+                    if target == "all":
+                        target_hostnames = list(clients.keys())
+                        queued_targets.extend(target_hostnames)
+                        for hostname in target_hostnames:
+                            _enqueue_command_locked(hostname, action, args, command_type=cmd_type, relay=True)
+                    else:
+                        queued_targets.append(target)
+                        _enqueue_command_locked(target, action, args, command_type=cmd_type, relay=True)
+                    serialized_commands = _serialize_commands()
+                commands_changed = True
 
-            # Ack each queued command
-            if cmd_id:
-                async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
-                    ack_resp = await hc_ack.post(f"{base}/ack", json={
-                        "command_id": cmd_id,
-                        "status": "queued",
-                    }, headers=headers)
-                    ack_resp.raise_for_status()
+                # Ack each queued command
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "queued",
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
+            except Exception as exc:
+                logger.warning("Hub relay: failed to enqueue %s/%s %s: %s", target, action, args, exc)
+                if cmd_id:
+                    async with httpx.AsyncClient(timeout=10, verify=_hub_tls_verify()) as hc_ack:
+                        ack_resp = await hc_ack.post(f"{base}/ack", json={
+                            "command_id": cmd_id,
+                            "status": "executed",
+                            "result": {
+                                "success": False,
+                                "task_type": cmd_type or action,
+                                "detail": str(exc),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
+                        }, headers=headers)
+                        ack_resp.raise_for_status()
 
         if commands_changed and serialized_commands is not None:
             await broadcast({"type": "commands_update", "commands": serialized_commands})
