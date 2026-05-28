@@ -10407,6 +10407,27 @@ async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
     return {"expired": count}
 
 
+@app.post("/api/commands/cancel-all")
+async def cancel_all_queued_commands() -> dict[str, int]:
+    """Cancel all pending/delivered commands (troubleshooting — stops queued work without deleting history)."""
+    now = time.time()
+    count = 0
+    async with state_lock:
+        for cmd in commands:
+            if cmd.get("status") in {"pending", "delivered"}:
+                cmd["status"] = "cancelled"
+                cmd["updated_at"] = now
+                cmd["error"] = "Manually cancelled via Cancel All"
+                count += 1
+        if count:
+            _save_commands()
+        serialized = _serialize_commands()
+    if count:
+        logger.info("Cancel-all: %d queued command(s) cancelled by user", count)
+        await broadcast({"type": "commands_update", "commands": serialized})
+    return {"cancelled": count}
+
+
 @app.delete("/api/commands/{cmd_id}")
 async def delete_command(cmd_id: str) -> dict[str, bool]:
     """Remove a command from history."""
