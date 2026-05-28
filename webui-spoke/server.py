@@ -4623,6 +4623,9 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
     hostname = socket.gethostname()
     spoke_name = settings.get("relay_spoke_name", "").strip() or hostname
     tenant_hint = (settings.get("relay_tenant_id") or settings.get("relay_tenant_hint") or "").strip()
+    existing_api_key = settings.get("relay_api_key", "").strip()
+    existing_tenant_id = settings.get("relay_tenant_id", "").strip()
+    had_approval = bool(existing_api_key and existing_tenant_id)
     _relay_diag_append("check_approval", spoke_id=spoke_id)
     hub_base = _relay_hub_base_url(server_url, settings.get("relay_tenant_id", ""))
     try:
@@ -4634,6 +4637,7 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
                 "spoke_name": spoke_name,
                 "tenant_id_hint": tenant_hint,
                 "onboarding_psk": settings.get("relay_onboarding_psk", "").strip(),
+                "api_key": existing_api_key,
                 "config": _build_registration_config(),
             })
             resp.raise_for_status()
@@ -4651,25 +4655,26 @@ async def _hub_check_approval(server_url: str, spoke_id: str) -> None:
             settings["relay_tenant_id"] = tenant_id
             settings["relay_tenant_hint"] = tenant_id
             relay_state["registration_status"] = "approved"
+            relay_state["error"] = ""
             updated = True
             _relay_diag_append("approval_received", spoke_id=spoke_id,
                                tenant_id=data.get("tenant_id"))
             logger.info("Hub approval received: spoke_id=%s tenant_id=%s", spoke_id, data.get("tenant_id"))
         else:
             tenant_hint = str(data.get("tenant_hint", "")).strip()
-            if settings.get("relay_api_key"):
-                settings["relay_api_key"] = ""
-                updated = True
-            if settings.get("relay_tenant_id"):
-                settings["relay_tenant_id"] = ""
-                updated = True
             if tenant_hint and tenant_hint != settings.get("relay_tenant_hint", ""):
                 settings["relay_tenant_hint"] = tenant_hint
                 updated = True
-            relay_state["registration_status"] = "pending"
-            relay_state["error"] = ""
-            _relay_diag_append("still_pending", spoke_id=spoke_id)
-            logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
+            if had_approval:
+                relay_state["registration_status"] = "approved"
+                relay_state["error"] = "Hub registration check returned pending; keeping existing approval until credentials are explicitly rejected."
+                _relay_diag_append("pending_ignored", spoke_id=spoke_id, tenant_hint=tenant_hint)
+                logger.warning("Hub registration check returned pending for approved spoke %s; keeping stored approval", spoke_id)
+            else:
+                relay_state["registration_status"] = "pending"
+                relay_state["error"] = ""
+                _relay_diag_append("still_pending", spoke_id=spoke_id)
+                logger.info("Hub registration still pending: spoke_id=%s", spoke_id)
         relay_registration_refresh_needed = False
         _save_relay_state()
         if updated:
