@@ -1101,7 +1101,9 @@ build_usb_state_json() {
         fi
         name="${USB_NAME_BY_BUS[$bus_path]:-$(find_label_for_vidpid "$vidpid")}"
         # Determine provisioning status for UI display
-        if [[ -f "${PROV_DIR}/${vmid}" ]]; then
+        if [[ -f "${PROV_DIR}/${vmid}.deleting" ]]; then
+            prov_status="tearing_down"
+        elif [[ -f "${PROV_DIR}/${vmid}" ]]; then
             prov_status="provisioning"
         elif [[ -n "$missing_since" ]]; then
             if (( _now_ts - missing_since > MISSING_TIMEOUT * 60 )); then
@@ -3463,6 +3465,15 @@ PY
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
             _expire_vm_pending_commands "$_dvmid"
+            # Mark VM as tearing_down immediately so collect_telemetry reflects it
+            # before the delete completes, giving the hub real-time status feedback.
+            echo "$(date +%s)" > "${PROV_DIR}/${_dvmid}.deleting"
+        done
+        build_usb_state_json
+        # build_usb_state_json updated the USB state cache files; the WS send_loop
+        # will pick up tearing_down status on its next collect_telemetry pass (≤3s).
+        for _di in "${!_del_vmids[@]}"; do
+            local _dvmid="${_del_vmids[$_di]}"
             (
                 _destroy_guest_only "$_dvmid"
             ) &
@@ -3476,6 +3487,7 @@ PY
                 _del_results[$_di]="failed"
                 log "Parallel delete failed: VMID ${_del_vmids[$_di]}"
             fi
+            rm -f "${PROV_DIR}/${_del_vmids[$_di]}.deleting" 2>/dev/null || true
         done
         load_state_file
         for _di in "${!_del_vmids[@]}"; do
