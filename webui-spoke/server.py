@@ -4926,12 +4926,21 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                 "prov_status": "provisioning",
             })
 
+    # Read raw simulation.conf so the hub can populate the conf editor when
+    # there is no GitHub API key and no saved hub override yet.
+    _sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
+    try:
+        sim_conf_content = _sim_conf_path.read_text(encoding="utf-8") if _sim_conf_path.exists() else ""
+    except Exception:
+        sim_conf_content = ""
+
     return {
         "spoke_id": spoke_id,
         "spoke_name": settings.get("relay_spoke_name", "").strip() or socket.gethostname(),
         "hostname": socket.gethostname(),
         "clients": clients_snapshot,
         "timestamp": time.time(),
+        "sim_conf_content": sim_conf_content,
         "hub_isolated": _hub_isolated(),  # Export the current isolation state so the hub can see when this spoke has paused config pushes.
         "hub_last_checkin": relay_state.get("last_sync"),  # Export the last successful check-in timestamp so the hub can reason about isolation timing.
         "hub_rtt_ms": relay_state.get("hub_rtt_ms"),  # Round-trip time from last telemetry send to ack receipt.
