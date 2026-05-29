@@ -2479,6 +2479,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
     background_tasks["baseline_saver"] = asyncio.create_task(hourly_baseline_saver())
     background_tasks["acme_renewal"] = asyncio.create_task(acme_renewal_loop())
+    background_tasks["demo_expiry"] = asyncio.create_task(_demo_expiry_task())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -6248,6 +6249,12 @@ async def relay_ws_loop() -> None:
                 _relay_ws_spoke_id = spoke_id
                 sender = asyncio.create_task(telemetry_loop())
                 try:
+                    # Clear all active demo scenarios on hub reconnect so that a hub
+                    # reboot automatically reverts any in-flight demo overrides.
+                    if _demo_active:
+                        logger.info("Hub reconnected — clearing %d active demo override(s)", len(_demo_active))
+                        _clear_all_demo_scenarios_sync()
+                        await broadcast_full_state()
                     await send_json({"type": "sync"})
                     async for raw_message in websocket:
                         message = json.loads(raw_message)
@@ -6288,6 +6295,18 @@ async def relay_ws_loop() -> None:
                                 q.put_nowait(None)
                         elif msg_type == "log_fetch":
                             asyncio.create_task(_handle_log_fetch(message))
+                        elif msg_type == "demo_scenario":
+                            _hostname = str(message.get("hostname") or "").strip()
+                            _scenario = str(message.get("scenario") or "").strip()
+                            if _hostname and _scenario:
+                                asyncio.create_task(_apply_demo_scenario(_hostname, _scenario, triggered_by="hub"))
+                        elif msg_type == "demo_clear":
+                            _hostname = str(message.get("hostname") or "").strip()
+                            if _hostname:
+                                asyncio.create_task(_clear_demo_scenario(_hostname))
+                            else:
+                                _clear_all_demo_scenarios_sync()
+                                asyncio.create_task(broadcast_full_state())
                 finally:
                     await _close_all_shell_sessions(notify_exit=False)
                     if _relay_ws_send_json is send_json:
@@ -7172,7 +7191,7 @@ async def create_local_user(payload: LocalUserCreatePayload, user: SpokeUser = D
     if not password:
         raise HTTPException(status_code=422, detail="Password is required")
     if role_raw not in _LOCAL_USER_ROLES:
-        raise HTTPException(status_code=422, detail="Role must be admin or viewer")
+        raise HTTPException(status_code=422, detail="Role must be admin, viewer, or demo")
 
     users = _get_local_users()
     if any(str(entry.get("username", "")).strip().lower() == username.lower() for entry in users):
@@ -9978,8 +9997,162 @@ async def api_all_clients_control(overrides: dict[str, str]) -> dict[str, Any]:
     return {"status": "ok", "updated": updated, "overrides": normalized}
 
 
+# ── Demo Scenario System ──────────────────────────────────────────────────────
+# Demo users can trigger named failure scenarios on individual clients without
+# needing to understand simulation.conf.  Overrides are:
+#   - In-memory only (cleared on hub or spoke reboot automatically)
+#   - Auto-expired after DEMO_TTL_SECONDS (120 minutes)
+#   - Exclusive: each scenario sets all failure flags explicitly so there is
+#     never ambiguity about which failure is active
 
-# ── Log viewer endpoints ──────────────────────────────────────────────────────
+_DEMO_TTL_SECONDS = 120 * 60  # 120 minutes
+
+_FAILURE_FLAGS = ("dns_fail", "dhcp_fail", "assoc_fail", "auth_fail", "ssidpw_fail", "port_flap")
+
+
+def _build_demo_scenarios() -> dict[str, dict[str, str]]:
+    scenarios: dict[str, dict[str, str]] = {
+        "normal": {f: "off" for f in _FAILURE_FLAGS},
+    }
+    for flag in _FAILURE_FLAGS:
+        scenarios[flag] = {f: ("on" if f == flag else "off") for f in _FAILURE_FLAGS}
+    return scenarios
+
+
+DEMO_SCENARIOS: dict[str, dict[str, str]] = _build_demo_scenarios()
+
+# hostname → {scenario, flags, expires_at, triggered_by}
+_demo_active: dict[str, dict[str, Any]] = {}
+
+
+async def _apply_demo_scenario(hostname: str, scenario: str, triggered_by: str) -> dict[str, Any]:
+    """Apply a named demo scenario to a client and record its expiry.
+
+    Returns the serialized client payload.  Raises HTTPException if the
+    scenario name is unknown or the client is not found.
+    """
+    flags = DEMO_SCENARIOS.get(scenario)
+    if flags is None:
+        raise HTTPException(status_code=422, detail=f"Unknown scenario '{scenario}'. Valid: {sorted(DEMO_SCENARIOS)}")
+
+    async with state_lock:
+        if hostname not in clients:
+            raise HTTPException(status_code=404, detail=f"Client '{hostname}' not found")
+        clients[hostname].setdefault("overrides", {}).update(flags)
+        payload = serialize_client(hostname, clients[hostname])
+
+    if scenario == "normal":
+        _demo_active.pop(hostname, None)
+    else:
+        _demo_active[hostname] = {
+            "scenario": scenario,
+            "flags": flags,
+            "expires_at": time.time() + _DEMO_TTL_SECONDS,
+            "triggered_by": triggered_by,
+        }
+
+    await broadcast({"type": "overrides_update", "client": payload})
+    return payload
+
+
+async def _clear_demo_scenario(hostname: str) -> dict[str, Any] | None:
+    """Clear demo override for one client; returns serialized client or None if not found."""
+    _demo_active.pop(hostname, None)
+    async with state_lock:
+        if hostname not in clients:
+            return None
+        clients[hostname]["overrides"] = {}
+        payload = serialize_client(hostname, clients[hostname])
+    await broadcast({"type": "overrides_cleared", "client": payload})
+    return payload
+
+
+def _clear_all_demo_scenarios_sync() -> None:
+    """Synchronous best-effort clear of all demo overrides (used on hub reconnect)."""
+    _demo_active.clear()
+    for client in clients.values():
+        client["overrides"] = {}
+
+
+def _demo_active_summary() -> list[dict[str, Any]]:
+    now = time.time()
+    return [
+        {
+            "hostname": h,
+            "scenario": v["scenario"],
+            "triggered_by": v.get("triggered_by", ""),
+            "expires_at": v["expires_at"],
+            "minutes_remaining": max(0, round((v["expires_at"] - now) / 60, 1)),
+        }
+        for h, v in list(_demo_active.items())
+    ]
+
+
+class DemoScenarioRequest(BaseModel):
+    scenario: str  # e.g. "dns_fail", "dhcp_fail", "normal"
+
+
+@app.post("/api/demo/client/{hostname}/scenario")
+async def api_demo_set_scenario(
+    hostname: str,
+    body: DemoScenarioRequest,
+    user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    """Trigger a named demo scenario on a client.
+
+    Called via hub WebSocket relay or directly by an admin.
+    The override is in-memory and expires after 120 minutes or on reboot.
+    """
+    payload = await _apply_demo_scenario(hostname, body.scenario, triggered_by=user.username)
+    entry = _demo_active.get(hostname)
+    return {
+        "ok": True,
+        "hostname": hostname,
+        "scenario": body.scenario,
+        "minutes_remaining": round(entry["minutes_remaining"] if entry and "minutes_remaining" in entry else 0),
+        "client": payload,
+    }
+
+
+@app.delete("/api/demo/client/{hostname}/scenario")
+async def api_demo_clear_scenario(
+    hostname: str,
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    """Clear the demo scenario override for a specific client."""
+    payload = await _clear_demo_scenario(hostname)
+    return {"ok": True, "hostname": hostname, "cleared": True, "client": payload}
+
+
+@app.get("/api/demo/active")
+async def api_demo_active(_user: SpokeUser = Depends(require_auth)) -> dict[str, Any]:
+    """Return all currently active demo scenario overrides."""
+    return {"active": _demo_active_summary()}
+
+
+@app.get("/api/demo/scenarios")
+async def api_demo_scenarios(_user: SpokeUser = Depends(require_auth)) -> dict[str, Any]:
+    """Return the available scenario names and their flag definitions."""
+    return {"scenarios": DEMO_SCENARIOS}
+
+
+async def _demo_expiry_task() -> None:
+    """Background task: check every 30 s and clear any expired demo overrides."""
+    while True:
+        try:
+            await asyncio.sleep(30)
+            now = time.time()
+            expired = [h for h, v in list(_demo_active.items()) if v["expires_at"] <= now]
+            for hostname in expired:
+                logger.info("Demo override expired for %s — reverting to normal", hostname)
+                await _clear_demo_scenario(hostname)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("demo_expiry_task error: %s", exc)
+
+
+
 
 JOURNAL_UNIT = "client-sim-dashboard"
 INSTALL_LOG_PATH = Path("/var/log/client-sim-dashboard-install.log")
