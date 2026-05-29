@@ -1315,7 +1315,18 @@ clone_vm_for_usb() {
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
         timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
         _wait_vm_stopped "$vmid" 60 || true
-        timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || \
+            timeout 120 qm destroy "$vmid" --skiplock --purge 2>/dev/null || true
+        # Last resort: if qm destroy can't remove a partial/zombie config (e.g.
+        # the clone was aborted before the config was fully written), delete the
+        # config file directly so the VMID is not stuck as a zombie.
+        if qm status "$vmid" >/dev/null 2>&1; then
+            local _conf_path="/etc/pve/local/qemu-server/${vmid}.conf"
+            if [[ -f "$_conf_path" ]]; then
+                log "WARN: qm destroy $vmid failed — removing zombie config directly: $_conf_path"
+                rm -f "$_conf_path" 2>/dev/null || true
+            fi
+        fi
         _wait_vmid_gone "$vmid" 60 || true
         unset "STATE_VMID_TO_BUS[$vmid]"
         unset "STATE_VMID_TO_IMAGE[$vmid]"
@@ -1338,6 +1349,26 @@ clone_vm_for_usb() {
         return 1
     fi
     probe_template_lock_status >/dev/null 2>&1 || true
+
+    # Pre-clone zombie cleanup: if this VMID already exists in Proxmox (e.g. a
+    # partial clone from a prior failed run that _teardown couldn't destroy),
+    # force-destroy it now before cloning.  Without this, qm clone fails with
+    # "VMID in use" and _teardown's stop attempt shows "unable to find config",
+    # causing the VMID to be silently skipped and the next VMID used instead —
+    # producing the alternating-skip pattern visible in the task log.
+    if qm status "$vmid" >/dev/null 2>&1; then
+        log "WARN: VMID $vmid already exists in Proxmox before clone (zombie from prior failed run) — force-destroying"
+        timeout 30  qm stop    "$vmid" --skiplock --timeout 0 2>/dev/null || true
+        _wait_vm_stopped "$vmid" 30 || true
+        timeout 120 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        _wait_vmid_gone  "$vmid" 30 || true
+        if qm status "$vmid" >/dev/null 2>&1; then
+            log "ERROR: could not destroy zombie VMID $vmid — skipping clone to avoid VMID conflict"
+            _teardown "zombie VMID $vmid could not be destroyed"
+            return 1
+        fi
+        log "Zombie VMID $vmid destroyed; proceeding with clone"
+    fi
 
     # Clone — capture stderr so the real Proxmox error appears in the agent log
     local _clone_err
