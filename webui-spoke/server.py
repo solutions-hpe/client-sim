@@ -1386,6 +1386,19 @@ async def _apply_central_feed(feed: dict) -> None:
     central_wireless_clients.clear()
     central_wireless_clients.update({w: int(c or 0) for w, c in new_wireless.items()})
 
+    # In centralized mode the hub polls Central and pushes wireless_clients here.
+    # Populate _client_count_samples so the Sites health tab works the same way
+    # it does in distributed mode (where _poll_central_once fills the samples).
+    if new_wireless:
+        now_cc = time.time()
+        cutoff_cc = now_cc - CLIENT_COUNT_WINDOW
+        for _wsite, _wl_count in central_wireless_clients.items():
+            _client_count_samples.setdefault(_wsite, []).append((now_cc, _wl_count))
+            _client_count_samples[_wsite] = [
+                s for s in _client_count_samples[_wsite] if s[0] >= cutoff_cc
+            ]
+        _save_client_count_baseline()
+
     hardware_alert_devices = {}
     for alert in hardware_alerts:
         if not isinstance(alert, dict):
@@ -10559,6 +10572,48 @@ async def api_system_health(request: Request) -> dict[str, Any]:
         "uptime_secs": uptime_secs,
         "service_status": svc_status,
         "proxmox_install_cmd": install_cmd,
+    }
+
+
+@app.get("/api/qa/summary")
+async def api_qa_summary() -> dict[str, Any]:
+    """Spoke-level QA summary: dongles, VMs, reporting clients, and pass/fail.
+
+    Cross-references USB dongle count against provisioned VMs and actively
+    reporting clients so Copilot (or any automated check) can assert the full
+    auto-provisioning pipeline is healthy on this spoke.
+    """
+    async with state_lock:
+        proxmox_connected = bool(proxmox_state.get("connected", False))
+        present_usb: list[Any] = list(proxmox_state.get("present_usb") or [])
+        usb_state: list[Any] = list(proxmox_state.get("usb_state") or [])
+        vms: list[Any] = list(proxmox_state.get("vms") or [])
+        reporting_clients = len(clients)
+
+    dongle_count = len(present_usb) if present_usb else len(usb_state)
+    vm_count = len(vms)
+    auto_provision = _normalize_toggle(settings.get("usb_auto_provision", "off")) == "on"
+
+    issues: list[str] = []
+    if not proxmox_connected:
+        issues.append("Proxmox agent is not connected")
+    if auto_provision and dongle_count > 0 and vm_count != dongle_count:
+        issues.append(
+            f"VM count ({vm_count}) does not match dongle count ({dongle_count})"
+        )
+    if dongle_count > 0 and reporting_clients != dongle_count:
+        issues.append(
+            f"reporting clients ({reporting_clients}) does not match dongle count ({dongle_count})"
+        )
+
+    return {
+        "proxmox_agent_connected": proxmox_connected,
+        "dongle_count": dongle_count,
+        "vm_count": vm_count,
+        "reporting_clients": reporting_clients,
+        "auto_provision": auto_provision,
+        "pass": len(issues) == 0,
+        "issues": issues,
     }
 
 
