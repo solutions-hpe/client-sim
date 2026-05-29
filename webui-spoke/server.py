@@ -435,6 +435,27 @@ def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = None) -
     tmp_path.replace(path)
 
 
+def _merge_ini_override(parser: "configparser.ConfigParser", override_path: "Path") -> None:
+    """Merge a hub-managed override .conf file on top of an already-parsed INI parser.
+
+    Keys and sections in the override file take precedence over whatever the
+    base file loaded.  The override file uses the same INI format as
+    simulation.conf / user-overrides.conf — no format changes.
+    """
+    if not override_path.exists():
+        return
+    try:
+        override_parser = configparser.ConfigParser()
+        override_parser.read_string(override_path.read_text(encoding="utf-8"))
+        for section in override_parser.sections():
+            if not parser.has_section(section):
+                parser.add_section(section)
+            for key, value in override_parser.items(section):
+                parser.set(section, key, value)
+    except Exception as exc:
+        logger.warning("Could not apply hub override %s: %s", override_path, exc)
+
+
 def _save_state_cache(force: bool = False) -> None:
     global _state_cache_last_save
     now = time.time()
@@ -3500,6 +3521,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         if sim_conf.exists():
             parser = configparser.ConfigParser()
             parser.read_string(sim_conf.read_text(encoding="utf-8"))
+            _merge_ini_override(parser, REPO_DIR / "configs" / "hub-sim-overrides.conf")
             sim_phy = parser.get("simulation", "sim_phy", fallback="wireless").strip().lower() or "wireless"
     except Exception:
         pass
@@ -5634,7 +5656,7 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
         settings["notifications"] = notifications
 
     for key, value in config_payload.items():
-        if key in HUB_RELAY_KEYS or key in {"command", "config", "config_version", "__config_version", "central_api", "central_config", "notifications", *HUB_NOTIFICATION_KEY_MAP.keys()}:
+        if key in HUB_RELAY_KEYS or key in {"command", "config", "config_version", "__config_version", "central_api", "central_config", "notifications", "sim_conf_override", "user_conf_override", *HUB_NOTIFICATION_KEY_MAP.keys()}:
             continue
         # USB allowlist control: when this spoke is under hub management, the hub owns
         # usb_vidpids and usb_ignored_vidpids — apply whatever the hub sends (even empty,
@@ -5653,6 +5675,36 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             settings[key] = value
         changed.append(key)
+
+    # ── Hub-managed .conf overrides ───────────────────────────────────────────
+    # The hub pushes optional INI text for simulation.conf and user-overrides.conf.
+    # None = no override (spoke uses its GitHub-pulled files as-is).
+    # Non-None string = write to hub-*-overrides.conf so the spoke merges it on top.
+    for override_key, override_filename in (
+        ("sim_conf_override",  "hub-sim-overrides.conf"),
+        ("user_conf_override", "hub-user-overrides.conf"),
+    ):
+        if override_key not in config_payload:
+            continue
+        override_text = config_payload[override_key]
+        override_path = REPO_DIR / "configs" / override_filename
+        try:
+            if override_text is None:
+                # Hub cleared the override — remove local file so GitHub file applies.
+                if override_path.exists():
+                    override_path.unlink()
+                    changed.append(f"{override_key}:cleared")
+            else:
+                override_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = override_path.with_suffix(".tmp")
+                tmp.write_text(str(override_text), encoding="utf-8")
+                tmp.replace(override_path)
+                changed.append(f"{override_key}:updated")
+        except Exception as exc:
+            logger.warning("Could not write %s: %s", override_path, exc)
+
+    # Invalidate simulation.conf INI cache so the merged result is recomputed.
+    _sim_conf_cache["sim_mtime"] = -1.0
 
     _save_settings()
     await broadcast({"type": "settings_update", "settings": await api_settings_get()})
@@ -9086,6 +9138,8 @@ async def api_simulations() -> dict[str, Any]:
             try:
                 parser = configparser.ConfigParser()
                 parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
+                # Apply hub-managed override on top (hub-connected mode only)
+                _merge_ini_override(parser, REPO_DIR / "configs" / "hub-sim-overrides.conf")
 
                 # Per-bucket test keys (read from [sN] sections)
                 _BUCKET_TEST_KEYS = [
@@ -9290,6 +9344,7 @@ async def api_sim_clients(sim_id: str) -> dict[str, Any]:
         try:
             p = _cp.ConfigParser()
             p.read_string(sim_conf_path.read_text(encoding="utf-8"))
+            _merge_ini_override(p, REPO_DIR / "configs" / "hub-sim-overrides.conf")
             if p.has_section(sim_id):
                 wsite = p.get(sim_id, "wsite", fallback="")
         except Exception:
@@ -9576,6 +9631,21 @@ async def api_config(hostname: str | None = Query(default=None)) -> str:
     config_path = repo_path("configs", "simulation.conf")
     config_text = config_path.read_text(encoding="utf-8")
 
+    # Apply hub-managed override (hub-connected mode) by serialising the merged parser back to text
+    hub_override_path = REPO_DIR / "configs" / "hub-sim-overrides.conf"
+    if hub_override_path.exists():
+        try:
+            parser = configparser.ConfigParser()
+            parser.optionxform = str
+            parser.read_string(config_text)
+            _merge_ini_override(parser, hub_override_path)
+            import io as _io
+            buf = _io.StringIO()
+            parser.write(buf)
+            config_text = buf.getvalue()
+        except Exception as exc:
+            logger.warning("Could not apply hub-sim-overrides for /api/config: %s", exc)
+
     if not hostname:
         return config_text
 
@@ -9589,7 +9659,22 @@ async def api_config(hostname: str | None = Query(default=None)) -> str:
 @app.get("/api/config/overrides", response_class=PlainTextResponse)
 async def api_config_overrides() -> str:
     overrides_path = repo_path("configs", "user-overrides.conf")
-    return overrides_path.read_text(encoding="utf-8")
+    base_text = overrides_path.read_text(encoding="utf-8") if overrides_path.exists() else ""
+    # Apply hub-managed user-overrides on top
+    hub_override_path = REPO_DIR / "configs" / "hub-user-overrides.conf"
+    if hub_override_path.exists():
+        try:
+            parser = configparser.ConfigParser()
+            parser.optionxform = str
+            parser.read_string(base_text)
+            _merge_ini_override(parser, hub_override_path)
+            import io as _io
+            buf = _io.StringIO()
+            parser.write(buf)
+            return buf.getvalue()
+        except Exception as exc:
+            logger.warning("Could not apply hub-user-overrides for /api/config/overrides: %s", exc)
+    return base_text
 
 
 @app.get("/api/config/parsed")
@@ -9598,6 +9683,7 @@ async def api_config_parsed() -> dict[str, dict[str, str]]:
     parser = configparser.ConfigParser()
     parser.optionxform = str
     parser.read(config_path, encoding="utf-8")
+    _merge_ini_override(parser, REPO_DIR / "configs" / "hub-sim-overrides.conf")
     return {section: dict(parser.items(section)) for section in parser.sections()}
 
 
@@ -9665,6 +9751,72 @@ async def api_config_overrides_save(update: OverridesSaveRequest) -> dict[str, A
         pushed = False
 
     return {"status": "ok", "pushed": pushed}
+
+
+class ConfOverrideBody(BaseModel):
+    content: str  # Raw INI text, same format as the target .conf file
+
+
+@app.get("/api/config/hub-sim-override", response_class=PlainTextResponse)
+async def api_get_hub_sim_override() -> str:
+    """Return the current hub-managed simulation.conf override, or empty string."""
+    p = REPO_DIR / "configs" / "hub-sim-overrides.conf"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+@app.put("/api/config/hub-sim-override")
+async def api_set_hub_sim_override(body: ConfOverrideBody) -> dict[str, Any]:
+    """Write hub-managed simulation.conf override locally (standalone mode).
+
+    In hub-connected mode this file is managed by the hub via config_update;
+    this endpoint supports direct editing from the spoke UI when disconnected.
+    """
+    ensure_repo_ready()
+    p = REPO_DIR / "configs" / "hub-sim-overrides.conf"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(body.content, encoding="utf-8")
+    tmp.replace(p)
+    _sim_conf_cache["sim_mtime"] = -1.0  # Invalidate cache
+    return {"ok": True}
+
+
+@app.delete("/api/config/hub-sim-override")
+async def api_clear_hub_sim_override() -> dict[str, Any]:
+    """Remove hub-managed simulation.conf override — reverts to GitHub file."""
+    p = REPO_DIR / "configs" / "hub-sim-overrides.conf"
+    if p.exists():
+        p.unlink()
+    _sim_conf_cache["sim_mtime"] = -1.0
+    return {"ok": True, "cleared": True}
+
+
+@app.get("/api/config/hub-user-override", response_class=PlainTextResponse)
+async def api_get_hub_user_override() -> str:
+    """Return the current hub-managed user-overrides.conf override, or empty string."""
+    p = REPO_DIR / "configs" / "hub-user-overrides.conf"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+@app.put("/api/config/hub-user-override")
+async def api_set_hub_user_override(body: ConfOverrideBody) -> dict[str, Any]:
+    """Write hub-managed user-overrides.conf override locally (standalone mode)."""
+    ensure_repo_ready()
+    p = REPO_DIR / "configs" / "hub-user-overrides.conf"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(body.content, encoding="utf-8")
+    tmp.replace(p)
+    return {"ok": True}
+
+
+@app.delete("/api/config/hub-user-override")
+async def api_clear_hub_user_override() -> dict[str, Any]:
+    """Remove hub-managed user-overrides.conf override — reverts to GitHub file."""
+    p = REPO_DIR / "configs" / "hub-user-overrides.conf"
+    if p.exists():
+        p.unlink()
+    return {"ok": True, "cleared": True}
 
 
 @app.get("/api/scripts/list")
