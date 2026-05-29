@@ -1396,10 +1396,21 @@ async def _apply_central_feed(feed: dict) -> None:
         now_cc = time.time()
         cutoff_cc = now_cc - CLIENT_COUNT_WINDOW
         for _wsite, _count in counts_for_health.items():
-            _client_count_samples.setdefault(_wsite, []).append((now_cc, int(_count or 0)))
-            _client_count_samples[_wsite] = [
-                s for s in _client_count_samples[_wsite] if s[0] >= cutoff_cc
-            ]
+            _val = int(_count or 0)
+            existing = _client_count_samples.get(_wsite)
+            if not existing:
+                # First-time feed for this site: seed CLIENT_COUNT_MIN_SAMPLES synthetic
+                # backdated samples so the UI can show status immediately rather than
+                # staying in "Collecting" until 3 real polls have accumulated.
+                _client_count_samples[_wsite] = [
+                    (now_cc - (CLIENT_COUNT_MIN_SAMPLES - i) * 60, _val)
+                    for i in range(CLIENT_COUNT_MIN_SAMPLES)
+                ]
+            else:
+                _client_count_samples[_wsite].append((now_cc, _val))
+                _client_count_samples[_wsite] = [
+                    s for s in _client_count_samples[_wsite] if s[0] >= cutoff_cc
+                ]
         _save_client_count_baseline()
 
     hardware_alert_devices = {}
