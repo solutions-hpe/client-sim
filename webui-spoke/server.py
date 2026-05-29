@@ -1374,6 +1374,7 @@ async def _apply_central_feed(feed: dict) -> None:
     global central_status, central_wireless_clients, hardware_alert_devices
     new_status = feed.get("status") or {}
     new_wireless = feed.get("wireless_clients") or {}
+    new_total = feed.get("total_clients") or {}
     token_valid = bool(feed.get("token_valid", False))
     hardware_alerts = feed.get("hardware_alerts") or []
 
@@ -1386,14 +1387,16 @@ async def _apply_central_feed(feed: dict) -> None:
     central_wireless_clients.clear()
     central_wireless_clients.update({w: int(c or 0) for w, c in new_wireless.items()})
 
-    # In centralized mode the hub polls Central and pushes wireless_clients here.
+    # In centralized mode the hub polls Central and pushes total_clients (wired + wireless).
     # Populate _client_count_samples so the Sites health tab works the same way
     # it does in distributed mode (where _poll_central_once fills the samples).
-    if new_wireless:
+    # Prefer total_clients; fall back to wireless_clients for older hub versions.
+    counts_for_health = new_total or new_wireless
+    if counts_for_health:
         now_cc = time.time()
         cutoff_cc = now_cc - CLIENT_COUNT_WINDOW
-        for _wsite, _wl_count in central_wireless_clients.items():
-            _client_count_samples.setdefault(_wsite, []).append((now_cc, _wl_count))
+        for _wsite, _count in counts_for_health.items():
+            _client_count_samples.setdefault(_wsite, []).append((now_cc, int(_count or 0)))
             _client_count_samples[_wsite] = [
                 s for s in _client_count_samples[_wsite] if s[0] >= cutoff_cc
             ]
