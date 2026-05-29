@@ -41,6 +41,7 @@ HUB_STATE_DIR="/var/lib/client-sim"
 HUB_LAST_SUCCESS_FILE="${HUB_STATE_DIR}/hub-last-success"
 HUB_SERVER_URL_FILE="${HUB_STATE_DIR}/hub-server-url"
 HUB_REDETECT_LOCK_FILE="${HUB_STATE_DIR}/hub-redetect.lock"
+USB_PROVISION_LOCK_FILE="${HUB_STATE_DIR}/usb-provision.lock"
 
 # ── Hardware Watchdog ──────────────────────────────────────────────────────────
 HW_WATCHDOG_INTERVAL="${CLIENT_SIM_HW_WATCHDOG_INTERVAL:-60}"   # seconds between scans
@@ -1621,7 +1622,7 @@ reclone_vm_instance() {
     log "Recloned VM $vmid for USB $bus_path ($vidpid) type=$device_type image=$saved_image"
 }
 
-usb_provision_loop() {
+_usb_provision_loop_impl() {
     local now bus_path vidpid product_name vmid missing_since
     local timeout_seconds missing_age _current_bus _state_vidpid _guest_type
 
@@ -1834,6 +1835,21 @@ usb_provision_loop() {
 
     [[ "$_state_changed" -eq 1 ]] && save_state_file
     build_usb_state_json
+}
+
+usb_provision_loop() {
+    if command -v flock >/dev/null 2>&1; then
+        (
+            if ! flock -n 200; then
+                log "Provision loop already running in another process — skipping duplicate trigger"
+                exit 0
+            fi
+            _usb_provision_loop_impl
+        ) 200>"$USB_PROVISION_LOCK_FILE"
+        return $?
+    fi
+
+    _usb_provision_loop_impl
 }
 
 refresh_usb_telemetry_only() {
