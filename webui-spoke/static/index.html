@@ -374,15 +374,22 @@
         </div>
         <div id="cmd-msg" class="form-msg" style="margin-bottom:6px;"></div>
         <div class="table-scroll">
-          <table class="data-table" id="cmd-table">
+          <table class="data-table" id="cmd-table" style="table-layout:fixed;width:100%;">
+            <colgroup>
+              <col style="width:90px">
+              <col style="width:130px">
+              <col>
+              <col style="width:90px">
+              <col style="width:70px">
+              <col style="width:32px">
+            </colgroup>
             <thead>
               <tr>
                 <th>Target</th>
                 <th>Action</th>
-                <th>Description</th>
+                <th>Info</th>
                 <th>Status</th>
                 <th>Age</th>
-                <th>Message</th>
                 <th></th>
               </tr>
             </thead>

@@ -3829,6 +3829,8 @@ const CMD_ACTION_LABELS = {
   snapshot_vm:          'Snapshotting VM',
   provision_unassigned: 'Provisioning unassigned dongles',
   update_agent:         'Updating Proxmox agent',
+  config_update:        'Hub config update',
+  config_clear:         'Hub config clear',
 };
 
 function cmdDescription(cmd) {
@@ -3877,7 +3879,16 @@ function renderCommandTable(cmds) {
     tr.appendChild(actionTd);
 
     const descTd = document.createElement('td');
-    descTd.textContent = cmdDescription(cmd);
+    descTd.style.wordBreak = 'break-word';
+    const descSpan = document.createElement('span');
+    descSpan.textContent = cmdDescription(cmd);
+    descTd.appendChild(descSpan);
+    if (cmd.message) {
+      const msgSpan = document.createElement('div');
+      msgSpan.style.cssText = 'margin-top:4px;font-size:0.82em;color:var(--muted);word-break:break-word;white-space:normal;';
+      msgSpan.textContent = cmd.message;
+      descTd.appendChild(msgSpan);
+    }
     tr.appendChild(descTd);
 
     const statusTd = document.createElement('td');
@@ -3890,14 +3901,6 @@ function renderCommandTable(cmds) {
     const ageTd = document.createElement('td');
     ageTd.textContent = age;
     tr.appendChild(ageTd);
-
-    const messageTd = document.createElement('td');
-    messageTd.style.maxWidth = '220px';
-    messageTd.style.overflow = 'hidden';
-    messageTd.style.textOverflow = 'ellipsis';
-    messageTd.style.whiteSpace = 'nowrap';
-    messageTd.textContent = cmd.message || '—';
-    tr.appendChild(messageTd);
 
     const deleteTd = document.createElement('td');
     const deleteBtn = document.createElement('button');
