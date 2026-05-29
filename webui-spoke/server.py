@@ -4749,6 +4749,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
         "timestamp": time.time(),
         "hub_isolated": _hub_isolated(),  # Export the current isolation state so the hub can see when this spoke has paused config pushes.
         "hub_last_checkin": relay_state.get("last_sync"),  # Export the last successful check-in timestamp so the hub can reason about isolation timing.
+        "hub_rtt_ms": relay_state.get("hub_rtt_ms"),  # Round-trip time from last telemetry send to ack receipt.
+        "hub_processing_ms": relay_state.get("hub_processing_ms"),  # Hub-reported time to process and save telemetry.
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
         "proxmox": {
             "connected": bool(proxmox_state.get("connected", False)),
@@ -6182,6 +6184,7 @@ async def relay_ws_loop() -> None:
                 async def telemetry_loop() -> None:
                     while True:
                         telemetry = await _build_relay_telemetry_payload(spoke_id)
+                        relay_state["_last_telemetry_sent_at"] = time.time()
                         await send_json({"type": "telemetry", "payload": telemetry})
                         # Do NOT set connected=True here — wait for telemetry_ack from the hub.
                         # Setting connected on send would mask auth failures where the hub
@@ -6206,7 +6209,14 @@ async def relay_ws_loop() -> None:
                             payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
                             await _apply_central_feed(payload)
                         elif msg_type == "telemetry_ack":
+                            sent_at = relay_state.pop("_last_telemetry_sent_at", None)
+                            rtt_ms = round((time.time() - sent_at) * 1000) if sent_at else None
+                            hub_processing_ms = message.get("processing_ms")
                             relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
+                            if rtt_ms is not None:
+                                relay_state["hub_rtt_ms"] = rtt_ms
+                            if hub_processing_ms is not None:
+                                relay_state["hub_processing_ms"] = hub_processing_ms
                             await _broadcast_relay_state()
                         elif msg_type == "pong":
                             relay_state.update({"connected": True, "error": None})
