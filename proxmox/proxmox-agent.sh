@@ -1775,7 +1775,7 @@ _usb_provision_loop_impl() {
         vidpid="${PRESENT_BUSES[$bus_path]}"
         local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
         while (( _next_free_vmid <= end_vmid )); do
-            [[ -z "${STATE_VMID_TO_BUS[$_next_free_vmid]:-}" ]] && break
+            [[ -z "${STATE_VMID_TO_BUS[$_next_free_vmid]:-}" && -z "${_existing_vmids[$_next_free_vmid]:-}" ]] && break
             ((_next_free_vmid++))
         done
         if (( _next_free_vmid > end_vmid )); then
@@ -2917,6 +2917,17 @@ execute_vm_command() {
             run_reseed_command
             ;;
         provision_unassigned)
+            log "provision_unassigned: clearing bus exclusions for present certified dongles"
+            load_excluded_buses
+            local _excl_cleared=0
+            for _excl_bus in "${!STATE_EXCLUDED_BUS[@]}"; do
+                if [[ -n "${PRESENT_BUSES[$_excl_bus]:-}" ]]; then
+                    unset "STATE_EXCLUDED_BUS[$_excl_bus]"
+                    _excl_cleared=1
+                    log "provision_unassigned: cleared exclusion for present bus $_excl_bus"
+                fi
+            done
+            (( _excl_cleared )) && save_excluded_buses
             log "provision_unassigned: running USB provision loop to assign dongles without VMs"
             usb_provision_loop || log "WARNING: provision_unassigned loop failed"
             ;;
