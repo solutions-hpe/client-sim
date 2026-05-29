@@ -6282,7 +6282,7 @@ async def relay_ws_loop() -> None:
 async def relay_loop() -> None:
     while True:
         interval = int(settings.get("relay_poll_interval", RELAY_INTERVAL_DEFAULT))
-        jitter = random.randint(0, 30)
+        jitter = random.randint(0, 15)
         try:
             if _WEBSOCKETS_AVAILABLE and websockets is not None:
                 await relay_ws_loop()
