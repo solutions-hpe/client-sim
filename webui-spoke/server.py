@@ -4825,9 +4825,9 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
     async with state_lock:
         proxmox_vms = list(proxmox_state.get("vms") or [])
         usb_state = list(proxmox_state.get("usb_state", []))
+        clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
     present_usb = list(proxmox_state.get("present_usb", []))
     unknown_usb = list(proxmox_state.get("unknown_usb", []))
-    clients_snapshot = [serialize_client(hostname, clients[hostname]) for hostname in sorted(clients)]
 
     # Enrich the VM list with prov_status from usb_state so the hub can show
     # provisioning status without a separate lookup. Also synthesize entries for
@@ -6329,13 +6329,23 @@ async def relay_ws_loop() -> None:
 
                 async def telemetry_loop() -> None:
                     while True:
-                        telemetry = await _build_relay_telemetry_payload(spoke_id)
-                        relay_state["_last_telemetry_sent_at"] = time.time()
-                        await send_json({"type": "telemetry", "payload": telemetry})
-                        # Do NOT set connected=True here — wait for telemetry_ack from the hub.
-                        # Setting connected on send would mask auth failures where the hub
-                        # accepts the TCP/WS handshake but rejects the spoke with a close frame.
-                        _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
+                        try:
+                            telemetry = await _build_relay_telemetry_payload(spoke_id)
+                            relay_state["_last_telemetry_sent_at"] = time.time()
+                            await send_json({"type": "telemetry", "payload": telemetry})
+                            # Do NOT set connected=True here — wait for telemetry_ack from the hub.
+                            # Setting connected on send would mask auth failures where the hub
+                            # accepts the TCP/WS handshake but rejects the spoke with a close frame.
+                            _debug_event("relay_sync_ok", f"proxmox_connected={proxmox_state.get('connected')} clients={len(telemetry.get('clients', []))}")
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            # Log and continue — a transient error (e.g. WS send on a half-open
+                            # connection, serialisation blip) must not silently kill the loop.
+                            # If the WS is truly dead, the outer receive loop will detect it and
+                            # trigger reconnection; until then we keep trying so telemetry resumes
+                            # as soon as the connection recovers.
+                            logger.warning("relay telemetry_loop error (will retry in %ss): %s", interval, exc)
                         await asyncio.sleep(interval)
 
                 _relay_ws_send_json = send_json
