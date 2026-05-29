@@ -2230,6 +2230,98 @@ async def hourly_baseline_saver() -> None:
 
 
 
+def _sim_clients_per_wsite(active_snap: dict[str, Any]) -> dict[str, int]:
+    """Count currently-online sim clients grouped by wsite.
+
+    Reads simulation.conf directly so the result is always fresh regardless
+    of whether the /api/simulations endpoint has been called.  Falls back to
+    _sim_conf_cache when the conf file is unavailable.
+    """
+    # Build sim_id → wsite from simulation.conf (s0..s9 buckets)
+    sim_to_wsite: dict[str, str] = {}
+    sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
+    try:
+        parser = configparser.ConfigParser()
+        parser.read_string(sim_conf_path.read_text(encoding="utf-8"))
+        for section in parser.sections():
+            if parser.has_option(section, "wsite"):
+                wsite_val = parser.get(section, "wsite").strip()
+                if wsite_val:
+                    sim_to_wsite[section] = wsite_val
+    except Exception:
+        # Fall back to cached data if conf is unreadable
+        for sim_id, info in _sim_conf_cache.get("simulations", {}).items():
+            wsite_val = str(info.get("wsite", "")).strip()
+            if wsite_val:
+                sim_to_wsite[sim_id] = wsite_val
+
+    if not sim_to_wsite:
+        return {}
+
+    # Count online clients per wsite
+    counts: dict[str, int] = {w: 0 for w in set(sim_to_wsite.values())}
+    for client_data in active_snap.values():
+        sim_id = client_data.get("simulation_id", "")
+        wsite_val = sim_to_wsite.get(sim_id, "")
+        if not wsite_val:
+            continue
+        if compute_online(client_data.get("last_seen", datetime.min.replace(tzinfo=timezone.utc))):
+            counts[wsite_val] = counts.get(wsite_val, 0) + 1
+    return counts
+
+
+SIM_CLIENT_SAMPLE_INTERVAL = 60  # seconds between sim-client count samples
+
+
+async def sim_client_count_sampler() -> None:
+    """Background task: sample sim client counts per wsite every minute.
+
+    Provides client-count data for sites even when the Central API is not
+    configured or returns no wireless-client information.  The Central API
+    poll takes priority: if it has added a sample for a wsite within the
+    last SIM_CLIENT_SAMPLE_INTERVAL seconds, we skip that wsite so we do
+    not double-count.
+    """
+    while True:
+        await asyncio.sleep(SIM_CLIENT_SAMPLE_INTERVAL)
+        try:
+            now = time.time()
+            cutoff_cc = now - CLIENT_COUNT_WINDOW
+            async with state_lock:
+                active_snap = {h: dict(c) for h, c in clients.items()}
+
+            counts = _sim_clients_per_wsite(active_snap)
+            if not counts:
+                continue
+
+            updated = False
+            for wsite_val, count in counts.items():
+                existing = _client_count_samples.get(wsite_val, [])
+                last_ts = existing[-1][0] if existing else 0.0
+                # Skip if Central API already added a fresh sample this cycle
+                if now - last_ts < SIM_CLIENT_SAMPLE_INTERVAL * 0.9:
+                    continue
+                _client_count_samples.setdefault(wsite_val, []).append((now, count))
+                _client_count_samples[wsite_val] = [
+                    s for s in _client_count_samples[wsite_val] if s[0] >= cutoff_cc
+                ]
+                updated = True
+
+            if updated:
+                _save_client_count_baseline()
+                _save_state_cache()
+                await broadcast({
+                    "type": "central_update",
+                    "client_count_status": _client_count_payload(),
+                })
+            _update_service_health("sim_client_sampler", ok=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _update_service_health("sim_client_sampler", ok=False, error=str(exc))
+            logger.warning("Sim client count sampler error: %s", exc)
+
+
 def _client_count_payload() -> dict[str, Any]:
     """Per-site client count status based on 60-min rolling average.
     Falls back to persisted baseline when live samples are insufficient
@@ -2478,6 +2570,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["schedule_check"] = asyncio.create_task(schedule_check())
     background_tasks["gkill_switch"] = asyncio.create_task(gkill_switch_poller())
     background_tasks["baseline_saver"] = asyncio.create_task(hourly_baseline_saver())
+    background_tasks["sim_client_sampler"] = asyncio.create_task(sim_client_count_sampler())
     background_tasks["acme_renewal"] = asyncio.create_task(acme_renewal_loop())
     background_tasks["demo_expiry"] = asyncio.create_task(_demo_expiry_task())
     yield
