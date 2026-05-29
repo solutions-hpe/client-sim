@@ -932,6 +932,11 @@ function renderServerTab(data) {
     tbody.innerHTML = '';
     if (thChk) { thChk.disabled = sorted.length === 0; thChk.checked = false; }
     if (empty) empty.style.display = sorted.length ? 'none' : '';
+    if (empty && !sorted.length && catKey === 'sim') {
+      empty.textContent = latestProxmoxData.last_seen
+        ? 'No Deployed VMs'
+        : 'Waiting for Proxmox agent to check in…';
+    }
     if (!sorted.length) return;
 
     sorted.forEach((vm) => {
