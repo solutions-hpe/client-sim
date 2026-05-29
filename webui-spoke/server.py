@@ -435,6 +435,47 @@ def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = None) -
     tmp_path.replace(path)
 
 
+def _write_atomic_str(path: Path, serialized: str) -> None:
+    """Write a pre-serialised JSON string atomically using a unique tmp file.
+    Safe to call from a thread-pool worker (unique tmp name avoids races when
+    multiple saves for the same file are dispatched concurrently)."""
+    import uuid as _uuid_mod
+    tmp = path.with_name(f"{path.name}.{_uuid_mod.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(serialized, encoding="utf-8")
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+async def _async_save_vm_watchdog() -> None:
+    """Persist VM watchdog state without blocking the event loop."""
+    serialized = json.dumps(vm_watchdog, default=str)
+    try:
+        await asyncio.to_thread(_write_atomic_str, VM_WATCHDOG_FILE, serialized)
+    except Exception as exc:
+        logger.warning("Could not persist VM watchdog state to %s: %s", VM_WATCHDOG_FILE, exc)
+
+
+async def _async_save_commands() -> None:
+    """Persist command queue without blocking the event loop."""
+    serialized = json.dumps(commands, default=str)
+    try:
+        await asyncio.to_thread(_write_atomic_str, COMMAND_QUEUE_FILE, serialized)
+    except Exception as exc:
+        logger.warning("Could not persist command queue to %s: %s", COMMAND_QUEUE_FILE, exc)
+
+
+async def _async_save_reclone_state() -> None:
+    """Persist reclone state without blocking the event loop."""
+    serialized = json.dumps(reclone_state, default=str)
+    try:
+        await asyncio.to_thread(_write_atomic_str, RECLONE_STATE_FILE, serialized)
+    except Exception as exc:
+        logger.warning("Could not persist reclone state to %s: %s", RECLONE_STATE_FILE, exc)
+
+
 def _merge_ini_override(parser: "configparser.ConfigParser", override_path: "Path") -> None:
     """Merge a hub-managed override .conf file on top of an already-parsed INI parser.
 
@@ -3107,6 +3148,7 @@ background_tasks: dict[str, asyncio.Task[Any]] = {}
 service_health: dict[str, dict[str, Any]] = {}
 reclone_run_lock = asyncio.Lock()
 last_schedule_trigger: str | None = None
+_hub_repo_sync_task: asyncio.Task[Any] | None = None  # dedup guard for fire-and-forget repo_sync
 
 class ClientStatus(BaseModel):
     hostname: str
@@ -3867,7 +3909,7 @@ async def _broadcast_proxmox_state() -> None:
 
 
 async def _broadcast_reclone_state() -> None:
-    _save_reclone_state()
+    await _async_save_reclone_state()
     await broadcast({"type": "reclone_update", **dict(reclone_state)})
 
 
@@ -4278,7 +4320,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                     _update_reclone_log(vmid, name, final_status, str(current.get("message") or "").strip() or None)
                     if final_status == "completed":
                         _record_vm_watchdog_clone_completed(vmid, name)
-                        _save_vm_watchdog()
+                        await _async_save_vm_watchdog()
                         reclone_state["completed"] += 1
                     else:
                         reclone_state["failed"] += 1
@@ -4400,7 +4442,7 @@ async def auto_recovery_check() -> None:
                         "timestamp": iso_utcnow(),
                     })
                 reclone_state["auto_recovery_log"] = reclone_state["auto_recovery_log"][-50:]
-                _save_reclone_state()
+                await _async_save_reclone_state()
                 await broadcast({
                     "type": "notification",
                     "level": "warning",
@@ -4465,7 +4507,7 @@ async def vm_watchdog_loop() -> None:
                 broadcast_needed = True
                 logger.warning("VM watchdog queued reclone for VM %s (%s) after 24h without check-in", vmid_int, hostname or vm.get("name") or f"VM {vmid_int}")
             if changed:
-                _save_vm_watchdog()
+                await _async_save_vm_watchdog()
             if broadcast_needed:
                 await _broadcast_proxmox_state()
             _update_service_health("vm_watchdog", ok=True)
@@ -5507,18 +5549,18 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
             continue
 
         if cmd_type == "repo_sync":
-            try:
-                result = await _run_hub_repo_sync()
-            except Exception as exc:
-                logger.exception("Hub repo_sync failed")
-                result = {
-                    "success": False,
-                    "task_type": "repo_sync",
-                    "detail": f"Repo Sync failed: {exc}",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
+            global _hub_repo_sync_task
+            already_running = _hub_repo_sync_task is not None and not _hub_repo_sync_task.done()
             if cmd_id:
-                await ack_fn(cmd_id, "executed", result)
+                await ack_fn(cmd_id, "executed", {
+                    "success": True,
+                    "task_type": "repo_sync",
+                    "detail": "Repo sync already in progress" if already_running else "Repo sync started",
+                    "started": not already_running,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            if not already_running:
+                _hub_repo_sync_task = asyncio.create_task(_run_hub_repo_sync())
             continue
 
         if cmd_type == "self_update":
@@ -5576,7 +5618,6 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                     "log": [], "started_at": None,
                     "last_run": None, "auto_recovery_log": [],
                 })
-                _save_reclone_state()
                 await _broadcast_reclone_state()
             result = {"cleared": _status != "running", "previous_status": _status}
             if cmd_id:
@@ -6138,7 +6179,6 @@ async def relay_sync_once() -> None:
                         "log": [], "started_at": None,
                         "last_run": None, "auto_recovery_log": [],
                     })
-                    _save_reclone_state()
                     await _broadcast_reclone_state()
                 result = {"cleared": _status != "running", "previous_status": _status}
                 if cmd_id:
@@ -8078,12 +8118,8 @@ async def api_proxmox_reclone_state_clear() -> dict[str, Any]:
         "last_run": None,
         "auto_recovery_log": [],
     })
-    _save_reclone_state()
     await _broadcast_reclone_state()
     return {"cleared": True, "previous_status": status}
-
-
-
 
 
 async def _authorize_proxmox_agent(hostname: str, api_key: str, client_ip: str, now: float) -> tuple[str | None, JSONResponse | None]:
@@ -8231,7 +8267,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             for vmid in newly_provisioned:
                 vm = next((item for item in enriched_vms if str(item.get("vmid")) == vmid), {})
                 _record_vm_watchdog_clone_completed(vmid, vm.get("name"))
-            _save_vm_watchdog()
+            await _async_save_vm_watchdog()
         elif torn_down:
             proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
     _update_provision_run_state(enriched_vms, new_usb, now)
@@ -8284,7 +8320,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             # Persist the reset and push a reclone_update WS message so any
             # connected browser sees the tile clear immediately without waiting
             # for the next proxmox_update broadcast.
-            _save_reclone_state()
+            await _async_save_reclone_state()
             await _broadcast_reclone_state()
 
     # Auto-trigger provision_unassigned when usb_auto_provision is enabled and
@@ -10049,7 +10085,7 @@ async def _apply_client_status(status: ClientStatus) -> tuple[dict[str, Any], bo
             vm_watchdog.pop(vmid_key, None)
             watchdog_changed = True
         if watchdog_changed:
-            _save_vm_watchdog()
+            await _async_save_vm_watchdog()
         payload = serialize_client(status.hostname, clients[status.hostname])
 
     return payload, watchdog_changed, None
@@ -10674,13 +10710,12 @@ async def api_server_clear_cache() -> dict[str, Any]:
         proxmox_log_buffer.clear()
         pending_proxmox_agents.clear()
         commands.clear()
-        _save_commands()
+        await _async_save_commands()
         reclone_state.update({
             "status": "idle", "type": None, "total": 0, "completed": 0,
             "failed": 0, "current_vm": None, "log": [], "auto_recovery_log": [],
             "last_run": None, "started_at": None,
         })
-        _save_reclone_state()
         update_all_state.update({
             "running": False, "phase": "idle", "total_agents": 0,
             "completed_agents": 0, "failed_agents": 0, "agent_cmds": [],
@@ -10905,11 +10940,8 @@ async def _ack_command_internal(body: dict[str, Any]) -> dict[str, bool]:
         cmd["message"] = str(message) if message is not None else ""
         cmd["updated_at"] = time.time()
         cmd["purge_after"] = cmd["updated_at"] + COMMAND_RESULT_RETENTION_SECS
-        _save_commands()
+        await _async_save_commands()
         serialized = _serialize_commands()
-
-    await broadcast({"type": "commands_update", "commands": serialized})
-    return {"ok": True}
 
 
 @app.post("/api/inbox/ack")
@@ -10939,7 +10971,7 @@ async def expire_pending_for_target(target: str = Query(...)) -> dict[str, int]:
                 cmd["purge_after"] = now + COMMAND_RESULT_RETENTION_SECS
                 count += 1
         if count:
-            _save_commands()
+            await _async_save_commands()
         serialized = _serialize_commands()
     if count:
         logger.info("Expired %d active command(s) for target %s before VM destroy", count, target)
@@ -10962,7 +10994,7 @@ async def cancel_all_queued_commands() -> dict[str, int]:
                 cmd["error"] = "Manually cancelled via Cancel All"
                 count += 1
         if count:
-            _save_commands()
+            await _async_save_commands()
         serialized = _serialize_commands()
     if count:
         logger.info("Cancel-all: %d queued command(s) cancelled by user", count)
@@ -10978,7 +11010,7 @@ async def delete_command(cmd_id: str) -> dict[str, bool]:
         commands[:] = [c for c in commands if c["id"] != cmd_id]
         if len(commands) == before:
             raise HTTPException(status_code=404, detail="Command not found")
-        _save_commands()
+        await _async_save_commands()
         serialized = _serialize_commands()
     await broadcast({"type": "commands_update", "commands": serialized})
     return {"ok": True}
