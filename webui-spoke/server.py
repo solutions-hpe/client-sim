@@ -11053,6 +11053,10 @@ async def ws_proxmox_endpoint(
                 await _ack_command_internal(payload)
                 await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
             elif msg_type == "ping":
+                # Agent heartbeat — update last_seen so UI stays current even
+                # when full telemetry times out (e.g. during a VM reclone).
+                proxmox_state["last_seen"] = time.time()
+                proxmox_state["connected"] = True
                 await websocket.send_json({"type": "pong"})
             elif msg_type == "sync":
                 await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)

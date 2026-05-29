@@ -3166,6 +3166,14 @@ async def send_loop(ws):
         if payload is not None:
             await ws.send(json.dumps({'type': 'telemetry', 'payload': payload}))
             touch_success()
+        else:
+            # Telemetry collection timed out (e.g. pvesh blocked during reclone).
+            # Send a minimal heartbeat so the server keeps last_seen fresh.
+            try:
+                await ws.send(json.dumps({'type': 'ping'}))
+                touch_success()
+            except Exception:
+                pass
         await send_progress_events(ws)
         await asyncio.sleep(telemetry_interval)
 async def main():
