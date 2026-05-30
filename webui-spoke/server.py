@@ -5682,14 +5682,30 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
             continue
 
         if cmd_type == "proxmox_agent_command":
+            import uuid as _uuid_mod
+            _action = (payload_data or {}).get("action", "")
+            _args = (payload_data or {}).get("args", {})
             try:
-                import uuid as _uuid_mod
-                _action = (payload_data or {}).get("action", "")
                 result = await _forward_hub_passthrough_to_proxmox("command", {
                     "id": str(_uuid_mod.uuid4()),
                     "action": _action,
-                    "args": (payload_data or {}).get("args", {}),
+                    "args": _args,
                 })
+            except RuntimeError:
+                # Proxmox agent not connected via WebSocket (inbox polling mode) — enqueue
+                # via the spoke's local command queue so the agent picks it up on next poll.
+                # process_inbox handles multiple delete_vm commands in parallel, which avoids
+                # the sequential-WS timeout for bulk teardown operations.
+                try:
+                    await _queue_proxmox_command(_action, _args if isinstance(_args, dict) else {})
+                    result = {
+                        "success": True,
+                        "task_type": "proxmox_agent_command",
+                        "detail": f"Queued {_action} via spoke inbox (WS unavailable)",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                except Exception as exc2:
+                    result = {"success": False, "task_type": "proxmox_agent_command", "detail": str(exc2)}
             except Exception as exc:
                 result = {"success": False, "task_type": "proxmox_agent_command", "detail": str(exc)}
             if cmd_id:
@@ -6231,14 +6247,27 @@ async def relay_sync_once() -> None:
                 continue
 
             if cmd_type == "proxmox_agent_command":
+                import uuid as _uuid_mod
+                _action = (payload_data or {}).get("action", "")
+                _args = (payload_data or {}).get("args", {})
                 try:
-                    import uuid as _uuid_mod
-                    _action = (payload_data or {}).get("action", "")
                     result = await _forward_hub_passthrough_to_proxmox("command", {
                         "id": str(_uuid_mod.uuid4()),
                         "action": _action,
-                        "args": (payload_data or {}).get("args", {}),
+                        "args": _args,
                     })
+                except RuntimeError:
+                    # Proxmox agent not connected via WebSocket — fall back to spoke inbox queue.
+                    try:
+                        await _queue_proxmox_command(_action, _args if isinstance(_args, dict) else {})
+                        result = {
+                            "success": True,
+                            "task_type": "proxmox_agent_command",
+                            "detail": f"Queued {_action} via spoke inbox (WS unavailable)",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                    except Exception as exc2:
+                        result = {"success": False, "task_type": "proxmox_agent_command", "detail": str(exc2)}
                 except Exception as exc:
                     result = {"success": False, "task_type": "proxmox_agent_command", "detail": str(exc)}
                 if cmd_id:

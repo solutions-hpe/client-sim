@@ -3211,7 +3211,14 @@ async def main():
                             for command in payload.get('commands') or []:
                                 await run_command(command)
                         elif msg_type == 'command':
-                            await run_command(payload)
+                            # delete_vm is long-running (stop+destroy) — run as a background
+                            # task so multiple deletes can execute in parallel without each
+                            # one blocking the WS receive loop for the next command.
+                            action = str(payload.get('action') or '').replace('-', '_')
+                            if action == 'delete_vm':
+                                asyncio.create_task(run_command_bg('--process-single-command', json.dumps(payload)))
+                            else:
+                                await run_command(payload)
                         elif msg_type == 'backup':
                             asyncio.create_task(run_command_bg('--process-backup-command', json.dumps(payload)))
                         elif msg_type == 'reseed':
