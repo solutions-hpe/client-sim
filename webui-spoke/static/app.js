@@ -30,9 +30,7 @@ const IMPACT_LABELS = {
 const BUCKET_SECTION_RE = /^s\d+$/;
 const BOOL_VALUE_SET = new Set(['on', 'off', 'yes', 'no', 'true', 'false']);
 const PW_KEY_RE = /pw$|password|secret/i;
-const KNOWN_SECTION_LABELS = { simulation: 'Simulation', server: 'Server', address: 'IP Addresses' };
 function _fmtConfigKey(k) { return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
-function _fmtSection(s) { return KNOWN_SECTION_LABELS[s] || s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '); }
 function _isBoolVal(v) { return BOOL_VALUE_SET.has(String(v ?? '').toLowerCase().trim()); }
 
 const clients = new Map();
@@ -94,8 +92,7 @@ let currentSettings = {
   l1_vlan_start: '100',
   l1_vlan_end: '199'
 };
-let configData = {};
-let configLoaded = false;
+let spokeSimConfState = { loaded: false, loading: false, rawContent: '', fetchedAt: '', sections: {}, sectionOrder: [], keyOrder: {}, error: null };
 let centralTokenValid = null;
 let centralLastSyncedTs = null;
 let centralStatusInitialized = false;
@@ -157,9 +154,10 @@ function activateSetupSubtab(subtabId = 'setup-github') {
     panel.classList.toggle('hidden', !isActive);
   });
   if (subtabId === 'setup-account') loadSpokeLocalUsers().catch(() => {});
+  if (subtabId === 'setup-simulation') loadSpokeSimConf().catch(() => {});
 }
 
-function activateConfigSubtab(subtabId = 'config-general') {
+function activateConfigSubtab(subtabId = 'config-simulation-panel') {
   document.querySelectorAll('.config-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
@@ -168,8 +166,8 @@ function activateConfigSubtab(subtabId = 'config-general') {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
-  if (subtabId === 'config-general' || subtabId === 'config-addresses' || subtabId === 'config-buckets-panel') {
-    loadConfigEditor().catch(() => {});
+  if (subtabId === 'config-simulation-panel') {
+    loadSpokeSimConf().catch(() => {});
   }
   if (subtabId === 'config-user-overrides') {
     loadSpokeUserOverridesConf().catch(() => {});
@@ -614,11 +612,8 @@ const hwLoadAlertsBtn = document.getElementById('hw-load-alerts-btn');
 const hwChecksContainer = document.getElementById('hw-checks-container');
 const hwChecksMsg = document.getElementById('hw-checks-msg');
 const hwChecksPreview = document.getElementById('hw-checks-preview');
-const configSimulationForm = document.getElementById('config-simulation-form');
-const configAddressesForm  = document.getElementById('config-addresses-form');
-const configSimulationMsg = document.getElementById('config-simulation-message');
-const configBucketsContainer = document.getElementById('config-buckets-container');
-const configBucketsMsg = document.getElementById('config-buckets-message');
+const configSimulationPanel = document.getElementById('config-simulation-panel');
+const setupSimulationPanel = document.getElementById('setup-simulation-panel');
 
 function mergeSettings(next = {}) {
   const mergedCentralApi = normalizeCentralApiSettings(next, currentSettings.central_api);
@@ -1614,6 +1609,15 @@ async function requestJson(url, options = {}) {
     throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+async function requestText(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return text;
 }
 
 function escHtml(s) {
@@ -3505,282 +3509,259 @@ function buildConfigToggle(field, value) {
 function collectSectionedConfigState(root) {
   const payloads = {};
   if (!root) return payloads;
-  root.querySelectorAll('[data-config-section][data-config-key]').forEach((input) => {
-    const section = input.dataset.configSection;
-    const key = input.dataset.configKey;
+  root.querySelectorAll('[data-config-section][data-config-key], [data-section][data-key]').forEach((input) => {
+    const section = input.dataset.configSection || input.dataset.section;
+    const key = input.dataset.configKey || input.dataset.key;
     if (!section || !key) return;
     if (!payloads[section]) payloads[section] = {};
-    payloads[section][key] = input.type === 'checkbox' ? (input.checked ? 'on' : 'off') : input.value;
+    payloads[section][key] = input.type === 'checkbox'
+      ? (input.checked ? (input.dataset.on || 'on') : (input.dataset.off || 'off'))
+      : input.value;
   });
   return payloads;
 }
 
-function buildBucketSummary(section, values = {}) {
-  return `${section} — ${values.name || values.wsite || 'Unnamed bucket'}`;
+const SIM_FIXED_SECTION_ORDER = ['simulation', 'server', 'address', ...Array.from({ length: 10 }, (_, i) => `s${i}`)];
+const SIM_SLOT_KEYS = ['wsite', 'ssid', 'ssidpw', 'dhcp_fail', 'dns_fail', 'assoc_fail', 'port_flap', 'ping_test', 'download', 'www_traffic', 'iperf', 'sim_phy', 'l1'];
+const SIM_SELECT_FIELDS = { sim_phy: ['wireless', 'ethernet'], sim_load: ['100', '75', '50', '25', '0'] };
+
+function simIsBoolValue(value) {
+  return BOOL_VALUE_SET.has(String(value ?? '').trim().toLowerCase());
 }
 
-const SIM_PHY_OPTIONS = ['wireless', 'ethernet', 'any'];
-const ADDRESS_SECTION_RE = /^(server|address)$/i;
-
-function _buildSectionCard(section, values, container) {
-  const card = document.createElement('div');
-  card.className = 'setup-card setup-section-gap';
-
-  const hdr = document.createElement('div');
-  hdr.className = 'setup-card-header';
-  const h2 = document.createElement('h2');
-  h2.textContent = `[${_fmtSection(section)}]`;
-  hdr.appendChild(h2);
-  card.appendChild(hdr);
-
-  const form = document.createElement('div');
-  form.className = 'setup-form';
-
-  const textPairs = [], boolPairs = [];
-  Object.entries(values).forEach(([key, val]) => {
-    (_isBoolVal(val) ? boolPairs : textPairs).push([key, val]);
-  });
-
-  const fieldGrid = document.createElement('div');
-  fieldGrid.className = 'config-field-grid';
-
-  textPairs.forEach(([key, val]) => {
-    if (key === 'sim_load') {
-      const simLoadOptions = ['100', '75', '50', '25', '0'];
-      const { group, select } = buildConfigSelect(section, key, simLoadOptions, String(val));
-      const lbl = group.querySelector('label');
-      if (lbl) lbl.textContent = 'Sim Load %';
-      // Replace option text with descriptive labels
-      select.options[0].textContent = '100% — Full load (all simulations)';
-      select.options[1].textContent = '75% — 3/4 simulations';
-      select.options[2].textContent = '50% — Half simulations';
-      select.options[3].textContent = '25% — 1/4 simulations';
-      select.options[4].textContent = '0% — No simulations (stay associated)';
-      fieldGrid.appendChild(group);
-      return;
-    }
-    if (key === 'sim_phy') {
-      const { group } = buildConfigSelect(section, key, SIM_PHY_OPTIONS, String(val || 'wireless'));
-      const lbl = group.querySelector('label');
-      if (lbl) lbl.textContent = 'Sim Phy';
-      fieldGrid.appendChild(group);
-      return;
-    }
-    const { group } = buildConfigInput({ section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' }, val);
-    const lbl = group.querySelector('label');
-    if (lbl) lbl.textContent = _fmtConfigKey(key);
-    fieldGrid.appendChild(group);
-  });
-
-  if (textPairs.length) form.appendChild(fieldGrid);
-
-  if (boolPairs.length) {
-    const h3 = document.createElement('h3');
-    h3.textContent = 'Flags';
-    form.appendChild(h3);
-    const grid = document.createElement('div');
-    grid.className = 'toggle-grid';
-    boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
-    form.appendChild(grid);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'form-actions';
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'btn btn-primary';
-  saveBtn.textContent = `Save [${section}] to GitHub`;
-  actions.appendChild(saveBtn);
-  form.appendChild(actions);
-
-  const msg = document.createElement('div');
-  msg.className = 'settings-message hidden';
-  form.appendChild(msg);
-
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
-    try {
-      const updates = collectSectionedConfigState(form)[section] || {};
-      const result = await requestJson('/api/config/simulation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section, updates }),
-      });
-      showInlineMessage(msg, result?.pushed ? `[${section}] saved and pushed to GitHub.` : `[${section}] saved. GitHub push skipped.`, false, 7000);
-      await loadConfigEditor(true);
-    } catch (error) {
-      showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = `Save [${section}] to GitHub`;
-    }
-  });
-
-  card.appendChild(form);
-  container.appendChild(card);
+function simBoolPair(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'yes' || normalized === 'no') return ['yes', 'no'];
+  if (normalized === 'true' || normalized === 'false') return ['true', 'false'];
+  return ['on', 'off'];
 }
 
-function renderSimulationConfigForm() {
-  if (!configSimulationForm) return;
-  configSimulationForm.textContent = '';
-
-  const sections = Object.keys(configData).filter(
-    s => !BUCKET_SECTION_RE.test(s) && !ADDRESS_SECTION_RE.test(s)
-  );
-  if (sections.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'No configuration sections found — sync from GitHub first.';
-    configSimulationForm.appendChild(p);
-    return;
-  }
-
-  sections.forEach(section => _buildSectionCard(section, configData[section] || {}, configSimulationForm));
+function simFieldLabel(key) {
+  return _fmtConfigKey(String(key || ''));
 }
 
-function renderAddressesForm() {
-  if (!configAddressesForm) return;
-  configAddressesForm.textContent = '';
-
-  const sections = Object.keys(configData).filter(s => ADDRESS_SECTION_RE.test(s));
-  if (sections.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'No [server] or [address] sections found — sync from GitHub first.';
-    configAddressesForm.appendChild(p);
-    return;
-  }
-
-  sections.forEach(section => _buildSectionCard(section, configData[section] || {}, configAddressesForm));
-}
-
-function renderBucketEditors() {
-  if (!configBucketsContainer) return;
-  configBucketsContainer.textContent = '';
-
-  const buckets = Object.keys(configData)
-    .filter(s => BUCKET_SECTION_RE.test(s))
-    .sort((a, b) => parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
-
-  if (buckets.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'No bucket sections (s0–s9) found in simulation.conf.';
-    configBucketsContainer.appendChild(p);
-    return;
-  }
-
-  buckets.forEach((section, idx) => {
-    const values = configData[section] || {};
-    const details = document.createElement('details');
-    details.className = 'setup-card setup-section-gap';
-    if (idx === 0) details.open = true;
-
-    const summary = document.createElement('summary');
-    summary.textContent = buildBucketSummary(section, values);
-    details.appendChild(summary);
-
-    const body = document.createElement('div');
-    body.className = 'setup-form';
-
-    const tracked = { ...values };
-
-    const fieldGrid = document.createElement('div');
-    fieldGrid.className = 'config-field-grid';
-
-    // Text inputs (preserve file order, skip booleans and sim_phy)
-    Object.entries(values).forEach(([key, val]) => {
-      if (key === 'sim_phy' || _isBoolVal(val)) return;
-      const { group, input } = buildConfigInput(
-        { section, key, type: PW_KEY_RE.test(key) ? 'password' : 'text' },
-        val,
-      );
-      const lbl = group.querySelector('label');
-      if (lbl) lbl.textContent = _fmtConfigKey(key);
-      input.addEventListener('input', () => {
-        tracked[key] = input.value.trim();
-        summary.textContent = buildBucketSummary(section, tracked);
-      });
-      fieldGrid.appendChild(group);
+function simSectionKeys(section, values = {}, keyOrder = {}) {
+  const ordered = keyOrder?.[section] || [];
+  if (String(section).match(/^s\d+$/)) {
+    const seen = new Set();
+    const keys = [];
+    SIM_SLOT_KEYS.forEach((key) => {
+      keys.push(key);
+      seen.add(key);
     });
+    [...ordered, ...Object.keys(values || {})].forEach((key) => {
+      if (!seen.has(key)) {
+        keys.push(key);
+        seen.add(key);
+      }
+    });
+    return keys;
+  }
+  return ordered.length ? ordered : Object.keys(values || {});
+}
 
-    // sim_phy select (if present)
-    if ('sim_phy' in values) {
-      const { group } = buildConfigSelect(section, 'sim_phy', SIM_PHY_OPTIONS, values.sim_phy || 'wireless');
-      const lbl = group.querySelector('label');
-      if (lbl) lbl.textContent = 'Sim Phy';
-      fieldGrid.appendChild(group);
+function renderSimField(section, key, rawValue = '') {
+  const value = String(rawValue ?? '');
+  const label = simFieldLabel(key);
+  if (simIsBoolValue(value)) {
+    const [onValue, offValue] = simBoolPair(value);
+    return `
+      <label class="toggle-label" style="justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;gap:12px;">
+        <span>${escHtml(label)}</span>
+        <input type="checkbox" data-section="${escHtml(section)}" data-key="${escHtml(key)}" data-on="${escHtml(onValue)}" data-off="${escHtml(offValue)}"${value.toLowerCase() === onValue ? ' checked' : ''}>
+      </label>
+    `;
+  }
+  if (SIM_SELECT_FIELDS[key]) {
+    return `
+      <label class="form-group">
+        <span class="form-label">${escHtml(label)}</span>
+        <select class="form-input" data-section="${escHtml(section)}" data-key="${escHtml(key)}">
+          ${SIM_SELECT_FIELDS[key].map((option) => `<option value="${escHtml(option)}"${option === value ? ' selected' : ''}>${escHtml(option)}</option>`).join('')}
+        </select>
+      </label>
+    `;
+  }
+  const inputType = PW_KEY_RE.test(key) ? 'password' : 'text';
+  return `
+    <label class="form-group">
+      <span class="form-label">${escHtml(label)}</span>
+      <input class="form-input" type="${inputType}" value="${escHtml(value)}" data-section="${escHtml(section)}" data-key="${escHtml(key)}">
+    </label>
+  `;
+}
+
+function renderSimSection(section, values = {}, { open = false } = {}) {
+  const keys = simSectionKeys(section, values, spokeSimConfState.keyOrder);
+  const isSlot = Boolean(String(section).match(/^s\d+$/));
+  const title = isSlot ? `Simulation S${section.slice(1)}` : `[${section}]`;
+  const textKeys = keys.filter((key) => !simIsBoolValue(String(values[key] ?? '')) && !SIM_SELECT_FIELDS[key]);
+  const selectKeys = keys.filter((key) => SIM_SELECT_FIELDS[key]);
+  const boolKeys = keys.filter((key) => simIsBoolValue(String(values[key] ?? '')));
+  const minColWidth = isSlot ? '160px' : '220px';
+  const inputKeys = [...textKeys, ...selectKeys];
+  const inputFields = inputKeys.map((key) => renderSimField(section, key, values[key] ?? '')).join('');
+  const boolFields = boolKeys.map((key) => {
+    const value = String(values[key] ?? '');
+    const [onValue, offValue] = simBoolPair(value);
+    const checked = value.toLowerCase() === onValue ? ' checked' : '';
+    const label = simFieldLabel(key);
+    return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-size:0.875rem;">
+      <input type="checkbox" data-section="${escHtml(section)}" data-key="${escHtml(key)}" data-on="${escHtml(onValue)}" data-off="${escHtml(offValue)}"${checked}>
+      <span>${escHtml(label)}</span>
+    </label>`;
+  }).join('');
+  const body = keys.length ? `
+      <div class="setup-form setup-section-gap" data-sim-section-form="${escHtml(section)}">
+        ${inputKeys.length ? `<div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(${minColWidth},1fr));gap:8px;">${inputFields}</div>` : ''}
+        ${boolKeys.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px 20px;padding:6px 0;">${boolFields}</div>` : ''}
+        <div class="form-actions" style="display:flex;justify-content:flex-end;">
+          <button type="button" class="btn btn-primary btn-small" data-save-sim-section="${escHtml(section)}">Save [${escHtml(section)}] to GitHub</button>
+        </div>
+        <div class="settings-message hidden" data-sim-section-message="${escHtml(section)}" role="alert"></div>
+      </div>`
+    : `
+      <div class="setup-form setup-section-gap" data-sim-section-form="${escHtml(section)}">
+        <div class="muted">No fields found in this section.</div>
+        <div class="form-actions" style="display:flex;justify-content:flex-end;">
+          <button type="button" class="btn btn-primary btn-small" data-save-sim-section="${escHtml(section)}">Save [${escHtml(section)}] to GitHub</button>
+        </div>
+        <div class="settings-message hidden" data-sim-section-message="${escHtml(section)}" role="alert"></div>
+      </div>`;
+  return `
+    <details class="setup-card setup-section-gap"${open ? ' open' : ''}>
+      <summary style="cursor:pointer;font-weight:600;">${escHtml(title)}</summary>
+      ${body}
+    </details>
+  `;
+}
+
+function spokeSimOrderedSections() {
+  const sections = spokeSimConfState.sections || {};
+  const orderedSections = [];
+  const seen = new Set();
+  SIM_FIXED_SECTION_ORDER.forEach((section) => {
+    if (section === 'simulation' || section === 'server' || section === 'address') {
+      if (Object.prototype.hasOwnProperty.call(sections, section)) {
+        orderedSections.push(section);
+        seen.add(section);
+      }
+      return;
     }
-
-    body.appendChild(fieldGrid);
-
-    // Toggle flags
-    const boolPairs = Object.entries(values).filter(([k, v]) => k !== 'sim_phy' && _isBoolVal(v));
-    if (boolPairs.length) {
-      const h3 = document.createElement('h3');
-      h3.textContent = 'Flags';
-      body.appendChild(h3);
-      const grid = document.createElement('div');
-      grid.className = 'toggle-grid';
-      boolPairs.forEach(([key, val]) => grid.appendChild(buildConfigToggle({ section, key }, val)));
-      body.appendChild(grid);
+    orderedSections.push(section);
+    seen.add(section);
+  });
+  (spokeSimConfState.sectionOrder || []).forEach((section) => {
+    if (!seen.has(section)) {
+      orderedSections.push(section);
+      seen.add(section);
     }
+  });
+  Object.keys(sections).forEach((section) => {
+    if (!seen.has(section)) orderedSections.push(section);
+  });
+  return orderedSections;
+}
 
-    const actions = document.createElement('div');
-    actions.className = 'form-actions';
-    const saveButton = document.createElement('button');
-    saveButton.type = 'button';
-    saveButton.className = 'btn btn-primary';
-    saveButton.textContent = 'Save Bucket';
-    actions.appendChild(saveButton);
-    body.appendChild(actions);
-
-    const message = document.createElement('div');
-    message.className = 'settings-message hidden';
-    body.appendChild(message);
-
-    saveButton.addEventListener('click', async () => {
-      saveButton.disabled = true;
-      saveButton.textContent = 'Saving…';
+function bindSpokeSimConfigPanel(container) {
+  if (!container) return;
+  container.querySelectorAll('[data-refresh-spoke-sim]').forEach((button) => {
+    button.addEventListener('click', () => loadSpokeSimConf(true).catch(() => {}));
+  });
+  container.querySelectorAll('[data-save-sim-section]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const section = button.dataset.saveSimSection;
+      const form = container.querySelector(`[data-sim-section-form="${CSS.escape(section)}"]`);
+      const msg = container.querySelector(`[data-sim-section-message="${CSS.escape(section)}"]`);
+      if (!section || !form || !msg) return;
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = 'Saving…';
       try {
-        const updates = collectSectionedConfigState(body)[section] || {};
+        const updates = collectSectionedConfigState(form)[section] || {};
         const result = await requestJson('/api/config/simulation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ section, updates }),
         });
-        showInlineMessage(message, result?.pushed ? `Saved ${section} and pushed to GitHub.` : `Saved ${section}. GitHub push skipped.`, false, 7000);
-        await loadConfigEditor(true);
+        showInlineMessage(msg, result?.pushed ? `[${section}] saved and pushed to GitHub.` : `[${section}] saved. GitHub push skipped.`, false, 7000);
+        await loadSpokeSimConf(true);
       } catch (error) {
-        showInlineMessage(message, `Error: ${error.message}`, true, 7000);
+        showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
       } finally {
-        saveButton.disabled = false;
-        saveButton.textContent = 'Save Bucket';
+        button.disabled = false;
+        button.textContent = originalText;
       }
     });
-
-    details.appendChild(body);
-    configBucketsContainer.appendChild(details);
   });
 }
 
-async function loadConfigEditor(force = false) {
-  if (!force && configLoaded) return configData;
-  try {
-    const data = await requestJson('/api/config/parsed');
-    configData = data || {};
-    configLoaded = true;
-    renderSimulationConfigForm();
-    renderAddressesForm();
-    renderBucketEditors();
-    return configData;
-  } catch (error) {
-    configLoaded = false;
-    showInlineMessage(configSimulationMsg, `Error: ${error.message}`, true, 7000);
-    showInlineMessage(configBucketsMsg, `Error: ${error.message}`, true, 7000);
-    throw error;
+function renderSpokeSimConfigPanel() {
+  const containers = [configSimulationPanel, setupSimulationPanel].filter(Boolean);
+  if (!containers.length) return;
+  const fetched = spokeSimConfState.fetchedAt ? new Date(spokeSimConfState.fetchedAt).toLocaleString() : '—';
+  const infoBar = `
+    <section class="setup-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:600;">configs/simulation.conf</div>
+          <div class="muted" style="font-size:0.85rem;">Last loaded: ${escHtml(fetched)}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-small" data-refresh-spoke-sim="true">Refresh</button>
+        </div>
+      </div>
+    </section>
+  `;
+
+  containers.forEach((container) => {
+    if (spokeSimConfState.loading) {
+      container.innerHTML = `${infoBar}<div class="empty-state">Loading simulation.conf…</div>`;
+      bindSpokeSimConfigPanel(container);
+      return;
+    }
+    if (spokeSimConfState.error) {
+      container.innerHTML = `${infoBar}<section class="setup-card"><div class="empty-state">${escHtml(spokeSimConfState.error)}</div></section>`;
+      bindSpokeSimConfigPanel(container);
+      return;
+    }
+    const sections = spokeSimConfState.sections || {};
+    const orderedSections = spokeSimOrderedSections();
+    container.innerHTML = `${infoBar}<div data-spoke-sim-config-form>
+      ${orderedSections.map((section, index) => renderSimSection(section, sections[section] || {}, { open: index === 0 })).join('')}
+    </div>`;
+    bindSpokeSimConfigPanel(container);
+  });
+}
+
+async function loadSpokeSimConf(force = false) {
+  if (!force && spokeSimConfState.loaded) {
+    renderSpokeSimConfigPanel();
+    return spokeSimConfState;
   }
+  if (spokeSimConfState.loading) return spokeSimConfState;
+  spokeSimConfState = { ...spokeSimConfState, loading: true, error: null };
+  renderSpokeSimConfigPanel();
+  try {
+    const content = await requestText('/api/config');
+    const parsed = parseSpokeIni(content || '');
+    spokeSimConfState = {
+      ...parsed,
+      loaded: true,
+      loading: false,
+      rawContent: content || '',
+      fetchedAt: new Date().toISOString(),
+      error: null,
+    };
+  } catch (error) {
+    spokeSimConfState = { ...spokeSimConfState, loaded: false, loading: false, error: error.message };
+  }
+  renderSpokeSimConfigPanel();
+  return spokeSimConfState;
+}
+
+async function loadConfigEditor(force = false) {
+  return loadSpokeSimConf(force);
 }
 
 // ── User-overrides INI parser/serializer ─────────────────────────────────────
@@ -5482,7 +5463,8 @@ if (centralTabButton) {
 
 if (configTabButton) {
   configTabButton.addEventListener('click', () => {
-    loadConfigEditor().catch(() => {});
+    activateConfigSubtab('config-simulation-panel');
+    loadSpokeSimConf().catch(() => {});
   });
 }
 
