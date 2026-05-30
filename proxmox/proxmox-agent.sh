@@ -2234,11 +2234,12 @@ out = []
 for v in qemu:
     vmid = v.get('vmid')
     bus_path, has_usb_config, pci_addrs, source_vmid, supported, reason, is_template = reclone_info('qemu', vmid)
+    raw_cpu = v.get('cpu')
     out.append({
         'vmid':                vmid,
         'name':                v.get('name', ''),
         'status':              v.get('status', 'unknown'),
-        'cpu':                 round(float(v.get('cpu') or 0) * 100, 1),
+        'cpu':                 round(float(raw_cpu) * 100, 1) if raw_cpu is not None else None,
         'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         bool(v.get('template', 0)) or is_template,
@@ -2253,11 +2254,12 @@ for v in qemu:
 for v in lxc:
     vmid = v.get('vmid')
     _bus_path, _has_usb, _pci_addrs, source_vmid, supported, reason, is_template = reclone_info('lxc', vmid)
+    raw_cpu = v.get('cpu')
     out.append({
         'vmid':                vmid,
         'name':                v.get('name', ''),
         'status':              v.get('status', 'unknown'),
-        'cpu':                 round(float(v.get('cpu') or 0) * 100, 1),
+        'cpu':                 round(float(raw_cpu) * 100, 1) if raw_cpu is not None else None,
         'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         is_template,
