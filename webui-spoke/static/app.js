@@ -168,6 +168,12 @@ function activateConfigSubtab(subtabId = 'config-general') {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
+  if (subtabId === 'config-general' || subtabId === 'config-addresses' || subtabId === 'config-buckets-panel') {
+    loadConfigEditor().catch(() => {});
+  }
+  if (subtabId === 'config-user-overrides') {
+    loadSpokeUserOverridesConf().catch(() => {});
+  }
 }
 
 function activateServerSubtab(subtabId = 'server-vms') {
@@ -3775,6 +3781,400 @@ async function loadConfigEditor(force = false) {
     showInlineMessage(configBucketsMsg, `Error: ${error.message}`, true, 7000);
     throw error;
   }
+}
+
+// ── User-overrides INI parser/serializer ─────────────────────────────────────
+function parseSpokeIni(text) {
+  const sections = {};
+  const sectionOrder = [];
+  const keyOrder = {};
+  let current = null;
+  for (const rawLine of (text || '').split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(';') || line.startsWith('#')) continue;
+    const secMatch = line.match(/^\[(.+)\]$/);
+    if (secMatch) {
+      current = secMatch[1];
+      if (!sections[current]) {
+        sections[current] = {};
+        sectionOrder.push(current);
+        keyOrder[current] = [];
+      }
+      continue;
+    }
+    if (!current) continue;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx <= 0) continue;
+    const key = line.slice(0, eqIdx).trim();
+    const value = line.slice(eqIdx + 1).trim();
+    if (!Object.prototype.hasOwnProperty.call(sections[current], key)) keyOrder[current].push(key);
+    sections[current][key] = value;
+  }
+  return { sections, sectionOrder, keyOrder };
+}
+
+function serializeSpokeIni(sections, sectionOrder, keyOrder) {
+  return sectionOrder.map((section) => {
+    const keys = keyOrder[section] || Object.keys(sections[section] || {});
+    const body = keys.map((key) => `${key} = ${sections[section]?.[key] ?? ''}`).join('\n');
+    return `[${section}]\n${body}`;
+  }).join('\n\n') + (sectionOrder.length ? '\n' : '');
+}
+
+// ── Spoke user-overrides state ────────────────────────────────────────────────
+let spokeUserOverridesState = { sections: {}, sectionOrder: [], keyOrder: {}, loaded: false, loading: false, error: null };
+let spokeUserOverridesSearch = '';
+let spokeUomState = null;
+
+function getSpokeUserOverrideTemplate() {
+  const sections = spokeUserOverridesState.sections || {};
+  const sectionOrder = spokeUserOverridesState.sectionOrder || [];
+  const keyOrder = spokeUserOverridesState.keyOrder || {};
+  const templateOrder = [];
+  const seen = new Set();
+  const sampleValues = {};
+
+  sectionOrder.forEach((section) => {
+    (keyOrder[section] || Object.keys(sections[section] || {})).forEach((key) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      templateOrder.push(key);
+      sampleValues[key] = sections[section]?.[key];
+    });
+  });
+
+  if (!templateOrder.length) {
+    templateOrder.push('wsite', 'ssid', 'ssidpw', 'dhcp_fail', 'kill_switch', 'sim_load');
+    sampleValues.dhcp_fail = 'off';
+    sampleValues.kill_switch = 'off';
+    sampleValues.sim_load = '100';
+  }
+
+  const values = {};
+  templateOrder.forEach((key) => {
+    const sample = sampleValues[key];
+    if (_isBoolVal(sample) || key === 'dhcp_fail' || key === 'kill_switch') {
+      values[key] = 'off';
+    } else if (key === 'sim_load') {
+      values[key] = sample ? String(sample) : '100';
+    } else {
+      values[key] = '';
+    }
+  });
+
+  return { values, order: templateOrder };
+}
+
+async function loadSpokeUserOverridesConf(force = false) {
+  if (!force && spokeUserOverridesState.loaded) return spokeUserOverridesState;
+  if (spokeUserOverridesState.loading) return spokeUserOverridesState;
+  spokeUserOverridesState.loading = true;
+  spokeUserOverridesState.error = null;
+  renderSpokeUserOverridesEditor();
+  try {
+    const data = await requestJson('/api/config/user-overrides-conf');
+    const parsed = parseSpokeIni(data.content || '');
+    spokeUserOverridesState = { ...parsed, loaded: true, loading: false, error: null };
+  } catch (error) {
+    spokeUserOverridesState = { ...spokeUserOverridesState, loading: false, loaded: false, error: error.message };
+  }
+  renderSpokeUserOverridesEditor();
+  return spokeUserOverridesState;
+}
+
+async function saveSpokeUserOverrides() {
+  const { sections, sectionOrder, keyOrder } = spokeUserOverridesState;
+  const content = serializeSpokeIni(sections, sectionOrder, keyOrder);
+  return requestJson('/api/config/user-overrides-conf', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+}
+
+function applySpokeUserOverrideSearch() {
+  const term = spokeUserOverridesSearch;
+  const panel = document.getElementById('config-user-overrides');
+  if (!panel) return;
+  const cards = panel.querySelectorAll('[data-override-username]');
+  let shown = 0;
+  cards.forEach((card) => {
+    const match = !term || card.dataset.overrideUsername.toLowerCase().includes(term);
+    card.style.display = match ? '' : 'none';
+    if (match) shown += 1;
+  });
+  const countEl = document.getElementById('spoke-uo-search-count');
+  if (countEl) countEl.textContent = term ? `${shown} of ${cards.length} shown` : '';
+}
+
+function renderSpokeUserOverrideCard(username, values) {
+  const card = document.createElement('div');
+  card.className = 'setup-card setup-section-gap';
+  card.dataset.overrideUsername = username;
+
+  const cardHdr = document.createElement('div');
+  cardHdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;';
+  const title = document.createElement('h3');
+  title.style.margin = '0';
+  title.textContent = username;
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn btn-danger';
+  delBtn.style.cssText = 'padding:4px 10px;font-size:0.8rem;';
+  delBtn.textContent = '✕ Remove';
+  cardHdr.appendChild(title);
+  cardHdr.appendChild(delBtn);
+  card.appendChild(cardHdr);
+
+  const form = document.createElement('div');
+  form.className = 'setup-form';
+  const tracked = { ...values };
+  const orderedKeys = spokeUserOverridesState.keyOrder[username] || Object.keys(values);
+  const textKeys = orderedKeys.filter((key) => !_isBoolVal(values[key]));
+  const boolKeys = orderedKeys.filter((key) => _isBoolVal(values[key]));
+
+  if (textKeys.length) {
+    const fieldGrid = document.createElement('div');
+    fieldGrid.className = 'config-field-grid';
+    textKeys.forEach((key) => {
+      const inputType = key === 'sim_load' ? 'number' : (PW_KEY_RE.test(key) ? 'password' : 'text');
+      const { group, input } = buildConfigInput(
+        { section: username, key, type: inputType },
+        values[key],
+      );
+      if (key === 'sim_load') {
+        input.min = '0';
+        input.max = '100';
+        input.step = '1';
+      }
+      const lbl = group.querySelector('label');
+      if (lbl) lbl.textContent = _fmtConfigKey(key);
+      input.addEventListener('input', () => { tracked[key] = input.value.trim(); });
+      fieldGrid.appendChild(group);
+    });
+    form.appendChild(fieldGrid);
+  }
+
+  if (boolKeys.length) {
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Flags';
+    form.appendChild(h3);
+    const grid = document.createElement('div');
+    grid.className = 'toggle-grid';
+    boolKeys.forEach((key) => {
+      const toggle = buildConfigToggle({ section: username, key }, values[key]);
+      const text = toggle.querySelector('.toggle-label');
+      if (text) text.textContent = _fmtConfigKey(key);
+      const input = toggle.querySelector('input');
+      input?.addEventListener('change', () => { tracked[key] = input.checked ? 'on' : 'off'; });
+      grid.appendChild(toggle);
+    });
+    form.appendChild(grid);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'form-actions';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn btn-primary';
+  saveBtn.textContent = 'Save';
+  actions.appendChild(saveBtn);
+  form.appendChild(actions);
+
+  const msg = document.createElement('div');
+  msg.className = 'settings-message hidden';
+  form.appendChild(msg);
+
+  delBtn.addEventListener('click', async () => {
+    if (!window.confirm(`Remove overrides for "${username}"?`)) return;
+    const snapshot = {
+      sections: { ...spokeUserOverridesState.sections },
+      sectionOrder: [...spokeUserOverridesState.sectionOrder],
+      keyOrder: { ...spokeUserOverridesState.keyOrder },
+    };
+    const idx = spokeUserOverridesState.sectionOrder.indexOf(username);
+    if (idx >= 0) spokeUserOverridesState.sectionOrder.splice(idx, 1);
+    delete spokeUserOverridesState.sections[username];
+    delete spokeUserOverridesState.keyOrder[username];
+    renderSpokeUserOverridesEditor();
+    try {
+      await saveSpokeUserOverrides();
+      showNotification(`Removed overrides for ${username}.`);
+    } catch (error) {
+      spokeUserOverridesState.sections = snapshot.sections;
+      spokeUserOverridesState.sectionOrder = snapshot.sectionOrder;
+      spokeUserOverridesState.keyOrder = snapshot.keyOrder;
+      renderSpokeUserOverridesEditor();
+      showNotification(`Failed to remove ${username}: ${error.message}`, 'error');
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      spokeUserOverridesState.sections[username] = { ...tracked };
+      const result = await saveSpokeUserOverrides();
+      showInlineMessage(msg, result?.pushed ? 'Saved and pushed to GitHub.' : 'Saved locally.', false, 5000);
+    } catch (error) {
+      showInlineMessage(msg, `Error: ${error.message}`, true, 7000);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
+
+  card.appendChild(form);
+  return card;
+}
+
+function renderSpokeUserOverridesEditor() {
+  const panel = document.getElementById('config-user-overrides');
+  if (!panel) return;
+  panel.textContent = '';
+
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;';
+  const hdrLeft = document.createElement('div');
+  const h2 = document.createElement('h2');
+  h2.style.margin = '0';
+  h2.textContent = 'User Overrides';
+  const p = document.createElement('p');
+  p.style.cssText = 'margin:4px 0 0;color:var(--text-secondary);font-size:0.85rem;';
+  p.textContent = 'Per-user simulation profile overrides stored in user-overrides.conf';
+  hdrLeft.appendChild(h2);
+  hdrLeft.appendChild(p);
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn btn-primary';
+  addBtn.textContent = '+ Add User';
+  addBtn.addEventListener('click', () => openSpokeUserOverrideModal(null));
+  hdr.appendChild(hdrLeft);
+  hdr.appendChild(addBtn);
+  panel.appendChild(hdr);
+
+  if (spokeUserOverridesState.loading) {
+    const loading = document.createElement('p');
+    loading.className = 'muted';
+    loading.textContent = 'Loading…';
+    panel.appendChild(loading);
+    return;
+  }
+  if (spokeUserOverridesState.error) {
+    const error = document.createElement('p');
+    error.style.color = 'var(--error)';
+    error.textContent = `Error: ${spokeUserOverridesState.error}`;
+    panel.appendChild(error);
+    return;
+  }
+
+  const { sections, sectionOrder } = spokeUserOverridesState;
+  if (sectionOrder.length > 5) {
+    const searchRow = document.createElement('div');
+    searchRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.placeholder = 'Search users…';
+    input.className = 'form-input';
+    input.style.maxWidth = '280px';
+    input.value = spokeUserOverridesSearch;
+    input.addEventListener('input', () => {
+      spokeUserOverridesSearch = input.value.trim().toLowerCase();
+      applySpokeUserOverrideSearch();
+    });
+    const count = document.createElement('span');
+    count.id = 'spoke-uo-search-count';
+    count.style.cssText = 'font-size:0.82rem;color:var(--text-secondary);';
+    searchRow.appendChild(input);
+    searchRow.appendChild(count);
+    panel.appendChild(searchRow);
+  }
+
+  if (!sectionOrder.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'No user overrides configured. Click "+ Add User" to create one.';
+    panel.appendChild(empty);
+    return;
+  }
+
+  sectionOrder.forEach((username) => {
+    panel.appendChild(renderSpokeUserOverrideCard(username, sections[username] || {}));
+  });
+  if (spokeUserOverridesSearch) applySpokeUserOverrideSearch();
+}
+
+function openSpokeUserOverrideModal(prefill) {
+  ensureSpokeUserOverrideModal();
+  spokeUomState = { prefill };
+  const body = document.getElementById('spoke-uom-body');
+  if (!body) return;
+  body.textContent = '';
+
+  const fg = document.createElement('div');
+  fg.className = 'form-group';
+  const lbl = document.createElement('label');
+  lbl.textContent = 'Username';
+  lbl.className = 'form-label';
+  const inp = document.createElement('input');
+  inp.id = 'spoke-uom-username';
+  inp.className = 'form-input';
+  inp.placeholder = 'e.g. jsmith';
+  inp.type = 'text';
+  fg.appendChild(lbl);
+  fg.appendChild(inp);
+  body.appendChild(fg);
+
+  const hint = document.createElement('p');
+  hint.className = 'form-hint';
+  hint.style.margin = '0';
+  hint.textContent = 'A new card will be created with the standard override fields.';
+  body.appendChild(hint);
+
+  const overlay = document.getElementById('spoke-user-override-modal-overlay');
+  if (!overlay) return;
+  overlay.style.display = '';
+  overlay.classList.remove('hidden');
+  inp.focus();
+}
+
+function closeSpokeUserOverrideModal() {
+  const overlay = document.getElementById('spoke-user-override-modal-overlay');
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.classList.add('hidden');
+  }
+  spokeUomState = null;
+}
+
+function ensureSpokeUserOverrideModal() {
+  if (document.getElementById('spoke-uom-save')?.dataset.wired) return;
+  const saveBtn = document.getElementById('spoke-uom-save');
+  const cancelBtn = document.getElementById('spoke-uom-cancel');
+  const overlay = document.getElementById('spoke-user-override-modal-overlay');
+  if (saveBtn) {
+    saveBtn.dataset.wired = '1';
+    saveBtn.addEventListener('click', async () => {
+      const inp = document.getElementById('spoke-uom-username');
+      const username = (inp?.value || '').trim();
+      if (!username) {
+        inp?.focus();
+        return;
+      }
+      if (spokeUserOverridesState.sections[username]) {
+        window.alert(`User "${username}" already exists.`);
+        return;
+      }
+      const template = getSpokeUserOverrideTemplate();
+      spokeUserOverridesState.sections[username] = { ...template.values };
+      spokeUserOverridesState.sectionOrder.push(username);
+      spokeUserOverridesState.keyOrder[username] = [...template.order];
+      closeSpokeUserOverrideModal();
+      renderSpokeUserOverridesEditor();
+    });
+  }
+  cancelBtn?.addEventListener('click', closeSpokeUserOverrideModal);
+  overlay?.addEventListener('click', (event) => {
+    if (event.target === overlay) closeSpokeUserOverrideModal();
+  });
 }
 
 // ── Command Inbox ─────────────────────────────────────────────────────────────

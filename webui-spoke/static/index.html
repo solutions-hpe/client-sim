@@ -737,6 +737,7 @@
       <button class="config-subtab active" data-subtab="config-general" role="tab">General</button>
       <button class="config-subtab" data-subtab="config-addresses" role="tab">IP Addresses</button>
       <button class="config-subtab" data-subtab="config-buckets-panel" role="tab">Buckets</button>
+      <button class="config-subtab" data-subtab="config-user-overrides" role="tab">User Overrides</button>
     </nav>
 
     <!-- General: [simulation] section -->
@@ -760,6 +761,10 @@
         <div id="config-buckets-container"></div>
         <div id="config-buckets-message" class="settings-message hidden" role="alert"></div>
       </div>
+    </div>
+
+    <div id="config-user-overrides" class="config-subpanel hidden">
+      <!-- Rendered by renderSpokeUserOverridesEditor() -->
     </div>
   </main>
 
@@ -1623,6 +1628,16 @@
       </div>
     </div>
   </main>
+  <div id="spoke-user-override-modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="spoke-uom-title" style="display:none;">
+    <div class="modal-box" style="max-width:520px;">
+      <h2 id="spoke-uom-title" style="margin:0 0 16px;">User Override</h2>
+      <div id="spoke-uom-body"></div>
+      <div class="modal-actions" style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button id="spoke-uom-cancel" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="spoke-uom-save" class="btn btn-primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
   <div id="app-notification" class="app-notification settings-message hidden" aria-live="polite"></div>
   <script src="/app.js" defer></script>
 

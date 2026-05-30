@@ -10074,8 +10074,42 @@ async def api_config_overrides_save(update: OverridesSaveRequest) -> dict[str, A
     return {"status": "ok", "pushed": pushed}
 
 
+@app.get("/api/config/user-overrides-conf")
+async def api_get_user_overrides_conf() -> dict[str, str]:
+    """Return user-overrides.conf content as JSON {content, mode}."""
+    overrides_path = REPO_DIR / "configs" / "user-overrides.conf"
+    content = overrides_path.read_text(encoding="utf-8") if overrides_path.exists() else ""
+    return {
+        "content": content,
+        "mode": "local",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class ConfOverrideBody(BaseModel):
     content: str  # Raw INI text, same format as the target .conf file
+
+
+@app.put("/api/config/user-overrides-conf")
+async def api_put_user_overrides_conf(body: ConfOverrideBody) -> dict[str, Any]:
+    """Write the entire user-overrides.conf and push to GitHub."""
+    ensure_repo_ready()
+    overrides_path = REPO_DIR / "configs" / "user-overrides.conf"
+    overrides_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = overrides_path.with_suffix(".tmp")
+    tmp.write_text(body.content, encoding="utf-8")
+    tmp.replace(overrides_path)
+    pushed = False
+    try:
+        async with _git_lock:
+            pushed = await asyncio.to_thread(
+                _push_to_github,
+                ["configs/user-overrides.conf"],
+                "WebUI: update user-overrides.conf",
+            )
+    except ValueError:
+        pushed = False
+    return {"ok": True, "pushed": pushed}
 
 
 @app.get("/api/config/hub-sim-override", response_class=PlainTextResponse)
