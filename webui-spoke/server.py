@@ -5330,7 +5330,65 @@ async def _handle_vnc_proxy_request(message: dict[str, Any]) -> None:
         await _relay_vnc_to_hub({"type": "vnc_disconnect", "request_id": request_id})
 
 
-# ── Log relay ──────────────────────────────────────────────────────────────────
+async def _handle_provision_proxmox_token(message: dict[str, Any]) -> None:
+    """Auto-create a Proxmox API token via pvesh and report it back to the hub."""
+    request_id = str(message.get("request_id") or "").strip()
+
+    async def _send_error(error: str) -> None:
+        await _relay_vnc_to_hub({"type": "proxmox_token_provision_error", "request_id": request_id, "error": error})
+
+    pvesh_path = shutil.which("pvesh")
+    if not pvesh_path:
+        await _send_error("pvesh not found — is the spoke running directly on a Proxmox host?")
+        return
+
+    TOKEN_ID = "cs-hub"
+    USER = "root@pam"
+
+    try:
+        # Remove any existing token with this ID so we always get a fresh secret
+        del_proc = await asyncio.create_subprocess_exec(
+            pvesh_path, "delete", f"/access/users/{USER}/token/{TOKEN_ID}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(del_proc.wait(), timeout=10.0)
+    except Exception:
+        pass  # Token may not exist yet — ignore
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            pvesh_path, "create", f"/access/users/{USER}/token/{TOKEN_ID}",
+            "--privsep", "0",
+            "--output-format", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        if proc.returncode != 0:
+            await _send_error(f"pvesh create failed: {stderr.decode().strip()[:300]}")
+            return
+
+        data = json.loads(stdout.decode().strip())
+        secret = str(data.get("value") or "").strip()
+        if not secret:
+            await _send_error("pvesh returned no token value in response")
+            return
+
+        full_token = f"{USER}!{TOKEN_ID}={secret}"
+        settings["proxmox_api_token"] = full_token
+        _persisted["proxmox_api_token"] = full_token
+        _save_settings()
+        logger.info("Proxmox API token auto-provisioned: %s!%s", USER, TOKEN_ID)
+
+        await _relay_vnc_to_hub({"type": "proxmox_token_provisioned", "request_id": request_id, "token": full_token})
+
+    except asyncio.TimeoutError:
+        await _send_error("pvesh timed out after 15 seconds")
+    except json.JSONDecodeError as exc:
+        await _send_error(f"Could not parse pvesh output: {exc}")
+    except Exception as exc:
+        await _send_error(f"Unexpected error: {exc}")
 
 async def _handle_log_fetch(message: dict[str, Any]) -> None:
     """Fetch log lines from journal/agent/watchdog/install and send back to hub."""
@@ -6679,6 +6737,8 @@ async def relay_ws_loop() -> None:
                             await _handle_shell_relay_message(message)
                         elif msg_type == "vnc_proxy_request":
                             asyncio.create_task(_handle_vnc_proxy_request(message))
+                        elif msg_type == "provision_proxmox_token":
+                            asyncio.create_task(_handle_provision_proxmox_token(message))
                         elif msg_type == "vnc_frame_to_proxmox":
                             req_id = str(message.get("request_id") or "").strip()
                             q = _vnc_sessions.get(req_id)
