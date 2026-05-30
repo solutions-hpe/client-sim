@@ -434,6 +434,7 @@ _sim_conf_cache: dict[str, Any] = {
 # Refreshed by _sim_conf_content_refresh_loop every 30s in a thread-pool worker
 # so reads never block the event loop or the telemetry_loop task.
 _sim_conf_content_cache: dict[str, Any] = {"content": "", "mtime_ns": -1, "error": None}
+_user_overrides_conf_content_cache: dict[str, Any] = {"content": "", "mtime_ns": -1, "error": None}
 
 
 def _refresh_sim_conf_content() -> None:
@@ -454,6 +455,24 @@ def _refresh_sim_conf_content() -> None:
         _sim_conf_content_cache["error"] = str(exc)
 
 
+def _refresh_user_overrides_conf_content() -> None:
+    """Stat + conditionally re-read user-overrides.conf into _user_overrides_conf_content_cache.
+    Designed to run inside asyncio.to_thread — never call from the event loop directly."""
+    path = REPO_DIR / "configs" / "user-overrides.conf"
+    try:
+        st = path.stat()
+        if st.st_mtime_ns != _user_overrides_conf_content_cache["mtime_ns"]:
+            _user_overrides_conf_content_cache["content"] = path.read_text(encoding="utf-8")
+            _user_overrides_conf_content_cache["mtime_ns"] = st.st_mtime_ns
+            _user_overrides_conf_content_cache["error"] = None
+    except FileNotFoundError:
+        _user_overrides_conf_content_cache["content"] = ""
+        _user_overrides_conf_content_cache["mtime_ns"] = -1
+        _user_overrides_conf_content_cache["error"] = None
+    except Exception as exc:
+        _user_overrides_conf_content_cache["error"] = str(exc)
+
+
 async def _sim_conf_content_refresh_loop() -> None:
     """Background task: keep _sim_conf_content_cache fresh without blocking the event loop."""
     while True:
@@ -461,6 +480,16 @@ async def _sim_conf_content_refresh_loop() -> None:
             await asyncio.to_thread(_refresh_sim_conf_content)
         except Exception as exc:
             _sim_conf_content_cache["error"] = str(exc)
+        await asyncio.sleep(30)
+
+
+async def _user_overrides_conf_content_refresh_loop() -> None:
+    """Background task: keep _user_overrides_conf_content_cache fresh without blocking the event loop."""
+    while True:
+        try:
+            await asyncio.to_thread(_refresh_user_overrides_conf_content)
+        except Exception as exc:
+            _user_overrides_conf_content_cache["error"] = str(exc)
         await asyncio.sleep(30)
 
 
@@ -2723,6 +2752,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["relay"] = asyncio.create_task(relay_loop())
     background_tasks["hub_isolation_monitor"] = asyncio.create_task(hub_isolation_monitor())  # Watch the timeout in the background so the UI updates when isolation flips without waiting for another relay message.
     background_tasks["sim_conf_refresh"] = asyncio.create_task(_sim_conf_content_refresh_loop())
+    background_tasks["user_overrides_conf_refresh"] = asyncio.create_task(_user_overrides_conf_content_refresh_loop())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
@@ -5029,6 +5059,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
     # Content is kept fresh by _sim_conf_content_refresh_loop (runs every 30s in a
     # thread-pool worker) so this dict-read never blocks the event loop.
     sim_conf_content = _sim_conf_content_cache["content"]
+    user_overrides_conf_content = _user_overrides_conf_content_cache["content"]
 
     return {
         "spoke_id": spoke_id,
@@ -5037,6 +5068,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
         "clients": clients_snapshot,
         "timestamp": time.time(),
         "sim_conf_content": sim_conf_content,
+        "user_overrides_conf_content": user_overrides_conf_content,
         "hub_isolated": _hub_isolated(),  # Export the current isolation state so the hub can see when this spoke has paused config pushes.
         "hub_last_checkin": relay_state.get("last_sync"),  # Export the last successful check-in timestamp so the hub can reason about isolation timing.
         "hub_rtt_ms": relay_state.get("hub_rtt_ms"),  # Round-trip time from last telemetry send to ack receipt.
