@@ -349,6 +349,46 @@ Requires an authenticated local `admin` session.
 
 Hub-driven config sync never overwrites these local auth settings.
 
+### Config editor endpoints
+
+These endpoints are used by the spoke Config UI and standalone editors.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/config/overrides` | Returns plain-text `user-overrides.conf` (effective content after any local hub override is merged in) |
+| `POST` | `/api/config/overrides/save` | Legacy per-user section save used by the inline override editor; request body `{username, flags}` and response `{status: "ok", pushed: bool}` |
+| `GET` | `/api/config/user-overrides-conf` | Returns the full `user-overrides.conf` file as `{content, mode, fetched_at}` |
+| `PUT` | `/api/config/user-overrides-conf` | Replaces the full file from `{content: str}` and returns `{ok: bool, pushed: bool}` |
+
+**`GET /api/config/user-overrides-conf` response:**
+
+```json
+{
+  "content": "[jsmith]\nsimulation_id=s7\n",
+  "mode": "local",
+  "fetched_at": "2026-05-30T12:34:56+00:00"
+}
+```
+
+`mode` identifies where the file came from. On a standalone spoke this is currently `local`.
+
+**`PUT /api/config/user-overrides-conf` request body:**
+
+```json
+{
+  "content": "[jsmith]\nsimulation_id=s7\n"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "pushed": true
+}
+```
+
 ---
 
 ## Proxmox Agent Endpoints

@@ -31,6 +31,7 @@ Aruba Central (AP/switch telemetry)
 
 - Host the browser UI and local API for the site/lab
 - Track simulation client health, overrides, logs, and command state
+- Manage `simulation.conf` and `user-overrides.conf` locally when running standalone
 - Poll Aruba Central and correlate Central status with local client/site mappings
 - Act as the tenant-approved relay endpoint consumer for hub-issued commands
 
@@ -102,6 +103,16 @@ By default, DHCP serves `169.253.1.11`–`169.253.1.254` on the isolated client 
 - `install-lxc.sh` fetches `static/app.js`, `static/style.css`, and `templates/index.html` from `cs-webui` on the same branch selected for the spoke install.
 - `server.py` serves the shared HTML template and injects `WEBUI_MODE=spoke` at runtime.
 - Use `--branch <name>` to keep the spoke backend and shared frontend aligned (`main` for production).
+
+### Standalone config editors
+
+When a spoke is not hub-managed, it owns both config files directly.
+
+- **Config** edits `simulation.conf` with the same unified collapsible-card renderer used by Hub.
+- **Setup → Simulation** opens the same `simulation.conf` editor from the Setup workflow.
+- **Config → User Overrides** manages `user-overrides.conf` locally.
+
+If Hub is connected, tenant pushes still win and are written locally as `hub-sim-overrides.conf` and `hub-user-overrides.conf`.
 
 ---
 
@@ -217,6 +228,8 @@ Every inbox command receives an ack. For example:
 
 The spoke persists its configuration in `settings.json` and exposes it through `GET /api/settings` and `POST /api/settings`.
 
+Standalone config-file editing is separate from `settings.json`: `simulation.conf` and `user-overrides.conf` live under `configs/`, while hub-managed overrides are written locally as `hub-sim-overrides.conf` and `hub-user-overrides.conf`.
+
 ### Common top-level settings
 
 | Key | Description |
@@ -318,6 +331,10 @@ These are the main local endpoints exposed by `webui-spoke`.
 | `GET` | `/api/hardware-alerts` | Current hardware alert summary |
 | `POST` | `/api/status` | Client heartbeat/beacon endpoint |
 | `GET` | `/api/config?hostname=<h>` | Render effective `simulation.conf` |
+| `GET` | `/api/config/overrides` | Return effective plain-text `user-overrides.conf` |
+| `GET` | `/api/config/user-overrides-conf` | Return full-file `user-overrides.conf` as `{content, mode, fetched_at}` |
+| `PUT` | `/api/config/user-overrides-conf` | Replace the full `user-overrides.conf` file |
+| `POST` | `/api/config/overrides/save` | Save one user override section from the editor |
 | `GET` | `/api/scripts/list?platform=linux|windows` | List available scripts |
 | `GET` | `/api/scripts/{platform}/{filename}` | Download a script |
 

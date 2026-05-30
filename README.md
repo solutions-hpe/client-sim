@@ -24,6 +24,8 @@ At an operational level, this repo gives you:
 - Linux VM scripts that fetch config, run simulations, and report status
 - watchdogs for both the spoke service and Proxmox agent
 - configuration-driven simulation behavior using INI files
+- shared hub-style spoke config editors for `simulation.conf` and `user-overrides.conf`
+- 7-day client-count baseline monitoring persisted in `client_count_7day.json`
 - local spoke auth management with password rotation and extra admin/viewer users
 
 ### Spoke installation (`install-lxc.sh`)
@@ -225,12 +227,24 @@ The spoke now includes **Setup → Account** for local authentication management
 - **Local Users** lets spoke admins add or remove extra local users with `admin` or `viewer` roles.
 - Hub-driven config sync never overwrites spoke auth settings: `admin_password`, `auth_provider`, and all LDAP/RADIUS/TACACS fields remain local-only on the spoke.
 
+### Standalone spoke configuration
+
+When a spoke is running without Hub relay, it manages its own config files locally.
+
+- **Config** tab: edit `simulation.conf` using the shared hub-style renderer. `[simulation]`, `[server]`, `[address]`, and each `s0`–`s9` slot render as collapsible cards with text/select fields in a responsive grid and boolean flags inline.
+- **Setup → Simulation**: opens the same `simulation.conf` editor from the Setup workflow.
+- **Config → User Overrides**: manage `user-overrides.conf` locally from the spoke UI.
+
+When the spoke is hub-connected, tenant pushes from Hub take precedence and are written locally as `configs/hub-sim-overrides.conf` and `configs/hub-user-overrides.conf`.
+
 ### Configuration files
 
 The two main operator-edited files are:
 
 - `configs/simulation.conf`
 - `configs/user-overrides.conf`
+
+Operators can edit these directly in GitHub, through Hub when relay-managed, or from the spoke UI when running standalone.
 
 Resolution order on a client VM is:
 
@@ -531,7 +545,7 @@ The FastAPI lifespan boot starts these tasks:
 | `vm_watchdog.json` | VM watchdog/autorecovery state |
 | `central_history.jsonl` | Central alert history |
 | `client_history.json` | client history persistence |
-| `client_count_baseline.json` | client-count monitor baseline |
+| `client_count_7day.json` | persisted 7-day hourly client-count history used for the baseline alarm |
 
 #### Main in-memory state families
 
@@ -653,7 +667,9 @@ On Linux clients, the websocket agent is intended to run under `client-sim-agent
 | `GET /api/health` | basic reachability check |
 | `POST /api/status` | VM heartbeat and error upload |
 | `GET /api/config` | hostname-aware effective config download |
-| `GET /api/config/overrides` | raw `user-overrides.conf` |
+| `GET /api/config/overrides` | effective `user-overrides.conf` text after any local hub override merge |
+| `GET/PUT /api/config/user-overrides-conf` | full-file user-overrides editor for standalone spoke mode |
+| `POST /api/config/overrides/save` | legacy per-user override save helper |
 | `GET /api/scripts/list` | list platform files |
 | `GET /api/scripts/{platform}/{filename}` | download one script |
 | `GET /api/inbox` | VM command polling |

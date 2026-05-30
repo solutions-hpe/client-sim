@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.1] — 2026-05-30
+
+### Added
+- **Spoke `user-overrides.conf` management** — the spoke Config tab now includes local add/edit/delete management for `configs/user-overrides.conf`, plus new `GET/PUT /api/config/user-overrides-conf` endpoints for full-file reads and saves.
+- **Persisted 7-day client-count history** — the spoke now writes `client_count_7day.json` and uses it to maintain the rolling baseline used by site client-count alarms.
+- **Setup → Simulation editor** — the Setup tab now exposes the same `simulation.conf` editor instead of an empty panel.
+- **Modal/form CSS for config editors** — `.modal-overlay`, `.modal-box`, `.modal-actions`, and `.form-grid` were added so the new config workflows render correctly.
+
+### Changed
+- **Unified `simulation.conf` renderer on spoke** — the Config tab now uses the hub-style `renderSimSection` / `renderHubSimulationSection` layout with collapsible sections and inline boolean controls.
+- **Client-count alarm baseline** — spoke client-count monitoring now compares current hourly averages against the 7-day rolling baseline, falling back to the 1-hour average until enough history exists.
+
+### Fixed
+- **Setup → Simulation content** — the panel is now populated with the same live editor used by the Config tab.
+
 All notable changes to the Client Simulation Suite project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project uses a distributed versioning system where each script has its own version number.

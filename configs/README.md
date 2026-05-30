@@ -1,13 +1,13 @@
 # simulation.conf — Configuration Guide
 
 The `configs/` folder contains two plain-text INI files that control every aspect
-of how client-sim runs. They are designed to be readable and editable directly in
-GitHub without any special tooling.
+of how client-sim runs. They remain easy to edit directly in GitHub, and the same
+files are surfaced through the Hub Config UI and the spoke standalone Config UI.
 
 ```
 configs/
   simulation.conf      ← simulation profiles and global settings
-  user-overrides.conf  ← per-user pin overrides (optional, ships with examples)
+  user-overrides.conf  ← per-username profile overrides (optional, ships with examples)
 ```
 
 ---
@@ -36,6 +36,11 @@ section in `user-overrides.conf`. This takes precedence over the hash.
 ---
 
 ## simulation.conf
+
+`simulation.conf` can be edited directly in GitHub, through the Hub **Config** view,
+or from a standalone spoke in **Config** or **Setup → Simulation**. In the UI, all
+section types now use the same collapsible card layout, and the `s0`–`s9` slots
+always show the full standard key set.
 
 ### [simulation] — Global settings
 
@@ -180,9 +185,11 @@ Available Checks**. The check IDs listed there are the strings to use here.
 
 ## user-overrides.conf
 
-This file pins individual users to a custom simulation regardless of which
-bucket their hostname hash selects. It is loaded **after** `simulation.conf`,
-so any key defined here wins over the bucket profile.
+This file stores one INI section per username. It is loaded **after**
+`simulation.conf`, so any key defined here wins over the bucket profile.
+
+It can be edited directly in GitHub, from Hub **Config → User Overrides**, or
+from a standalone spoke in **Config → User Overrides**.
 
 ```ini
 # Pin slynch to run ssidpw_fail instead of his bucket profile
@@ -196,7 +203,8 @@ www_traffic=off
 
 You do not need to repeat every key — only specify the keys you want to override.
 Keys not listed here fall through to the bucket (`[sX]`) value or the global
-`[simulation]` default.
+`[simulation]` default. Common uses are pinning `simulation_id=sX`, changing
+`wsite`/`ssid`, or toggling individual simulation flags for one user.
 
 ### When to use user overrides
 
