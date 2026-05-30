@@ -3081,6 +3081,7 @@ relay_state: dict[str, Any] = {
     # Diagnostic counters — surfaced in telemetry so the hub can detect instability.
     "ws_reconnect_count": 0,   # incremented on each successful WS connection (>0 means it reconnected)
     "ws_last_error": None,      # last exception string that caused a WS disconnect
+    "ws_last_reconnect_at": None,  # ISO UTC timestamp of last successful WS (re)connect
     "telemetry_build_ms": None, # how long the last _build_relay_telemetry_payload call took
     "hub_loop_lag_ms": None,    # hub event-loop lag reported in the last telemetry_ack
 }
@@ -4985,6 +4986,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
         "hub_loop_lag_ms": relay_state.get("hub_loop_lag_ms"),  # Hub event-loop lag reported in last ack — high values indicate hub blocking.
         "telemetry_build_ms": relay_state.get("telemetry_build_ms"),  # How long the last payload build took; high values indicate spoke event-loop blocking.
         "ws_reconnect_count": relay_state.get("ws_reconnect_count", 0),  # WS reconnect counter; non-zero means the spoke has had connection drops.
+        "ws_last_reconnect_at": relay_state.get("ws_last_reconnect_at"),  # ISO UTC timestamp of last successful WS (re)connect.
         "ws_last_error": relay_state.get("ws_last_error"),  # Last WS disconnect reason.
         "sim_conf_read_error": _sim_conf_content_cache.get("error"),  # Non-None if the background sim_conf reader is failing (e.g. FS stall).
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
@@ -6510,6 +6512,7 @@ async def relay_ws_loop() -> None:
                                           ssl=ws_ssl if ws_url.startswith("wss://") else None) as websocket:
                 backoff = 1
                 relay_state["ws_reconnect_count"] = relay_state.get("ws_reconnect_count", 0) + 1
+                relay_state["ws_last_reconnect_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 async def send_json(payload: dict[str, Any]) -> None:
                     async with send_lock:
