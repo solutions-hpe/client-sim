@@ -71,6 +71,8 @@ VM_WATCHDOG_FILE = BASE_DIR / "vm_watchdog.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
 CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
+CLIENT_COUNT_7DAY_FILE = BASE_DIR / "client_count_7day.json"
+CLIENT_COUNT_7DAY_WINDOW = 7 * 24 * 3600   # 7 days of hourly history
 CLIENT_HISTORY_DAYS = 7          # remove clients not seen within this many days
 CLIENT_SAVE_INTERVAL = 60        # seconds between periodic disk saves
 REPO_DIR = Path(os.getenv("REPO_DIR", "/app/client-sim")).resolve()
@@ -1220,7 +1222,20 @@ try:
 except Exception:
     pass
 
-# Hardware alert state: {check_id: {wsite: [device_name, ...]}}
+# 7-day hourly history: wsite → [(timestamp, hourly_avg), ...]
+# Each hourly_baseline_saver() tick appends one entry; the 7-day avg of these
+# is used as the alarm baseline so a prolonged drop doesn't suppress the alert.
+_client_count_hourly_history: dict[str, list[tuple[float, float]]] = {}
+try:
+    _7d_raw = json.loads(CLIENT_COUNT_7DAY_FILE.read_text(encoding="utf-8"))
+    _7d_cutoff = time.time() - CLIENT_COUNT_7DAY_WINDOW
+    _client_count_hourly_history = {
+        wsite: [(float(ts), float(v)) for ts, v in entries if float(ts) >= _7d_cutoff]
+        for wsite, entries in _7d_raw.items()
+    }
+except Exception:
+    pass
+
 # Populated during each Central poll cycle from alert objects.
 hardware_alert_devices: dict[str, dict[str, list[str]]] = {}
 
@@ -2291,21 +2306,38 @@ def _hw_alerts_payload() -> list[dict[str, Any]]:
 
 
 def _save_client_count_baseline() -> None:
-    """Persist the current per-site hourly averages to disk so a restart
-    can display the last known baseline instead of NO_DATA."""
+    """Persist per-site hourly averages to disk (restart recovery) and
+    append a snapshot to the 7-day hourly history used as the alarm baseline."""
     snapshot: dict[str, Any] = {}
     now = time.time()
+    cutoff_7day = now - CLIENT_COUNT_7DAY_WINDOW
     for wsite, samples in _client_count_samples.items():
         if len(samples) < CLIENT_COUNT_MIN_SAMPLES:
             continue
         avg = sum(s[1] for s in samples) / len(samples)
         snapshot[wsite] = {"hourly_avg": round(avg, 1), "recorded_at": now}
+        # Append current hourly average to the 7-day rolling history.
+        hist = _client_count_hourly_history.setdefault(wsite, [])
+        hist.append((now, avg))
+        _client_count_hourly_history[wsite] = [(ts, v) for ts, v in hist if ts >= cutoff_7day]
     if snapshot:
         try:
             CLIENT_COUNT_BASELINE_FILE.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
             _client_count_baseline.update(snapshot)
         except Exception as exc:
             logger.warning("Could not save client count baseline: %s", exc)
+    # Persist 7-day history independently so a restart still has the full window.
+    if _client_count_hourly_history:
+        try:
+            CLIENT_COUNT_7DAY_FILE.write_text(
+                json.dumps(
+                    {wsite: list(hist) for wsite, hist in _client_count_hourly_history.items()},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning("Could not save 7-day client count history: %s", exc)
 
 
 async def hourly_baseline_saver() -> None:
@@ -2424,27 +2456,45 @@ async def sim_client_count_sampler() -> None:
 
 
 def _client_count_payload() -> dict[str, Any]:
-    """Per-site client count status based on 60-min rolling average.
-    Falls back to persisted baseline when live samples are insufficient
-    so the UI shows the last known baseline instead of NO_DATA after restart."""
+    """Per-site client count status using a 7-day rolling baseline.
+
+    Alarm logic:
+    - current_hourly = average of the last hour's samples (smoothed "current")
+    - baseline = 7-day rolling average of hourly snapshots (stable reference)
+    - drop_pct = (baseline - current_hourly) / baseline × 100
+    - DEGRADED when drop_pct >= CLIENT_COUNT_DROP_PCT
+
+    Because the baseline spans 7 days, a prolonged client drop does NOT
+    suppress the alarm — it stays active until counts recover to near-normal.
+    Falls back to 1-hour average when insufficient 7-day history exists
+    (first day of operation or after data loss)."""
     site_mappings = settings.get("site_mappings", {})
     result: dict[str, Any] = {}
     for wsite, samples in _client_count_samples.items():
         if not samples:
             continue
-        current = samples[-1][1]
+        current = samples[-1][1]   # raw latest sample (display only)
         site_name = site_mappings.get(wsite, wsite)
+
+        # 7-day baseline: average of all hourly snapshots recorded in the last 7 days.
+        hourly_hist = _client_count_hourly_history.get(wsite, [])
+        has_7day = len(hourly_hist) >= 2
+        baseline_7day = (sum(v for _, v in hourly_hist) / len(hourly_hist)) if has_7day else None
+
         if len(samples) < CLIENT_COUNT_MIN_SAMPLES:
-            # Use persisted baseline average if available
+            # Not enough live samples yet — use persisted baseline data.
             saved = _client_count_baseline.get(wsite)
             if saved:
-                avg = saved["hourly_avg"]
-                drop_pct = max(0.0, (avg - current) / avg * 100.0) if avg >= 1 else 0.0
+                hourly_avg = saved["hourly_avg"]
+                baseline = baseline_7day if has_7day else hourly_avg
+                drop_pct = max(0.0, (baseline - hourly_avg) / baseline * 100.0) if baseline >= 1 else 0.0
                 status = "DEGRADED" if drop_pct >= CLIENT_COUNT_DROP_PCT else "OK"
                 result[wsite] = {
                     "site_name": site_name,
                     "current": current,
-                    "hourly_avg": avg,
+                    "hourly_avg": hourly_avg,
+                    "baseline_7day": round(baseline_7day, 1) if baseline_7day is not None else None,
+                    "baseline_source": "7day" if has_7day else "hourly",
                     "drop_pct": drop_pct,
                     "status": status,
                     "ts": samples[-1][0],
@@ -2456,23 +2506,31 @@ def _client_count_payload() -> dict[str, Any]:
                     "site_name": site_name,
                     "current": current,
                     "hourly_avg": current,
+                    "baseline_7day": round(baseline_7day, 1) if baseline_7day is not None else None,
+                    "baseline_source": "none",
                     "drop_pct": 0.0,
                     "status": "NO_DATA",
                     "ts": samples[-1][0],
                     "baseline_stale": False,
                 }
             continue
-        avg = sum(s[1] for s in samples) / len(samples)
-        if avg < 1:
+
+        hourly_avg = sum(s[1] for s in samples) / len(samples)
+        # Use 7-day baseline when available; fall back to hourly avg on first day.
+        baseline = baseline_7day if has_7day else hourly_avg
+        if baseline < 1:
             status = "OK"
             drop_pct = 0.0
         else:
-            drop_pct = (avg - current) / avg * 100.0
+            # Compare smoothed current (hourly avg) against the 7-day stable baseline.
+            drop_pct = (baseline - hourly_avg) / baseline * 100.0
             status = "DEGRADED" if drop_pct >= CLIENT_COUNT_DROP_PCT else "OK"
         result[wsite] = {
             "site_name": site_name,
             "current": current,
-            "hourly_avg": avg,
+            "hourly_avg": round(hourly_avg, 1),
+            "baseline_7day": round(baseline_7day, 1) if baseline_7day is not None else None,
+            "baseline_source": "7day" if has_7day else "hourly",
             "drop_pct": drop_pct,
             "status": status,
             "ts": samples[-1][0],
