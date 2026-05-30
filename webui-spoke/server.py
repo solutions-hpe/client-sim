@@ -5635,6 +5635,52 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                 await ack_fn(cmd_id, "executed", result)
             continue
 
+        if cmd_type == "proxmox_approve_agent":
+            hostname = str(payload_data.get("hostname") or "").strip()
+            try:
+                pending_payload: list[dict[str, Any]] | None = None
+                async with state_lock:
+                    pending_hostname = _resolve_proxmox_agent_hostname(hostname, pending_proxmox_agents)
+                    approved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents)
+                    if approved_hostname is None:
+                        resolved_hostname = pending_hostname or _normalize_proxmox_hostname(hostname)
+                        if resolved_hostname:
+                            key = str(uuid.uuid4())
+                            approved_proxmox_agents[resolved_hostname] = key
+                            pending_proxmox_agents.pop(pending_hostname or resolved_hostname, None)
+                            settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+                            _save_settings()
+                            pending_payload = _pending_proxmox_payload()
+                    else:
+                        if pending_hostname:
+                            pending_proxmox_agents.pop(pending_hostname, None)
+                            pending_payload = _pending_proxmox_payload()
+                if pending_payload is not None:
+                    await broadcast({"type": "proxmox_pending_update", "pending": pending_payload})
+                await _broadcast_proxmox_state()
+                result = {"success": True, "task_type": "proxmox_approve_agent", "hostname": hostname}
+            except Exception as exc:
+                result = {"success": False, "task_type": "proxmox_approve_agent", "detail": str(exc)}
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
+        if cmd_type == "proxmox_revoke_agent":
+            hostname = str(payload_data.get("hostname") or "").strip()
+            try:
+                async with state_lock:
+                    resolved_hostname = _resolve_proxmox_agent_hostname(hostname, approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+                    approved_proxmox_agents.pop(resolved_hostname, None)
+                    settings["proxmox_approved_agents"] = dict(approved_proxmox_agents)
+                    _save_settings()
+                await _broadcast_proxmox_state()
+                result = {"success": True, "task_type": "proxmox_revoke_agent", "hostname": hostname}
+            except Exception as exc:
+                result = {"success": False, "task_type": "proxmox_revoke_agent", "detail": str(exc)}
+            if cmd_id:
+                await ack_fn(cmd_id, "executed", result)
+            continue
+
         if cmd_type == "proxmox_agent_command":
             try:
                 import uuid as _uuid_mod
