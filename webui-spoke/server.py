@@ -7187,9 +7187,14 @@ async def periodic_webui_refresh() -> None:
 
 
 async def check_for_update() -> None:
-    """Background task: check for a new installer version every 24 hours.
-    Only detects and broadcasts — never auto-applies. Updates are applied
-    explicitly via /api/self-update or /api/update-all."""
+    """Background task: check for a new installer version every 24 hours with
+    a random 2-hour jitter. Auto-applies the update when a new version is
+    detected and the spoke is idle (no active reclone or reseed)."""
+    import random
+    # Spread initial check across first 2 hours to avoid update stampedes
+    initial_jitter = random.uniform(0, 7200)
+    logger.info("Update checker: first check in %.0f seconds", initial_jitter)
+    await asyncio.sleep(initial_jitter)
     while True:
         try:
             available = await asyncio.to_thread(_get_repo_version)
@@ -7208,12 +7213,31 @@ async def check_for_update() -> None:
             )
             _update_service_health("update_checker", ok=True)
             await _broadcast_update_state()
+
+            # Auto-apply if update available and spoke is idle
+            if (
+                update_state["update_available"]
+                and not update_state["update_in_progress"]
+                and reclone_state.get("status") != "running"
+                and not _proxmox_reseed_in_progress
+            ):
+                logger.info(
+                    "Auto-update: new version %s available and spoke is idle — applying",
+                    available,
+                )
+                asyncio.create_task(_run_self_update())
+            elif update_state["update_available"]:
+                logger.info(
+                    "Auto-update: new version %s available but spoke is busy — will retry next cycle",
+                    available,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _update_service_health("update_checker", ok=False, error=str(exc))
             logger.exception("Update checker error: %s", exc)
-        await asyncio.sleep(UPDATE_CHECK_INTERVAL)
+        # 24 hours + up to 2-hour jitter to prevent all spokes checking simultaneously
+        await asyncio.sleep(UPDATE_CHECK_INTERVAL + random.uniform(0, 7200))
 
 
 
