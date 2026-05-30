@@ -428,6 +428,39 @@ _sim_conf_cache: dict[str, Any] = {
     "simulations": {},
 }
 
+# Raw text cache for sim_conf_content sent in telemetry.
+# Refreshed by _sim_conf_content_refresh_loop every 30s in a thread-pool worker
+# so reads never block the event loop or the telemetry_loop task.
+_sim_conf_content_cache: dict[str, Any] = {"content": "", "mtime_ns": -1, "error": None}
+
+
+def _refresh_sim_conf_content() -> None:
+    """Stat + conditionally re-read simulation.conf into _sim_conf_content_cache.
+    Designed to run inside asyncio.to_thread — never call from the event loop directly."""
+    path = REPO_DIR / "configs" / "simulation.conf"
+    try:
+        st = path.stat()
+        if st.st_mtime_ns != _sim_conf_content_cache["mtime_ns"]:
+            _sim_conf_content_cache["content"] = path.read_text(encoding="utf-8")
+            _sim_conf_content_cache["mtime_ns"] = st.st_mtime_ns
+            _sim_conf_content_cache["error"] = None
+    except FileNotFoundError:
+        _sim_conf_content_cache["content"] = ""
+        _sim_conf_content_cache["mtime_ns"] = -1
+        _sim_conf_content_cache["error"] = None
+    except Exception as exc:
+        _sim_conf_content_cache["error"] = str(exc)
+
+
+async def _sim_conf_content_refresh_loop() -> None:
+    """Background task: keep _sim_conf_content_cache fresh without blocking the event loop."""
+    while True:
+        try:
+            await asyncio.to_thread(_refresh_sim_conf_content)
+        except Exception as exc:
+            _sim_conf_content_cache["error"] = str(exc)
+        await asyncio.sleep(30)
+
 
 def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = None) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
@@ -2631,6 +2664,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["webui_refresh"] = asyncio.create_task(periodic_webui_refresh())
     background_tasks["relay"] = asyncio.create_task(relay_loop())
     background_tasks["hub_isolation_monitor"] = asyncio.create_task(hub_isolation_monitor())  # Watch the timeout in the background so the UI updates when isolation flips without waiting for another relay message.
+    background_tasks["sim_conf_refresh"] = asyncio.create_task(_sim_conf_content_refresh_loop())
     background_tasks["client_history_saver"] = asyncio.create_task(client_history_saver())
     background_tasks["command_expiry"] = asyncio.create_task(expire_commands())
     background_tasks["auto_recovery"] = asyncio.create_task(auto_recovery_check())
@@ -3044,6 +3078,11 @@ relay_state: dict[str, Any] = {
     "error": None,
     "registration_status": _relay_registration_status_from_settings(),
     "api_key_configured": bool(settings.get("relay_api_key")),
+    # Diagnostic counters — surfaced in telemetry so the hub can detect instability.
+    "ws_reconnect_count": 0,   # incremented on each successful WS connection (>0 means it reconnected)
+    "ws_last_error": None,      # last exception string that caused a WS disconnect
+    "telemetry_build_ms": None, # how long the last _build_relay_telemetry_payload call took
+    "hub_loop_lag_ms": None,    # hub event-loop lag reported in the last telemetry_ack
 }
 relay_registration_refresh_needed = bool(relay_state["enabled"])
 # Capped registration diagnostic log — last 50 attempts
@@ -4928,11 +4967,9 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
 
     # Read raw simulation.conf so the hub can populate the conf editor when
     # there is no GitHub API key and no saved hub override yet.
-    _sim_conf_path = REPO_DIR / "configs" / "simulation.conf"
-    try:
-        sim_conf_content = _sim_conf_path.read_text(encoding="utf-8") if _sim_conf_path.exists() else ""
-    except Exception:
-        sim_conf_content = ""
+    # Content is kept fresh by _sim_conf_content_refresh_loop (runs every 30s in a
+    # thread-pool worker) so this dict-read never blocks the event loop.
+    sim_conf_content = _sim_conf_content_cache["content"]
 
     return {
         "spoke_id": spoke_id,
@@ -4945,6 +4982,11 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
         "hub_last_checkin": relay_state.get("last_sync"),  # Export the last successful check-in timestamp so the hub can reason about isolation timing.
         "hub_rtt_ms": relay_state.get("hub_rtt_ms"),  # Round-trip time from last telemetry send to ack receipt.
         "hub_processing_ms": relay_state.get("hub_processing_ms"),  # Hub-reported time to process and save telemetry.
+        "hub_loop_lag_ms": relay_state.get("hub_loop_lag_ms"),  # Hub event-loop lag reported in last ack — high values indicate hub blocking.
+        "telemetry_build_ms": relay_state.get("telemetry_build_ms"),  # How long the last payload build took; high values indicate spoke event-loop blocking.
+        "ws_reconnect_count": relay_state.get("ws_reconnect_count", 0),  # WS reconnect counter; non-zero means the spoke has had connection drops.
+        "ws_last_error": relay_state.get("ws_last_error"),  # Last WS disconnect reason.
+        "sim_conf_read_error": _sim_conf_content_cache.get("error"),  # Non-None if the background sim_conf reader is failing (e.g. FS stall).
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
         "proxmox": {
             "connected": bool(proxmox_state.get("connected", False)),
@@ -6392,6 +6434,7 @@ async def relay_ws_loop() -> None:
             async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10,
                                           ssl=ws_ssl if ws_url.startswith("wss://") else None) as websocket:
                 backoff = 1
+                relay_state["ws_reconnect_count"] = relay_state.get("ws_reconnect_count", 0) + 1
 
                 async def send_json(payload: dict[str, Any]) -> None:
                     async with send_lock:
@@ -6406,7 +6449,10 @@ async def relay_ws_loop() -> None:
                 async def telemetry_loop() -> None:
                     while True:
                         try:
+                            _t0 = time.monotonic()
                             telemetry = await _build_relay_telemetry_payload(spoke_id)
+                            build_ms = round((time.monotonic() - _t0) * 1000)
+                            relay_state["telemetry_build_ms"] = build_ms
                             relay_state["_last_telemetry_sent_at"] = time.time()
                             await send_json({"type": "telemetry", "payload": telemetry})
                             # Do NOT set connected=True here — wait for telemetry_ack from the hub.
@@ -6450,11 +6496,14 @@ async def relay_ws_loop() -> None:
                             sent_at = relay_state.pop("_last_telemetry_sent_at", None)
                             rtt_ms = round((time.time() - sent_at) * 1000) if sent_at else None
                             hub_processing_ms = message.get("processing_ms")
+                            hub_loop_lag_ms = message.get("loop_lag_ms")
                             relay_state.update({"connected": True, "last_sync": time.time(), "error": None})
                             if rtt_ms is not None:
                                 relay_state["hub_rtt_ms"] = rtt_ms
                             if hub_processing_ms is not None:
                                 relay_state["hub_processing_ms"] = hub_processing_ms
+                            if hub_loop_lag_ms is not None:
+                                relay_state["hub_loop_lag_ms"] = hub_loop_lag_ms
                             await _broadcast_relay_state()
                         elif msg_type == "pong":
                             relay_state.update({"connected": True, "error": None})
@@ -6498,7 +6547,7 @@ async def relay_ws_loop() -> None:
             raise
         except WebSocketInvalidStatus as exc:
             status_code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
-            relay_state.update({"connected": False, "error": f"websocket handshake failed: {exc}"})
+            relay_state.update({"connected": False, "error": f"websocket handshake failed: {exc}", "ws_last_error": f"HTTP {status_code}: {exc}"})
             await _broadcast_relay_state()
             if status_code in (401, 403):
                 relay_registration_refresh_needed = True
@@ -6514,7 +6563,7 @@ async def relay_ws_loop() -> None:
                 await asyncio.sleep(min(backoff, 30))
                 backoff = min(backoff * 2, 30)
         except Exception as exc:
-            relay_state.update({"connected": False, "error": str(exc)})
+            relay_state.update({"connected": False, "error": str(exc), "ws_last_error": str(exc)})
             _debug_event("relay_sync_fail", str(exc)[:200])
             await _broadcast_relay_state()
             # Detect WebSocket close codes 4401/4403 sent by the hub when auth fails.
