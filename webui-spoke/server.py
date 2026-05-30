@@ -5337,9 +5337,14 @@ async def _handle_provision_proxmox_token(message: dict[str, Any]) -> None:
     async def _send_error(error: str) -> None:
         await _relay_vnc_to_hub({"type": "proxmox_token_provision_error", "request_id": request_id, "error": error})
 
-    pvesh_path = shutil.which("pvesh")
+    # pvesh may not be in the systemd service PATH — check common Proxmox locations
+    pvesh_path = None
+    for candidate in [shutil.which("pvesh"), "/usr/bin/pvesh", "/usr/sbin/pvesh", "/usr/local/bin/pvesh"]:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            pvesh_path = candidate
+            break
     if not pvesh_path:
-        await _send_error("pvesh not found — is the spoke running directly on a Proxmox host?")
+        await _send_error("pvesh not found — the spoke must be running directly on the Proxmox host (checked /usr/bin, /usr/sbin, /usr/local/bin)")
         return
 
     TOKEN_ID = "cs-hub"
