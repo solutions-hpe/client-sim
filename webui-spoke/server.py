@@ -10990,15 +10990,18 @@ async def api_qa_summary() -> dict[str, Any]:
         reporting_clients = len(clients)
 
     dongle_count = len(present_usb) if present_usb else len(usb_state)
-    vm_count = len(vms)
+    # Only count sim-client VMs — those with a USB dongle assigned (in usb_state).
+    # Templates, IoT VMs, and other non-sim VMs must not be included in this total.
+    usb_vmids = {str(e.get("vmid")) for e in usb_state if e.get("vmid") is not None}
+    sim_vm_count = sum(1 for vm in vms if str(vm.get("vmid", "")) in usb_vmids)
     auto_provision = _normalize_toggle(settings.get("usb_auto_provision", "off")) == "on"
 
     issues: list[str] = []
     if not proxmox_connected:
         issues.append("Proxmox agent is not connected")
-    if auto_provision and dongle_count > 0 and vm_count != dongle_count:
+    if auto_provision and dongle_count > 0 and sim_vm_count != dongle_count:
         issues.append(
-            f"VM count ({vm_count}) does not match dongle count ({dongle_count})"
+            f"VM count ({sim_vm_count}) does not match dongle count ({dongle_count})"
         )
     if dongle_count > 0 and reporting_clients != dongle_count:
         issues.append(
@@ -11008,7 +11011,8 @@ async def api_qa_summary() -> dict[str, Any]:
     return {
         "proxmox_agent_connected": proxmox_connected,
         "dongle_count": dongle_count,
-        "vm_count": vm_count,
+        "vm_count": sim_vm_count,
+        "total_vm_count": len(vms),
         "reporting_clients": reporting_clients,
         "auto_provision": auto_provision,
         "pass": len(issues) == 0,
