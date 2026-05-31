@@ -35,13 +35,14 @@ init_simulation_context() {
   # reads them from there via get_value $username.
   process_ini_file '/usr/local/scripts/simulation.conf'
   username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
-  # Hash the hostname to assign a bucket — no VMID required.
-  bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
+  # Hash the username to assign a bucket — produces s0-s9 deterministically.
+  bucket=$(python3 -c "import zlib; print(zlib.crc32('${username}'.encode()) % 10)")
   simulation_id="s${bucket}"
   # Allow user-overrides.conf to pin a specific bucket via simulation_id key.
+  # Only accept valid slot IDs (s0-s9); ignore malformed values.
   # This must happen before the bucket config is read below.
   user_sim_id=$(get_value "$username" 'simulation_id')
-  [[ -n "$user_sim_id" ]] && simulation_id="$user_sim_id"
+  [[ "$user_sim_id" =~ ^s[0-9]$ ]] && simulation_id="$user_sim_id"
   require_config_value "username" "$username"
   require_config_value "simulation_id" "$simulation_id"
 }

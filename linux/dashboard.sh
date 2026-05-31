@@ -29,10 +29,11 @@ username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
 server_url=$(get_value 'server' 'server_url')
 server_url="${server_url:-http://169.253.1.1:8000}"
-bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
+bucket=$(python3 -c "import zlib; print(zlib.crc32('${username}'.encode()) % 10)")
 simulation_id="s${bucket}"
 user_sim_id=$(get_value "$username" 'simulation_id')
-[[ -n "$user_sim_id" ]] && simulation_id="$user_sim_id"
+# Only accept valid slot IDs (s0-s9) from user overrides; ignore malformed values
+[[ "$user_sim_id" =~ ^s[0-9]$ ]] && simulation_id="$user_sim_id"
 kill_switch=$(get_value 'simulation' 'kill_switch')
 rapid_update=$(get_value 'simulation' 'rapid_update')
 sim_load=$(get_value 'simulation' 'sim_load')
