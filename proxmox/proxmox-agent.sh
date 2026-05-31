@@ -1485,7 +1485,7 @@ PY
     done
 
     if [[ "$came_back" -eq 1 ]]; then
-        timeout 120 qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
+        timeout 360 qm guest exec "$vmid" --timeout 300 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
             && log "update.sh completed on VM $vmid" \
             || log "WARNING: update.sh exec failed on VM $vmid — will retry on next boot"
     else

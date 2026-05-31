@@ -160,7 +160,7 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
             (( reboot_wait >= 180 )) && { echo "WARNING: VM $vmid did not come back after reboot"; break; }
         done
 
-        qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh \
+        qm guest exec "$vmid" --timeout 300 -- bash /usr/local/scripts/update.sh \
             && echo "update.sh completed on VM $vmid" \
             || echo "WARNING: update.sh failed on VM $vmid"
 
@@ -224,7 +224,7 @@ if [[ "$cmd" == "config" ]]; then
             (( reboot_wait >= 180 )) && { echo "WARNING: VM $i did not come back after reboot"; break; }
         done
 
-        qm guest exec "$i" --timeout 90 -- bash /usr/local/scripts/update.sh \
+        qm guest exec "$i" --timeout 300 -- bash /usr/local/scripts/update.sh \
             && echo "update.sh completed on VM $i" \
             || echo "WARNING: update.sh failed on VM $i"
     done
