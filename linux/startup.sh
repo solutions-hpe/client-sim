@@ -47,8 +47,13 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
 simulation_id="s${bucket}"
 user_sim_id=$(get_value "$username" 'simulation_id')
-# Only accept valid slot IDs (s0-s9) from user overrides; ignore malformed values
-[[ "$user_sim_id" =~ ^s[0-9]$ ]] && simulation_id="$user_sim_id"
+# Only accept valid slot IDs (s0-s9); old scripts used character-position hashing
+# which could produce letters (e.g. "su"). Reject and fall back to hash bucket.
+if [[ -n "$user_sim_id" && ! "$user_sim_id" =~ ^s[0-9]$ ]]; then
+  echo "WARNING: invalid simulation_id '${user_sim_id}' for ${HOSTNAME} — old hashing method detected, using hash bucket ${simulation_id}" | tee -a /usr/local/scripts/sim.log
+elif [[ "$user_sim_id" =~ ^s[0-9]$ ]]; then
+  simulation_id="$user_sim_id"
+fi
 reboot_schedule=$(get_value 'simulation' 'reboot_schedule')
 repo_location=$(get_value 'simulation' 'repo_location')
 sim_phy=$(get_value $simulation_id 'sim_phy')
