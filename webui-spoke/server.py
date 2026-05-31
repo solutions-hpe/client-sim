@@ -8969,13 +8969,13 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             (mem_avg is not None and mem_avg >= mem_del_thr)
         ):
             usb_vmids_int: set[int] = set()
-            for _e in usb_state:
+            for _e in normalized_usb_state:
                 try:
                     usb_vmids_int.add(int(_e["vmid"]))
                 except (KeyError, TypeError, ValueError):
                     pass
             candidates: list[int] = []
-            for _vm in vms:
+            for _vm in enriched_vms:
                 try:
                     _vid = int(_vm.get("vmid", 0) or 0)
                     if _vm.get("type") == "qemu" and _vid in usb_vmids_int and _vid not in _pending_delete_vmids:
