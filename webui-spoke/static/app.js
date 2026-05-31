@@ -1066,21 +1066,25 @@ function renderServerTab(data) {
   const _warmupRemainS = data?.resource_samples_started
     ? Math.max(0, 3600 - (Date.now() / 1000 - Number(data.resource_samples_started)))
     : null;
-  const _warmupLabel = _warmupRemainS != null && _warmupRemainS > 0
-    ? `warming up… ${Math.ceil(_warmupRemainS / 60)} min`
-    : 'warming up…';
+  const _warmupRemainLabel = _warmupRemainS != null && _warmupRemainS > 0
+    ? `${Math.ceil(_warmupRemainS / 60)} min`
+    : null;
   if (cpuAvgPill) {
     if (data?.cpu_1h_avg != null) {
       cpuAvgPill.innerHTML = `📊 CPU avg: <span id="server-cpu-avg">${Number(data.cpu_1h_avg).toFixed(1)}</span>%`;
+    } else if (data?.cpu_est_avg != null) {
+      cpuAvgPill.innerHTML = `📊 CPU avg: ~${Number(data.cpu_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
     } else {
-      cpuAvgPill.innerHTML = `📊 ${_warmupLabel}`;
+      cpuAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
     }
   }
   if (memAvgPill) {
     if (data?.mem_1h_avg != null) {
       memAvgPill.innerHTML = `📊 Mem avg: <span id="server-mem-avg">${Number(data.mem_1h_avg).toFixed(1)}</span>%`;
+    } else if (data?.mem_est_avg != null) {
+      memAvgPill.innerHTML = `📊 Mem avg: ~${Number(data.mem_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
     } else {
-      memAvgPill.innerHTML = `📊 ${_warmupLabel}`;
+      memAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
     }
   }
 
