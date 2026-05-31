@@ -1488,6 +1488,16 @@ PY
         timeout 360 qm guest exec "$vmid" --timeout 300 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
             && log "update.sh completed on VM $vmid" \
             || log "WARNING: update.sh exec failed on VM $vmid — will retry on next boot"
+
+        # Trigger hub self-update so the hub pulls latest scripts too
+        if [[ -n "$SERVER_URL" ]]; then
+            local _hub_http
+            _hub_http=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+                -X POST "${SERVER_URL}/api/self-update" 2>/dev/null || true)
+            [[ "$_hub_http" == "200" ]] \
+                && log "Hub self-update triggered at ${SERVER_URL}" \
+                || log "WARNING: Hub self-update returned HTTP ${_hub_http:-000} (non-fatal)"
+        fi
     else
         log "WARNING: VM $vmid did not come back after reboot — skipping update.sh"
     fi

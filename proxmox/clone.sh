@@ -164,6 +164,16 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
             && echo "update.sh completed on VM $vmid" \
             || echo "WARNING: update.sh failed on VM $vmid"
 
+        # Trigger hub self-update so the hub pulls latest scripts too
+        _hub_url=$(tr -d '[:space:]' < /var/lib/client-sim/hub-server-url 2>/dev/null || true)
+        if [[ -n "$_hub_url" ]]; then
+            _hub_http=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+                -X POST "${_hub_url}/api/self-update" 2>/dev/null || true)
+            [[ "$_hub_http" == "200" ]] \
+                && echo "Hub self-update triggered at ${_hub_url}" \
+                || echo "WARNING: Hub self-update returned HTTP ${_hub_http:-000} (non-fatal)"
+        fi
+
         # USB assignment goes into config now; device is available after reboot
         if [[ -n "$dev" ]]; then
             echo "Assigning USB $dev -> VM $vmid"
@@ -227,6 +237,16 @@ if [[ "$cmd" == "config" ]]; then
         qm guest exec "$i" --timeout 300 -- bash /usr/local/scripts/update.sh \
             && echo "update.sh completed on VM $i" \
             || echo "WARNING: update.sh failed on VM $i"
+
+        # Trigger hub self-update so the hub pulls latest scripts too
+        _hub_url=$(tr -d '[:space:]' < /var/lib/client-sim/hub-server-url 2>/dev/null || true)
+        if [[ -n "$_hub_url" ]]; then
+            _hub_http=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+                -X POST "${_hub_url}/api/self-update" 2>/dev/null || true)
+            [[ "$_hub_http" == "200" ]] \
+                && echo "Hub self-update triggered at ${_hub_url}" \
+                || echo "WARNING: Hub self-update returned HTTP ${_hub_http:-000} (non-fatal)"
+        fi
     done
 fi
 
