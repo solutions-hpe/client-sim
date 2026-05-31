@@ -1469,13 +1469,29 @@ PY
         && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
         || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
 
-    # Run update.sh so the VM has the latest scripts before its first boot.
-    # This ensures sim-id hashing and all other logic is current before startup.sh runs.
-    timeout 120 qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
-        && log "update.sh completed on VM $vmid" \
-        || log "WARNING: update.sh exec failed on VM $vmid — will retry on first boot"
-
     timeout 30 qm guest exec "$vmid" --timeout 10 -- reboot >/dev/null 2>&1 || true
+
+    # Wait for the VM to come back up after reboot, then run update.sh
+    # so it has the latest scripts before startup.sh runs for the first time.
+    local reboot_wait=0
+    local came_back=0
+    while (( reboot_wait < 180 )); do
+        sleep 5
+        reboot_wait=$(( reboot_wait + 5 ))
+        if qm guest ping "$vmid" >/dev/null 2>&1; then
+            came_back=1
+            break
+        fi
+    done
+
+    if [[ "$came_back" -eq 1 ]]; then
+        timeout 120 qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
+            && log "update.sh completed on VM $vmid" \
+            || log "WARNING: update.sh exec failed on VM $vmid — will retry on next boot"
+    else
+        log "WARNING: VM $vmid did not come back after reboot — skipping update.sh"
+    fi
+
     rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
 }

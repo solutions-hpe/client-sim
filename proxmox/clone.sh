@@ -150,8 +150,19 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
         done
 
         qm guest exec "$vmid" --timeout 60 -- hostnamectl set-hostname "${vm_name}"
-        qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh
         qm guest exec "$vmid" -- reboot
+
+        # Wait for VM to come back up after reboot before running update.sh
+        reboot_wait=0
+        until qm guest ping "$vmid" >/dev/null 2>&1; do
+            sleep 5
+            reboot_wait=$((reboot_wait + 5))
+            (( reboot_wait >= 180 )) && { echo "WARNING: VM $vmid did not come back after reboot"; break; }
+        done
+
+        qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh \
+            && echo "update.sh completed on VM $vmid" \
+            || echo "WARNING: update.sh failed on VM $vmid"
 
         # USB assignment goes into config now; device is available after reboot
         if [[ -n "$dev" ]]; then
@@ -203,8 +214,19 @@ if [[ "$cmd" == "config" ]]; then
         vm_name=$(get_value "c${i}" 'vm_name')
         vm_name="${vm_name:-sim-client}"
         qm guest exec "$i" --timeout 60 -- hostnamectl set-hostname "${vm_name}"
-        qm guest exec "$i" --timeout 90 -- bash /usr/local/scripts/update.sh
         qm guest exec "$i" -- reboot
+
+        # Wait for VM to come back up after reboot before running update.sh
+        reboot_wait=0
+        until qm guest ping "$i" >/dev/null 2>&1; do
+            sleep 5
+            reboot_wait=$((reboot_wait + 5))
+            (( reboot_wait >= 180 )) && { echo "WARNING: VM $i did not come back after reboot"; break; }
+        done
+
+        qm guest exec "$i" --timeout 90 -- bash /usr/local/scripts/update.sh \
+            && echo "update.sh completed on VM $i" \
+            || echo "WARNING: update.sh failed on VM $i"
     done
 fi
 
