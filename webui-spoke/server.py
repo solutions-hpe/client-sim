@@ -11319,6 +11319,9 @@ async def _ack_command_internal(body: dict[str, Any]) -> dict[str, bool]:
         await _async_save_commands()
         serialized = _serialize_commands()
 
+    await broadcast({"type": "commands_update", "commands": serialized})
+    return {"ok": True}
+
 
 @app.post("/api/inbox/ack")
 async def ack_command(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, bool]:
