@@ -696,6 +696,24 @@ function showNotification(message, level = 'info') {
   }, 4000);
 }
 
+function showToast(message, level = 'success') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;top:72px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  const cls = level === 'error' ? 'error' : level === 'warn' ? 'warn' : level === 'info' ? 'info' : 'success';
+  toast.className = `settings-message ${cls}`;
+  toast.textContent = message;
+  toast.style.cssText = 'min-width:240px;max-width:420px;box-shadow:0 4px 16px rgba(0,0,0,0.15);cursor:pointer;';
+  toast.addEventListener('click', () => toast.remove());
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 5000);
+}
+
 function formatRelativeTime(ts) {
   if (!ts) return '—';
   const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -1022,9 +1040,15 @@ function renderServerTab(data) {
 
     tbody.querySelectorAll('.vm-action-btn:not([disabled])').forEach((btn) => {
       btn.addEventListener('click', () => {
-        sendProxmoxCommand(btn.dataset.action, btn.dataset.vmid)
-          .then(() => showNotification(`${btn.title} command sent for VM ${btn.dataset.vmid}`, 'info'))
-          .catch((err) => showNotification(`Error: ${err.message}`, 'error'));
+        const action = btn.dataset.action;
+        const vmid = btn.dataset.vmid;
+        if (action === 'delete_vm') {
+          const vmName = btn.closest('tr')?.querySelector('td:nth-child(4)')?.textContent?.trim() || `VM ${vmid}`;
+          if (!confirm(`Delete ${vmName} (VMID ${vmid})?\n\nThis will stop and permanently destroy the VM. This cannot be undone.`)) return;
+        }
+        sendProxmoxCommand(action, vmid)
+          .then(() => showToast(`${btn.title} command sent for VM ${vmid}`, 'success'))
+          .catch((err) => showToast(`Error: ${err.message}`, 'error'));
       });
     });
 
@@ -6429,9 +6453,10 @@ document.getElementById('server-select-all')?.addEventListener('change', (e) => 
     if (!panel) return;
     const vmids = [...panel.querySelectorAll('.vm-check:checked')].map((cb) => cb.dataset.vmid);
     if (!vmids.length) return;
+    if (op === 'delete' && !confirm(`Delete ${vmids.length} VM(s)?\n\nThis will stop and permanently destroy them. This cannot be undone.`)) return;
     const action = op === 'reclone' ? 'reclone_vm' : op === 'delete' ? 'delete_vm' : `${op}_vm`;
     vmids.forEach((vmid) => sendProxmoxCommand(action, vmid));
-    showNotification(`${op} sent for ${vmids.length} VM(s)`, 'info');
+    showToast(`${op.charAt(0).toUpperCase() + op.slice(1)} command sent for ${vmids.length} VM(s)`, 'success');
   });
 });
 

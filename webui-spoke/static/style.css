@@ -906,6 +906,18 @@ body.spoke-login-active {
   border: 1px solid rgba(1,169,130,0.3);
 }
 
+.settings-message.info {
+  background: #e8f4fd;
+  color: #1a6a9a;
+  border: 1px solid rgba(26,106,154,0.3);
+}
+
+.settings-message.warn {
+  background: #fff8e1;
+  color: #7a5800;
+  border: 1px solid rgba(122,88,0,0.3);
+}
+
 .settings-message.error {
   background: var(--hpe-red-bg);
   color: #C0392B;
