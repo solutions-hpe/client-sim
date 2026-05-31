@@ -1423,17 +1423,17 @@ PY
         return 1
     fi
 
-    # Wait for guest agent
-    for _ in $(seq 1 60); do
+    # Wait for guest agent (up to 10 minutes, 5s intervals)
+    for _ in $(seq 1 120); do
         if qm guest ping "$vmid" >/dev/null 2>&1; then
             guest_ready=1
             break
         fi
-        sleep 2
+        sleep 5
     done
 
     if [[ "$guest_ready" -eq 0 ]]; then
-        log "WARNING: Guest agent not ready after 120s for VM $vmid — attempting hostname set anyway"
+        log "WARNING: Guest agent not ready after 600s for VM $vmid — attempting hostname set anyway"
     fi
 
     # Set hostname — write /etc/hostname + suppress cloud-init from overriding it.
@@ -1475,7 +1475,7 @@ PY
     # so it has the latest scripts before startup.sh runs for the first time.
     local reboot_wait=0
     local came_back=0
-    while (( reboot_wait < 180 )); do
+    while (( reboot_wait < 600 )); do
         sleep 5
         reboot_wait=$(( reboot_wait + 5 ))
         if qm guest ping "$vmid" >/dev/null 2>&1; then

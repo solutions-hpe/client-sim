@@ -141,7 +141,7 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
         qm start "$vmid"
 
         # Wait for the QEMU guest agent to become responsive before running commands
-        timeout=60
+        timeout=600
         elapsed=0
         until qm guest ping "$vmid" >/dev/null 2>&1; do
             sleep 2
@@ -157,7 +157,7 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
         until qm guest ping "$vmid" >/dev/null 2>&1; do
             sleep 5
             reboot_wait=$((reboot_wait + 5))
-            (( reboot_wait >= 180 )) && { echo "WARNING: VM $vmid did not come back after reboot"; break; }
+            (( reboot_wait >= 600 )) && { echo "WARNING: VM $vmid did not come back after reboot"; break; }
         done
 
         qm guest exec "$vmid" --timeout 300 -- bash /usr/local/scripts/update.sh \
@@ -221,7 +221,7 @@ if [[ "$cmd" == "config" ]]; then
         until qm guest ping "$i" >/dev/null 2>&1; do
             sleep 5
             reboot_wait=$((reboot_wait + 5))
-            (( reboot_wait >= 180 )) && { echo "WARNING: VM $i did not come back after reboot"; break; }
+            (( reboot_wait >= 600 )) && { echo "WARNING: VM $i did not come back after reboot"; break; }
         done
 
         qm guest exec "$i" --timeout 300 -- bash /usr/local/scripts/update.sh \
