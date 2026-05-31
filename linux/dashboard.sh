@@ -29,7 +29,7 @@ username=$(echo "$HOSTNAME" | cut -d "-" -f 1)
 
 server_url=$(get_value 'server' 'server_url')
 server_url="${server_url:-http://169.253.1.1:8000}"
-bucket=$(python3 -c "import zlib; print(zlib.crc32('${username}'.encode()) % 10)")
+bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
 simulation_id="s${bucket}"
 user_sim_id=$(get_value "$username" 'simulation_id')
 # Only accept valid slot IDs (s0-s9) from user overrides; ignore malformed values

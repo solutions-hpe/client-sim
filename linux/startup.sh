@@ -44,7 +44,7 @@ echo Parsing Config File | tee -a /usr/local/scripts/sim.log
 #Settings read from the local config file
 #Global Simulation settings
 #------------------------------------------------------------
-bucket=$(python3 -c "import zlib; print(zlib.crc32('${username}'.encode()) % 10)")
+bucket=$(python3 -c "import zlib; print(zlib.crc32('${HOSTNAME}'.encode()) % 10)")
 simulation_id="s${bucket}"
 user_sim_id=$(get_value "$username" 'simulation_id')
 # Only accept valid slot IDs (s0-s9) from user overrides; ignore malformed values
