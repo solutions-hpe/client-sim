@@ -3158,6 +3158,8 @@ _acme_status: dict[str, Any] = {"running": False, "last_result": None, "last_err
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
 gkill_switch_state: dict[str, Any] = {"value": "off", "last_fetched": None, "error": None}
+# Queues for proxmox token provision responses relayed from agent → spoke → hub
+_proxmox_token_provision_queues: dict[str, asyncio.Queue] = {}
 GKILL_SWITCH_URL = "https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt"
 relay_state: dict[str, Any] = {
     "enabled": settings.get("relay_enabled") == "on" and bool(settings.get("relay_server_url")),
@@ -5363,10 +5365,41 @@ async def _handle_provision_proxmox_token(message: dict[str, Any]) -> None:
         except Exception:
             pass
     if not pvesh_path:
-        await _send_error(
-            "pvesh not found — checked /usr/bin, /usr/sbin, /usr/local/bin, /usr/share/pve-manager/bin, /opt/proxmox/bin. "
-            "Ensure the spoke is running directly on the Proxmox host (not inside a VM or Docker container)."
-        )
+        # pvesh not available locally — try relaying to the Proxmox agent if connected.
+        if proxmox_ws_connection is not None:
+            logger.info("provision_proxmox_token: pvesh not found locally, relaying to proxmox agent")
+            q: asyncio.Queue = asyncio.Queue(maxsize=1)
+            _proxmox_token_provision_queues[request_id] = q
+            try:
+                await proxmox_ws_connection.send_json({
+                    "type": "create_proxmox_token",
+                    "request_id": request_id,
+                })
+                result = await asyncio.wait_for(q.get(), timeout=30.0)
+                if result.get("ok"):
+                    token = str(result.get("token") or "").strip()
+                    settings["proxmox_api_token"] = token
+                    _persisted["proxmox_api_token"] = token
+                    _save_settings()
+                    logger.info("Proxmox API token provisioned via agent: relaying to hub")
+                    await _relay_vnc_to_hub({
+                        "type": "proxmox_token_provisioned",
+                        "request_id": request_id,
+                        "token": token,
+                    })
+                else:
+                    await _send_error(str(result.get("error") or "Agent failed to provision token"))
+            except asyncio.TimeoutError:
+                await _send_error("Proxmox agent did not respond to token creation request within 30 seconds")
+            except Exception as exc:
+                await _send_error(f"Failed to relay token request to agent: {exc}")
+            finally:
+                _proxmox_token_provision_queues.pop(request_id, None)
+        else:
+            await _send_error(
+                "pvesh not found locally and no Proxmox agent is connected. "
+                "Ensure the proxmox-agent.sh service is running on the Proxmox host."
+            )
         return
 
     TOKEN_ID = "cs-hub"
@@ -11542,6 +11575,16 @@ async def ws_proxmox_endpoint(
                 payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
                 await _ack_command_internal(payload)
                 await websocket.send_json({"type": "ack_ok", "id": payload.get("id")})
+            elif msg_type in {"token_provisioned", "token_provision_error"}:
+                req_id = str(data.get("request_id") or "").strip()
+                q = _proxmox_token_provision_queues.get(req_id)
+                if q is not None:
+                    if msg_type == "token_provisioned":
+                        await q.put({"ok": True, "token": data.get("token")})
+                    else:
+                        await q.put({"ok": False, "error": data.get("error", "Agent token provision failed")})
+                else:
+                    logger.warning("Received %s but no waiting provision queue for request_id=%r", msg_type, req_id)
             elif msg_type == "ping":
                 # Agent heartbeat — update last_seen so UI stays current even
                 # when full telemetry times out (e.g. during a VM reclone).

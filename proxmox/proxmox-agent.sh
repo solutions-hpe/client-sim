@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.15"
+AGENT_VERSION="1.16"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3182,6 +3182,44 @@ async def run_command_bg(flag, command):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     asyncio.create_task(proc.wait())
+async def handle_create_proxmox_token(ws, request_id):
+    import shutil as _shutil
+    TOKEN_ID = 'cs-hub'
+    USER = 'root@pam'
+    pvesh = _shutil.which('pvesh') or '/usr/bin/pvesh'
+    async def send_result(msg):
+        try:
+            await ws.send(json.dumps(msg))
+        except Exception:
+            pass
+    try:
+        del_proc = await asyncio.create_subprocess_exec(
+            pvesh, 'delete', f'/access/users/{USER}/token/{TOKEN_ID}',
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(del_proc.wait(), timeout=10)
+    except Exception:
+        pass
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            pvesh, 'create', f'/access/users/{USER}/token/{TOKEN_ID}',
+            '--privsep', '0', '--output-format', 'json',
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+        if proc.returncode != 0:
+            await send_result({'type': 'token_provision_error', 'request_id': request_id, 'error': f'pvesh failed: {stderr.decode().strip()[:300]}'})
+            return
+        data = json.loads(stdout.decode().strip())
+        secret = str(data.get('value') or '').strip()
+        if not secret:
+            await send_result({'type': 'token_provision_error', 'request_id': request_id, 'error': 'pvesh returned no token value'})
+            return
+        await send_result({'type': 'token_provisioned', 'request_id': request_id, 'token': f'{USER}!{TOKEN_ID}={secret}'})
+    except asyncio.TimeoutError:
+        await send_result({'type': 'token_provision_error', 'request_id': request_id, 'error': 'pvesh timed out'})
+    except Exception as exc:
+        await send_result({'type': 'token_provision_error', 'request_id': request_id, 'error': str(exc)})
 async def send_progress_events(ws):
     for event_file in sorted(queue_dir.glob('*.json')):
         try:
@@ -3257,6 +3295,9 @@ async def main():
                             asyncio.create_task(run_command_bg('--process-backup-command', json.dumps(payload)))
                         elif msg_type == 'reseed':
                             asyncio.create_task(run_command_bg('--process-reseed-command', json.dumps(payload)))
+                        elif msg_type == 'create_proxmox_token':
+                            req_id = str(payload.get('request_id') or '')
+                            asyncio.create_task(handle_create_proxmox_token(ws, req_id))
                 finally:
                     sender.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
