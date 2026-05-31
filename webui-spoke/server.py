@@ -5337,18 +5337,41 @@ async def _handle_provision_proxmox_token(message: dict[str, Any]) -> None:
     async def _send_error(error: str) -> None:
         await _relay_vnc_to_hub({"type": "proxmox_token_provision_error", "request_id": request_id, "error": error})
 
-    # pvesh may not be in the systemd service PATH — check common Proxmox locations
-    pvesh_path = None
-    for candidate in [shutil.which("pvesh"), "/usr/bin/pvesh", "/usr/sbin/pvesh", "/usr/local/bin/pvesh"]:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            pvesh_path = candidate
-            break
+    # pvesh may not be in the systemd service PATH — check all common Proxmox locations.
+    # Use os.path.isfile only (not os.access X_OK) since the service may run as a user
+    # that lacks execute permission on the stat but can still exec via the kernel.
+    pvesh_candidates = [
+        shutil.which("pvesh"),
+        "/usr/bin/pvesh",
+        "/usr/sbin/pvesh",
+        "/usr/local/bin/pvesh",
+        "/usr/share/pve-manager/bin/pvesh",
+        "/opt/proxmox/bin/pvesh",
+    ]
+    pvesh_path = next((c for c in pvesh_candidates if c and os.path.isfile(c)), None)
     if not pvesh_path:
-        await _send_error("pvesh not found — the spoke must be running directly on the Proxmox host (checked /usr/bin, /usr/sbin, /usr/local/bin)")
+        # Last resort: try running pvesh directly and let the OS sort out the path
+        try:
+            probe = await asyncio.create_subprocess_exec(
+                "pvesh", "--version",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(probe.wait(), timeout=5.0)
+            if probe.returncode == 0:
+                pvesh_path = "pvesh"
+        except Exception:
+            pass
+    if not pvesh_path:
+        await _send_error(
+            "pvesh not found — checked /usr/bin, /usr/sbin, /usr/local/bin, /usr/share/pve-manager/bin, /opt/proxmox/bin. "
+            "Ensure the spoke is running directly on the Proxmox host (not inside a VM or Docker container)."
+        )
         return
 
     TOKEN_ID = "cs-hub"
     USER = "root@pam"
+    logger.info("provision_proxmox_token: using pvesh at %s", pvesh_path)
 
     try:
         # Remove any existing token with this ID so we always get a fresh secret
