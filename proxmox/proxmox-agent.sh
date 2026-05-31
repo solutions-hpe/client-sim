@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.16"
+AGENT_VERSION="1.17"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2430,7 +2430,8 @@ collect_telemetry() {
         t1 = 0; t2 = 0
         for (i = 2; i <= n; i++) { t1 += a[i]; t2 += b[i] }
         dt = t2 - t1; di = b[5] - a[5]
-        printf "%.1f", dt > 0 ? (1 - di/dt) * 100 : 0
+        val = (dt > 0) ? (1 - di/dt) * 100 : 0
+        printf "%.1f\n", val
     }' 2>/dev/null) || cpu_line=0
     mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     mem_free=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
