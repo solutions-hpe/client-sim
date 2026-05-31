@@ -959,6 +959,10 @@ settings: dict[str, Any] = {
     "usb_auto_provision": _normalize_relay_enabled(_persisted.get("usb_auto_provision", "off")),
     "use_all_dongles": bool(_persisted.get("use_all_dongles", False)),
     "usb_max_slots": str(_persisted.get("usb_max_slots", "24")),
+    "cpu_provision_threshold": str(_persisted.get("cpu_provision_threshold", "80")),
+    "cpu_delete_threshold": str(_persisted.get("cpu_delete_threshold", "90")),
+    "mem_provision_threshold": str(_persisted.get("mem_provision_threshold", "80")),
+    "mem_delete_threshold": str(_persisted.get("mem_delete_threshold", "90")),
     "vmid_start": int(_persisted.get("vmid_start", 0)),
     "usb_ignored_vidpids": _persisted.get("usb_ignored_vidpids", "[]"),
     "ignored_hostnames": _persisted.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -1076,6 +1080,10 @@ def _get_cached_settings() -> dict[str, Any]:
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "use_all_dongles": _setting_bool("use_all_dongles", False),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
+        "cpu_provision_threshold": settings.get("cpu_provision_threshold", "80"),
+        "cpu_delete_threshold": settings.get("cpu_delete_threshold", "90"),
+        "mem_provision_threshold": settings.get("mem_provision_threshold", "80"),
+        "mem_delete_threshold": settings.get("mem_delete_threshold", "90"),
         "vmid_start": int(settings.get("vmid_start", 0) or 0),
         "usb_ignored_vidpids": settings.get("usb_ignored_vidpids", "[]"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -3230,6 +3238,52 @@ _prev_usb_by_vmid: dict[str, str] = {}
 # VMIDs for which a delete command has been queued but not yet confirmed by telemetry.
 # Kept as a set so the UI can show "deleting…" immediately instead of the row vanishing.
 _pending_delete_vmids: set[int] = set()
+# Rolling resource samples for 1-hour average CPU/memory threshold checks.
+# Each entry is (unix_timestamp, value_percent).  Pruned to the last hour on each update.
+_cpu_samples: list[tuple[float, float]] = []
+_mem_samples: list[tuple[float, float]] = []
+_resource_samples_started: float = 0.0  # epoch when first sample was recorded
+_RESOURCE_SAMPLE_WINDOW = 3600  # seconds (1 hour)
+
+
+def _resource_1h_average(samples: list[tuple[float, float]]) -> float | None:
+    """Return the mean of all samples within the last hour.
+
+    Returns None (→ treat as below threshold, allow provisioning) when fewer
+    than a full hour of data has been collected since sampling began.
+    """
+    if not _resource_samples_started:
+        return None
+    if (time.time() - _resource_samples_started) < _RESOURCE_SAMPLE_WINDOW:
+        return None  # warm-up period: not enough history yet
+    cutoff = time.time() - _RESOURCE_SAMPLE_WINDOW
+    recent = [v for ts, v in samples if ts >= cutoff]
+    return sum(recent) / len(recent) if recent else None
+
+
+def _record_resource_samples(node: dict[str, Any], now: float) -> None:
+    """Append a CPU and memory sample from the latest node telemetry."""
+    global _resource_samples_started
+    cpu_pct = node.get("cpu_percent")
+    mem_used = node.get("mem_used_kb")
+    mem_total = node.get("mem_total_kb")
+    cutoff = now - _RESOURCE_SAMPLE_WINDOW
+    if cpu_pct is not None:
+        if not _resource_samples_started:
+            _resource_samples_started = now
+        _cpu_samples.append((now, float(cpu_pct)))
+        _cpu_samples[:] = [(ts, v) for ts, v in _cpu_samples if ts >= cutoff]
+    try:
+        if mem_used is not None and mem_total:
+            mem_total_f = float(mem_total)
+            if mem_total_f > 0:
+                if not _resource_samples_started:
+                    _resource_samples_started = now
+                mem_pct = (float(mem_used) / mem_total_f) * 100.0
+                _mem_samples.append((now, mem_pct))
+                _mem_samples[:] = [(ts, v) for ts, v in _mem_samples if ts >= cutoff]
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
@@ -3352,6 +3406,10 @@ class SettingsUpdate(BaseModel):
     usb_auto_provision: str | None = None
     use_all_dongles: bool | None = None
     usb_max_slots: str | None = None
+    cpu_provision_threshold: str | None = None
+    cpu_delete_threshold: str | None = None
+    mem_provision_threshold: str | None = None
+    mem_delete_threshold: str | None = None
     vmid_start: int | None = None
     usb_ignored_vidpids: str | None = None
     ignored_hostnames: str | None = None
@@ -4845,6 +4903,10 @@ def _build_registration_config() -> dict[str, Any]:
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
+        "cpu_provision_threshold": settings.get("cpu_provision_threshold", "80"),
+        "cpu_delete_threshold": settings.get("cpu_delete_threshold", "90"),
+        "mem_provision_threshold": settings.get("mem_provision_threshold", "80"),
+        "mem_delete_threshold": settings.get("mem_delete_threshold", "90"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
         "vm_silent_timeout": settings.get("vm_silent_timeout", "24"),
         "ignored_hostnames": settings.get("ignored_hostnames", '["sim-rpi-0000"]'),
@@ -8118,6 +8180,18 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if update.usb_max_slots is not None:
         settings["usb_max_slots"] = str(max(1, min(256, int(update.usb_max_slots.strip() or "24"))))
 
+    def _clamp_pct(val: str, default: str) -> str:
+        return str(max(0, min(100, int(val.strip() or default))))
+
+    if update.cpu_provision_threshold is not None:
+        settings["cpu_provision_threshold"] = _clamp_pct(update.cpu_provision_threshold, "80")
+    if update.cpu_delete_threshold is not None:
+        settings["cpu_delete_threshold"] = _clamp_pct(update.cpu_delete_threshold, "90")
+    if update.mem_provision_threshold is not None:
+        settings["mem_provision_threshold"] = _clamp_pct(update.mem_provision_threshold, "80")
+    if update.mem_delete_threshold is not None:
+        settings["mem_delete_threshold"] = _clamp_pct(update.mem_delete_threshold, "90")
+
     if update.vmid_start is not None:
         settings["vmid_start"] = max(0, int(update.vmid_start))
 
@@ -8573,6 +8647,9 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     _proxmox_reseed_in_progress = bool(body.get("reseed_in_progress", False))
     proxmox_state["node"] = body.get("node", {}) or {}
     proxmox_state["vms"] = enriched_vms
+
+    # Record rolling resource samples for 1-hour average threshold checks
+    _record_resource_samples(proxmox_state["node"], now)
     proxmox_state["reseed_in_progress"] = _proxmox_reseed_in_progress
     proxmox_state["usb_state"] = normalized_usb_state
     proxmox_state["present_usb"] = normalized_present_usb
@@ -8703,12 +8780,67 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             await _broadcast_reclone_state()
 
     # Auto-trigger provision_unassigned when usb_auto_provision is enabled and
-    # certified unassigned dongles are physically present.  Only queued when no
-    # provision run is active and no provision_unassigned command is already
-    # pending in the proxmox command queue.
+    # certified unassigned dongles are physically present.  Resource (CPU/memory)
+    # thresholds gate provisioning and can also trigger deletion of the newest sim VM.
     if settings.get("usb_auto_provision") == "on" and reclone_state.get("status") != "running":
+        def _pct_setting(key: str, default: str) -> int:
+            try:
+                return max(0, min(100, int(str(settings.get(key, default)).strip() or default)))
+            except (TypeError, ValueError):
+                return int(default)
+
+        cpu_prov_thr = _pct_setting("cpu_provision_threshold", "80")
+        cpu_del_thr  = _pct_setting("cpu_delete_threshold",  "90")
+        mem_prov_thr = _pct_setting("mem_provision_threshold", "80")
+        mem_del_thr  = _pct_setting("mem_delete_threshold",  "90")
+        cpu_avg = _resource_1h_average(_cpu_samples)
+        mem_avg = _resource_1h_average(_mem_samples)
+
+        # Delete gate: if either metric exceeds its delete threshold and no delete is
+        # already in flight, remove the newest sim VM (highest VMID) to shed load.
+        delete_queued = any(
+            c.get("action") == "delete_vm"
+            and c.get("status") not in {"completed", "failed", "expired"}
+            for c in commands
+        )
+        if not delete_queued and (
+            (cpu_avg is not None and cpu_avg >= cpu_del_thr) or
+            (mem_avg is not None and mem_avg >= mem_del_thr)
+        ):
+            usb_vmids_int: set[int] = set()
+            for _e in usb_state:
+                try:
+                    usb_vmids_int.add(int(_e["vmid"]))
+                except (KeyError, TypeError, ValueError):
+                    pass
+            candidates: list[int] = []
+            for _vm in vms:
+                try:
+                    _vid = int(_vm.get("vmid", 0) or 0)
+                    if _vm.get("type") == "qemu" and _vid in usb_vmids_int and _vid not in _pending_delete_vmids:
+                        candidates.append(_vid)
+                except (TypeError, ValueError):
+                    pass
+            if candidates:
+                target_vmid = max(candidates)  # newest = highest VMID
+                _del_args = _prepare_delete_vm_args({"vmid": target_vmid})
+                await _queue_proxmox_command("delete_vm", _del_args)
+                _pending_delete_vmids.add(target_vmid)
+                logger.info(
+                    "Auto-provision resource gate: delete threshold exceeded "
+                    "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
+                    cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                )
+
+        # Provision gate: skip new provisioning when either resource exceeds its threshold.
+        # Also skip for this cycle if we just queued a delete, to avoid churn.
+        resource_ok = (
+            not delete_queued
+            and (cpu_avg is None or cpu_avg < cpu_prov_thr)
+            and (mem_avg is None or mem_avg < mem_prov_thr)
+        )
         prov_run = proxmox_state.get("prov_run") or {}
-        if not prov_run.get("running"):
+        if resource_ok and not prov_run.get("running"):
             unassigned = _proxmox_unassigned_present_usb()
             if unassigned:
                 certified_set = {
