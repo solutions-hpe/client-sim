@@ -149,7 +149,8 @@ if [[ -n "$host_id" && "$cmd" == "automated" ]]; then
             (( elapsed >= timeout )) && break
         done
 
-        qm guest exec "$vmid" -- hostnamectl set-hostname "${vm_name}"
+        qm guest exec "$vmid" --timeout 60 -- hostnamectl set-hostname "${vm_name}"
+        qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh
         qm guest exec "$vmid" -- reboot
 
         # USB assignment goes into config now; device is available after reboot
@@ -201,7 +202,8 @@ if [[ "$cmd" == "config" ]]; then
     for (( i=start_vmid; i<=end_vmid; i++ )); do
         vm_name=$(get_value "c${i}" 'vm_name')
         vm_name="${vm_name:-sim-client}"
-        qm guest exec "$i" -- hostnamectl set-hostname "${vm_name}"
+        qm guest exec "$i" --timeout 60 -- hostnamectl set-hostname "${vm_name}"
+        qm guest exec "$i" --timeout 90 -- bash /usr/local/scripts/update.sh
         qm guest exec "$i" -- reboot
     done
 fi

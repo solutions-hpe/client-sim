@@ -1469,6 +1469,12 @@ PY
         && log "Wrote sim_phy=${device_type} to usb-phy-override.conf on VM $vmid" \
         || log "WARNING: Could not write usb-phy-override.conf on VM $vmid"
 
+    # Run update.sh so the VM has the latest scripts before its first boot.
+    # This ensures sim-id hashing and all other logic is current before startup.sh runs.
+    timeout 120 qm guest exec "$vmid" --timeout 90 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
+        && log "update.sh completed on VM $vmid" \
+        || log "WARNING: update.sh exec failed on VM $vmid — will retry on first boot"
+
     timeout 30 qm guest exec "$vmid" --timeout 10 -- reboot >/dev/null 2>&1 || true
     rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
     log "Provisioned VM $vmid ($full_name) for USB $bus_path (${product_name}) type=${device_type}"
