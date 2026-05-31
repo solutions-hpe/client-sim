@@ -130,10 +130,11 @@
   <main id="tab-server" class="page tab-content hidden tab-panel" style="display:none;">
     <nav class="setup-subnav" role="tablist">
       <button class="setup-subtab server-subtab active" data-subtab="server-vms" role="tab">VMs</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-iot" role="tab">IoT (T3)</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-usb" role="tab">USB (T2)</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-t3" role="tab">IoT (T3)</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-other" role="tab">Other</button>
+      <button class="setup-subtab server-subtab" data-subtab="server-vh" role="tab">VirtualHere</button>
       <button class="setup-subtab server-subtab" data-subtab="server-commands" role="tab">Command Queue</button>
-      <button class="setup-subtab server-subtab" data-subtab="server-services" role="tab">Services</button>
       <button class="setup-subtab server-subtab" data-subtab="server-node" role="tab">Details</button>
     </nav>
 
@@ -311,31 +312,58 @@
       </div>
     </div>
 
-    <!-- IoT (T3) sub-tab — shows PCI devices on this Proxmox node that qualify as T3 IoT adapters -->
-    <div id="server-iot" class="setup-subpanel hidden">
+    <!-- IoT (T3) sub-tab — shows VMs with PCI passthrough of T3 IoT adapters -->
+    <div id="server-t3" class="setup-subpanel hidden">
       <div class="setup-card setup-section-gap">
         <div class="setup-card-header">
-          <h2>IoT / T3 Devices</h2>
-          <div id="iot-stat-pills" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>
+          <h2>IoT (T3) Clients</h2>
+          <p>VMs with PCI passthrough of a T3 IoT adapter (VID 168c:0034).</p>
         </div>
-        <p style="margin:0 0 12px;color:var(--muted);font-size:0.9rem;">
-          PCI devices on the Proxmox node that classify this host as a T3 (IoT-capable) node.
-          Currently scans for VID:PID <code>168c:0034</code> (Qualcomm Atheros AR9462 802.11ac adapter).
-        </p>
-        <table class="data-table" id="iot-pci-table">
-          <thead>
-            <tr>
-              <th>PCI Address</th>
-              <th>VID:PID</th>
-              <th>Device Name</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="iot-pci-tbody"></tbody>
+        <table class="data-table" id="server-t3-vm-table">
+          <colgroup>
+            <col style="width:70px">
+            <col>
+            <col style="width:80px">
+            <col style="width:90px">
+            <col>
+          </colgroup>
+          <thead><tr><th>VMID</th><th>Name</th><th>Type</th><th>Status</th><th>PCI</th></tr></thead>
+          <tbody id="server-t3-vm-tbody"></tbody>
         </table>
-        <div id="iot-pci-empty" style="text-align:center;color:var(--muted);padding:32px;display:none;">
-          No T3 PCI devices detected on this Proxmox node.
+      </div>
+    </div>
+
+    <!-- Other sub-tab — non-sim, non-IoT VMs and containers -->
+    <div id="server-other" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header">
+          <h2>Other VMs &amp; Containers</h2>
+          <p>VMs and LXC containers not classified as USB (T2) or IoT (T3).</p>
         </div>
+        <table class="data-table" id="server-other-vm-table">
+          <colgroup>
+            <col style="width:70px">
+            <col>
+            <col style="width:80px">
+            <col style="width:90px">
+            <col>
+          </colgroup>
+          <thead><tr><th>VMID</th><th>Name</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="server-other-vm-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- VirtualHere sub-tab -->
+    <div id="server-vh" class="setup-subpanel hidden">
+      <div class="setup-card setup-section-gap">
+        <div class="setup-card-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h2>🔌 VirtualHere Devices</h2>
+            <div id="vh-stat-pills" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;"></div>
+          </div>
+        </div>
+        <div id="vh-device-list" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -400,30 +428,6 @@
       </div>
     </div>
 
-    <!-- Services sub-tab -->
-    <div id="server-services" class="setup-subpanel hidden">
-      <div class="tile">
-        <h3>Background Services</h3>
-        <div class="tile-scroll">
-          <table id="services-table" class="data-table">
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th>Status</th>
-                <th>Last Run</th>
-                <th>Run Count</th>
-                <th>Errors</th>
-                <th>Last Error</th>
-              </tr>
-            </thead>
-            <tbody id="services-tbody">
-              <tr><td colspan="6" class="empty-msg">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
     <!-- Details sub-tab -->
     <div id="server-node" class="setup-subpanel">
       <div class="setup-card setup-section-gap">
@@ -432,6 +436,8 @@
             <h2 id="server-node-name" style="margin:0;">—</h2>
             <span class="server-stat-pill" title="CPU">⚡ CPU: <span id="server-cpu">—</span>%</span>
             <span class="server-stat-pill" title="RAM">🧠 RAM: <span id="server-ram">—</span></span>
+            <span class="server-stat-pill" title="1-hour rolling average CPU" id="server-cpu-avg-pill">📊 CPU avg: <span id="server-cpu-avg">…</span>%</span>
+            <span class="server-stat-pill" title="1-hour rolling average memory" id="server-mem-avg-pill">📊 Mem avg: <span id="server-mem-avg">…</span>%</span>
             <span id="server-storage-pills"></span>
             <span class="server-stat-pill" id="server-agent-version-pill" title="Agent version" style="display:none;">🤖 Agent v<span id="server-agent-version">—</span></span>
           </div>

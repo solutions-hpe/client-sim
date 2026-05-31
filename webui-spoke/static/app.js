@@ -178,16 +178,14 @@ function activateServerSubtab(subtabId = 'server-vms') {
   document.querySelectorAll('.server-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.subtab === subtabId);
   });
-  ['server-node', 'server-vms', 'server-usb', 'server-iot', 'server-commands', 'server-services'].forEach((id) => {
+  ['server-node', 'server-vms', 'server-usb', 'server-t3', 'server-other', 'server-vh', 'server-commands'].forEach((id) => {
     const panel = document.getElementById(id);
     if (!panel) return;
     const isActive = id === subtabId;
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
-  if (subtabId === 'server-services') {
-    renderServiceStatus().catch(() => {});
-  }
+  if (subtabId === 'server-vh') renderVhDevices(latestProxmoxData);
 }
 
 // ── Agent Log Viewer ─────────────────────────────────────────────────────
@@ -443,7 +441,7 @@ const configTabButton = document.querySelector('.tab[data-tab="config"]');
 const simTabButton = document.querySelector('.tab[data-tab="simulations"]');
 const setupTabButton = document.querySelector('.tab[data-tab="setup"]');
 const setupSubtabButtons = document.querySelectorAll('.setup-subtab:not(.server-subtab):not(.sim-subtab):not(.central-subtab):not(.simtop-subtab)');
-const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-iot):not(#server-node):not(#server-commands):not(#server-services)');
+const setupSubpanels = document.querySelectorAll('.setup-subpanel:not(#server-vms):not(#server-usb):not(#server-t3):not(#server-other):not(#server-vh):not(#server-node):not(#server-commands)');
 const centralOverview = document.getElementById('central-overview');
 const centralSitesGrid = document.getElementById('central-sites-table');
 const centralEmpty = document.getElementById('central-empty');
@@ -845,7 +843,6 @@ function renderServerTab(data) {
   }
 
   renderUsbSummary(latestProxmoxData);
-  renderIotT3Panel(latestProxmoxData);
   renderRecloneStatus(latestRecloneState || latestProxmoxData.reclone_state || {});
   renderAutoProvisionStatus();
   const autoRecoveryPending = new Set(
@@ -866,7 +863,13 @@ function renderServerTab(data) {
   const containerVms = nonTemplateVms.filter((v) => v.type === 'lxc');
   const qemuVms      = nonTemplateVms.filter((v) => v.type !== 'lxc');
   const simVms       = qemuVms.filter((v) => Number(v.vmid) > 90000);
-  const otherVms     = qemuVms.filter((v) => !simVms.includes(v));
+  const nonSimQemu   = qemuVms.filter((v) => !simVms.includes(v));
+  // T3: qemu VMs whose PCI passthrough addresses overlap with known T3 device addresses on this node
+  const t3AddrSet = new Set((data?.t3_pci_devices || []).map(d => String(d.id || '').toLowerCase()));
+  const iotVms    = t3AddrSet.size
+    ? nonSimQemu.filter(v => (v.pci_passthrough_addrs || []).some(a => t3AddrSet.has(String(a).toLowerCase())))
+    : [];
+  const otherVms  = nonSimQemu.filter(v => !iotVms.includes(v));
 
   // Update count badges
   const countSim = document.getElementById('vm-count-sim');
@@ -1020,6 +1023,52 @@ function renderServerTab(data) {
   _renderVmGroup('sim', simVms);
   _renderVmGroup('other', otherVms);
   _renderVmGroup('containers', containerVms);
+
+  // T3 subtab: render IoT VMs
+  const _vmStatusDot = (s) => `<span class="status-dot ${s === 'running' ? 'online' : 'offline'}" title="${escHtml(s)}"></span> ${escHtml(s)}`;
+  const _t3Tbody = document.getElementById('server-t3-vm-tbody');
+  if (_t3Tbody) {
+    _t3Tbody.innerHTML = iotVms.length
+      ? iotVms.map(v => `<tr>
+          <td>${escHtml(String(v.vmid))}</td>
+          <td>${escHtml(v.name || '—')}</td>
+          <td>${escHtml(v.type || 'qemu')}</td>
+          <td>${_vmStatusDot(v.status || 'unknown')}</td>
+          <td>${escHtml((v.pci_passthrough_addrs || []).join(', ') || '—')}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="5" class="empty-state">No IoT (T3) devices detected on this node.</td></tr>`;
+  }
+  document.querySelectorAll('.server-subtab[data-subtab="server-t3"]').forEach(btn => {
+    btn.innerHTML = `IoT (T3) <span class="badge-count">${iotVms.length}</span>`;
+  });
+
+  // Other subtab: non-sim, non-IoT VMs + containers
+  const _otherAll = [...otherVms, ...containerVms];
+  const _otherTbody = document.getElementById('server-other-vm-tbody');
+  if (_otherTbody) {
+    _otherTbody.innerHTML = _otherAll.length
+      ? _otherAll.map(v => `<tr>
+          <td style="white-space:nowrap">${escHtml(String(v.vmid))}</td>
+          <td>${escHtml(v.name || '—')}</td>
+          <td style="white-space:nowrap">${escHtml(v.type || 'qemu')}</td>
+          <td style="white-space:nowrap">${_vmStatusDot(v.status || 'unknown')}</td>
+          <td></td>
+        </tr>`).join('')
+      : `<tr><td colspan="5" class="empty-state">No other VMs or containers.</td></tr>`;
+  }
+  document.querySelectorAll('.server-subtab[data-subtab="server-other"]').forEach(btn => {
+    btn.innerHTML = `Other <span class="badge-count">${_otherAll.length}</span>`;
+  });
+
+  // 1-hour average pills
+  const cpuAvgPill = document.getElementById('server-cpu-avg-pill');
+  const memAvgPill = document.getElementById('server-mem-avg-pill');
+  if (cpuAvgPill) {
+    setEl('server-cpu-avg', data?.cpu_1h_avg != null ? Number(data.cpu_1h_avg).toFixed(1) : '…');
+  }
+  if (memAvgPill) {
+    setEl('server-mem-avg', data?.mem_1h_avg != null ? Number(data.mem_1h_avg).toFixed(1) : '…');
+  }
 
   // Reset select-all
   const selectAll = document.getElementById('server-select-all');
@@ -2026,43 +2075,57 @@ function renderTableRowsIncremental(tbody, items, keyFn, rowHtmlFn) {
 // Reads proxmox_state.t3_pci_devices — a list of PCI devices on this Proxmox
 // node that match the T3 target VID:PIDs (currently 168c:0034).
 // Shows a table row per device and a count pill; an empty state when none found.
-function renderIotT3Panel(proxmoxData = latestProxmoxData) {
-  const tbody = document.getElementById('iot-pci-tbody');
-  const emptyMsg = document.getElementById('iot-pci-empty');
-  const statPills = document.getElementById('iot-stat-pills');
-  if (!tbody) return;
+function renderVhDevices(proxmoxData = latestProxmoxData) {
+  const pills = document.getElementById('vh-stat-pills');
+  const list = document.getElementById('vh-device-list');
+  if (!pills || !list) return;
 
-  // t3_pci_devices is the filtered list of T3-qualifying PCI devices from the agent.
-  const devices = Array.isArray(proxmoxData?.t3_pci_devices) ? proxmoxData.t3_pci_devices : [];
+  const vh = proxmoxData?.vh_devices || {};
+  const devices = Array.isArray(vh.devices) ? vh.devices : [];
+  const svcActive = vh.vh_service_active;
+  const connected = vh.vh_connected;
+  const autoUseAll = vh.auto_use_all;
+  const count = vh.count ?? devices.length;
+  const inUse = devices.filter(d => d.auto_use).length;
+  const available = devices.filter(d => !d.auto_use).length;
 
-  // Update the stat pill in the card header showing total count.
-  if (statPills) {
-    const count = devices.length;
-    statPills.innerHTML = count > 0
-      ? `<span class="server-stat-pill" title="T3 PCI devices detected on this node">📡 ${count} T3 device${count !== 1 ? 's' : ''} detected</span>`
-      : `<span class="server-stat-pill" style="color:var(--muted)">No T3 devices</span>`;
-  }
-
-  // Show or hide the empty state message below the table.
-  if (emptyMsg) emptyMsg.style.display = devices.length ? 'none' : '';
+  const svcLabel = svcActive != null ? (svcActive ? '🟢 Service running' : '🔴 Service stopped') : null;
+  const autoLabel = autoUseAll != null ? (autoUseAll ? '⚡ Auto-Use All: ON' : '⚫ Auto-Use All: OFF') : null;
+  const countLabel = connected
+    ? (count > 0 ? `🔌 ${count} device${count !== 1 ? 's' : ''} — ${inUse} in use, ${available} available` : '⚫ No VH devices detected')
+    : '⚫ Not connected to VH server';
+  pills.innerHTML = [svcLabel, autoLabel, countLabel].filter(Boolean)
+    .map(l => `<span class="server-stat-pill">${l}</span>`).join('');
 
   if (!devices.length) {
-    tbody.innerHTML = '';
-    return;
+    list.innerHTML = '<p class="muted" style="padding:8px 0;">No VirtualHere adapters found. Ensure the VH client service is running and connected to a server.</p>';
+  } else {
+    const byServer = new Map();
+    devices.forEach(d => {
+      const srv = d.server || 'Unknown Server';
+      if (!byServer.has(srv)) byServer.set(srv, []);
+      byServer.get(srv).push(d);
+    });
+    let html = '';
+    byServer.forEach((devs, server) => {
+      html += `<div style="margin-bottom:16px;">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Server: ${escHtml(server)}</div>
+        <table class="data-table">
+          <thead><tr><th>Adapter</th><th>Address</th><th>Vendor</th><th>VID:PID</th><th>Serial</th><th>Status</th></tr></thead>
+          <tbody>${devs.map(d => `<tr>
+            <td><strong>${escHtml(d.name || 'Unknown')}</strong></td>
+            <td><code>${escHtml(d.address || '—')}</code></td>
+            <td>${escHtml(d.vendor || '—')}</td>
+            <td>${d.vendor_id && d.product_id ? `<code>${escHtml(d.vendor_id)}:${escHtml(d.product_id)}</code>` : '—'}</td>
+            <td><code>${escHtml(d.serial || '—')}</code></td>
+            <td>${d.auto_use
+              ? `<span class="badge badge-green">In Use${d.in_use_by ? ` by ${escHtml(d.in_use_by)}` : ''}</span>`
+              : '<span class="badge badge-grey">Available</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    });
+    list.innerHTML = html;
   }
-
-  // Render one row per T3 PCI device found on the Proxmox host.
-  tbody.innerHTML = devices.map((device) => {
-    const addr = escHtml(device.id || '—');       // PCI bus address e.g. 0000:01:00.0
-    const vidpid = escHtml(device.vidpid || '—'); // VID:PID e.g. 168c:0034
-    const name = escHtml(device.name || '—');     // Human-readable device name from lspci
-    return `<tr>
-      <td><code>${addr}</code></td>
-      <td><code>${vidpid}</code></td>
-      <td>${name}</td>
-      <td><span class="badge badge-green">Present</span></td>
-    </tr>`;
-  }).join('');
 }
 
 function renderUsbSummary(proxmoxData = latestProxmoxData) {
