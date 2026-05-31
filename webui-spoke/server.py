@@ -7588,6 +7588,14 @@ async def heartbeat_check() -> None:
             if changed:
                 await broadcast_full_state()
 
+            # Mark proxmox agent offline and clear stale VMs if it hasn't reported within OFFLINE_TIMEOUT
+            if proxmox_state.get("connected") and proxmox_state.get("last_seen"):
+                age = time.time() - float(proxmox_state["last_seen"])
+                if age > OFFLINE_TIMEOUT:
+                    proxmox_state["connected"] = False
+                    proxmox_state["vms"] = []
+                    await _broadcast_proxmox_state()
+
             # Auto-reset reclone state after 8 hours on successful completion
             if reclone_state.get("status") == "completed":
                 last_run = reclone_state.get("last_run") or {}
@@ -11483,6 +11491,7 @@ async def _proxmox_disconnect_grace(expected_hostname: str | None) -> None:
     if proxmox_state.get("last_seen") and (time.time() - float(proxmox_state.get("last_seen") or 0)) <= PROXMOX_WS_GRACE_SECS:
         return
     proxmox_state["connected"] = False
+    proxmox_state["vms"] = []
     await _broadcast_proxmox_state()
 
 
