@@ -68,6 +68,7 @@ RECLONE_STATE_FILE = BASE_DIR / "reclone_state.json"
 RELAY_STATE_FILE = BASE_DIR / "relay_state.json"
 UPDATE_STATE_FILE = BASE_DIR / "update_state.json"
 VM_WATCHDOG_FILE = BASE_DIR / "vm_watchdog.json"
+RESOURCE_CACHE_FILE = BASE_DIR / "resource_cache.json"
 HISTORY_FILE = BASE_DIR / "central_history.jsonl"
 CLIENT_HISTORY_FILE = BASE_DIR / "client_history.json"
 CLIENT_COUNT_BASELINE_FILE = BASE_DIR / "client_count_baseline.json"
@@ -2753,6 +2754,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     _load_relay_state()
     _load_update_state()
     _load_vm_watchdog()
+    _load_resource_cache()
     # Refresh cs-webui frontend files before accepting requests (non-blocking,
     # awaited once so the fix is in place before the first page load).
     await asyncio.wait_for(refresh_webui_frontend(), timeout=60)
@@ -3289,6 +3291,50 @@ def _record_resource_samples(node: dict[str, Any], now: float) -> None:
                 _mem_samples[:] = [(ts, v) for ts, v in _mem_samples if ts >= cutoff]
     except (TypeError, ValueError, ZeroDivisionError):
         pass
+    _save_resource_cache()
+_RESOURCE_CACHE_SAVE_INTERVAL = 60.0  # persist at most once per minute
+
+
+def _load_resource_cache() -> None:
+    """Restore resource samples from disk so restarts don't reset the 1-hour window."""
+    global _cpu_samples, _mem_samples, _resource_samples_started
+    try:
+        if not RESOURCE_CACHE_FILE.exists():
+            return
+        data = json.loads(RESOURCE_CACHE_FILE.read_text())
+        cutoff = time.time() - _RESOURCE_SAMPLE_WINDOW
+        loaded_cpu = [(float(ts), float(v)) for ts, v in (data.get("cpu_samples") or []) if float(ts) >= cutoff]
+        loaded_mem = [(float(ts), float(v)) for ts, v in (data.get("mem_samples") or []) if float(ts) >= cutoff]
+        started = float(data.get("started") or 0)
+        _cpu_samples = loaded_cpu
+        _mem_samples = loaded_mem
+        _resource_samples_started = started if started > 0 else 0.0
+        logger.info(
+            "Loaded resource cache: %d CPU samples, %d mem samples (started %.0fs ago)",
+            len(_cpu_samples), len(_mem_samples),
+            time.time() - _resource_samples_started if _resource_samples_started else 0,
+        )
+    except Exception:
+        logger.debug("Could not load resource cache from %s", RESOURCE_CACHE_FILE, exc_info=True)
+
+
+def _save_resource_cache() -> None:
+    """Persist resource samples so the 1-hour window survives service restarts."""
+    global _resource_cache_last_saved
+    now = time.time()
+    if now - _resource_cache_last_saved < _RESOURCE_CACHE_SAVE_INTERVAL:
+        return
+    _resource_cache_last_saved = now
+    try:
+        _atomic_write_json(RESOURCE_CACHE_FILE, {
+            "cpu_samples": _cpu_samples,
+            "mem_samples": _mem_samples,
+            "started": _resource_samples_started,
+        })
+    except Exception:
+        logger.debug("Could not save resource cache to %s", RESOURCE_CACHE_FILE, exc_info=True)
+
+
 # Ring buffer: last 500 agent log lines
 proxmox_log_buffer: list[str] = []
 PROXMOX_LOG_MAX = 500
