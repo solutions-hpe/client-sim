@@ -3734,6 +3734,26 @@ def _command_matches_agent(command: dict[str, Any], hostname: str, approved_host
     )
 
 
+def _reset_delivered_commands_locked(hostname: str, approved_hostname: str | None = None) -> int:
+    """On WS reconnect, reset 'delivered' commands back to 'pending' so they are re-sent.
+
+    Commands that were pushed via WS and marked 'delivered' but never acked (because the
+    connection dropped before the agent could process them) would otherwise be silently
+    abandoned — _peek_pending_agent_commands_locked only returns 'pending' commands.
+    Resetting them to 'pending' ensures they are re-delivered on the next push.
+    """
+    now = time.time()
+    reset = 0
+    for cmd in commands:
+        if cmd.get("status") == "delivered" and _command_matches_agent(cmd, hostname, approved_hostname):
+            cmd["status"] = "pending"
+            cmd["updated_at"] = now
+            reset += 1
+    if reset:
+        _save_commands()
+    return reset
+
+
 def _peek_pending_agent_commands_locked(hostname: str, approved_hostname: str | None = None) -> tuple[list[dict[str, Any]], int, int]:
     expired, purged = _cleanup_commands_locked()
     pending = [
@@ -11822,6 +11842,11 @@ async def ws_proxmox_endpoint(
         proxmox_ws_disconnect_task.cancel()
         proxmox_ws_disconnect_task = None
     try:
+        # Reset any 'delivered' commands back to 'pending' so they are re-sent.
+        # Commands pushed via WS before a spoke restart are marked 'delivered' but
+        # never acked (agent lost the connection), so they would be silently abandoned.
+        async with state_lock:
+            _reset_delivered_commands_locked(approved_hostname, approved_hostname)
         await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)
         while True:
             data = await websocket.receive_json()
@@ -11858,6 +11883,8 @@ async def ws_proxmox_endpoint(
                 proxmox_state["connected"] = True
                 await websocket.send_json({"type": "pong"})
             elif msg_type == "sync":
+                async with state_lock:
+                    _reset_delivered_commands_locked(approved_hostname, approved_hostname)
                 await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)
     except WebSocketDisconnect:
         pass
