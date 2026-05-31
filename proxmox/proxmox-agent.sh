@@ -1103,6 +1103,8 @@ build_usb_state_json() {
         # Determine provisioning status for UI display
         if [[ -f "${PROV_DIR}/${vmid}.deleting" ]]; then
             prov_status="tearing_down"
+        elif [[ -f "${PROV_DIR}/${vmid}.post_prov_retry" ]]; then
+            prov_status="post_prov_retry"
         elif [[ -f "${PROV_DIR}/${vmid}" ]]; then
             prov_status="provisioning"
         elif [[ -n "$missing_since" ]]; then
@@ -1313,7 +1315,7 @@ clone_vm_for_usb() {
     # Helper: destroy this VM and free its slot so the next loop retries
     _teardown() {
         local reason="$1"
-        rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
+        rm -f "${PROV_DIR}/${vmid}" "${PROV_DIR}/${vmid}.post_prov_retry" 2>/dev/null || true
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
         timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
         _wait_vm_stopped "$vmid" 60 || true
@@ -1500,6 +1502,15 @@ PY
         fi
     else
         log "WARNING: VM $vmid did not come back after reboot — skipping update.sh"
+        # Queue for post-provisioning retry: check every 10 min, reclone after 1 hour
+        local _retry_ts
+        _retry_ts=$(date +%s)
+        # Sanitise product_name — strip pipe chars used as field delimiter
+        local _safe_product
+        _safe_product="${product_name//|/}"
+        echo "${_retry_ts}|${_retry_ts}|${bus_path}|${image_num}|${device_type}|${_safe_product}" \
+            > "${PROV_DIR}/${vmid}.post_prov_retry"
+        log "POST-PROV RETRY: VM $vmid queued for retry (10-min interval, reclone after 1h)"
     fi
 
     rm -f "${PROV_DIR}/${vmid}" 2>/dev/null || true
@@ -1579,8 +1590,93 @@ destroy_vm() {
     fi
     unset "STATE_VMID_TO_BUS[$vmid]"
     unset "STATE_VMID_TO_IMAGE[$vmid]"
+    rm -f "${PROV_DIR}/${vmid}.post_prov_retry" 2>/dev/null || true
     save_state_file
     log "Destroyed ${guest_type^^} $vmid"
+}
+
+# Retry VMs that completed provisioning but whose post-reboot step (update.sh) was
+# skipped because the guest agent timed out. Checks every 10 minutes; after 1 hour
+# without the guest responding, destroys and lets the normal provision loop reclone.
+_run_post_prov_retry_queue() {
+    local _now _retry_file _vmid _start_ts _last_ts _bus _img _dtype _prodname
+    _now=$(date +%s)
+    local _state_mutated=0
+
+    for _retry_file in "${PROV_DIR}"/*.post_prov_retry; do
+        [[ -f "$_retry_file" ]] || continue
+
+        _vmid="${_retry_file##*/}"
+        _vmid="${_vmid%.post_prov_retry}"
+
+        # Parse stored fields
+        IFS='|' read -r _start_ts _last_ts _bus _img _dtype _prodname < "$_retry_file" || {
+            log "POST-PROV RETRY: corrupt retry file $_retry_file — removing"
+            rm -f "$_retry_file"
+            continue
+        }
+
+        # Honour 10-minute minimum between retries
+        if (( _now - _last_ts < 600 )); then continue; fi
+
+        # Skip if this VM is being torn down by another path
+        if [[ -f "${PROV_DIR}/${_vmid}.deleting" ]]; then
+            log "POST-PROV RETRY: VM $_vmid is being deleted — removing retry entry"
+            rm -f "$_retry_file"
+            continue
+        fi
+
+        # Guard against VMID reuse: the VM must still map to the same bus path
+        local _current_bus="${STATE_VMID_TO_BUS[$_vmid]:-}"
+        if [[ "$_current_bus" != "$_bus" ]]; then
+            log "POST-PROV RETRY: VM $_vmid bus mismatch (expected $_bus, got ${_current_bus:-none}) — stale entry, removing"
+            rm -f "$_retry_file"
+            continue
+        fi
+
+        # Verify VM still exists in Proxmox
+        if ! qm status "$_vmid" >/dev/null 2>&1; then
+            log "POST-PROV RETRY: VM $_vmid no longer exists — removing retry entry"
+            rm -f "$_retry_file"
+            continue
+        fi
+
+        local _elapsed=$(( _now - _start_ts ))
+
+        if qm guest ping "$_vmid" >/dev/null 2>&1; then
+            log "POST-PROV RETRY: VM $_vmid guest agent responded (after ${_elapsed}s) — running update.sh"
+            timeout 360 qm guest exec "$_vmid" --timeout 300 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
+                && log "POST-PROV RETRY: update.sh completed on VM $_vmid — retry resolved" \
+                || log "WARNING: POST-PROV RETRY: update.sh exec failed on VM $_vmid — VM is live, will update on next boot"
+            # Mirror hub self-update from the normal provision success path
+            if [[ -n "$SERVER_URL" ]]; then
+                local _hub_http
+                _hub_http=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
+                    -X POST "${SERVER_URL}/api/self-update" 2>/dev/null || true)
+                [[ "$_hub_http" == "200" ]] \
+                    && log "POST-PROV RETRY: Hub self-update triggered" \
+                    || true
+            fi
+            rm -f "$_retry_file"
+            _state_mutated=1
+        else
+            if (( _elapsed > 3600 )); then
+                log "POST-PROV RETRY: VM $_vmid unresponsive for >1 hour — deleting; provision loop will reclone"
+                rm -f "$_retry_file"
+                destroy_vm "$_vmid"
+                _state_mutated=1
+            else
+                local _remaining=$(( 3600 - _elapsed ))
+                log "POST-PROV RETRY: VM $_vmid still not responding — ${_remaining}s until reclone threshold"
+                echo "${_start_ts}|${_now}|${_bus}|${_img}|${_dtype}|${_prodname}" > "$_retry_file"
+            fi
+        fi
+    done
+
+    if (( _state_mutated )); then
+        build_usb_state_json
+        post_telemetry || true
+    fi
 }
 
 # Destroy VM via qm only — does NOT update in-memory state or write the state file.
@@ -3081,7 +3177,13 @@ _PROV_COOLDOWN_UNTIL=0
 # Clean up stale provisioning flag files from any previous run.
 # These are /tmp files that survive service restarts; without cleanup they
 # make VMs appear permanently stuck in "provisioning" status.
-rm -f "${PROV_DIR}"/* 2>/dev/null || true
+# Preserve .post_prov_retry files — they track VMs that need retry/reclone
+# and must survive service restarts to honour the 1-hour reclone deadline.
+for _prov_f in "${PROV_DIR}"/*; do
+    [[ "$_prov_f" == *.post_prov_retry ]] && continue
+    rm -f "$_prov_f" 2>/dev/null || true
+done
+unset _prov_f
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
 fi
@@ -3654,6 +3756,12 @@ while true; do
         fi
     else
         refresh_usb_telemetry_only || true
+    fi
+
+    # Retry queue: runs whenever auto-provisioning is on, independent of cooldown.
+    # Handles VMs that provisioned but didn't come back after the post-hostname reboot.
+    if [[ "$AUTO_PROVISION" == "on" ]]; then
+        _run_post_prov_retry_queue || true
     fi
 
     # Post telemetry after USB scan (has fresh USB state in this process)
