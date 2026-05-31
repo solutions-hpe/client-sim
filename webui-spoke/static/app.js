@@ -1063,11 +1063,25 @@ function renderServerTab(data) {
   // 1-hour average pills
   const cpuAvgPill = document.getElementById('server-cpu-avg-pill');
   const memAvgPill = document.getElementById('server-mem-avg-pill');
+  const _warmupRemainS = data?.resource_samples_started
+    ? Math.max(0, 3600 - (Date.now() / 1000 - Number(data.resource_samples_started)))
+    : null;
+  const _warmupLabel = _warmupRemainS != null && _warmupRemainS > 0
+    ? `warming up… ${Math.ceil(_warmupRemainS / 60)} min`
+    : 'warming up…';
   if (cpuAvgPill) {
-    setEl('server-cpu-avg', data?.cpu_1h_avg != null ? Number(data.cpu_1h_avg).toFixed(1) : '…');
+    if (data?.cpu_1h_avg != null) {
+      cpuAvgPill.innerHTML = `📊 CPU avg: <span id="server-cpu-avg">${Number(data.cpu_1h_avg).toFixed(1)}</span>%`;
+    } else {
+      cpuAvgPill.innerHTML = `📊 ${_warmupLabel}`;
+    }
   }
   if (memAvgPill) {
-    setEl('server-mem-avg', data?.mem_1h_avg != null ? Number(data.mem_1h_avg).toFixed(1) : '…');
+    if (data?.mem_1h_avg != null) {
+      memAvgPill.innerHTML = `📊 Mem avg: <span id="server-mem-avg">${Number(data.mem_1h_avg).toFixed(1)}</span>%`;
+    } else {
+      memAvgPill.innerHTML = `📊 ${_warmupLabel}`;
+    }
   }
 
   // Reset select-all

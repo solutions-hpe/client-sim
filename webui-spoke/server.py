@@ -4100,6 +4100,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
         "cpu_1h_avg": _resource_1h_average(_cpu_samples),
         "mem_1h_avg": _resource_1h_average(_mem_samples),
+        "resource_samples_started": _resource_samples_started or None,
     }
 
 
@@ -5250,6 +5251,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "pve_version": proxmox_state.get("pve_version"),
             "cpu_1h_avg": _resource_1h_average(_cpu_samples),
             "mem_1h_avg": _resource_1h_average(_mem_samples),
+            "resource_samples_started": _resource_samples_started or None,
             "template_lock": str(proxmox_state.get("template_lock") or ""),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
             "hw_faults": proxmox_state.get("hw_faults") or {},
