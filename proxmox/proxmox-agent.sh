@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.17"
+AGENT_VERSION="1.18"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2525,7 +2525,7 @@ for v in qemu:
         'vmid':                vmid,
         'name':                v.get('name', ''),
         'status':              v.get('status', 'unknown'),
-        'cpu':                 round(float(raw_cpu) * 100, 1) if raw_cpu is not None else None,
+        'cpu':                 round(float(raw_cpu) * 100, 2) if raw_cpu is not None else None,
         'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         bool(v.get('template', 0)) or is_template,
@@ -2545,7 +2545,7 @@ for v in lxc:
         'vmid':                vmid,
         'name':                v.get('name', ''),
         'status':              v.get('status', 'unknown'),
-        'cpu':                 round(float(raw_cpu) * 100, 1) if raw_cpu is not None else None,
+        'cpu':                 round(float(raw_cpu) * 100, 2) if raw_cpu is not None else None,
         'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         is_template,
