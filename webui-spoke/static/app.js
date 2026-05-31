@@ -5520,8 +5520,9 @@ if (purgeHistoryBtn) {
     try {
       const resp = await fetch('/api/clients/history', { method: 'DELETE' });
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      showToast('Client history cleared.', 'success');
     } catch (err) {
-      alert(`Purge failed: ${err.message}`);
+      showToast(`Purge failed: ${err.message}`, 'error');
     } finally {
       purgeHistoryBtn.disabled = false;
       purgeHistoryBtn.textContent = '🗑 Purge History';
