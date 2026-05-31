@@ -54,6 +54,15 @@ HW_TIER2_REBOOT_THRESHOLD="${CLIENT_SIM_HW_TIER2_THRESHOLD:-3}"
 # Minimum seconds between watchdog-triggered reboots (prevent reboot storm)
 HW_REBOOT_COOLDOWN="${CLIENT_SIM_HW_REBOOT_COOLDOWN:-300}"
 
+# ── VM Guest Agent Watchdog ────────────────────────────────────────────────────
+# Monitors each sim VM's QEMU guest agent; reboots then reclones unresponsive VMs.
+GUEST_AGENT_WATCHDOG_ENABLED="${CLIENT_SIM_GUEST_AGENT_WATCHDOG_ENABLED:-on}"
+GUEST_AGENT_GRACE_MINUTES="${CLIENT_SIM_GUEST_AGENT_GRACE_MINUTES:-20}"
+GUEST_AGENT_CHECK_INTERVAL_MINUTES="${CLIENT_SIM_GUEST_AGENT_CHECK_INTERVAL_MINUTES:-10}"
+GUEST_AGENT_REBOOT_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_REBOOT_AFTER_MINUTES:-10}"
+GUEST_AGENT_RECLONE_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_RECLONE_AFTER_MINUTES:-30}"
+_LAST_AGENT_WATCHDOG_CHECK=0
+
 # Prevent duplicate instances
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting."
@@ -812,6 +821,13 @@ for vidpid in data.get("ignored_vidpids", []) or []:
     value = str(vidpid).strip().lower()
     if value:
         print(f"IGN\t{value}")
+# Agent watchdog settings (AGNT line — older agents silently ignore unknown line types)
+agnt_enabled   = str(data.get("guest_agent_watchdog_enabled", "on")).lower()
+agnt_grace     = int(data.get("guest_agent_grace_minutes", 20) or 20)
+agnt_interval  = int(data.get("guest_agent_check_interval_minutes", 10) or 10)
+agnt_reboot    = int(data.get("guest_agent_reboot_after_minutes", 10) or 10)
+agnt_reclone   = int(data.get("guest_agent_reclone_after_minutes", 30) or 30)
+print(f"AGNT\t{agnt_enabled}\t{agnt_grace}\t{agnt_interval}\t{agnt_reboot}\t{agnt_reclone}")
 PY
 )
 
@@ -868,6 +884,14 @@ PY
                 ;;
             IGN)
                 IGNORED_VIDPIDS["$a"]=1
+                ;;
+            AGNT)
+                # VM guest agent watchdog settings
+                GUEST_AGENT_WATCHDOG_ENABLED="${a:-on}"
+                GUEST_AGENT_GRACE_MINUTES="${b:-20}"
+                GUEST_AGENT_CHECK_INTERVAL_MINUTES="${c:-10}"
+                GUEST_AGENT_REBOOT_AFTER_MINUTES="${d:-10}"
+                GUEST_AGENT_RECLONE_AFTER_MINUTES="${e:-30}"
                 ;;
         esac
     done <<< "$parsed"
@@ -938,6 +962,9 @@ prune_stale_state_vmids() {
             unset "STATE_BUS_TO_VMID[$bus_path]"
             unset "STATE_MISSING_BY_BUS[$bus_path]"
         fi
+        rm -f "${PROV_DIR}/${vmid}.post_prov_retry" \
+              "${PROV_DIR}/${vmid}.provision_done" \
+              "${PROV_DIR}/${vmid}.agent_unresponsive" 2>/dev/null || true
         ((stale_count++))
         log "Removed stale VM state for VM $vmid${bus_path:+ (bus $bus_path)}"
     done
@@ -1105,6 +1132,14 @@ build_usb_state_json() {
             prov_status="tearing_down"
         elif [[ -f "${PROV_DIR}/${vmid}.post_prov_retry" ]]; then
             prov_status="post_prov_retry"
+        elif [[ -f "${PROV_DIR}/${vmid}.agent_unresponsive" ]]; then
+            local _au_rebooted_at
+            IFS='|' read -r _ _ _au_rebooted_at _ < "${PROV_DIR}/${vmid}.agent_unresponsive" 2>/dev/null || _au_rebooted_at=0
+            if [[ "${_au_rebooted_at:-0}" != "0" ]]; then
+                prov_status="agent_rebooting"
+            else
+                prov_status="agent_unresponsive"
+            fi
         elif [[ -f "${PROV_DIR}/${vmid}" ]]; then
             prov_status="provisioning"
         elif [[ -n "$missing_since" ]]; then
@@ -1315,7 +1350,8 @@ clone_vm_for_usb() {
     # Helper: destroy this VM and free its slot so the next loop retries
     _teardown() {
         local reason="$1"
-        rm -f "${PROV_DIR}/${vmid}" "${PROV_DIR}/${vmid}.post_prov_retry" 2>/dev/null || true
+        rm -f "${PROV_DIR}/${vmid}" "${PROV_DIR}/${vmid}.post_prov_retry" \
+              "${PROV_DIR}/${vmid}.provision_done" "${PROV_DIR}/${vmid}.agent_unresponsive" 2>/dev/null || true
         log "ERROR: VM $vmid provisioning failed — ${reason}. Tearing down and releasing USB $bus_path for retry."
         timeout 30 qm stop "$vmid" --skiplock 2>/dev/null || true
         _wait_vm_stopped "$vmid" 60 || true
@@ -1491,6 +1527,9 @@ PY
             && log "update.sh completed on VM $vmid" \
             || log "WARNING: update.sh exec failed on VM $vmid — will retry on next boot"
 
+        # Mark provisioning complete so the agent watchdog knows when to start monitoring
+        echo "$(date +%s)|${bus_path}" > "${PROV_DIR}/${vmid}.provision_done"
+
         # Trigger hub self-update so the hub pulls latest scripts too
         if [[ -n "$SERVER_URL" ]]; then
             local _hub_http
@@ -1590,7 +1629,9 @@ destroy_vm() {
     fi
     unset "STATE_VMID_TO_BUS[$vmid]"
     unset "STATE_VMID_TO_IMAGE[$vmid]"
-    rm -f "${PROV_DIR}/${vmid}.post_prov_retry" 2>/dev/null || true
+    rm -f "${PROV_DIR}/${vmid}.post_prov_retry" \
+          "${PROV_DIR}/${vmid}.provision_done" \
+          "${PROV_DIR}/${vmid}.agent_unresponsive" 2>/dev/null || true
     save_state_file
     log "Destroyed ${guest_type^^} $vmid"
 }
@@ -1648,6 +1689,8 @@ _run_post_prov_retry_queue() {
             timeout 360 qm guest exec "$_vmid" --timeout 300 -- bash /usr/local/scripts/update.sh >/dev/null 2>&1 \
                 && log "POST-PROV RETRY: update.sh completed on VM $_vmid — retry resolved" \
                 || log "WARNING: POST-PROV RETRY: update.sh exec failed on VM $_vmid — VM is live, will update on next boot"
+            # Write provision_done now that the VM is confirmed responsive
+            echo "$(date +%s)|${_bus}" > "${PROV_DIR}/${_vmid}.provision_done"
             # Mirror hub self-update from the normal provision success path
             if [[ -n "$SERVER_URL" ]]; then
                 local _hub_http
@@ -1670,6 +1713,108 @@ _run_post_prov_retry_queue() {
                 log "POST-PROV RETRY: VM $_vmid still not responding — ${_remaining}s until reclone threshold"
                 echo "${_start_ts}|${_now}|${_bus}|${_img}|${_dtype}|${_prodname}" > "$_retry_file"
             fi
+        fi
+    done
+
+    if (( _state_mutated )); then
+        build_usb_state_json
+        post_telemetry || true
+    fi
+}
+
+# Monitor VM guest agents and escalate: warn → soft reboot → reclone.
+# .provision_done (timestamp|bus_path) defines the grace period start.
+# .agent_unresponsive (first_fail|last_check|rebooted_at) tracks escalation state.
+# NOTE: the post-reboot reclone check runs even if the VM is stopped/paused
+# (rubber-duck fix: do NOT gate on running state for the reclone deadline).
+_run_vm_agent_watchdog() {
+    [[ "${GUEST_AGENT_WATCHDOG_ENABLED:-on}" != "on" ]] && return 0
+
+    local _now _grace_s _reboot_s _reclone_s _state_mutated=0
+    _now=$(date +%s)
+    _grace_s=$(( ${GUEST_AGENT_GRACE_MINUTES:-20} * 60 ))
+    _reboot_s=$(( ${GUEST_AGENT_REBOOT_AFTER_MINUTES:-10} * 60 ))
+    _reclone_s=$(( ${GUEST_AGENT_RECLONE_AFTER_MINUTES:-30} * 60 ))
+
+    local vmid
+    for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
+        # Skip VMs that are in mid-flight lifecycle states
+        [[ -f "${PROV_DIR}/${vmid}" ]] && continue
+        [[ -f "${PROV_DIR}/${vmid}.deleting" ]] && continue
+        [[ -f "${PROV_DIR}/${vmid}.post_prov_retry" ]] && continue
+
+        local _unresp_file="${PROV_DIR}/${vmid}.agent_unresponsive"
+        local _first_fail=0 _last_check=0 _rebooted_at=0
+
+        if [[ -f "$_unresp_file" ]]; then
+            IFS='|' read -r _first_fail _last_check _rebooted_at < "$_unresp_file" 2>/dev/null || true
+
+            # Post-reboot reclone deadline: runs REGARDLESS of VM running state
+            # (VM may be stuck stopped/paused after reboot attempt)
+            if [[ "${_rebooted_at:-0}" != "0" ]]; then
+                local _since_reboot=$(( _now - _rebooted_at ))
+                if (( _since_reboot >= _reclone_s )); then
+                    log "VM AGENT WATCHDOG: VM $vmid unresponsive ${_since_reboot}s after reboot — recloning"
+                    rm -f "$_unresp_file" "${PROV_DIR}/${vmid}.provision_done" 2>/dev/null || true
+                    destroy_vm "$vmid"
+                    _state_mutated=1
+                    continue
+                fi
+            fi
+        fi
+
+        # Grace period: skip VMs that haven't been marked provision_done yet
+        local _done_file="${PROV_DIR}/${vmid}.provision_done"
+        [[ ! -f "$_done_file" ]] && continue
+
+        local _done_ts _done_bus
+        IFS='|' read -r _done_ts _done_bus < "$_done_file" 2>/dev/null || { _done_ts=0; _done_bus=""; }
+        (( _done_ts == 0 )) && continue
+
+        # VMID reuse guard: stored bus must match current assignment
+        local _current_bus="${STATE_VMID_TO_BUS[$vmid]:-}"
+        if [[ -n "$_done_bus" && "$_done_bus" != "$_current_bus" ]]; then
+            log "VM AGENT WATCHDOG: VM $vmid bus mismatch (expected $_done_bus, got ${_current_bus:-none}) — removing stale watchdog files"
+            rm -f "$_done_file" "$_unresp_file" 2>/dev/null || true
+            continue
+        fi
+
+        # Still within grace period
+        (( _now - _done_ts < _grace_s )) && continue
+
+        # Only ping running VMs (stopped/paused ones are handled by the reclone path above)
+        local _vm_status
+        _vm_status=$(qm status "$vmid" 2>/dev/null | awk '{print $2}' || true)
+        [[ "$_vm_status" != "running" ]] && continue
+
+        # Bounded ping: 5s max so a batch of stuck VMs doesn't stall the main loop
+        if timeout 5 qm guest ping "$vmid" >/dev/null 2>&1; then
+            if [[ -f "$_unresp_file" ]]; then
+                log "VM AGENT WATCHDOG: VM $vmid guest agent recovered — clearing unresponsive state"
+                rm -f "$_unresp_file"
+                _state_mutated=1
+            fi
+            continue
+        fi
+
+        # Agent not responding
+        if [[ ! -f "$_unresp_file" ]]; then
+            echo "${_now}|${_now}|0" > "$_unresp_file"
+            log "VM AGENT WATCHDOG: VM $vmid agent not responding — monitoring started (reboot_after=${GUEST_AGENT_REBOOT_AFTER_MINUTES}m, reclone_after=${GUEST_AGENT_RECLONE_AFTER_MINUTES}m)"
+            _state_mutated=1
+            continue
+        fi
+
+        local _unresponsive_s=$(( _now - _first_fail ))
+        # Update last-check timestamp
+        echo "${_first_fail}|${_now}|${_rebooted_at}" > "$_unresp_file"
+
+        if [[ "${_rebooted_at:-0}" == "0" ]] && (( _unresponsive_s >= _reboot_s )); then
+            log "VM AGENT WATCHDOG: VM $vmid unresponsive ${_unresponsive_s}s — issuing soft reboot"
+            qm reboot "$vmid" --timeout 30 2>/dev/null || qm reset "$vmid" 2>/dev/null || true
+            echo "${_first_fail}|${_now}|${_now}" > "$_unresp_file"
+            log "VM AGENT WATCHDOG: VM $vmid soft reboot issued — will reclone if still unresponsive after ${GUEST_AGENT_RECLONE_AFTER_MINUTES}m"
+            _state_mutated=1
         fi
     done
 
@@ -3177,10 +3322,14 @@ _PROV_COOLDOWN_UNTIL=0
 # Clean up stale provisioning flag files from any previous run.
 # These are /tmp files that survive service restarts; without cleanup they
 # make VMs appear permanently stuck in "provisioning" status.
-# Preserve .post_prov_retry files — they track VMs that need retry/reclone
-# and must survive service restarts to honour the 1-hour reclone deadline.
+# Preserve durable state files that must survive restarts:
+#   .post_prov_retry  — tracks VMs waiting for retry/reclone after missed update.sh
+#   .provision_done   — marks provisioning completion (watchdog grace period anchor)
+#   .agent_unresponsive — tracks watchdog escalation state (reboot/reclone timing)
 for _prov_f in "${PROV_DIR}"/*; do
     [[ "$_prov_f" == *.post_prov_retry ]] && continue
+    [[ "$_prov_f" == *.provision_done ]] && continue
+    [[ "$_prov_f" == *.agent_unresponsive ]] && continue
     rm -f "$_prov_f" 2>/dev/null || true
 done
 unset _prov_f
@@ -3762,6 +3911,15 @@ while true; do
     # Handles VMs that provisioned but didn't come back after the post-hostname reboot.
     if [[ "$AUTO_PROVISION" == "on" ]]; then
         _run_post_prov_retry_queue || true
+    fi
+
+    # VM guest agent watchdog: runs on its own interval regardless of auto-provision state.
+    local _now_watchdog
+    _now_watchdog=$(date +%s)
+    local _watchdog_interval_s=$(( ${GUEST_AGENT_CHECK_INTERVAL_MINUTES:-10} * 60 ))
+    if (( _now_watchdog - _LAST_AGENT_WATCHDOG_CHECK >= _watchdog_interval_s )); then
+        _LAST_AGENT_WATCHDOG_CHECK=$_now_watchdog
+        _run_vm_agent_watchdog || true
     fi
 
     # Post telemetry after USB scan (has fresh USB state in this process)
