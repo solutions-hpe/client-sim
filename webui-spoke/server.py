@@ -7687,7 +7687,7 @@ async def _run_self_update() -> None:
     # Wait for any pending/delivered Proxmox agent commands (e.g. update_agent) to be
     # acked before restarting. Without this delay, the spoke restarts and loses the
     # in-memory command state before the agent has a chance to ack the command.
-    _agent_update_wait_secs = 60
+    _agent_update_wait_secs = 180
     _agent_update_deadline = time.time() + _agent_update_wait_secs
     while time.time() < _agent_update_deadline:
         async with state_lock:
@@ -11601,13 +11601,30 @@ async def list_commands() -> list[dict[str, Any]]:
 
 async def _poll_agent_inbox(hostname: str, approved_hostname: str | None = None) -> list[dict[str, Any]]:
     async with state_lock:
+        # Reset stale 'delivered' commands to 'pending' so they are re-sent if the agent
+        # restarted without acking them (same logic as WS reconnect reset).
+        # Only reset commands older than 30s to avoid re-delivering in-progress commands.
+        _stale_threshold = 30.0
+        now = time.time()
+        reset = 0
+        for cmd in commands:
+            if (
+                cmd.get("status") == "delivered"
+                and _command_matches_agent(cmd, hostname, approved_hostname)
+                and (now - float(cmd.get("updated_at") or cmd.get("created_at") or now)) >= _stale_threshold
+            ):
+                cmd["status"] = "pending"
+                cmd["updated_at"] = now
+                reset += 1
+        if reset:
+            _save_commands()
         pending, expired, purged = _peek_pending_agent_commands_locked(hostname, approved_hostname)
         if pending:
             _mark_commands_delivered_locked([command["id"] for command in pending])
         serialized = _serialize_commands()
         payload = [_serialize_command_for_agent(command) for command in pending]
 
-    if pending or expired or purged:
+    if pending or expired or purged or reset:
         await broadcast({"type": "commands_update", "commands": serialized})
     return payload
 
