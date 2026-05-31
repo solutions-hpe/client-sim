@@ -3173,6 +3173,18 @@ _acme_status: dict[str, Any] = {"running": False, "last_result": None, "last_err
 state_lock = asyncio.Lock()
 repo_state = {"synced": False, "error": None, "last_sync": None}
 gkill_switch_state: dict[str, Any] = {"value": "off", "last_fetched": None, "error": None}
+# ── Command trace ring buffer ───────────────────────────────────────────────────
+# Captures key events in the hub→spoke→agent relay pipeline so they can be
+# fetched via /api/debug/command-trace for live debugging without SSH access.
+_COMMAND_TRACE_MAX = 300
+_command_trace: list[dict[str, Any]] = []
+
+def _trace(event: str, **kwargs: Any) -> None:
+    """Append a timestamped event to the command trace ring buffer."""
+    entry = {"t": datetime.now(timezone.utc).isoformat(), "event": event, **kwargs}
+    _command_trace.append(entry)
+    if len(_command_trace) > _COMMAND_TRACE_MAX:
+        del _command_trace[: len(_command_trace) - _COMMAND_TRACE_MAX]
 # Queues for proxmox token provision responses relayed from agent → spoke → hub
 _proxmox_token_provision_queues: dict[str, asyncio.Queue] = {}
 GKILL_SWITCH_URL = "https://raw.githubusercontent.com/solutions-hpe/client-sim/main/kill_switch.txt"
@@ -3788,9 +3800,12 @@ async def _push_pending_agent_commands(hostname: str, websocket: WebSocket, appr
         if expired or purged:
             await broadcast({"type": "commands_update", "commands": serialized})
         return True
+    _trace("agent_ws_push", hostname=hostname,
+           commands=[{"action": c.get("action"), "args": {k: v for k, v in (c.get("args") or {}).items() if k in {"vmid", "vm_type"}}} for c in payload])
     try:
         await websocket.send_json({"type": "commands", "commands": payload})
-    except Exception:
+    except Exception as exc:
+        _trace("agent_ws_push_err", hostname=hostname, error=str(exc))
         return False
     async with state_lock:
         changed = _mark_commands_delivered_locked([command["id"] for command in pending])
@@ -5704,21 +5719,30 @@ async def _handle_log_fetch(message: dict[str, Any]) -> None:
             await _send_response([f"[WARN] Journal unavailable: {err or 'no output'}"])
             return
         await _send_response(text.splitlines())
+        return
 
     except Exception as exc:
         await _send_response([], error=str(exc))
-    future = loop.create_future()
 
-    def _ready() -> None:
-        if not future.done():
-            future.set_result(None)
 
-    loop.add_reader(fd, _ready)
-    try:
-        await future
-    finally:
-        with contextlib.suppress(Exception):
-            loop.remove_reader(fd)
+async def _handle_command_trace_request(message: dict[str, Any]) -> None:
+    """Send the command relay trace buffer back to the hub."""
+    request_id = str(message.get("request_id") or "").strip()
+    if not request_id or _relay_ws_send_json is None:
+        return
+    async with state_lock:
+        cmds_snapshot = list(_serialize_commands())
+    out: dict[str, Any] = {
+        "type": "command_trace_response",
+        "request_id": request_id,
+        "agent_connected": proxmox_ws_connection is not None,
+        "agent_hostname": proxmox_ws_hostname,
+        "command_queue": cmds_snapshot,
+        "trace": list(reversed(_command_trace)),
+    }
+    if _relay_ws_spoke_id:
+        out["spoke_id"] = _relay_ws_spoke_id
+    await _relay_ws_send_json(out)
 
 
 async def _relay_shell_message(message: dict[str, Any]) -> None:
@@ -5931,6 +5955,9 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
         action = rc.get("action", "") or payload_data.get("action", "")
         normalized_action = _normalize_command_action(action)
         args = rc.get("args", {}) or payload_data.get("args", {})
+        _trace("hub_relay_recv", cmd_type=cmd_type, target=target, action=normalized_action,
+               args={k: v for k, v in (args or {}).items() if k in {"vmid", "vm_type", "vm_name"}},
+               cmd_id=cmd_id)
 
         if cmd_type in {"backup", "reseed"}:
             try:
@@ -6186,6 +6213,7 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
             continue
 
         if not target or not action:
+            _trace("hub_relay_skip", reason="empty target or action", target=target, action=action)
             continue
         try:
             async with state_lock:
@@ -6198,11 +6226,15 @@ async def _apply_relay_command_batch(remote_cmds: list[dict[str, Any]], ack_fn) 
                     queued_targets.append(target)
                     _enqueue_command_locked(target, action, args, command_type=cmd_type, relay=True)
                 serialized_commands = _serialize_commands()
+            agent_connected = proxmox_ws_connection is not None if target == "proxmox" else bool(client_ws_connections.get(target))
+            _trace("hub_relay_enqueued", target=target, action=action, cmd_id=cmd_id,
+                   agent_connected=agent_connected)
             commands_changed = True
             if cmd_id:
                 await ack_fn(cmd_id, "queued", None)
         except Exception as exc:
             logger.warning("Hub relay: failed to enqueue %s/%s %s: %s", target, action, args, exc)
+            _trace("hub_relay_enqueue_err", target=target, action=action, error=str(exc))
             if cmd_id:
                 await ack_fn(cmd_id, "executed", {
                     "success": False,
@@ -6997,6 +7029,8 @@ async def relay_ws_loop() -> None:
                                 q.put_nowait(None)
                         elif msg_type == "log_fetch":
                             asyncio.create_task(_handle_log_fetch(message))
+                        elif msg_type == "command_trace_request":
+                            asyncio.create_task(_handle_command_trace_request(message))
                         elif msg_type == "demo_scenario":
                             _hostname = str(message.get("hostname") or "").strip()
                             _scenario = str(message.get("scenario") or "").strip()
@@ -11257,6 +11291,20 @@ async def api_debug() -> dict[str, Any]:
     }
 
 
+@app.get("/api/debug/command-trace")
+async def api_debug_command_trace() -> dict[str, Any]:
+    """Returns the last 300 command relay events for diagnosing hub→spoke→agent pipeline issues."""
+    async with state_lock:
+        cmds_snapshot = list(_serialize_commands())
+    agent_connected = proxmox_ws_connection is not None
+    return {
+        "agent_connected": agent_connected,
+        "agent_hostname": proxmox_ws_hostname,
+        "command_queue": cmds_snapshot,
+        "trace": list(reversed(_command_trace)),
+    }
+
+
 @app.get("/api/services/status")
 async def api_services_status() -> dict[str, Any]:
     return {
@@ -11678,6 +11726,9 @@ async def _ack_command_internal(body: dict[str, Any]) -> dict[str, bool]:
         cmd["message"] = str(message) if message is not None else ""
         cmd["updated_at"] = time.time()
         cmd["purge_after"] = cmd["updated_at"] + COMMAND_RESULT_RETENTION_SECS
+        _trace("agent_ack", cmd_id=cmd_id, action=cmd.get("action"), target=cmd.get("target"),
+               args={k: v for k, v in (cmd.get("args") or {}).items() if k in {"vmid", "vm_type"}},
+               status=status, message=str(message)[:200] if message else "")
         await _async_save_commands()
         serialized = _serialize_commands()
 

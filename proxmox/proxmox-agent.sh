@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.19"
+AGENT_VERSION="1.20"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3302,13 +3302,18 @@ print(
 PY
 )
     IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type <<< "$parsed"
-    [[ -z "$cmd_id" || -z "$action" ]] && return 0
+    if [[ -z "$cmd_id" || -z "$action" ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [CMD] SKIP: empty cmd_id or action — raw=${raw:0:200}" >> "$AGENT_LOG"
+        return 0
+    fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [CMD] RECV: action=$action vmid=$vmid type=${guest_type:-$cmd_type} id=$cmd_id" >> "$AGENT_LOG"
     status="completed"
     message="${action} completed"
     if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" 2>>"$AGENT_LOG"; then
         status="failed"
         message="${action} failed — check $AGENT_LOG"
     fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [CMD] DONE: action=$action vmid=$vmid status=$status id=$cmd_id" >> "$AGENT_LOG"
     ack_inbox_command "$cmd_id" "$status" "$message" || true
 }
 
@@ -3439,18 +3444,36 @@ async def collect_telemetry():
     except Exception:
         print(f"[WARN] Malformed payload (truncated): {raw[:200]}", file=sys.stderr)
         return None
+AGENT_LOG_FILE = '/var/log/client-sim-proxmox-agent.log'
+def _open_agent_log():
+    try:
+        return open(AGENT_LOG_FILE, 'a', buffering=1)
+    except Exception:
+        return None
 async def run_command(command):
-    proc = await asyncio.create_subprocess_exec(
-        'bash', script_path, '--process-single-command', json.dumps(command),
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-    )
-    await proc.wait()
+    log_fh = _open_agent_log()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'bash', script_path, '--process-single-command', json.dumps(command),
+            stdout=log_fh or asyncio.subprocess.DEVNULL,
+            stderr=log_fh or asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    finally:
+        if log_fh:
+            log_fh.close()
 async def run_command_bg(flag, command):
+    log_fh = _open_agent_log()
     proc = await asyncio.create_subprocess_exec(
         'bash', script_path, flag, command,
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        stdout=log_fh or asyncio.subprocess.DEVNULL,
+        stderr=log_fh or asyncio.subprocess.DEVNULL,
     )
-    asyncio.create_task(proc.wait())
+    async def _wait_and_close():
+        await proc.wait()
+        if log_fh:
+            log_fh.close()
+    asyncio.create_task(_wait_and_close())
 async def handle_create_proxmox_token(ws, request_id):
     import shutil as _shutil
     TOKEN_ID = 'cs-hub'
@@ -3561,13 +3584,30 @@ async def main():
                             continue
                         msg_type = str(payload.get('type') or '').lower()
                         if msg_type == 'commands':
-                            for command in payload.get('commands') or []:
-                                await run_command(command)
+                            cmds = payload.get('commands') or []
+                            try:
+                                import datetime as _dt
+                                with open(AGENT_LOG_FILE, 'a') as _lf:
+                                    _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] BATCH received: {len(cmds)} command(s): {[c.get('action') for c in cmds]}\n")
+                            except Exception:
+                                pass
+                            for command in cmds:
+                                action_name = str(command.get('action') or '')
+                                if action_name == 'delete_vm':
+                                    asyncio.create_task(run_command_bg('--process-single-command', json.dumps(command)))
+                                else:
+                                    await run_command(command)
                         elif msg_type == 'command':
                             # delete_vm is long-running (stop+destroy) — run as a background
                             # task so multiple deletes can execute in parallel without each
                             # one blocking the WS receive loop for the next command.
                             action = str(payload.get('action') or '').replace('-', '_')
+                            try:
+                                import datetime as _dt
+                                with open(AGENT_LOG_FILE, 'a') as _lf:
+                                    _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] SINGLE received: action={action}\n")
+                            except Exception:
+                                pass
                             if action == 'delete_vm':
                                 asyncio.create_task(run_command_bg('--process-single-command', json.dumps(payload)))
                             else:
