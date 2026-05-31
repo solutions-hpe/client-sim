@@ -1106,34 +1106,35 @@ function renderServerTab(data) {
   // 1-hour average pills
   const cpuAvgPill = document.getElementById('server-cpu-avg-pill');
   const memAvgPill = document.getElementById('server-mem-avg-pill');
-  const _warmupRemainS = data?.resource_samples_started
-    ? Math.max(0, 3600 - (Date.now() / 1000 - Number(data.resource_samples_started)))
-    : null;
-  const _warmupRemainLabel = _warmupRemainS != null && _warmupRemainS > 0
-    ? `${Math.ceil(_warmupRemainS / 60)} min`
-    : null;
+  // Rolling average — updated with every sample (no need to wait for a full hour).
+  // _resource_1h_average on the backend returns the mean of whatever samples exist in
+  // the last 60-minute window, so data is available from the very first telemetry tick.
+  // Show sample count in the tooltip so the user knows how much history backs the number.
+  const _sampleCount = data?.resource_sample_count ?? 0;
+  const _sampleAge = data?.resource_samples_started
+    ? Math.round((Date.now() / 1000 - Number(data.resource_samples_started)) / 60)
+    : 0;
+  const _sampleContext = _sampleCount > 0
+    ? `Rolling 1-hour average — ${_sampleCount} sample${_sampleCount !== 1 ? 's' : ''} over the last ${Math.min(_sampleAge, 60)} min.`
+    : 'Collecting samples — average will appear with the first telemetry tick.';
   if (cpuAvgPill) {
-    if (data?.cpu_1h_avg != null) {
-      cpuAvgPill.title = 'Confirmed 1-hour rolling average CPU usage. During warmup the UI shows an estimated ~value until the full 60-minute window is available.';
-      cpuAvgPill.innerHTML = `📊 CPU avg: <span id="server-cpu-avg">${Number(data.cpu_1h_avg).toFixed(1)}</span>%`;
-    } else if (data?.cpu_est_avg != null) {
-      cpuAvgPill.title = `Estimated CPU average from samples collected so far while the 1-hour window fills${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
-      cpuAvgPill.innerHTML = `📊 CPU avg: ~${Number(data.cpu_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
+    const _cpuVal = data?.cpu_1h_avg ?? data?.cpu_est_avg;
+    if (_cpuVal != null) {
+      cpuAvgPill.title = _sampleContext;
+      cpuAvgPill.innerHTML = `📊 CPU avg: <span id="server-cpu-avg">${Number(_cpuVal).toFixed(1)}</span>%`;
     } else {
-      cpuAvgPill.title = `Collecting CPU samples for the 1-hour rolling average${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
-      cpuAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
+      cpuAvgPill.title = _sampleContext;
+      cpuAvgPill.innerHTML = `📊 CPU avg: –`;
     }
   }
   if (memAvgPill) {
-    if (data?.mem_1h_avg != null) {
-      memAvgPill.title = 'Confirmed 1-hour rolling average memory usage. During warmup the UI shows an estimated ~value until the full 60-minute window is available.';
-      memAvgPill.innerHTML = `📊 Mem avg: <span id="server-mem-avg">${Number(data.mem_1h_avg).toFixed(1)}</span>%`;
-    } else if (data?.mem_est_avg != null) {
-      memAvgPill.title = `Estimated memory average from samples collected so far while the 1-hour window fills${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
-      memAvgPill.innerHTML = `📊 Mem avg: ~${Number(data.mem_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
+    const _memVal = data?.mem_1h_avg ?? data?.mem_est_avg;
+    if (_memVal != null) {
+      memAvgPill.title = _sampleContext;
+      memAvgPill.innerHTML = `📊 Mem avg: <span id="server-mem-avg">${Number(_memVal).toFixed(1)}</span>%`;
     } else {
-      memAvgPill.title = `Collecting memory samples for the 1-hour rolling average${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
-      memAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
+      memAvgPill.title = _sampleContext;
+      memAvgPill.innerHTML = `📊 Mem avg: –`;
     }
   }
 

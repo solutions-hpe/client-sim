@@ -4134,6 +4134,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "cpu_est_avg": _resource_estimated_average(_cpu_samples),
         "mem_est_avg": _resource_estimated_average(_mem_samples),
         "resource_samples_started": _resource_samples_started or None,
+        "resource_sample_count": len(_cpu_samples),
     }
 
 
@@ -5287,6 +5288,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "cpu_est_avg": _resource_estimated_average(_cpu_samples),
             "mem_est_avg": _resource_estimated_average(_mem_samples),
             "resource_samples_started": _resource_samples_started or None,
+            "resource_sample_count": len(_cpu_samples),
             "template_lock": str(proxmox_state.get("template_lock") or ""),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
             "hw_faults": proxmox_state.get("hw_faults") or {},
