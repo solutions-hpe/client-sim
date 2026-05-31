@@ -7684,6 +7684,22 @@ async def _run_self_update() -> None:
     """Re-run the installer from the synced repo. Systemd will restart the service."""
     if update_state["update_in_progress"]:
         return
+    # Wait for any pending/delivered Proxmox agent commands (e.g. update_agent) to be
+    # acked before restarting. Without this delay, the spoke restarts and loses the
+    # in-memory command state before the agent has a chance to ack the command.
+    _agent_update_wait_secs = 60
+    _agent_update_deadline = time.time() + _agent_update_wait_secs
+    while time.time() < _agent_update_deadline:
+        async with state_lock:
+            active = [c for c in commands if c.get("status") in ("pending", "delivered")]
+        if not active:
+            break
+        logger.info(
+            "Self-update: waiting for %d Proxmox agent command(s) to complete before restarting (%.0fs remaining)...",
+            len(active),
+            _agent_update_deadline - time.time(),
+        )
+        await asyncio.sleep(5)
     if not _INSTALLER_PATH.exists():
         msg = f"Self-update: installer not found at {_INSTALLER_PATH}"
         logger.error(msg)
