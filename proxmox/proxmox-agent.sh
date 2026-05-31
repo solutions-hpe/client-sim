@@ -2419,7 +2419,19 @@ PY
 
 collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json template_lock template_lock_json
-    cpu_line=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "0")
+    # Two-sample /proc/stat diff: captures user+nice+system+iowait+irq+softirq (total - idle).
+    # More accurate than top's "us" field which only shows user-space CPU.
+    local _s1 _s2
+    _s1=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    sleep 1
+    _s2=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    cpu_line=$(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN {
+        n = split(s1, a); split(s2, b)
+        t1 = 0; t2 = 0
+        for (i = 2; i <= n; i++) { t1 += a[i]; t2 += b[i] }
+        dt = t2 - t1; di = b[5] - a[5]
+        printf "%.1f", dt > 0 ? (1 - di/dt) * 100 : 0
+    }' 2>/dev/null) || cpu_line=0
     mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     mem_free=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
     mem_used=$(( mem_total - mem_free ))
