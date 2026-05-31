@@ -31,6 +31,7 @@ Aruba Central (AP/switch telemetry)
 
 - Host the browser UI and local API for the site/lab
 - Track simulation client health, overrides, logs, and command state
+- Track Proxmox node telemetry, 1-hour warmup samples, retry-queue state, and guest-agent watchdog recovery for the VM Server UI
 - Manage `simulation.conf` and `user-overrides.conf` locally when running standalone
 - Poll Aruba Central and correlate Central status with local client/site mappings
 - Act as the tenant-approved relay endpoint consumer for hub-issued commands
@@ -100,7 +101,7 @@ By default, DHCP serves `169.253.1.11`–`169.253.1.254` on the isolated client 
 
 `webui-spoke` serves the shared frontend from the `cs-webui` repo rather than maintaining a separate spoke-only UI.
 
-- `install-lxc.sh` fetches `static/app.js`, `static/style.css`, and `templates/index.html` from `cs-webui` on the same branch selected for the spoke install.
+- `install-lxc.sh` fetches `static/js/*`, the legacy `static/app.js` compatibility bundle, `static/style.css`, and `templates/index.html` from `cs-webui` on the same branch selected for the spoke install.
 - `server.py` serves the shared HTML template and injects `WEBUI_MODE=spoke` at runtime.
 - Use `--branch <name>` to keep the spoke backend and shared frontend aligned (`main` for production).
 
@@ -113,6 +114,31 @@ When a spoke is not hub-managed, it owns both config files directly.
 - **Config → User Overrides** manages `user-overrides.conf` locally.
 
 If Hub is connected, tenant pushes still win and are written locally as `hub-sim-overrides.conf` and `hub-user-overrides.conf`.
+
+## Proxmox telemetry, warmup, and recovery
+
+The spoke VM Server view now stays aligned with the shared frontend used by Hub:
+
+- **VMs**, **USB (T2)**, **IoT (T3)**, **Other**, **VirtualHere**, **Command Queue**, and **Details**
+- **IoT (T3)** shows VMs with T3 PCI passthrough rather than raw PCI devices
+- **Other** shows non-sim, non-IoT VMs plus containers
+
+### Resource metrics and warmup states
+
+- Host CPU now uses a two-sample `/proc/stat` diff taken 1 second apart, so the reported percentage reflects total host load instead of only top's user-space `%us`.
+- Memory usage is calculated from `MemTotal` and `MemAvailable` on the Proxmox host.
+- The Details view exposes `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, and `resource_samples_started`.
+- The shared UI shows three states for the 1-hour averages:
+  1. `📊 warming up… <N> min remaining` — the 60-minute sample window has started but no confirmed average exists yet
+  2. `📊 CPU avg: ~3.2% (<N> min remaining)` / `Mem avg: ~…` — estimated average from samples collected so far
+  3. `📊 CPU avg: 3.2%` / `Mem avg: 41.7%` — confirmed 1-hour rolling average once the full window is available
+- `resource_cache.json` persists `cpu_samples`, `mem_samples`, `started`, `agent_version`, and `pve_version` so a restart does not reset the warmup countdown or blank version metadata.
+
+### Recovery flows
+
+- If a VM misses the post-reboot `update.sh` step because the guest agent is still unavailable, the Proxmox agent puts it into a post-provision retry queue, retries every 10 minutes, and deletes/reclones it after 1 hour if the guest agent never responds.
+- The VM guest-agent watchdog tracks `qm guest ping` health per VM, marks guests as `agent down`, soft-reboots them after the configured threshold, and reclones them if they remain unresponsive.
+- Watchdog state, command queue state, and reclone state are persisted asynchronously to disk so a spoke restart does not lose in-flight recovery context.
 
 ---
 
@@ -196,6 +222,19 @@ The spoke relay cycle then:
 2. fetches hub inbox commands
 3. applies or queues each command locally
 4. sends an acknowledgement with status/result payload
+
+### Relayed Proxmox telemetry
+
+The relay payload sent by `_build_relay_telemetry_payload()` includes a `proxmox` object that Hub uses for the shared VM Server views. The relayed fields include:
+
+- node connectivity and timestamps (`connected`, `last_seen`, `node`)
+- VM inventory plus per-VM `cpu`, `mem`, `maxmem`, `prov_status`, template flags, USB config state, and T3 PCI passthrough addresses
+- USB summary (`usb_state`, `present_usb`, `unknown_usb`, `usb_count`)
+- cached version metadata (`agent_version`, `pve_version`)
+- resource warmup/average fields (`cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, `resource_samples_started`)
+- template lock, reseed state, hardware-fault summary, and T3 counts
+
+Local-only data stays on the spoke. That includes the raw sample arrays in `resource_cache.json`, local log buffers, and the on-disk retry/watchdog marker files the Proxmox agent uses for recovery.
 
 ### Hub-pushed commands
 
@@ -328,6 +367,7 @@ These are the main local endpoints exposed by `webui-spoke`.
 | `GET` | `/api/clients` | Current client inventory/state. Each client includes `has_usb: bool` for T1/T2 classification |
 | `GET` | `/api/simulations` | Grouped simulation view |
 | `GET` | `/api/simulations/{sim_id}/clients` | Client list for one simulation/site bucket |
+| `GET` | `/api/proxmox/status` | Current Proxmox node/VM/USB state, including live CPU/RAM, 1-hour avg warmup fields, agent/pve versions, and VM recovery status |
 | `GET` | `/api/hardware-alerts` | Current hardware alert summary |
 | `POST` | `/api/status` | Client heartbeat/beacon endpoint |
 | `GET` | `/api/config?hostname=<h>` | Render effective `simulation.conf` |

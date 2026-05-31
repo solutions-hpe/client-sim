@@ -828,6 +828,9 @@ function renderServerTab(data) {
   const agentVer = latestProxmoxData.agent_version;
   if (agentVerPill) {
     agentVerPill.style.display = agentVer ? '' : 'none';
+    agentVerPill.title = latestProxmoxData.pve_version
+      ? `Proxmox agent version reported by the host. Cached locally so the badge survives a spoke restart. Host PVE version: ${latestProxmoxData.pve_version}.`
+      : 'Proxmox agent version reported by the host. Cached locally so the badge survives a spoke restart.';
     setEl('server-agent-version', agentVer || '—');
   }
 
@@ -962,20 +965,36 @@ function renderServerTab(data) {
       const isWebui      = webuiVmid != null && Number(vm.vmid) === webuiVmid;
       const baseStatusText = `${vm.status === 'running' ? '🟢' : vm.status === 'paused' ? '🟡' : '⚫'} ${vm.status || 'unknown'}`;
       let statusLabel;
-      if (recloneLog === 'in_progress')        statusLabel = '🔄 recloning…';
-      else if (recloneLog === 'queued')        statusLabel = '⏳ queued';
-      else if (vm.status === 'deleting')       statusLabel = '🔴 deleting…';
-      else if (vm.status === 'provisioning')   statusLabel = '🟡 provisioning…';
-      else if (vm.status === 'cloning')        statusLabel = '🟡 cloning…';
-      else if (vm.status === 'configuring')    statusLabel = '🟡 configuring…';
-      else                                     statusLabel = baseStatusText;
+      let statusTitle;
+      if (recloneLog === 'in_progress') {
+        statusLabel = '🔄 recloning…';
+        statusTitle = 'Reclone is currently running for this VM.';
+      } else if (recloneLog === 'queued') {
+        statusLabel = '⏳ queued';
+        statusTitle = 'VM is queued for the next reclone action.';
+      } else if (vm.status === 'deleting') {
+        statusLabel = '🔴 deleting…';
+        statusTitle = 'VM delete is in progress.';
+      } else if (vm.status === 'provisioning') {
+        statusLabel = '🟡 provisioning…';
+        statusTitle = 'VM is being provisioned and is not ready yet.';
+      } else if (vm.status === 'cloning') {
+        statusLabel = '🟡 cloning…';
+        statusTitle = 'VM clone is in progress.';
+      } else if (vm.status === 'configuring') {
+        statusLabel = '🟡 configuring…';
+        statusTitle = 'VM clone finished and guest configuration is still running.';
+      } else {
+        statusLabel = baseStatusText;
+        statusTitle = `VM status: ${vm.status || 'unknown'}`;
+      }
       const memUsed  = vm.mem    ? fmtSize(Number(vm.mem)    * 1024 * 1024) : '—';
       const memTotal = vm.maxmem ? fmtSize(Number(vm.maxmem) * 1024 * 1024) : '—';
       // Show CPU only for running VMs — stopped VMs always report 0 which is misleading
       const cpuVal = (vm.status === 'running') && vm.cpu != null && !Number.isNaN(Number(vm.cpu))
         ? Number(vm.cpu).toFixed(1) + '%' : '—';
       const recoveryBadge = autoRecoveryPending.has(Number(vm.vmid))
-        ? ' <span class="badge badge-yellow" title="Auto-recovery reclone queued">↺ auto-recovery</span>'
+        ? ' <span class="badge badge-yellow" title="Guest-agent watchdog queued an auto-recovery reclone for this VM">↺ auto-recovery</span>'
         : '';
       const webuiBadge = isWebui
         ? ' <span class="badge badge-grey" title="This is the container running the dashboard — cannot be deleted">🔒 webui</span>'
@@ -991,7 +1010,7 @@ function renderServerTab(data) {
       tr.dataset.status = baseStatusText;
       tr.innerHTML = `
         <td><input type="checkbox" class="vm-check" data-vmid="${vm.vmid}"${isWebui ? ' disabled' : ''}></td>
-        <td class="vm-status-cell">${statusLabel}</td>
+        <td class="vm-status-cell" title="${escHtml(statusTitle)}">${statusLabel}</td>
         <td>${vm.vmid}</td>
         <td>${escHtml(vm.name || '—')}${recoveryBadge}${webuiBadge}</td>
         <td>${cpuVal}</td>
@@ -1071,19 +1090,25 @@ function renderServerTab(data) {
     : null;
   if (cpuAvgPill) {
     if (data?.cpu_1h_avg != null) {
+      cpuAvgPill.title = 'Confirmed 1-hour rolling average CPU usage. During warmup the UI shows an estimated ~value until the full 60-minute window is available.';
       cpuAvgPill.innerHTML = `📊 CPU avg: <span id="server-cpu-avg">${Number(data.cpu_1h_avg).toFixed(1)}</span>%`;
     } else if (data?.cpu_est_avg != null) {
+      cpuAvgPill.title = `Estimated CPU average from samples collected so far while the 1-hour window fills${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
       cpuAvgPill.innerHTML = `📊 CPU avg: ~${Number(data.cpu_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
     } else {
+      cpuAvgPill.title = `Collecting CPU samples for the 1-hour rolling average${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
       cpuAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
     }
   }
   if (memAvgPill) {
     if (data?.mem_1h_avg != null) {
+      memAvgPill.title = 'Confirmed 1-hour rolling average memory usage. During warmup the UI shows an estimated ~value until the full 60-minute window is available.';
       memAvgPill.innerHTML = `📊 Mem avg: <span id="server-mem-avg">${Number(data.mem_1h_avg).toFixed(1)}</span>%`;
     } else if (data?.mem_est_avg != null) {
+      memAvgPill.title = `Estimated memory average from samples collected so far while the 1-hour window fills${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
       memAvgPill.innerHTML = `📊 Mem avg: ~${Number(data.mem_est_avg).toFixed(1)}%${_warmupRemainLabel ? ` <span style="opacity:0.6;font-size:0.85em;">(${_warmupRemainLabel})</span>` : ''}`;
     } else {
+      memAvgPill.title = `Collecting memory samples for the 1-hour rolling average${_warmupRemainLabel ? ` (${_warmupRemainLabel})` : ''}.`;
       memAvgPill.innerHTML = `📊 ${_warmupRemainLabel ? `warming up… ${_warmupRemainLabel}` : 'warming up…'}`;
     }
   }

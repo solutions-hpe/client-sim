@@ -20,8 +20,9 @@ This repo is the local execution plane. It can run standalone, or relay telemetr
 At an operational level, this repo gives you:
 
 - a FastAPI spoke dashboard/API inside a Proxmox LXC
-- a Proxmox host agent for VM, USB, and reclone operations
+- a Proxmox host agent for VM, USB, reclone, post-provision retry, and guest-agent watchdog operations
 - Linux VM scripts that fetch config, run simulations, and report status
+- accurate Proxmox host CPU/memory telemetry with 1-hour rolling averages, warmup estimates, and hub relay support
 - watchdogs for both the spoke service and Proxmox agent
 - configuration-driven simulation behavior using INI files
 - shared hub-style spoke config editors for `simulation.conf` and `user-overrides.conf`
@@ -194,6 +195,18 @@ In v1.0, the Proxmox agent can receive `backup` and `reseed` commands over its W
 At startup, `install-proxmox-agent.sh` tries to download `proxmox/installer-override.conf` from the selected branch and silently skips it on `404`. When present, that file can override values such as `AZURE_ACCOUNT`, `OVERRIDE_HUB_URL`, `OVERRIDE_TENANT_ID`, and `OVERRIDE_SERVER_URL`.
 
 On production `main`, `installer-override.conf` is intentionally **not** shipped. Production installs will silently skip the override download with no effect.
+
+### Proxmox telemetry, warmup, and recovery
+
+Recent Proxmox-side changes add five operator-visible behaviors:
+
+- **Accurate host CPU** — `proxmox-agent.sh` now samples `/proc/stat` twice, 1 second apart, and reports `(1 − Δidle / Δtotal) × 100`. This captures total host CPU load (user, nice, system, iowait, irq, softirq), not just top's user-space `%us` value.
+- **1-hour CPU and memory averages** — `webui-spoke/server.py` records rolling CPU and memory samples from node telemetry and exposes both confirmed 1-hour averages and warmup estimates.
+- **Three warmup UI states** — the spoke Details tab and hub Details view now show: `📊 warming up… <N> min remaining` when no samples exist yet, `📊 CPU avg: ~3.2% (<N> min remaining)` / `Mem avg: ~…` while the 1-hour window is still filling, and `📊 CPU avg: 3.2%` / `Mem avg: 41.7%` once the full 60-minute window is available.
+- **Persisted warmup cache** — `webui-spoke/resource_cache.json` stores `cpu_samples`, `mem_samples`, `started`, `agent_version`, and `pve_version` so a spoke restart does not reset the warmup countdown or blank the Details version rows.
+- **Recovery queues and watchdogs** — if a VM misses the post-reboot `update.sh` step because the guest agent is still unavailable, the agent retries every 10 minutes and destroys/reclones the VM after 1 hour. Separately, the VM guest-agent watchdog monitors `qm guest ping`, soft-reboots unresponsive guests, and reclones them if they stay down beyond the configured escalation thresholds.
+
+When relay is enabled, Hub receives `agent_version`, `pve_version`, `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, `resource_samples_started`, and per-VM `cpu` / `mem` / `maxmem` fields through `_build_relay_telemetry_payload()`. The raw sample history itself stays local on the spoke in `resource_cache.json`.
 
 ### USB allocation policies
 
@@ -538,11 +551,12 @@ The FastAPI lifespan boot starts these tasks:
 |---|---|
 | `settings.json` | durable settings and approved keys |
 | `state_cache.json` | restart recovery for last-known proxmox/central state |
-| `command_queue.json` | local queued commands |
-| `reclone_state.json` | long-running VM operation state |
+| `command_queue.json` | local queued commands, persisted asynchronously for restart recovery |
+| `reclone_state.json` | long-running VM operation state, persisted asynchronously |
 | `relay_state.json` | hub relay connection state |
 | `update_state.json` | installer/app update status |
-| `vm_watchdog.json` | VM watchdog/autorecovery state |
+| `vm_watchdog.json` | VM guest-agent watchdog / auto-recovery state, persisted asynchronously |
+| `resource_cache.json` | rolling CPU/memory samples plus cached `agent_version` / `pve_version` for 1-hour warmup recovery |
 | `central_history.jsonl` | Central alert history |
 | `client_history.json` | client history persistence |
 | `client_count_7day.json` | persisted 7-day hourly client-count history used for the baseline alarm |
@@ -566,8 +580,9 @@ The FastAPI lifespan boot starts these tasks:
 
 - host registration and API key persistence
 - USB certification and assignment tracking
-- VM inventory and node telemetry collection
-- VM provisioning, recloning, deletion, and updates
+- VM inventory, node telemetry collection, and host `agent_version` / `pve_version` reporting
+- VM provisioning, recloning, deletion, post-provision retry handling, and updates
+- VM guest-agent watchdog health / reboot / reclone escalation
 - command polling/ACK handling
 - self-update scheduling
 
@@ -586,6 +601,8 @@ That file is reloaded on every agent restart to reconstruct USB-to-VM mappings.
 - background telemetry sender every `TELEMETRY_INTERVAL`
 - background inbox processor every `INBOX_INTERVAL`
 - USB scan/provision loop in the main process
+- post-provision retry queue sweep for VMs that missed the post-reboot step
+- VM guest-agent watchdog sweep using the configured grace/check/reboot/reclone timers
 - periodic self-update check
 
 #### USB tracking model
@@ -594,6 +611,12 @@ That file is reloaded on every agent restart to reconstruct USB-to-VM mappings.
 - unknown devices are surfaced separately for operator review
 - missing USB devices retain state until timeout
 - `usb-phy-override.conf` is written inside guests so `sim_phy` matches the assigned USB class
+
+The agent also keeps three durable per-VM marker files in its provision state directory:
+
+- `.post_prov_retry` — VM completed the clone but missed the post-reboot `update.sh` step; retry every 10 minutes, reclone after 1 hour
+- `.provision_done` — anchor timestamp for the guest-agent watchdog grace period
+- `.agent_unresponsive` — watchdog escalation state (`first_fail`, `last_check`, `rebooted_at`)
 
 ### Simulation script architecture
 
