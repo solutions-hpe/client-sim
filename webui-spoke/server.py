@@ -3254,15 +3254,16 @@ _RESOURCE_SAMPLE_WINDOW = 3600  # seconds (1 hour)
 
 
 def _resource_1h_average(samples: list[tuple[float, float]]) -> float | None:
-    """Return the mean of all samples within the last hour.
+    """Return the rolling mean of all samples within the last hour.
 
-    Returns None (→ treat as below threshold, allow provisioning) when fewer
-    than a full hour of data has been collected since sampling began.
+    Returns the average of whatever samples exist as soon as the first one
+    arrives — no warm-up delay.  Returns None only when no samples have been
+    recorded yet (i.e. no telemetry received since startup).
+    Older samples outside the 1-hour window are already pruned by
+    _record_resource_samples(), so this always reflects recent history.
     """
-    if not _resource_samples_started:
+    if not samples:
         return None
-    if (time.time() - _resource_samples_started) < _RESOURCE_SAMPLE_WINDOW:
-        return None  # warm-up period: not enough history yet
     cutoff = time.time() - _RESOURCE_SAMPLE_WINDOW
     recent = [v for ts, v in samples if ts >= cutoff]
     return sum(recent) / len(recent) if recent else None
