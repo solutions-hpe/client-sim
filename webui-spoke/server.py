@@ -6888,6 +6888,14 @@ async def relay_ws_loop() -> None:
                             else:
                                 _clear_all_demo_scenarios_sync()
                                 asyncio.create_task(broadcast_full_state())
+                        elif msg_type == "purge_clients":
+                            async def _do_purge_clients_relay() -> None:
+                                async with state_lock:
+                                    clients.clear()
+                                await asyncio.to_thread(_save_client_history)
+                                await broadcast({"type": "clients_purged"})
+                                logger.info("Client history purged by hub relay request")
+                            asyncio.create_task(_do_purge_clients_relay())
                 finally:
                     await _close_all_shell_sessions(notify_exit=False)
                     if _relay_ws_send_json is send_json:
