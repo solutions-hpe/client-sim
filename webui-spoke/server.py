@@ -5224,6 +5224,13 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                     "name": vm.get("name", ""),
                     "status": vm.get("status", ""),
                     "type": vm.get("type", ""),
+                    "cpu": vm.get("cpu"),
+                    "mem": vm.get("mem"),
+                    "maxmem": vm.get("maxmem"),
+                    "is_template": vm.get("is_template", False),
+                    "has_usb_config": vm.get("has_usb_config", False),
+                    "reclone_bus_path": vm.get("reclone_bus_path"),
+                    "pci_passthrough_addrs": vm.get("pci_passthrough_addrs") or [],
                     "prov_status": vm.get("prov_status", "active"),
                 }
                 for vm in enriched_vms
