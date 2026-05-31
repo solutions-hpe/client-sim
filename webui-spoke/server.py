@@ -9211,7 +9211,16 @@ async def api_proxmox_unlock_template() -> dict[str, Any]:
 
 @app.delete("/api/proxmox/vms/{vmid}")
 async def api_proxmox_delete_vm(vmid: int) -> dict[str, Any]:
-    args = _prepare_delete_vm_args({"vmid": vmid})
+    try:
+        args = _prepare_delete_vm_args({"vmid": vmid})
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            # VM not in current Proxmox inventory — it may have been manually removed
+            # from Proxmox directly.  Queue the delete anyway with a safe default so the
+            # agent can confirm it is gone (idempotent) and update its state files.
+            args = {"vmid": vmid, "vm_type": "qemu"}
+        else:
+            raise
     cmd = await _queue_proxmox_command("delete_vm", args)
     _pending_delete_vmids.add(vmid)
     await _broadcast_proxmox_state()

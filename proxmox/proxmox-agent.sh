@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.18"
+AGENT_VERSION="1.19"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3282,10 +3282,15 @@ try:
     cmd = json.loads(raw)
 except Exception:
     cmd = {}
-args = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
+# Support both direct commands (action/args at top level) and queued commands
+# (action/args nested inside payload by the hub command relay).
+payload = cmd.get('payload', {}) if isinstance(cmd.get('payload', {}), dict) else {}
+action_val = cmd.get('action', '') or payload.get('action', '')
+args_raw = cmd.get('args', {}) if isinstance(cmd.get('args', {}), dict) else {}
+args = args_raw or (payload.get('args', {}) if isinstance(payload.get('args', {}), dict) else {})
 print(
     str(cmd.get('id', '')).replace('\t', ' '),
-    str(cmd.get('action', '')).replace('\t', ' ').replace('-', '_'),
+    str(action_val).replace('\t', ' ').replace('-', '_'),
     str(args.get('vmid', '')),
     str(args.get('type') or args.get('vm_type') or '').replace('\t', ' '),
     str(args.get('source_vmid', '')),
@@ -3527,8 +3532,20 @@ async def send_loop(ws):
         await asyncio.sleep(telemetry_interval)
 async def main():
     backoff = 1
+    LOG_OFFSET_FILE = '/var/lib/client-sim/agent-log-offset'
     while True:
         try:
+            # Reset the log-offset file before each WS connect so the first telemetry
+            # after a reconnect always ships the last 100 log lines into the spoke's
+            # buffer.  Without this the buffer stays empty after a spoke restart because
+            # the offset still points to the end-of-file from the previous session.
+            try:
+                import os as _os
+                _os.remove(LOG_OFFSET_FILE)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
             async with websockets.connect(build_ws_url(load_server_url()), ping_interval=20, ping_timeout=10) as ws:
                 backoff = 1
                 await ws.send(json.dumps({'type': 'sync'}))
