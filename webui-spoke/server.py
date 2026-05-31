@@ -3309,6 +3309,11 @@ def _load_resource_cache() -> None:
         _cpu_samples = loaded_cpu
         _mem_samples = loaded_mem
         _resource_samples_started = started if started > 0 else 0.0
+        # Restore agent/pve version so hub Details shows versions immediately after restart
+        if data.get("agent_version"):
+            proxmox_state["agent_version"] = data["agent_version"]
+        if data.get("pve_version"):
+            proxmox_state["pve_version"] = data["pve_version"]
         logger.info(
             "Loaded resource cache: %d CPU samples, %d mem samples (started %.0fs ago)",
             len(_cpu_samples), len(_mem_samples),
@@ -3330,6 +3335,8 @@ def _save_resource_cache() -> None:
             "cpu_samples": _cpu_samples,
             "mem_samples": _mem_samples,
             "started": _resource_samples_started,
+            "agent_version": proxmox_state.get("agent_version"),
+            "pve_version": proxmox_state.get("pve_version"),
         })
     except Exception:
         logger.debug("Could not save resource cache to %s", RESOURCE_CACHE_FILE, exc_info=True)
@@ -5241,6 +5248,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "usb_count": len(present_usb) if present_usb else len(usb_state),
             "agent_version": proxmox_state.get("agent_version"),
             "pve_version": proxmox_state.get("pve_version"),
+            "cpu_1h_avg": _resource_1h_average(_cpu_samples),
+            "mem_1h_avg": _resource_1h_average(_mem_samples),
             "template_lock": str(proxmox_state.get("template_lock") or ""),
             "reseed_in_progress": bool(_proxmox_reseed_in_progress),
             "hw_faults": proxmox_state.get("hw_faults") or {},
@@ -8745,8 +8754,6 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["node"] = body.get("node", {}) or {}
     proxmox_state["vms"] = enriched_vms
 
-    # Record rolling resource samples for 1-hour average threshold checks
-    _record_resource_samples(proxmox_state["node"], now)
     proxmox_state["reseed_in_progress"] = _proxmox_reseed_in_progress
     proxmox_state["usb_state"] = normalized_usb_state
     proxmox_state["present_usb"] = normalized_present_usb
@@ -8755,6 +8762,10 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
     proxmox_state["template_lock"] = str(body.get("template_lock", "") or "").strip()
     proxmox_state["vh_devices"] = body.get("vh_devices", {})
+
+    # Record rolling resource samples for 1-hour average threshold checks.
+    # Called after agent_version/pve_version are set so _save_resource_cache persists them.
+    _record_resource_samples(proxmox_state["node"], now)
 
     # T3 PCI devices — store the raw list from the agent and compute a filtered list
     # of devices matching the T3 target VID:PIDs (currently just 168c:0034).
