@@ -663,7 +663,7 @@ def _load_commands() -> None:
                 changed = True
                 continue
             cmd = dict(entry)
-            if cmd.get("status") == "executing":
+            if cmd.get("status") in ("executing", "delivered"):
                 cmd["status"] = "pending"
                 cmd["updated_at"] = now
                 changed = True
