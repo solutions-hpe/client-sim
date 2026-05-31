@@ -4030,6 +4030,8 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "auto_recovery_pending": _auto_recovery_pending_vmids(),
         "webui_vmid": WEBUI_VMID,
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
+        "cpu_1h_avg": _resource_1h_average(_cpu_samples),
+        "mem_1h_avg": _resource_1h_average(_mem_samples),
     }
 
 
