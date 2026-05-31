@@ -5143,7 +5143,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                 "central_clients_by_site": dict(central_browse_clients_by_site),
             },
             "reclone_state": {
-                k: v for k, v in reclone_state.items() if k != "log" and k != "auto_recovery_log"
+                k: v for k, v in reclone_state.items() if k != "auto_recovery_log"
             },
         }
 
