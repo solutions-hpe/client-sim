@@ -974,6 +974,11 @@ settings: dict[str, Any] = {
     "l1_vlan_start": str(_persisted.get("l1_vlan_start", "100")),
     "l1_vlan_end": str(_persisted.get("l1_vlan_end", "199")),
     "spoke_tls": _normalize_relay_enabled(_persisted.get("spoke_tls", os.getenv("SPOKE_TLS", "off"))),
+    "guest_agent_watchdog_enabled": _normalize_relay_enabled(_persisted.get("guest_agent_watchdog_enabled", "on")),
+    "guest_agent_grace_minutes": str(_persisted.get("guest_agent_grace_minutes", "20")),
+    "guest_agent_check_interval_minutes": str(_persisted.get("guest_agent_check_interval_minutes", "10")),
+    "guest_agent_reboot_after_minutes": str(_persisted.get("guest_agent_reboot_after_minutes", "10")),
+    "guest_agent_reclone_after_minutes": str(_persisted.get("guest_agent_reclone_after_minutes", "30")),
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
     "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
@@ -3421,6 +3426,11 @@ class SettingsUpdate(BaseModel):
     l1_vlan_start: str | None = None
     l1_vlan_end: str | None = None
     spoke_tls: str | None = None
+    guest_agent_watchdog_enabled: str | None = None
+    guest_agent_grace_minutes: str | None = None
+    guest_agent_check_interval_minutes: str | None = None
+    guest_agent_reboot_after_minutes: str | None = None
+    guest_agent_reclone_after_minutes: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -3893,6 +3903,11 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
         "l1_vlan_start": max(1, min(4094, int(str(settings.get("l1_vlan_start", "100")).strip() or "100"))),
         "l1_vlan_end": max(1, min(4094, int(str(settings.get("l1_vlan_end", "199")).strip() or "199"))),
+        "guest_agent_watchdog_enabled": _normalize_toggle(settings.get("guest_agent_watchdog_enabled", "on")),
+        "guest_agent_grace_minutes": max(1, int(str(settings.get("guest_agent_grace_minutes", "20")).strip() or "20")),
+        "guest_agent_check_interval_minutes": max(1, int(str(settings.get("guest_agent_check_interval_minutes", "10")).strip() or "10")),
+        "guest_agent_reboot_after_minutes": max(1, int(str(settings.get("guest_agent_reboot_after_minutes", "10")).strip() or "10")),
+        "guest_agent_reclone_after_minutes": max(1, int(str(settings.get("guest_agent_reclone_after_minutes", "30")).strip() or "30")),
     }
 
 
@@ -4915,6 +4930,11 @@ def _build_registration_config() -> dict[str, Any]:
         "l1_vlan_start": settings.get("l1_vlan_start", "100"),
         "l1_vlan_end": settings.get("l1_vlan_end", "199"),
         "hub_tls_verify": settings.get("hub_tls_verify", "off"),
+        "guest_agent_watchdog_enabled": settings.get("guest_agent_watchdog_enabled", "on"),
+        "guest_agent_grace_minutes": settings.get("guest_agent_grace_minutes", "20"),
+        "guest_agent_check_interval_minutes": settings.get("guest_agent_check_interval_minutes", "10"),
+        "guest_agent_reboot_after_minutes": settings.get("guest_agent_reboot_after_minutes", "10"),
+        "guest_agent_reclone_after_minutes": settings.get("guest_agent_reclone_after_minutes", "30"),
     }
 
 
@@ -7660,12 +7680,15 @@ async def heartbeat_check() -> None:
             if changed:
                 await broadcast_full_state()
 
-            # Mark proxmox agent offline and clear stale VMs if it hasn't reported within OFFLINE_TIMEOUT
+            # Mark proxmox agent offline if it hasn't reported within OFFLINE_TIMEOUT.
+            # DO NOT clear proxmox_state["vms"] — the last-known VM list is still
+            # accurate for USB/T1-T2 classification and gets refreshed when the agent
+            # reconnects.  Clearing it causes all clients to flip to T1 on every agent
+            # hiccup, which produces spurious classification noise.
             if proxmox_state.get("connected") and proxmox_state.get("last_seen"):
                 age = time.time() - float(proxmox_state["last_seen"])
                 if age > OFFLINE_TIMEOUT:
                     proxmox_state["connected"] = False
-                    proxmox_state["vms"] = []
                     await _broadcast_proxmox_state()
 
             # Auto-reset reclone state after 8 hours on successful completion
@@ -8244,6 +8267,17 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.l1_vlan_end is not None:
         settings["l1_vlan_end"] = str(max(1, min(4094, int(update.l1_vlan_end.strip() or "199"))))
+
+    if update.guest_agent_watchdog_enabled is not None:
+        settings["guest_agent_watchdog_enabled"] = _normalize_toggle(update.guest_agent_watchdog_enabled)
+    if update.guest_agent_grace_minutes is not None:
+        settings["guest_agent_grace_minutes"] = str(max(1, int(update.guest_agent_grace_minutes.strip() or "20")))
+    if update.guest_agent_check_interval_minutes is not None:
+        settings["guest_agent_check_interval_minutes"] = str(max(1, int(update.guest_agent_check_interval_minutes.strip() or "10")))
+    if update.guest_agent_reboot_after_minutes is not None:
+        settings["guest_agent_reboot_after_minutes"] = str(max(1, int(update.guest_agent_reboot_after_minutes.strip() or "10")))
+    if update.guest_agent_reclone_after_minutes is not None:
+        settings["guest_agent_reclone_after_minutes"] = str(max(1, int(update.guest_agent_reclone_after_minutes.strip() or "30")))
 
     if update.spoke_tls is not None:
         settings["spoke_tls"] = _normalize_toggle(update.spoke_tls)
