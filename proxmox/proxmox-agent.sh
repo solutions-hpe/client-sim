@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.22"
+AGENT_VERSION="1.23"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -63,13 +63,24 @@ GUEST_AGENT_REBOOT_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_REBOOT_AFTER_MINUTES:
 GUEST_AGENT_RECLONE_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_RECLONE_AFTER_MINUTES:-30}"
 _LAST_AGENT_WATCHDOG_CHECK=0
 
-# Prevent duplicate instances
-if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting."
-    exit 1
+# Worker subprocesses dispatched by the main agent's Python WS client must NOT be
+# blocked by the duplicate-instance guard — they are always called while the main
+# agent is running (which would otherwise look like a duplicate).
+_IS_SUBPROCESS=0
+case "${1:-}" in
+    --process-single-command|--collect-telemetry|--process-backup-command|--process-reseed-command)
+        _IS_SUBPROCESS=1 ;;
+esac
+
+# Prevent duplicate daemon instances (skip for worker subprocesses)
+if [[ "$_IS_SUBPROCESS" -eq 0 ]]; then
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Another instance already running (PID $(cat "$PIDFILE")), exiting."
+        exit 1
+    fi
+    echo $$ > "$PIDFILE"
+    trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; [[ -n "${INBOX_PID:-}" ]] && kill "$INBOX_PID" 2>/dev/null; [[ -n "${HW_WATCHDOG_PID:-}" ]] && kill "$HW_WATCHDOG_PID" 2>/dev/null; true' EXIT
 fi
-echo $$ > "$PIDFILE"
-trap 'rm -f "$PIDFILE"; [[ -n "${TELEMETRY_PID:-}" ]] && kill "$TELEMETRY_PID" 2>/dev/null; [[ -n "${INBOX_PID:-}" ]] && kill "$INBOX_PID" 2>/dev/null; [[ -n "${HW_WATCHDOG_PID:-}" ]] && kill "$HW_WATCHDOG_PID" 2>/dev/null; true' EXIT
 
 AUTO_PROVISION="off"
 MISSING_TIMEOUT=60
