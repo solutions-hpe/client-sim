@@ -4132,7 +4132,7 @@ while true; do
         if ! kill -0 "$WS_PID" 2>/dev/null; then
             log "WARNING: WebSocket client process $WS_PID died — restarting"
             start_proxmox_ws_client || true
-            WS_PID=$!
+            # WS_PID is updated inside start_proxmox_ws_client
         fi
     fi
 
