@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.23"
+AGENT_VERSION="1.24"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2775,17 +2775,6 @@ self_update_agent() {
     rm -f "$tmp_file"
     save_repo_branch "$branch"
     log "Agent updated v${AGENT_VERSION} → v${new_version} from ${repo_raw} — scheduling restart..."
-    # Also trigger the spoke to self-update so spoke and agent stay in sync.
-    if [[ -n "$SERVER_URL" ]]; then
-        local _spoke_http
-        _spoke_http=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 \
-            -X POST "${SERVER_URL}/api/self-update" 2>/dev/null || true)
-        if [[ "$_spoke_http" == "200" ]]; then
-            log "Triggered spoke self-update at ${SERVER_URL}"
-        else
-            log "WARNING: spoke self-update request returned HTTP ${_spoke_http:-000} (non-fatal)"
-        fi
-    fi
     if ! schedule_agent_restart; then
         log "ERROR: Failed to schedule agent restart"
         return 1
