@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.35"
+AGENT_VERSION="1.36"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -4203,9 +4203,8 @@ while true; do
     fi
 
     # VM guest agent watchdog: runs on its own interval regardless of auto-provision state.
-    local _now_watchdog
     _now_watchdog=$(date +%s)
-    local _watchdog_interval_s=$(( ${GUEST_AGENT_CHECK_INTERVAL_MINUTES:-10} * 60 ))
+    _watchdog_interval_s=$(( ${GUEST_AGENT_CHECK_INTERVAL_MINUTES:-10} * 60 ))
     if (( _now_watchdog - _LAST_AGENT_WATCHDOG_CHECK >= _watchdog_interval_s )); then
         _LAST_AGENT_WATCHDOG_CHECK=$_now_watchdog
         _run_vm_agent_watchdog || true
