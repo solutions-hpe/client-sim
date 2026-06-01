@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.27"
+AGENT_VERSION="1.28"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1292,11 +1292,15 @@ _destroy_guest_only() {
     else
         if [[ "$force" == "1" ]]; then
             # Force-stop immediately (hub-initiated delete of simulation VMs — no graceful shutdown needed).
-            qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
+            # --timeout 5: 5s grace for ACPI shutdown, then SIGKILL the QEMU process.
+            # The outer system timeout 30 ensures qm stop never blocks indefinitely.
+            timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || \
+                timeout 30 qm stop "$vmid" --skiplock --forceStop 1 2>/dev/null || \
+                timeout 30 qm stop "$vmid" --skiplock --timeout 1 2>/dev/null || true
             _wait_guest_stopped "$guest_type" "$vmid" 30 || true
         else
-            qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
-                qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
+            timeout 150 qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
+                timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || true
             _wait_guest_stopped "$guest_type" "$vmid" 150 || true
         fi
         log "Destroying VM $vmid"
