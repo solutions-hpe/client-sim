@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.28"
+AGENT_VERSION="1.29"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1292,12 +1292,21 @@ _destroy_guest_only() {
     else
         if [[ "$force" == "1" ]]; then
             # Force-stop immediately (hub-initiated delete of simulation VMs — no graceful shutdown needed).
-            # --timeout 5: 5s grace for ACPI shutdown, then SIGKILL the QEMU process.
-            # The outer system timeout 30 ensures qm stop never blocks indefinitely.
+            # Try qm stop with short timeout, then fall back to directly killing the QEMU process.
             timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || \
                 timeout 30 qm stop "$vmid" --skiplock --forceStop 1 2>/dev/null || \
                 timeout 30 qm stop "$vmid" --skiplock --timeout 1 2>/dev/null || true
-            _wait_guest_stopped "$guest_type" "$vmid" 30 || true
+            _wait_guest_stopped "$guest_type" "$vmid" 15 || {
+                # qm stop didn't work — kill the QEMU process directly via its PID file.
+                local _qemu_pid
+                _qemu_pid=$(cat "/run/qemu-server/${vmid}.pid" 2>/dev/null || true)
+                if [[ -n "$_qemu_pid" ]] && kill -0 "$_qemu_pid" 2>/dev/null; then
+                    log "Force-killing QEMU process $_qemu_pid for VM $vmid"
+                    kill -9 "$_qemu_pid" 2>/dev/null || true
+                    sleep 3
+                fi
+            }
+            _wait_guest_stopped "$guest_type" "$vmid" 20 || true
         else
             timeout 150 qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
                 timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || true
