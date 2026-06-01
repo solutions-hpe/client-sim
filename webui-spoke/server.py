@@ -9107,6 +9107,29 @@ async def clear_proxmox_logs() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.post("/api/proxmox/log-push", response_model=None)
+async def proxmox_log_push(request: Request, body: dict = Body(...)) -> dict[str, bool] | JSONResponse:
+    """Lightweight HTTP log-push endpoint — agent sends log lines here even when WS is unavailable.
+    Accepts: {"hostname": "...", "log_lines": ["line1", ...]}
+    Auth: X-API-Key header (same as telemetry endpoint).
+    """
+    hostname = str(body.get("hostname") or body.get("node", {}).get("hostname") or "").strip()
+    api_key = request.headers.get("X-API-Key", "")
+    client_ip = request.client.host if request.client else "unknown"
+    if not hostname:
+        return JSONResponse({"error": "hostname required"}, status_code=400)
+    _approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, client_ip, time.time())
+    if response is not None:
+        return response
+    new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
+    if new_lines:
+        proxmox_log_buffer.extend(new_lines)
+        if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
+            del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+        await broadcast({"type": "proxmox_log_update", "lines": new_lines})
+    return {"ok": True, "accepted": len(new_lines)}
+
+
 @app.post("/api/proxmox/watchdog_event")
 async def proxmox_watchdog_event(body: dict = Body(...)) -> dict[str, bool]:
     event = str(body.get("event", "") or "").strip()
@@ -11936,12 +11959,13 @@ async def ws_proxmox_endpoint(
     if proxmox_ws_disconnect_task is not None:
         proxmox_ws_disconnect_task.cancel()
         proxmox_ws_disconnect_task = None
+    _trace("agent_ws_connect", hostname=approved_hostname)
     try:
         # Reset any 'delivered' commands back to 'pending' so they are re-sent.
         # Commands pushed via WS before a spoke restart are marked 'delivered' but
         # never acked (agent lost the connection), so they would be silently abandoned.
         async with state_lock:
-            _reset_delivered_commands_locked(approved_hostname, approved_hostname)
+            reset_count = _reset_delivered_commands_locked(approved_hostname, approved_hostname)
         await _push_pending_agent_commands(approved_hostname, websocket, approved_hostname)
         while True:
             data = await websocket.receive_json()
@@ -11987,6 +12011,7 @@ async def ws_proxmox_endpoint(
         if proxmox_ws_connection is websocket:
             proxmox_ws_connection = None
             proxmox_ws_hostname = approved_hostname
+            _trace("agent_ws_disconnect", hostname=approved_hostname)
             proxmox_ws_disconnect_task = asyncio.create_task(_proxmox_disconnect_grace(approved_hostname))
 
 

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.24"
+AGENT_VERSION="1.25"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -128,7 +128,11 @@ declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACK
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "$msg"
+    echo "$msg" >> "$AGENT_LOG" 2>/dev/null || true
+}
 
 sed_escape() {
     printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'
@@ -3436,6 +3440,27 @@ post_telemetry() {
     esac
 }
 
+# Helper: push recent log lines to spoke via HTTP (fallback when WS is unavailable).
+# Uses the same offset file as collect_log_lines so lines aren't double-sent.
+push_logs_http() {
+    [[ -f "$AGENT_LOG" ]] || return 0
+    local log_lines_json payload response status
+    log_lines_json=$(collect_log_lines 2>/dev/null) || return 0
+    [[ "$log_lines_json" == "[]" ]] && return 0
+    payload=$(python3 -c "
+import json, sys
+lines = json.loads(sys.argv[1])
+print(json.dumps({'hostname': sys.argv[2], 'log_lines': lines}))
+" "$log_lines_json" "$(hostname 2>/dev/null || echo unknown)" 2>/dev/null) || return 0
+    response=$(curl_api_status POST /api/proxmox/log-push "$payload" 2>/dev/null || true)
+    status="${response##*$'\n'}"
+    case "$status" in
+        200) return 0 ;;
+        202|401|403) handle_auth_failure "$status" "/api/proxmox/log-push" ;;
+        *) ;;
+    esac
+}
+
 # ── Inbox command processor ────────────────────────────────────────────────────
 # Runs in its own background loop every INBOX_INTERVAL seconds, fully decoupled
 # from the main USB provisioning loop. Reclone wait+ACK is itself backgrounded
@@ -3621,8 +3646,21 @@ async def main():
                 pass
             except Exception:
                 pass
-            async with websockets.connect(build_ws_url(load_server_url()), ping_interval=120, ping_timeout=120) as ws:
+            ws_url = build_ws_url(load_server_url())
+            try:
+                import datetime as _dt
+                with open(AGENT_LOG_FILE, 'a') as _lf:
+                    _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] CONNECTING to {ws_url.split('?')[0]}\n")
+            except Exception:
+                pass
+            async with websockets.connect(ws_url, ping_interval=120, ping_timeout=120) as ws:
                 backoff = 1
+                try:
+                    import datetime as _dt
+                    with open(AGENT_LOG_FILE, 'a') as _lf:
+                        _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] CONNECTED\n")
+                except Exception:
+                    pass
                 # Do NOT send an initial 'sync' here — the spoke already pushes pending
                 # commands immediately on WS connect via ws_proxmox_endpoint.  Sending
                 # sync would cause the spoke to reset and re-push commands a second time,
@@ -3704,7 +3742,19 @@ async def main():
                     sender.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await sender
-        except Exception:
+                    try:
+                        import datetime as _dt
+                        with open(AGENT_LOG_FILE, 'a') as _lf:
+                            _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] DISCONNECTED\n")
+                    except Exception:
+                        pass
+        except Exception as _exc:
+            try:
+                import datetime as _dt
+                with open(AGENT_LOG_FILE, 'a') as _lf:
+                    _lf.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [WS] ERROR: {_exc!r} — retry in {min(backoff, 30)}s\n")
+            except Exception:
+                pass
             await asyncio.sleep(min(backoff, 30))
             backoff = min(backoff * 2, 30)
 asyncio.run(main())
@@ -4075,6 +4125,16 @@ while true; do
 
     # Post telemetry after USB scan (has fresh USB state in this process)
     post_telemetry
+    push_logs_http || true
+
+    # WebSocket client watchdog: restart if the Python WS process has died.
+    if [[ "$USE_PROXMOX_WS" -eq 1 ]] && [[ -n "${WS_PID:-}" ]]; then
+        if ! kill -0 "$WS_PID" 2>/dev/null; then
+            log "WARNING: WebSocket client process $WS_PID died — restarting"
+            start_proxmox_ws_client || true
+            WS_PID=$!
+        fi
+    fi
 
     # Periodic self-update: check GitHub every SELF_UPDATE_INTERVAL seconds.
     # This ensures the agent updates even if the WebUI never sends update_agent.
