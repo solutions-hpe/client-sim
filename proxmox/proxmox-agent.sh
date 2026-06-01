@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.30"
+AGENT_VERSION="1.31"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3502,10 +3502,11 @@ start_proxmox_ws_client() {
     local poll_hostname script_path
     poll_hostname=$(hostname 2>/dev/null || printf '%s' "$h")
     script_path=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$PROGRESS_EVENT_QUEUE_DIR" "$HUB_SERVER_URL_FILE" "$HUB_LAST_SUCCESS_FILE" <<'PY' &
+    python3 - "$script_path" "$SERVER_URL" "$API_KEY" "$poll_hostname" "$TELEMETRY_INTERVAL" "$PROGRESS_EVENT_QUEUE_DIR" "$HUB_SERVER_URL_FILE" "$HUB_LAST_SUCCESS_FILE" "$ENV_FILE" <<'PY' &
 import asyncio, contextlib, json, sys, time
 from pathlib import Path
 script_path, default_server_url, api_key, hostname, telemetry_interval, progress_queue_dir, server_url_file, last_success_file = sys.argv[1:9]
+env_file = sys.argv[9] if len(sys.argv) > 9 else ""
 telemetry_interval = max(1, int(float(telemetry_interval or 3)))
 queue_dir = Path(progress_queue_dir)
 queue_dir.mkdir(parents=True, exist_ok=True)
@@ -3523,9 +3524,24 @@ def load_server_url():
     except Exception:
         pass
     return default_server_url
-def build_ws_url(server_url):
+def load_api_key():
+    """Re-read the API key from ENV_FILE on each WS reconnect.
+    If the key was rotated by inbox auth failure + re-registration in the bash
+    process, this ensures the WS client picks up the new key automatically
+    without needing an explicit process restart."""
+    if env_file:
+        try:
+            for line in Path(env_file).read_text(encoding='utf-8').splitlines():
+                if line.startswith('CLIENT_SIM_API_KEY='):
+                    key = line[len('CLIENT_SIM_API_KEY='):].strip()
+                    if key:
+                        return key
+        except Exception:
+            pass
+    return api_key
+def build_ws_url(server_url, current_key=None):
     ws_url = server_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
-    return ws_url + f"/ws/proxmox?hostname={hostname}&api_key={api_key}"
+    return ws_url + f"/ws/proxmox?hostname={hostname}&api_key={current_key or api_key}"
 def touch_success():
     try:
         last_success_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3679,7 +3695,7 @@ async def main():
                 pass
             except Exception:
                 pass
-            ws_url = build_ws_url(load_server_url())
+            ws_url = build_ws_url(load_server_url(), load_api_key())
             try:
                 import datetime as _dt
                 with open(AGENT_LOG_FILE, 'a') as _lf:
@@ -3832,7 +3848,7 @@ process_inbox() {
         200) ;;
         202|401|403)
             handle_auth_failure "$status" "/api/inbox"
-            return 0
+            return 1  # Signal auth recovery so loop retries quickly with new key
             ;;
         "") return 0 ;;
         *)
@@ -4099,7 +4115,12 @@ if [[ "$USE_PROXMOX_WS" -eq 1 ]]; then
 fi
 (
     while true; do
-        process_inbox || true
+        if ! process_inbox; then
+            # Auth recovery just completed (new key saved); retry quickly so
+            # commands are not delayed by the full poll interval.
+            sleep 5
+            process_inbox || true
+        fi
         sleep "$_inbox_poll_interval"
     done
 ) &
