@@ -11706,6 +11706,15 @@ async def _poll_agent_inbox(hostname: str, approved_hostname: str | None = None)
         serialized = _serialize_commands()
         payload = [_serialize_command_for_agent(command) for command in pending]
 
+    _trace(
+        "inbox_polled",
+        hostname=hostname,
+        approved_as=approved_hostname,
+        commands_delivered=len(pending) if pending else 0,
+        stale_reset=reset,
+        actions=[c.get("action") for c in pending] if pending else [],
+        cmd_ids=[c.get("id") for c in pending] if pending else [],
+    )
     if pending or expired or purged or reset:
         await broadcast({"type": "commands_update", "commands": serialized})
     return payload
@@ -11764,12 +11773,18 @@ async def ack_command(request: Request, body: dict[str, Any] = Body(...)) -> dic
     """Device reports command result."""
     # Accept either a valid simulation client key OR a valid proxmox agent key.
     api_key = request.headers.get("X-API-Key", "")
+    ack_hostname = request.headers.get("X-Hostname", "") or body.get("hostname", "")
     is_approved_proxmox = any(
         api_key == v for v in approved_proxmox_agents.values()
     ) if api_key else False
     if not is_approved_proxmox:
         _require_shared_client_key(request.headers.get("X-Client-Key", ""), "/api/inbox/ack")
-    return await _ack_command_internal(body)
+        ack_hostname = ack_hostname or "(sim-client)"
+    result = await _ack_command_internal(body)
+    _trace("inbox_ack_received", hostname=ack_hostname or "(unknown)",
+           cmd_id=str(body.get("id", "")), status=body.get("status", ""),
+           message=str(body.get("message", ""))[:200])
+    return result
 
 
 @app.delete("/api/commands/pending")

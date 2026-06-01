@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.31"
+AGENT_VERSION="1.32"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -615,13 +615,14 @@ normalize_command_name() {
 }
 
 json_payload() {
-    python3 - "$@" <<'PY'
+    python3 - "$HOSTNAME" "$@" <<'PY'
 import json
 import sys
 print(json.dumps({
-    "id": sys.argv[1],
-    "status": sys.argv[2],
-    "message": sys.argv[3],
+    "hostname": sys.argv[1],
+    "id": sys.argv[2],
+    "status": sys.argv[3],
+    "message": sys.argv[4],
 }))
 PY
 }
