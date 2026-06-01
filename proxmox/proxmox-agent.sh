@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.26"
+AGENT_VERSION="1.27"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -4009,7 +4009,7 @@ PY
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
             (
-                _destroy_guest_only "$_dvmid"
+                _destroy_guest_only "$_dvmid" "" "1"
             ) &
             _del_pids+=($!)
         done
