@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.38"
+AGENT_VERSION="1.39"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3463,7 +3463,11 @@ log "Host block $host_id → VM range $start_vmid-$end_vmid (max_slots=$MAX_USB_
 # Helper: collect and POST telemetry immediately
 post_telemetry() {
     local telem response status body
-    telem=$(collect_telemetry 2>/dev/null) || return 0
+    telem=$(collect_telemetry 2>/dev/null) || { log "WARNING: collect_telemetry failed (non-zero exit)"; return 0; }
+    if [[ -z "$telem" ]]; then
+        log "WARNING: collect_telemetry returned empty payload — skipping POST"
+        return 0
+    fi
     response=$(curl_api_status POST /api/proxmox/telemetry "$telem" 2>/dev/null || true)
     status="${response##*$'\n'}"
     body="${response%$'\n'*}"
@@ -4070,13 +4074,16 @@ PY
             local _dvmid="${_del_vmids[$_di]}"
             local _dcmd_id="${_del_ids[$_di]}"
             (
+                _del_t0=$(date +%s)
                 log "Delete subshell started: vmid=$_dvmid cmd_id=$_dcmd_id"
                 if _destroy_guest_only "$_dvmid" "" "1"; then
-                    log "Parallel delete done: VMID $_dvmid"
+                    _del_elapsed=$(( $(date +%s) - _del_t0 ))
+                    log "Parallel delete done: VMID $_dvmid elapsed=${_del_elapsed}s"
                     ack_inbox_command "$_dcmd_id" "completed" "delete_vm completed" || \
                         log "ERROR: ACK failed for $_dcmd_id (completed)"
                 else
-                    log "Parallel delete failed: VMID $_dvmid"
+                    _del_elapsed=$(( $(date +%s) - _del_t0 ))
+                    log "Parallel delete failed: VMID $_dvmid elapsed=${_del_elapsed}s"
                     ack_inbox_command "$_dcmd_id" "failed" "delete_vm failed — check $AGENT_LOG" || \
                         log "ERROR: ACK failed for $_dcmd_id (failed)"
                 fi

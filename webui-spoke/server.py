@@ -4658,6 +4658,7 @@ async def _run_rolling_reclone(trigger_type: str) -> None:
                 if status == "pending":
                     poll_interval = min(poll_interval * 2, 10.0)
             logger.warning("Rolling reclone: VM %s (%s) timed out", vmid, name)
+            _trace("reclone_timeout", vmid=vmid, name=name, cmd_id=cmd.get("id"), trigger=trigger_type)
             _update_reclone_log(vmid, name, "failed", "Timed out waiting for Proxmox agent ACK")
             reclone_state["failed"] += 1
             await _broadcast_reclone_state()
@@ -4833,6 +4834,7 @@ async def vm_watchdog_loop() -> None:
                 changed = True
                 broadcast_needed = True
                 logger.warning("VM watchdog queued reclone for VM %s (%s) after 24h without check-in", vmid_int, hostname or vm.get("name") or f"VM {vmid_int}")
+                _trace("watchdog_reclone_queued", vmid=vmid_int, name=hostname or vm.get("name") or f"VM {vmid_int}", reclone_count=reclone_count)
             if changed:
                 await _async_save_vm_watchdog()
             if broadcast_needed:
