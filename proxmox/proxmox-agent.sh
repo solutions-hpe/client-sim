@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.21"
+AGENT_VERSION="1.22"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2435,10 +2435,40 @@ collect_telemetry() {
     local cpu_line mem_total mem_free mem_used storage_json vms_json template_lock template_lock_json
     # Two-sample /proc/stat diff: captures user+nice+system+iowait+irq+softirq (total - idle).
     # More accurate than top's "us" field which only shows user-space CPU.
+    # Also snapshot per-VM QEMU process ticks before the sleep so we can compute
+    # accurate per-VM CPU% over the same 1-second window (pvesh returns stale 0.0
+    # for lightly-loaded VMs because its internal poller only runs every 3-5s).
     local _s1 _s2
     _s1=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    declare -A _vm_ticks_t1
+    for _pf in /var/run/qemu-server/*.pid; do
+        [[ -f "$_pf" ]] || continue
+        _vid="${_pf##*/}"; _vid="${_vid%.pid}"
+        _pid=$(cat "$_pf" 2>/dev/null) || continue
+        [[ -d "/proc/$_pid" ]] || continue
+        _tk=$(awk '{print $14+$15}' "/proc/$_pid/stat" 2>/dev/null) && \
+            _vm_ticks_t1[$_vid]="$_tk"
+    done
     sleep 1
     _s2=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    # Compute per-VM CPU percentages normalised the same way as pvesh:
+    # pct = (delta_ticks / hz) / num_host_cpus * 100  → fraction of total host CPU (0-100)
+    local _hz _ncpus _vm_cpu_json
+    _hz=$(getconf CLK_TCK 2>/dev/null || echo "100")
+    _ncpus=$(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "1")
+    _vm_cpu_json="{"
+    for _vid in "${!_vm_ticks_t1[@]}"; do
+        _pf2="/var/run/qemu-server/${_vid}.pid"
+        [[ -f "$_pf2" ]] || continue
+        _pid2=$(cat "$_pf2" 2>/dev/null) || continue
+        [[ -d "/proc/$_pid2" ]] || continue
+        _tk2=$(awk '{print $14+$15}' "/proc/$_pid2/stat" 2>/dev/null) || continue
+        _delta=$(( _tk2 - _vm_ticks_t1[$_vid] ))
+        _pct=$(awk -v d="$_delta" -v hz="$_hz" -v n="$_ncpus" \
+               'BEGIN { printf "%.2f", (d / hz / n) * 100 }' 2>/dev/null) || _pct="0"
+        _vm_cpu_json+="\"${_vid}\":${_pct},"
+    done
+    _vm_cpu_json="${_vm_cpu_json%,}}"
     cpu_line=$(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN {
         n = split(s1, a); split(s2, b)
         t1 = 0; t2 = 0
@@ -2468,9 +2498,13 @@ collect_telemetry() {
     if command -v pvesh &>/dev/null; then
         # pvesh returns: cpu (0.0-1.0 fraction), mem (bytes), maxmem (bytes)
         # Normalise: cpu → percent, mem/maxmem → MB. Merge QEMU VMs + LXC containers.
-        vms_json=$(python3 -c "
-import json, subprocess, sys, re
+        # VM_PROC_CPU carries pre-computed per-VM CPU% from /proc/{pid}/stat (same 1s window
+        # as host CPU), which is more accurate than pvesh's stale internal poll value.
+        vms_json=$(VM_PROC_CPU="$_vm_cpu_json" python3 -c "
+import json, subprocess, sys, re, os
 from pathlib import Path
+
+proc_cpu = json.loads(os.environ.get('VM_PROC_CPU', '{}'))
 
 META_RE = re.compile(r'(?:reclone[-_ ](?:source|template)|template[-_ ]source)\\s*[:=]\\s*(\\d+)', re.I)
 
@@ -2535,11 +2569,14 @@ for v in qemu:
     vmid = v.get('vmid')
     bus_path, has_usb_config, pci_addrs, source_vmid, supported, reason, is_template = reclone_info('qemu', vmid)
     raw_cpu = v.get('cpu')
+    # Prefer proc-based CPU (accurate 1s sample) over pvesh's stale internal value.
+    proc_pct = proc_cpu.get(str(vmid))
+    cpu_val = proc_pct if proc_pct is not None else (round(float(raw_cpu) * 100, 2) if raw_cpu is not None else None)
     out.append({
         'vmid':                vmid,
         'name':                v.get('name', ''),
         'status':              v.get('status', 'unknown'),
-        'cpu':                 round(float(raw_cpu) * 100, 2) if raw_cpu is not None else None,
+        'cpu':                 cpu_val,
         'mem':                 round(int(v.get('mem') or 0) / 1024 / 1024),
         'maxmem':              round(int(v.get('maxmem') or 0) / 1024 / 1024),
         'is_template':         bool(v.get('template', 0)) or is_template,
