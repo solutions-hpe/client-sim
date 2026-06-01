@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.32"
+AGENT_VERSION="1.33"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3861,7 +3861,7 @@ process_inbox() {
 
     log "Commands received: $response"
     local parsed_commands
-    parsed_commands=$(python3 - "$response" <<'PY' 2>/dev/null || true
+    parsed_commands=$(python3 - "$response" <<'PY' 2>>"$AGENT_LOG" || true
 import json
 import sys
 
@@ -4041,11 +4041,13 @@ PY
         ) &
     fi
 
-    # Parallel delete_vm: stop+destroy all selected guests concurrently, then update state once.
+    # Parallel delete_vm: stop+destroy all selected guests concurrently.
+    # Each delete subshell ACKs itself so process_inbox returns immediately —
+    # never blocked while waiting for multi-minute VM destroys.
     if [[ ${#_del_vmids[@]} -gt 0 ]]; then
         load_state_file
         load_excluded_buses
-        local _del_pids=() _del_results=()
+        local _del_pids=()
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
             _expire_vm_pending_commands "$_dvmid"
@@ -4058,50 +4060,48 @@ PY
         # will pick up tearing_down status on its next collect_telemetry pass (≤3s).
         for _di in "${!_del_vmids[@]}"; do
             local _dvmid="${_del_vmids[$_di]}"
+            local _dcmd_id="${_del_ids[$_di]}"
             (
-                _destroy_guest_only "$_dvmid" "" "1"
+                if _destroy_guest_only "$_dvmid" "" "1"; then
+                    log "Parallel delete done: VMID $_dvmid"
+                    ack_inbox_command "$_dcmd_id" "completed" "delete_vm completed" || true
+                    log "ACK delete: $_dcmd_id vmid=$_dvmid status=completed"
+                else
+                    log "Parallel delete failed: VMID $_dvmid"
+                    ack_inbox_command "$_dcmd_id" "failed" "delete_vm failed — check $AGENT_LOG" || true
+                    log "ACK delete: $_dcmd_id vmid=$_dvmid status=failed"
+                fi
+                rm -f "${PROV_DIR}/${_dvmid}.deleting" 2>/dev/null || true
             ) &
             _del_pids+=($!)
         done
-        for _di in "${!_del_pids[@]}"; do
-            if wait "${_del_pids[$_di]}" 2>/dev/null; then
-                _del_results[$_di]="completed"
-                log "Parallel delete done: VMID ${_del_vmids[$_di]}"
-            else
-                _del_results[$_di]="failed"
-                log "Parallel delete failed: VMID ${_del_vmids[$_di]}"
-            fi
-            rm -f "${PROV_DIR}/${_del_vmids[$_di]}.deleting" 2>/dev/null || true
-        done
-        load_state_file
-        for _di in "${!_del_vmids[@]}"; do
-            [[ "${_del_results[$_di]:-failed}" == "completed" ]] || continue
-            local _dvmid="${_del_vmids[$_di]}"
-            local _dbus="${STATE_VMID_TO_BUS[$_dvmid]:-}"
-            if [[ -n "$_dbus" ]]; then
-                unset "STATE_MISSING_BY_BUS[$_dbus]"
-                unset "STATE_BUS_TO_VMID[$_dbus]"
-                unset "STATE_VIDPID_BY_BUS[$_dbus]"
-                # Exclude bus from auto-provisioning so the VM isn't immediately recreated.
-                STATE_EXCLUDED_BUS["$_dbus"]="1"
-                log "Bus $_dbus excluded from auto-provisioning after hub-initiated delete of VM $_dvmid"
-            fi
-            unset "STATE_VMID_TO_BUS[$_dvmid]"
-            unset "STATE_VMID_TO_IMAGE[$_dvmid]"
-        done
-        save_state_file
-        save_excluded_buses
-        build_usb_state_json  # rebuild cache so post_telemetry doesn't report stale VMs
-        for _di in "${!_del_vmids[@]}"; do
-            local _status="${_del_results[$_di]:-failed}"
-            local _message="delete_vm completed"
-            if [[ "$_status" != "completed" ]]; then
-                _message="delete_vm failed — check $AGENT_LOG"
-            fi
-            ack_inbox_command "${_del_ids[$_di]}" "$_status" "$_message" || true
-            log "ACK delete: ${_del_ids[$_di]} vmid=${_del_vmids[$_di]} status=$_status"
-        done
-        post_telemetry
+        # State cleanup and telemetry run in background once all deletes finish —
+        # this unblocks process_inbox so the inbox loop keeps polling on schedule.
+        local _snap_del_pids=("${_del_pids[@]}")
+        local _snap_del_vmids=("${_del_vmids[@]}")
+        (
+            for _p in "${_snap_del_pids[@]}"; do
+                while kill -0 "$_p" 2>/dev/null; do sleep 2; done
+            done
+            load_state_file
+            for _dvmid in "${_snap_del_vmids[@]}"; do
+                local _dbus="${STATE_VMID_TO_BUS[$_dvmid]:-}"
+                if [[ -n "$_dbus" ]]; then
+                    unset "STATE_MISSING_BY_BUS[$_dbus]"
+                    unset "STATE_BUS_TO_VMID[$_dbus]"
+                    unset "STATE_VIDPID_BY_BUS[$_dbus]"
+                    # Exclude bus from auto-provisioning so the VM isn't immediately recreated.
+                    STATE_EXCLUDED_BUS["$_dbus"]="1"
+                    log "Bus $_dbus excluded from auto-provisioning after hub-initiated delete of VM $_dvmid"
+                fi
+                unset "STATE_VMID_TO_BUS[$_dvmid]"
+                unset "STATE_VMID_TO_IMAGE[$_dvmid]"
+            done
+            save_state_file
+            save_excluded_buses
+            build_usb_state_json  # rebuild cache so post_telemetry doesn't report stale VMs
+            post_telemetry
+        ) &
     fi
 }
 
