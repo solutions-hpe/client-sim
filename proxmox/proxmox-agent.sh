@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.29"
+AGENT_VERSION="1.30"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1291,36 +1291,56 @@ _destroy_guest_only() {
             timeout 300 pct destroy "$vmid" 2>/dev/null || true
     else
         if [[ "$force" == "1" ]]; then
-            # Force-stop immediately (hub-initiated delete of simulation VMs — no graceful shutdown needed).
-            # Try qm stop with short timeout, then fall back to directly killing the QEMU process.
-            timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || \
-                timeout 30 qm stop "$vmid" --skiplock --forceStop 1 2>/dev/null || \
-                timeout 30 qm stop "$vmid" --skiplock --timeout 1 2>/dev/null || true
+            # Force-stop immediately (hub-initiated delete — no graceful shutdown needed).
+            # Try qm stop with short timeout first.
+            timeout 30 qm stop "$vmid" --skiplock --timeout 5 >>"$AGENT_LOG" 2>&1 || \
+                timeout 30 qm stop "$vmid" --skiplock --forceStop 1 >>"$AGENT_LOG" 2>&1 || \
+                timeout 30 qm stop "$vmid" --skiplock --timeout 1 >>"$AGENT_LOG" 2>&1 || true
             _wait_guest_stopped "$guest_type" "$vmid" 15 || {
-                # qm stop didn't work — kill the QEMU process directly via its PID file.
-                local _qemu_pid
-                _qemu_pid=$(cat "/run/qemu-server/${vmid}.pid" 2>/dev/null || true)
+                # qm stop didn't fully stop the VM — kill QEMU process directly.
+                # Try PID file (PVE path), then /var/run fallback, then pgrep.
+                local _qemu_pid=""
+                _qemu_pid=$(cat "/run/qemu-server/${vmid}.pid" 2>/dev/null || \
+                            cat "/var/run/qemu-server/${vmid}.pid" 2>/dev/null || true)
+                if [[ -z "$_qemu_pid" ]] || ! kill -0 "$_qemu_pid" 2>/dev/null; then
+                    _qemu_pid=$(pgrep -f "[[:space:]]${vmid}[[:space:]]" 2>/dev/null | head -1 || \
+                                pgrep -f "qemu.*${vmid}" 2>/dev/null | head -1 || true)
+                fi
                 if [[ -n "$_qemu_pid" ]] && kill -0 "$_qemu_pid" 2>/dev/null; then
-                    log "Force-killing QEMU process $_qemu_pid for VM $vmid"
+                    log "Force-killing QEMU PID $_qemu_pid for VM $vmid"
                     kill -9 "$_qemu_pid" 2>/dev/null || true
+                    sleep 3
+                else
+                    # Last resort: kill via systemd unit (PVE 9+ cgroup)
+                    systemctl kill --signal=SIGKILL "qemu-server@${vmid}.service" 2>/dev/null || true
                     sleep 3
                 fi
             }
             _wait_guest_stopped "$guest_type" "$vmid" 20 || true
         else
-            timeout 150 qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
-                timeout 30 qm stop "$vmid" --skiplock --timeout 5 2>/dev/null || true
+            timeout 150 qm stop "$vmid" --skiplock --timeout 120 >>"$AGENT_LOG" 2>&1 || \
+                timeout 30 qm stop "$vmid" --skiplock --timeout 5 >>"$AGENT_LOG" 2>&1 || true
             _wait_guest_stopped "$guest_type" "$vmid" 150 || true
         fi
         log "Destroying VM $vmid"
-        timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
+        # Try destroy; if it fails (e.g. VM still flagged running), kill QEMU again and retry once.
+        if ! timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks >>"$AGENT_LOG" 2>&1; then
+            log "qm destroy $vmid failed — attempting emergency QEMU kill and retry"
+            local _retry_pid=""
+            _retry_pid=$(cat "/run/qemu-server/${vmid}.pid" 2>/dev/null || \
+                         cat "/var/run/qemu-server/${vmid}.pid" 2>/dev/null || \
+                         pgrep -f "[[:space:]]${vmid}[[:space:]]" 2>/dev/null | head -1 || true)
+            [[ -n "$_retry_pid" ]] && kill -9 "$_retry_pid" 2>/dev/null || true
+            systemctl kill --signal=SIGKILL "qemu-server@${vmid}.service" 2>/dev/null || true
+            sleep 5
+            timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks >>"$AGENT_LOG" 2>&1 || true
+        fi
     fi
 
     # Allow generous time for disk cleanup — large/thin images can take minutes.
-    # Treat timeout as a warning only: qm destroy already issued, disk cleanup
-    # will finish in the background and the VM will disappear from qm list shortly.
     _wait_guest_gone "$guest_type" "$vmid" 360 || {
-        log "WARNING: VM/CT $vmid still visible after 360s — disk cleanup ongoing; treating as success"
+        log "ERROR: VM/CT $vmid still visible after 360s — destroy may have failed; returning failure"
+        return 1
     }
     return 0
 }
