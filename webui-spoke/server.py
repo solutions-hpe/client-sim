@@ -3320,6 +3320,7 @@ def _record_resource_samples(node: dict[str, Any], now: float) -> None:
         pass
     _save_resource_cache()
 _RESOURCE_CACHE_SAVE_INTERVAL = 60.0  # persist at most once per minute
+_resource_cache_last_saved: float = 0.0
 
 
 def _load_resource_cache() -> None:
