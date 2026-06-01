@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.33"
+AGENT_VERSION="1.34"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3340,7 +3340,7 @@ execute_vm_command() {
             ;;
         start_vms)  for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm start "$vid" || true; done ;;
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
-        update_agent|update-agent)
+        update_agent|update-agent|proxmox_agent_update|proxmox-agent-update)
             self_update_agent "$_branch" "$_repo_raw"
             ;;
         update_spoke|update-spoke)
