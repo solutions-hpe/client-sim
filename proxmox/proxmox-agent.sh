@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.25"
+AGENT_VERSION="1.26"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -4055,17 +4055,23 @@ PY
     fi
 }
 
-# Launch inbox as an independent background loop only when websocket transport is unavailable
-if [[ "$USE_PROXMOX_WS" -ne 1 ]]; then
-    (
-        while true; do
-            process_inbox || true
-            sleep "$INBOX_INTERVAL"
-        done
-    ) &
-    INBOX_PID=$!
-    log "Background inbox poller started (PID $INBOX_PID, interval ${INBOX_INTERVAL}s)"
+# Launch inbox as an independent background loop.
+# When WS is active it acts as a fallback: the spoke resets stale "delivered"
+# commands (> 30 s un-acked) back to "pending" so they can be picked up here.
+# When WS is unavailable it is the primary command path.
+_inbox_poll_interval="$INBOX_INTERVAL"
+if [[ "$USE_PROXMOX_WS" -eq 1 ]]; then
+    # Longer interval when WS is the primary path — only needed as a fallback.
+    _inbox_poll_interval=60
 fi
+(
+    while true; do
+        process_inbox || true
+        sleep "$_inbox_poll_interval"
+    done
+) &
+INBOX_PID=$!
+log "Background inbox poller started (PID $INBOX_PID, interval ${_inbox_poll_interval}s, ws_mode=$USE_PROXMOX_WS)"
 
 # Start hardware watchdog in background
 if [[ "$HW_WATCHDOG_ENABLED" -eq 1 ]]; then
