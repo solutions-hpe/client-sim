@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.34"
+AGENT_VERSION="1.35"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -630,11 +630,14 @@ PY
 ack_inbox_command() {
     local cmd_id="$1" status="$2" message="${3:-}"
     local payload response_with_status http_status body attempt
+    log "DEBUG ack_inbox_command: cmd_id=$cmd_id status=$status"
     payload=$(json_payload "$cmd_id" "$status" "$message") || return 1
     for attempt in 1 2 3; do
+        log "DEBUG ACK attempt $attempt: cmd_id=$cmd_id"
         response_with_status=$(curl_api_status POST /api/inbox/ack "$payload" 2>/dev/null || true)
         http_status="${response_with_status##*$'\n'}"
         body="${response_with_status%$'\n'*}"
+        log "DEBUG ACK response: cmd_id=$cmd_id http_status=${http_status:-empty} body=${body:0:120}"
         case "$http_status" in
             200)
                 log "ACK: ${cmd_id} status=${status}"
@@ -648,6 +651,7 @@ ack_inbox_command() {
                 handle_auth_failure "$http_status" "/api/inbox/ack"
                 ;;
             "")
+                log "WARNING: ACK ${cmd_id} attempt ${attempt} — empty/no response (curl error?)"
                 ;;
             *)
                 log "WARNING: ACK ${cmd_id} attempt ${attempt} returned HTTP ${http_status} ${body:+body=${body:0:160}}"
@@ -1227,16 +1231,27 @@ _wait_vmid_gone() {
 
 get_guest_type() {
     local vmid="$1"
-    if [[ -f "/etc/pve/qemu-server/${vmid}.conf" ]]; then
-        printf 'qemu'
-        return 0
+    # All checks use timeout — /etc/pve/ is a FUSE mount (pmxcfs) and qm/pct status
+    # queries the QEMU monitor socket; both can hang indefinitely on stuck/zombie VMs.
+    if timeout 5 test -f "/etc/pve/qemu-server/${vmid}.conf" 2>/dev/null; then
+        log "DEBUG get_guest_type: vmid=$vmid type=qemu (conf file)"
+        printf 'qemu'; return 0
     fi
-    if [[ -f "/etc/pve/lxc/${vmid}.conf" ]]; then
-        printf 'lxc'
-        return 0
+    if timeout 5 test -f "/etc/pve/lxc/${vmid}.conf" 2>/dev/null; then
+        log "DEBUG get_guest_type: vmid=$vmid type=lxc (conf file)"
+        printf 'lxc'; return 0
     fi
-    qm status "$vmid" >/dev/null 2>&1 && { printf 'qemu'; return 0; }
-    pct status "$vmid" >/dev/null 2>&1 && { printf 'lxc'; return 0; }
+    log "DEBUG get_guest_type: vmid=$vmid no conf file — trying qm status"
+    if timeout 10 qm status "$vmid" >/dev/null 2>&1; then
+        log "DEBUG get_guest_type: vmid=$vmid type=qemu (qm status)"
+        printf 'qemu'; return 0
+    fi
+    log "DEBUG get_guest_type: vmid=$vmid qm status failed/timeout — trying pct status"
+    if timeout 10 pct status "$vmid" >/dev/null 2>&1; then
+        log "DEBUG get_guest_type: vmid=$vmid type=lxc (pct status)"
+        printf 'lxc'; return 0
+    fi
+    log "DEBUG get_guest_type: vmid=$vmid not found on this host"
     return 1
 }
 
@@ -1246,7 +1261,8 @@ _wait_guest_stopped() {
     [[ "$guest_type" == "lxc" ]] && cmd="pct"
     while [[ $elapsed -lt $max_wait ]]; do
         local state
-        state=$($cmd status "$vmid" 2>/dev/null | awk '{print $2}')
+        state=$(timeout 10 $cmd status "$vmid" 2>/dev/null | awk '{print $2}')
+        log "DEBUG _wait_guest_stopped: vmid=$vmid state=${state:-unknown} elapsed=${elapsed}s"
         [[ "$state" == "stopped" ]] && return 0
         sleep 3
         elapsed=$(( elapsed + 3 ))
@@ -1260,7 +1276,10 @@ _wait_guest_gone() {
     local elapsed=0 cmd="qm"
     [[ "$guest_type" == "lxc" ]] && cmd="pct"
     while [[ $elapsed -lt $max_wait ]]; do
-        $cmd status "$vmid" 2>/dev/null || return 0
+        local _rc=0
+        timeout 10 $cmd status "$vmid" 2>/dev/null || _rc=$?
+        log "DEBUG _wait_guest_gone: vmid=$vmid rc=$_rc elapsed=${elapsed}s"
+        [[ $_rc -ne 0 ]] && return 0
         sleep 3
         elapsed=$(( elapsed + 3 ))
     done
@@ -1270,6 +1289,7 @@ _wait_guest_gone() {
 
 _destroy_guest_only() {
     local vmid="$1" guest_type="${2:-}" force="${3:-0}"
+    log "DEBUG _destroy_guest_only: vmid=$vmid force=$force — resolving guest type"
     if [[ -z "$guest_type" ]]; then
         guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
     fi
@@ -4062,18 +4082,25 @@ PY
             local _dvmid="${_del_vmids[$_di]}"
             local _dcmd_id="${_del_ids[$_di]}"
             (
+                log "DEBUG delete subshell started: vmid=$_dvmid cmd_id=$_dcmd_id pid=$$"
                 if _destroy_guest_only "$_dvmid" "" "1"; then
                     log "Parallel delete done: VMID $_dvmid"
-                    ack_inbox_command "$_dcmd_id" "completed" "delete_vm completed" || true
+                    log "DEBUG ACK start: cmd_id=$_dcmd_id vmid=$_dvmid status=completed"
+                    ack_inbox_command "$_dcmd_id" "completed" "delete_vm completed" || \
+                        log "ERROR: ACK failed for $_dcmd_id (completed)"
                     log "ACK delete: $_dcmd_id vmid=$_dvmid status=completed"
                 else
                     log "Parallel delete failed: VMID $_dvmid"
-                    ack_inbox_command "$_dcmd_id" "failed" "delete_vm failed — check $AGENT_LOG" || true
+                    log "DEBUG ACK start: cmd_id=$_dcmd_id vmid=$_dvmid status=failed"
+                    ack_inbox_command "$_dcmd_id" "failed" "delete_vm failed — check $AGENT_LOG" || \
+                        log "ERROR: ACK failed for $_dcmd_id (failed)"
                     log "ACK delete: $_dcmd_id vmid=$_dvmid status=failed"
                 fi
                 rm -f "${PROV_DIR}/${_dvmid}.deleting" 2>/dev/null || true
+                log "DEBUG delete subshell done: vmid=$_dvmid"
             ) &
             _del_pids+=($!)
+            log "DEBUG spawned delete subshell: vmid=$_dvmid pid=$!"
         done
         # State cleanup and telemetry run in background once all deletes finish —
         # this unblocks process_inbox so the inbox loop keeps polling on schedule.
