@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.37"
+AGENT_VERSION="1.38"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3435,7 +3435,7 @@ mkdir -p /var/lib/client-sim
 # Clean up any stale reseed lock from a previous crash
 rm -f "$RESEED_LOCK_FILE"
 write_reclone_state_cache idle "[]"
-log "Proxmox agent starting. Server: $SERVER_URL"
+log "Proxmox agent v${AGENT_VERSION} starting. Server: $SERVER_URL"
 _LAST_SELF_UPDATE=0
 _PROV_FAIL_STREAK=0
 _PROV_COOLDOWN_UNTIL=0
@@ -3473,7 +3473,7 @@ post_telemetry() {
             handle_auth_failure "$status" "/api/proxmox/telemetry"
             return 0
             ;;
-        "") return 0 ;;
+        "") log "WARNING: telemetry POST failed (curl error or no response)"; return 0 ;;
         *)
             log "WARNING: telemetry POST returned HTTP ${status} ${body:+body=${body:0:160}}"
             return 0
@@ -3498,7 +3498,8 @@ print(json.dumps({'hostname': sys.argv[2], 'log_lines': lines}))
     case "$status" in
         200) return 0 ;;
         202|401|403) handle_auth_failure "$status" "/api/proxmox/log-push" ;;
-        *) ;;
+        "") log "WARNING: log-push POST failed (curl error or no response)" ;;
+        *) log "WARNING: log-push POST returned HTTP ${status}" ;;
     esac
 }
 

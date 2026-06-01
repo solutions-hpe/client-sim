@@ -3658,6 +3658,13 @@ def _cleanup_commands_locked(now: float | None = None) -> tuple[int, int]:
             cmd["updated_at"] = now
             cmd["purge_after"] = now + COMMAND_RESULT_RETENTION_SECS
             expired += 1
+            _trace(
+                "command_expired",
+                cmd_id=cmd.get("id"),
+                action=cmd.get("action"),
+                target=cmd.get("target"),
+                age_secs=round(now - cmd.get("created_at", now)),
+            )
 
     before = len(commands)
     commands[:] = [
@@ -11711,6 +11718,7 @@ async def _poll_agent_inbox(hostname: str, approved_hostname: str | None = None)
         _stale_threshold = 30.0
         now = time.time()
         reset = 0
+        stale_reset_ids: list[str] = []
         for cmd in commands:
             if (
                 cmd.get("status") == "delivered"
@@ -11720,8 +11728,11 @@ async def _poll_agent_inbox(hostname: str, approved_hostname: str | None = None)
                 cmd["status"] = "pending"
                 cmd["updated_at"] = now
                 reset += 1
+                stale_reset_ids.append(cmd.get("id", ""))
         if reset:
             _save_commands()
+            for cmd_id in stale_reset_ids:
+                _trace("stale_reset", hostname=hostname, approved_as=approved_hostname, cmd_id=cmd_id)
         pending, expired, purged = _peek_pending_agent_commands_locked(hostname, approved_hostname)
         if pending:
             _mark_commands_delivered_locked([command["id"] for command in pending])
