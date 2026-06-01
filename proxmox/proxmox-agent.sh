@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.20"
+AGENT_VERSION="1.21"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1253,7 +1253,7 @@ _wait_guest_gone() {
 }
 
 _destroy_guest_only() {
-    local vmid="$1" guest_type="${2:-}"
+    local vmid="$1" guest_type="${2:-}" force="${3:-0}"
     if [[ -z "$guest_type" ]]; then
         guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
     fi
@@ -1262,7 +1262,7 @@ _destroy_guest_only() {
         return 1
     fi
 
-    log "Stopping ${guest_type^^} $vmid before destroy"
+    log "Stopping ${guest_type^^} $vmid before destroy (force=$force)"
     if [[ "$guest_type" == "lxc" ]]; then
         timeout 120 pct stop "$vmid" --force 2>/dev/null || \
             timeout 120 pct stop "$vmid" --skiplock 2>/dev/null || \
@@ -1275,14 +1275,26 @@ _destroy_guest_only() {
             timeout 300 pct destroy "$vmid" --skiplock 2>/dev/null || \
             timeout 300 pct destroy "$vmid" 2>/dev/null || true
     else
-        qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
+        if [[ "$force" == "1" ]]; then
+            # Force-stop immediately (hub-initiated delete of simulation VMs — no graceful shutdown needed).
             qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
-        _wait_guest_stopped "$guest_type" "$vmid" 150 || true
+            _wait_guest_stopped "$guest_type" "$vmid" 30 || true
+        else
+            qm stop "$vmid" --skiplock --timeout 120 2>/dev/null || \
+                qm stop "$vmid" --skiplock --timeout 0 2>/dev/null || true
+            _wait_guest_stopped "$guest_type" "$vmid" 150 || true
+        fi
         log "Destroying VM $vmid"
         timeout 300 qm destroy "$vmid" --skiplock --purge --destroy-unreferenced-disks 2>/dev/null || true
     fi
 
-    _wait_guest_gone "$guest_type" "$vmid" 90
+    # Allow generous time for disk cleanup — large/thin images can take minutes.
+    # Treat timeout as a warning only: qm destroy already issued, disk cleanup
+    # will finish in the background and the VM will disappear from qm list shortly.
+    _wait_guest_gone "$guest_type" "$vmid" 360 || {
+        log "WARNING: VM/CT $vmid still visible after 360s — disk cleanup ongoing; treating as success"
+    }
+    return 0
 }
 
 destroy_lxc() {
@@ -1601,7 +1613,7 @@ _expire_vm_pending_commands() {
 }
 
 destroy_vm() {
-    local vmid="$1" guest_type="${2:-}" exclude_bus="${3:-0}"
+    local vmid="$1" guest_type="${2:-}" exclude_bus="${3:-0}" force="${4:-0}"
     local bus_path="${STATE_VMID_TO_BUS[$vmid]:-}"
     if [[ -z "$guest_type" ]]; then
         guest_type=$(get_guest_type "$vmid" 2>/dev/null || true)
@@ -1611,21 +1623,23 @@ destroy_vm() {
     # Without this, stale commands (e.g. reboot) remain in the queue and are delivered
     # to the replacement VM when the same VMID slot is re-used, causing an immediate reboot.
     _expire_vm_pending_commands "$vmid"
-    if ! _destroy_guest_only "$vmid" "$guest_type"; then
+
+    # Save bus exclusion BEFORE destroying so that even if destruction is slow or takes
+    # longer than the command timeout, the auto-provision loop never recreates this VM.
+    if [[ "$exclude_bus" == "1" && -n "$bus_path" ]]; then
+        load_excluded_buses
+        STATE_EXCLUDED_BUS["$bus_path"]="1"
+        save_excluded_buses
+        log "Bus $bus_path pre-excluded from auto-provisioning before hub-initiated delete of VM $vmid"
+    fi
+
+    if ! _destroy_guest_only "$vmid" "$guest_type" "$force"; then
         log "ERROR: Failed to destroy VMID $vmid"
         return 1
     fi
     if [[ -n "$bus_path" ]]; then
         unset "STATE_MISSING_BY_BUS[$bus_path]"
         unset "STATE_BUS_TO_VMID[$bus_path]"
-        if [[ "$exclude_bus" == "1" ]]; then
-            # Mark bus excluded so the provision loop won't immediately recreate the VM.
-            # The exclusion is cleared automatically when the USB dongle is unplugged.
-            load_excluded_buses
-            STATE_EXCLUDED_BUS["$bus_path"]="1"
-            save_excluded_buses
-            log "Bus $bus_path excluded from auto-provisioning after hub-initiated delete of VM $vmid"
-        fi
     fi
     unset "STATE_VMID_TO_BUS[$vmid]"
     unset "STATE_VMID_TO_IMAGE[$vmid]"
@@ -3200,7 +3214,8 @@ execute_vm_command() {
                 destroy_lxc "$vmid"
             else
                 load_state_file
-                destroy_vm "$vmid" "" "1"
+                # force=1: hub-initiated deletes use immediate force-stop (simulation VMs only).
+                destroy_vm "$vmid" "" "1" "1"
             fi
             ;;
         reclone_vms|reseed)
@@ -3569,9 +3584,12 @@ async def main():
                 pass
             except Exception:
                 pass
-            async with websockets.connect(build_ws_url(load_server_url()), ping_interval=20, ping_timeout=10) as ws:
+            async with websockets.connect(build_ws_url(load_server_url()), ping_interval=120, ping_timeout=120) as ws:
                 backoff = 1
-                await ws.send(json.dumps({'type': 'sync'}))
+                # Do NOT send an initial 'sync' here — the spoke already pushes pending
+                # commands immediately on WS connect via ws_proxmox_endpoint.  Sending
+                # sync would cause the spoke to reset and re-push commands a second time,
+                # spawning duplicate delete subprocesses.
                 touch_success()
                 sender = asyncio.create_task(send_loop(ws))
                 try:
@@ -3594,7 +3612,20 @@ async def main():
                             for command in cmds:
                                 action_name = str(command.get('action') or '')
                                 if action_name == 'delete_vm':
-                                    asyncio.create_task(run_command_bg('--process-single-command', json.dumps(command)))
+                                    def _make_delete_task(cmd=command):
+                                        t = asyncio.create_task(run_command_bg('--process-single-command', json.dumps(cmd)))
+                                        def _on_done(task):
+                                            exc = task.exception() if not task.cancelled() else None
+                                            if exc:
+                                                try:
+                                                    import datetime as _dt2
+                                                    with open(AGENT_LOG_FILE, 'a') as _lf2:
+                                                        _lf2.write(f"[{_dt2.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [CMD] ERROR: delete_vm task failed: {exc}\n")
+                                                except Exception:
+                                                    pass
+                                        t.add_done_callback(_on_done)
+                                        return t
+                                    _make_delete_task()
                                 else:
                                     await run_command(command)
                         elif msg_type == 'command':
@@ -3609,7 +3640,20 @@ async def main():
                             except Exception:
                                 pass
                             if action == 'delete_vm':
-                                asyncio.create_task(run_command_bg('--process-single-command', json.dumps(payload)))
+                                def _make_single_delete_task(p=payload):
+                                    t = asyncio.create_task(run_command_bg('--process-single-command', json.dumps(p)))
+                                    def _on_done(task):
+                                        exc = task.exception() if not task.cancelled() else None
+                                        if exc:
+                                            try:
+                                                import datetime as _dt2
+                                                with open(AGENT_LOG_FILE, 'a') as _lf2:
+                                                    _lf2.write(f"[{_dt2.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [CMD] ERROR: delete_vm task failed: {exc}\n")
+                                            except Exception:
+                                                pass
+                                    t.add_done_callback(_on_done)
+                                    return t
+                                _make_single_delete_task()
                             else:
                                 await run_command(payload)
                         elif msg_type == 'backup':
