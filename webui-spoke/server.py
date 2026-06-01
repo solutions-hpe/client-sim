@@ -3257,6 +3257,9 @@ _prev_usb_by_vmid: dict[str, str] = {}
 # VMIDs for which a delete command has been queued but not yet confirmed by telemetry.
 # Kept as a set so the UI can show "deleting…" immediately instead of the row vanishing.
 _pending_delete_vmids: set[int] = set()
+# Maps vmid → approved hostname of the agent that last reported that VM.
+# Used to route delete_vm / reclone_vm commands to the correct node in multi-agent setups.
+_proxmox_agent_vm_map: dict[int, str] = {}
 # Rolling resource samples for 1-hour average CPU/memory threshold checks.
 # Each entry is (unix_timestamp, value_percent).  Pruned to the last hour on each update.
 _cpu_samples: list[tuple[float, float]] = []
@@ -4516,8 +4519,17 @@ async def _queue_command(target: str, action: str, args: dict[str, Any] | None =
     return cmd
 
 
-async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None) -> dict[str, Any]:
-    return await _queue_command("proxmox", action, args, command_type=command_type)
+async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None, target: str = "proxmox") -> dict[str, Any]:
+    return await _queue_command(target, action, args, command_type=command_type)
+
+
+def _resolve_proxmox_vm_target(vmid: int | None) -> str:
+    """Return the specific agent hostname that owns this vmid, or 'proxmox' if unknown."""
+    if vmid is not None:
+        owner = _proxmox_agent_vm_map.get(int(vmid))
+        if owner and owner in approved_proxmox_agents:
+            return owner
+    return "proxmox"
 
 
 async def _queue_unlock_template_command(command_type: str = "unlock_template") -> dict[str, Any]:
@@ -8843,6 +8855,16 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["node"] = body.get("node", {}) or {}
     proxmox_state["vms"] = enriched_vms
 
+    # Update the vmid→hostname routing map so delete/reclone commands target the right node.
+    reported_vmids = {int(vm["vmid"]) for vm in enriched_vms if vm.get("vmid") is not None}
+    # Remove stale entries owned by this agent (VMs it no longer reports).
+    stale = [vmid for vmid, owner in _proxmox_agent_vm_map.items() if owner == hostname and vmid not in reported_vmids]
+    for vmid in stale:
+        del _proxmox_agent_vm_map[vmid]
+    # Register/update all VMs reported by this agent.
+    for vmid in reported_vmids:
+        _proxmox_agent_vm_map[vmid] = hostname
+
     proxmox_state["reseed_in_progress"] = _proxmox_reseed_in_progress
     proxmox_state["usb_state"] = normalized_usb_state
     proxmox_state["present_usb"] = normalized_present_usb
@@ -9021,7 +9043,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             if candidates:
                 target_vmid = max(candidates)  # newest = highest VMID
                 _del_args = _prepare_delete_vm_args({"vmid": target_vmid})
-                await _queue_proxmox_command("delete_vm", _del_args)
+                await _queue_proxmox_command("delete_vm", _del_args, target=_resolve_proxmox_vm_target(target_vmid))
                 _pending_delete_vmids.add(target_vmid)
                 logger.info(
                     "Auto-provision resource gate: delete threshold exceeded "
@@ -9278,7 +9300,7 @@ async def api_proxmox_delete_vm(vmid: int) -> dict[str, Any]:
             args = {"vmid": vmid, "vm_type": "qemu"}
         else:
             raise
-    cmd = await _queue_proxmox_command("delete_vm", args)
+    cmd = await _queue_proxmox_command("delete_vm", args, target=_resolve_proxmox_vm_target(vmid))
     _pending_delete_vmids.add(vmid)
     await _broadcast_proxmox_state()
     return {
