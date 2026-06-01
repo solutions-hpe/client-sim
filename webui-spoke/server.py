@@ -9126,8 +9126,12 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     except Exception:
         tb = traceback.format_exc()
         logger.error("TELEMETRY HANDLER CRASH for %s:\n%s", hostname, tb)
-        _trace("telemetry_crash", f"hostname={hostname!r} error={tb.splitlines()[-1]!r}")
-        proxmox_log_buffer.append(f"[SPOKE ERROR] telemetry crash: {tb.splitlines()[-1]}")
+        last_line = tb.splitlines()[-1] if tb.splitlines() else "unknown"
+        proxmox_log_buffer.append(f"[SPOKE ERROR] telemetry crash: {last_line}")
+        try:
+            _trace("telemetry_crash", hostname=hostname, error=last_line)
+        except Exception:
+            pass
         raise
 
 
