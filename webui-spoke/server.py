@@ -22,6 +22,7 @@ import struct
 import subprocess
 import termios
 import time
+import traceback
 import uuid
 import zlib
 from dataclasses import asdict, dataclass
@@ -9120,7 +9121,14 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     _approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, client_ip, now)
     if response is not None:
         return response
-    return await _apply_proxmox_telemetry_state(body, hostname, now)
+    try:
+        return await _apply_proxmox_telemetry_state(body, hostname, now)
+    except Exception:
+        tb = traceback.format_exc()
+        logger.error("TELEMETRY HANDLER CRASH for %s:\n%s", hostname, tb)
+        _trace("telemetry_crash", f"hostname={hostname!r} error={tb.splitlines()[-1]!r}")
+        proxmox_log_buffer.append(f"[SPOKE ERROR] telemetry crash: {tb.splitlines()[-1]}")
+        raise
 
 
 
