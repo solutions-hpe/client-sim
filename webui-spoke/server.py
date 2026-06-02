@@ -1283,6 +1283,12 @@ except Exception:
 # Populated during each Central poll cycle from alert objects.
 hardware_alert_devices: dict[str, dict[str, list[str]]] = {}
 
+# In hub-connected (centralized) mode the hub computes hardware_alerts and pushes the
+# full pre-built list (id/name/device_type/total/sites) to the spoke.  We cache it
+# here so _hw_alerts_payload() can return it when local settings["hardware_checks"] is
+# empty (i.e. the spoke has no locally-configured checks).
+_hub_fed_hardware_alerts: list[dict] = []
+
 # Previous check states for transition detection (green→red email/Teams trigger).
 # {check_key: "OK"|"ERROR"}  where check_key = f"{check_id}:{wsite}" or just check_id for hw
 _prev_check_states: dict[str, str] = {}
@@ -1504,7 +1510,7 @@ def _central_token_state() -> dict[str, str]:
 
 async def _apply_central_feed(feed: dict) -> None:
     """Apply hub-provided Central data feed to local in-memory state (centralized mode)."""
-    global central_status, central_wireless_clients, hardware_alert_devices
+    global central_status, central_wireless_clients, hardware_alert_devices, _hub_fed_hardware_alerts
     new_status = feed.get("status") or {}
     new_wireless = feed.get("wireless_clients") or {}
     new_total = feed.get("total_clients") or {}
@@ -1562,6 +1568,12 @@ async def _apply_central_feed(feed: dict) -> None:
             if devices:
                 site_devices[str(wsite)] = devices
         hardware_alert_devices[check_id] = site_devices
+
+    # Cache the full pre-built hardware_alerts list from the hub feed.  This is used
+    # by _hw_alerts_payload() when the spoke has no locally-configured hardware_checks
+    # (i.e. in hub-connected / centralized mode).  The hub already includes id, name,
+    # device_type, total, and sites — exactly the shape _hw_alerts_payload() produces.
+    _hub_fed_hardware_alerts = [a for a in hardware_alerts if isinstance(a, dict) and a.get("id")]
 
     # Update token state so spoke Central tab shows connected status
     if token_valid:
@@ -2325,8 +2337,21 @@ def _central_status_payload() -> dict[str, Any]:
 
 
 def _hw_alerts_payload() -> list[dict[str, Any]]:
-    """Serialize hardware_alert_devices merged with check metadata for broadcast."""
+    """Serialize hardware_alert_devices merged with check metadata for broadcast.
+
+    In distributed mode (spoke has its own Central credentials) the spoke builds
+    hardware_alert_devices from its own polling and this function assembles the
+    payload from settings["hardware_checks"].
+
+    In hub-connected (centralized) mode the spoke's settings["hardware_checks"] is
+    empty — the hub computes the alerts and pushes a pre-built list via the feed,
+    stored in _hub_fed_hardware_alerts.  Fall back to that list so the simulation
+    view can display gateway/AP/switch status correctly.
+    """
     hw_checks: list[dict[str, Any]] = settings.get("hardware_checks", [])
+    if not hw_checks:
+        # Hub-connected mode: return the pre-built list pushed by the hub
+        return list(_hub_fed_hardware_alerts)
     site_mappings: dict[str, str] = settings.get("site_mappings", {})
     result = []
     for check in hw_checks:
