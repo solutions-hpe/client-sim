@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.45"
+AGENT_VERSION="1.46"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -1624,9 +1624,12 @@ PY
         return 1
     fi
 
-    # Wait for guest agent (up to 10 minutes, 5s intervals)
+    # Wait for guest agent (up to 10 minutes, 5s intervals).
+    # Each iteration: timeout 10 ping + sleep 5 = ~15s max → 40 iters ≈ 10 min.
+    # Keeping this tight is critical for sequential provisioning (CONCURRENCY=1):
+    # a single stuck VM previously blocked the entire batch for up to 30 minutes.
     local _ping_attempt=0
-    for _ in $(seq 1 120); do
+    for _ in $(seq 1 40); do
         (( _ping_attempt++ )) || true
         local _ping_out _ping_rc
         _ping_out=$(timeout 10 qm agent "$vmid" ping 2>&1); _ping_rc=$?
@@ -1639,7 +1642,9 @@ PY
     done
 
     if [[ "$guest_ready" -eq 0 ]]; then
-        log "WARNING: Guest agent not ready after 600s for VM $vmid — attempting hostname set anyway"
+        log "WARNING: Guest agent not ready after ~10 min for VM $vmid — tearing down (will retry via post-prov queue)"
+        _teardown "guest agent unreachable after 10 min — tear down and retry"
+        return 1
     fi
 
     # Set hostname — write /etc/hostname + suppress cloud-init from overriding it.
@@ -1649,7 +1654,7 @@ PY
     # Also avoid hostnamectl: it communicates via D-Bus which may not be ready
     # right after boot and can hang the entire bash script.
     local hostname_set=0
-    for _ in $(seq 1 6); do
+    for _ in $(seq 1 3); do
         if timeout 90 qm guest exec "$vmid" --timeout 60 -- bash -c "
             echo '${full_name}' > /etc/hostname
             sed -i 's/^127\.0\.1\.1.*/127.0.1.1\t${full_name}/' /etc/hosts 2>/dev/null || true
@@ -1664,7 +1669,7 @@ PY
     done
 
     if [[ "$hostname_set" -eq 0 ]]; then
-        _teardown "guest agent unreachable — hostname never set"
+        _teardown "hostname set failed despite guest agent responding"
         return 1
     fi
 
@@ -1679,14 +1684,15 @@ PY
 
     # Wait for the VM to come back up after reboot, then run update.sh
     # so it has the latest scripts before startup.sh runs for the first time.
-    local reboot_wait=0
+    # Use a deadline-based loop so the `timeout 10` ping doesn't silently extend
+    # the wall-clock wait beyond the intended 5-minute cap.
+    local _reboot_deadline=$(( $(date +%s) + 300 ))
     local came_back=0
-    while (( reboot_wait < 600 )); do
+    while (( $(date +%s) < _reboot_deadline )); do
         sleep 5
-        reboot_wait=$(( reboot_wait + 5 ))
         local _pb_out _pb_rc
         _pb_out=$(timeout 10 qm agent "$vmid" ping 2>&1); _pb_rc=$?
-        log "PROVISION: qm agent $vmid ping post-reboot wait=${reboot_wait}s rc=${_pb_rc}${_pb_out:+ out=${_pb_out}}"
+        log "PROVISION: qm agent $vmid ping post-reboot rc=${_pb_rc}${_pb_out:+ out=${_pb_out}}"
         if (( _pb_rc == 0 )); then
             came_back=1
             break
