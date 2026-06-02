@@ -5366,6 +5366,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "cpu_1h_avg": _resource_1h_average(_cpu_samples),
             "mem_1h_avg": _resource_1h_average(_mem_samples),
             "provision_halt": proxmox_state.get("provision_halt"),
+            "prov_run": dict(proxmox_state.get("prov_run") or {}),
             "cpu_est_avg": _resource_estimated_average(_cpu_samples),
             "mem_est_avg": _resource_estimated_average(_mem_samples),
             "resource_samples_started": _resource_samples_started or None,
@@ -8961,6 +8962,11 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                 "ts": incoming.get("ts"),
                 "agent_version": incoming.get("agent_version", ""),
             })
+
+    # Persist provision_halt from the agent's telemetry so the hub can display it.
+    # The agent writes a local cache file and reports it here; the spoke just stores it.
+    if "provision_halt" in body:
+        proxmox_state["provision_halt"] = body.get("provision_halt")
 
     # Clear pending-delete VMIDs that the agent has confirmed are gone.
     # intersection_update keeps only IDs still in the telemetry report;

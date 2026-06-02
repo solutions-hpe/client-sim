@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.46"
+AGENT_VERSION="1.47"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3715,6 +3715,27 @@ done < <(ps aux 2>/dev/null | awk '/[q]m (clone|list)/{print $2}' || true)
 # Flock is released when the old agent dies (fd closed), but the file may still exist.
 rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
 unset _orphan_killed _orphan_pid
+
+# Startup: clean up stale provision sentinel files left by a previous agent run.
+# These plain ${PROV_DIR}/${vmid} files mark a USB bus as prov_status="provisioning".
+# If the agent was killed mid-clone (e.g. during an update restart), the cleanup in
+# clone_vm_for_usb never ran → the file persists → prov_run.running stays True → the
+# spoke stops sending provision_unassigned → provisioning stalls indefinitely.
+# A file is stale when its age exceeds CLONE_TIMEOUT_SECONDS (the maximum clone window).
+_stale_prov_found=0
+for _prov_file in "${PROV_DIR}"/[0-9]*; do
+    [[ -f "$_prov_file" ]] || continue
+    _fname="${_prov_file##*/}"
+    [[ "$_fname" == *"."* ]] && continue   # skip .provision_done, .post_prov_retry, etc.
+    _file_age=$(( $(date +%s) - $(stat -c %Y "$_prov_file" 2>/dev/null || echo 0) ))
+    if (( _file_age > CLONE_TIMEOUT_SECONDS )); then
+        log "Startup: removing stale provision sentinel ${_prov_file} (age=${_file_age}s > ${CLONE_TIMEOUT_SECONDS}s timeout)"
+        rm -f "$_prov_file" 2>/dev/null || true
+        (( _stale_prov_found++ )) || true
+    fi
+done
+(( _stale_prov_found > 0 )) && log "Startup: removed ${_stale_prov_found} stale provision sentinel(s); provisioning will resume on next cycle"
+unset _stale_prov_found _prov_file _fname _file_age
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
 fi
