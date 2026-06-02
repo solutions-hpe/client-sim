@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.43"
+AGENT_VERSION="1.44"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2129,11 +2129,21 @@ _usb_provision_loop_impl() {
 
     # ── Stale state cleanup: remove entries for VMIDs that no longer exist ────
     # Prevents dongles from being "stuck" assigned to a manually-deleted VM.
+    # Use a timeout so a hung qm/pct command doesn't stall the entire provision loop.
     local -A _existing_vmids=()
     local -A _reconnected_vidpids=()
+    local _qm_list_raw
+    _qm_list_raw=$(timeout 60 bash -c '{ qm list 2>/dev/null || true; pct list 2>/dev/null || true; }' 2>/dev/null)
+    local _qm_exit=$?
+    if [[ $_qm_exit -eq 124 ]]; then
+        log "WARNING: qm/pct list timed out (Proxmox may have a stuck task); skipping provision cycle"
+        printf '{"halted":false,"reason":"qm_busy","warning":"qm list timed out","ts":%s}\n' "$(date +%s)" \
+            > "$PROVISION_HALT_CACHE"
+        return 0
+    fi
     while IFS= read -r _vid; do
         [[ -n "$_vid" ]] && _existing_vmids["$_vid"]="1"
-    done < <({ qm list 2>/dev/null || true; pct list 2>/dev/null || true; } | awk '$1 ~ /^[0-9]+$/ { print $1 }')
+    done < <(printf '%s\n' "$_qm_list_raw" | awk '$1 ~ /^[0-9]+$/ { print $1 }')
     local _state_changed=0
     for vmid in "${!STATE_VMID_TO_BUS[@]}"; do
         if [[ -z "${_existing_vmids[$vmid]:-}" ]]; then
@@ -2335,8 +2345,21 @@ _usb_provision_loop_impl() {
             _all_pids+=("$_pid")
         done
         local _prov_ok=0 _prov_fail=0
+        # Wait for all clone jobs with a per-batch deadline to prevent indefinite hangs.
+        local _clone_deadline=$(( $(date +%s) + ${CLONE_TIMEOUT_SECONDS:-1800} ))
         for _i in "${!_all_pids[@]}"; do
-            if ! wait "${_all_pids[$_i]}" 2>/dev/null; then
+            local _cpid="${_all_pids[$_i]}"
+            # Poll until the job finishes or the deadline expires
+            while kill -0 "$_cpid" 2>/dev/null; do
+                if (( $(date +%s) >= _clone_deadline )); then
+                    log "WARNING: Clone timeout for VM ${_prov_vmids[$_i]} (PID $_cpid) — terminating stuck clone"
+                    kill -TERM "$_cpid" 2>/dev/null || true
+                    sleep 3; kill -KILL "$_cpid" 2>/dev/null || true
+                    break
+                fi
+                sleep 5
+            done
+            if ! wait "$_cpid" 2>/dev/null; then
                 log "WARNING: A parallel provision job failed for VM ${_prov_vmids[$_i]}"
                 unset "STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]"
                 unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]"
@@ -3507,6 +3530,26 @@ execute_vm_command() {
         restart_agent)
             log "restart_agent: scheduling immediate agent service restart"
             schedule_agent_restart
+            ;;
+        clear_provision_lock)
+            log "clear_provision_lock: killing stuck qm processes and clearing provision flock"
+            # Kill any hung qm clone/list processes so Proxmox locks are freed
+            local _killed=0
+            while IFS= read -r _qpid; do
+                [[ -n "$_qpid" ]] || continue
+                log "  Sending SIGTERM to stuck qm process PID $_qpid"
+                kill -TERM "$_qpid" 2>/dev/null && (( _killed++ )) || true
+            done < <(pgrep -f '^qm (clone|list)' 2>/dev/null || true)
+            (( _killed > 0 )) && { sleep 3; pgrep -f '^qm (clone|list)' 2>/dev/null | xargs -r kill -KILL 2>/dev/null || true; }
+            # Unlock any VMs stuck in locked state
+            qm list 2>/dev/null | awk 'NR>1 && $3=="locked" {print $1}' | while IFS= read -r _lvm; do
+                log "  Unlocking stuck VM $_lvm"
+                qm unlock "$_lvm" 2>/dev/null || true
+            done
+            # Remove the flock file so the next usb_provision_loop call succeeds
+            rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
+            rm -f "$PROVISION_HALT_CACHE"    2>/dev/null || true
+            log "Provision lock cleared; provision loop will resume on next main loop iteration"
             ;;
         update_spoke|update-spoke)
             # Ask the spoke to self-update by calling its HTTP endpoint directly.
