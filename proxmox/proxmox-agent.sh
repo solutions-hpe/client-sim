@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.39"
+AGENT_VERSION="1.40"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -849,6 +849,10 @@ agnt_interval  = int(data.get("guest_agent_check_interval_minutes", 10) or 10)
 agnt_reboot    = int(data.get("guest_agent_reboot_after_minutes", 10) or 10)
 agnt_reclone   = int(data.get("guest_agent_reclone_after_minutes", 30) or 30)
 print(f"AGNT\t{agnt_enabled}\t{agnt_grace}\t{agnt_interval}\t{agnt_reboot}\t{agnt_reclone}")
+# Resource provision thresholds (RSRC line — older agents silently ignore unknown line types)
+cpu_thr = max(0, min(100, int(data.get("cpu_provision_threshold", 80) or 80)))
+mem_thr = max(0, min(100, int(data.get("mem_provision_threshold", 80) or 80)))
+print(f"RSRC\t{cpu_thr}\t{mem_thr}")
 PY
 )
 
@@ -866,6 +870,8 @@ PY
     L1_VLAN_END=199
     MAX_USB_SLOTS=24
     USE_ALL_DONGLES="false"
+    CPU_PROVISION_THRESHOLD=80
+    MEM_PROVISION_THRESHOLD=80
 
     while IFS=$'\t' read -r kind a b c d e f g h i j k l; do
         [[ -z "$kind" ]] && continue
@@ -913,6 +919,11 @@ PY
                 GUEST_AGENT_CHECK_INTERVAL_MINUTES="${c:-10}"
                 GUEST_AGENT_REBOOT_AFTER_MINUTES="${d:-10}"
                 GUEST_AGENT_RECLONE_AFTER_MINUTES="${e:-30}"
+                ;;
+            RSRC)
+                # Resource-based provisioning thresholds
+                CPU_PROVISION_THRESHOLD="${a:-80}"
+                MEM_PROVISION_THRESHOLD="${b:-80}"
                 ;;
         esac
     done <<< "$parsed"
@@ -2173,6 +2184,38 @@ _usb_provision_loop_impl() {
             fi
         fi
     done
+
+    # ── Resource gate: skip provisioning if CPU or memory is above threshold ──
+    local _rsrc_cpu _rsrc_mem_pct _s1 _s2 _mem_total _mem_avail
+    _s1=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    sleep 1
+    _s2=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    _rsrc_cpu=$(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN {
+        n = split(s1, a); split(s2, b)
+        t1 = 0; t2 = 0
+        for (i = 2; i <= n; i++) { t1 += a[i]; t2 += b[i] }
+        dt = t2 - t1; di = b[5] - a[5]
+        val = (dt > 0) ? (1 - di/dt) * 100 : 0
+        printf "%.0f\n", val
+    }' 2>/dev/null) || _rsrc_cpu=0
+    _mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    _mem_avail=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    if [[ -n "$_mem_total" && "$_mem_total" -gt 0 ]]; then
+        _rsrc_mem_pct=$(awk -v t="$_mem_total" -v a="$_mem_avail" \
+            'BEGIN { printf "%.0f\n", (1 - a/t) * 100 }' 2>/dev/null) || _rsrc_mem_pct=0
+    else
+        _rsrc_mem_pct=0
+    fi
+    if (( _rsrc_cpu >= CPU_PROVISION_THRESHOLD )); then
+        log "Auto-provision paused: CPU ${_rsrc_cpu}% >= threshold ${CPU_PROVISION_THRESHOLD}%"
+        build_usb_state_json
+        return 0
+    fi
+    if (( _rsrc_mem_pct >= MEM_PROVISION_THRESHOLD )); then
+        log "Auto-provision paused: memory ${_rsrc_mem_pct}% >= threshold ${MEM_PROVISION_THRESHOLD}%"
+        build_usb_state_json
+        return 0
+    fi
 
     # ── Parallel provision: new USB dongles not yet assigned a VM ─────────────
     # Pre-assign VMIDs in the parent before forking so parallel subshells

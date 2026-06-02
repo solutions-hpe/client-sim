@@ -3246,6 +3246,7 @@ proxmox_state: dict[str, Any] = {
     "unknown_usb": [],
     "usb_state": [],
     "present_usb": [],
+    "blacklisted_drivers": [],
     "missing_timeout_mins": 60,
     "agent_version": None,
     "pve_version": None,
@@ -4019,6 +4020,8 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "guest_agent_check_interval_minutes": max(1, int(str(settings.get("guest_agent_check_interval_minutes", "10")).strip() or "10")),
         "guest_agent_reboot_after_minutes": max(1, int(str(settings.get("guest_agent_reboot_after_minutes", "10")).strip() or "10")),
         "guest_agent_reclone_after_minutes": max(1, int(str(settings.get("guest_agent_reclone_after_minutes", "30")).strip() or "30")),
+        "cpu_provision_threshold": max(0, min(100, int(str(settings.get("cpu_provision_threshold", "80")).strip() or "80"))),
+        "mem_provision_threshold": max(0, min(100, int(str(settings.get("mem_provision_threshold", "80")).strip() or "80"))),
     }
 
 
@@ -5335,6 +5338,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             # Used by the hub to classify this spoke as a T3 host and render per-node counts.
             "t3_pci_devices": list(proxmox_state.get("t3_pci_devices") or []),
             "t3_pci_count": len(proxmox_state.get("t3_pci_devices") or []),
+            "blacklisted_drivers": list(proxmox_state.get("blacklisted_drivers") or []),
         },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
