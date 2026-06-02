@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.41"
+AGENT_VERSION="1.42"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3461,18 +3461,15 @@ execute_vm_command() {
             run_reseed_command
             ;;
         provision_unassigned)
-            log "provision_unassigned: clearing bus exclusions for present certified dongles"
+            log "provision_unassigned: clearing all bus exclusions and running provision loop"
+            # scan_usb_devices must run before checking PRESENT_BUSES; simplest correct
+            # approach is to unconditionally clear all exclusions — that is the intent.
+            scan_usb_devices
             load_excluded_buses
-            local _excl_cleared=0
-            for _excl_bus in "${!STATE_EXCLUDED_BUS[@]}"; do
-                if [[ -n "${PRESENT_BUSES[$_excl_bus]:-}" ]]; then
-                    unset "STATE_EXCLUDED_BUS[$_excl_bus]"
-                    _excl_cleared=1
-                    log "provision_unassigned: cleared exclusion for present bus $_excl_bus"
-                fi
-            done
-            (( _excl_cleared )) && save_excluded_buses
-            log "provision_unassigned: running USB provision loop to assign dongles without VMs"
+            local _excl_count="${#STATE_EXCLUDED_BUS[@]}"
+            STATE_EXCLUDED_BUS=()
+            save_excluded_buses
+            log "provision_unassigned: cleared ${_excl_count} bus exclusion(s)"
             usb_provision_loop || log "WARNING: provision_unassigned loop failed"
             ;;
         unlock_template)
