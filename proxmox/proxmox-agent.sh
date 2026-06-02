@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.40"
+AGENT_VERSION="1.41"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -42,6 +42,7 @@ HUB_LAST_SUCCESS_FILE="${HUB_STATE_DIR}/hub-last-success"
 HUB_SERVER_URL_FILE="${HUB_STATE_DIR}/hub-server-url"
 HUB_REDETECT_LOCK_FILE="${HUB_STATE_DIR}/hub-redetect.lock"
 USB_PROVISION_LOCK_FILE="${HUB_STATE_DIR}/usb-provision.lock"
+PROVISION_HALT_CACHE="${HUB_STATE_DIR}/provision_halt.json"
 
 # ── Driver Blacklist ───────────────────────────────────────────────────────────
 DONGLE_BLACKLIST_CONF="/etc/modprobe.d/cs-dongle-blacklist.conf"
@@ -2207,15 +2208,24 @@ _usb_provision_loop_impl() {
         _rsrc_mem_pct=0
     fi
     if (( _rsrc_cpu >= CPU_PROVISION_THRESHOLD )); then
+        printf '{"halted":true,"reason":"cpu","cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+            "$_rsrc_cpu" "$CPU_PROVISION_THRESHOLD" "$_rsrc_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+            > "$PROVISION_HALT_CACHE"
         log "Auto-provision paused: CPU ${_rsrc_cpu}% >= threshold ${CPU_PROVISION_THRESHOLD}%"
         build_usb_state_json
         return 0
     fi
     if (( _rsrc_mem_pct >= MEM_PROVISION_THRESHOLD )); then
+        printf '{"halted":true,"reason":"mem","cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+            "$_rsrc_cpu" "$CPU_PROVISION_THRESHOLD" "$_rsrc_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+            > "$PROVISION_HALT_CACHE"
         log "Auto-provision paused: memory ${_rsrc_mem_pct}% >= threshold ${MEM_PROVISION_THRESHOLD}%"
         build_usb_state_json
         return 0
     fi
+    printf '{"halted":false,"reason":null,"cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+        "$_rsrc_cpu" "$CPU_PROVISION_THRESHOLD" "$_rsrc_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+        > "$PROVISION_HALT_CACHE"
 
     # ── Parallel provision: new USB dongles not yet assigned a VM ─────────────
     # Pre-assign VMIDs in the parent before forking so parallel subshells
@@ -2870,6 +2880,7 @@ print(json.dumps(out))
   "unknown_usb": $(read_json_cache_or_default "$USB_UNKNOWN_CACHE" "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
+  "provision_halt": $(read_json_cache_or_default "$PROVISION_HALT_CACHE" 'null'),
   "blacklisted_drivers": ${BLACKLISTED_DRIVERS_JSON},
   "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "t3_pci_devices": $(collect_t3_pci_devices 2>/dev/null || echo '[]'),
