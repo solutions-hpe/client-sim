@@ -3659,6 +3659,22 @@ for _prov_f in "${PROV_DIR}"/*; do
     rm -f "$_prov_f" 2>/dev/null || true
 done
 unset _prov_f
+
+# Startup: clear provision lock and kill orphaned qm clone/list processes from the
+# previous agent session.  When the agent is restarted by systemd, background qm clone
+# subprocesses may survive as orphans (parent was killed but the Proxmox command ran
+# via a detached subshell).  These orphans hold Proxmox task locks, causing qm list to
+# hang in the new provision loop.  Killing them here unblocks the next provision cycle.
+_orphan_killed=0
+while IFS= read -r _orphan_pid; do
+    [[ -n "$_orphan_pid" ]] || continue
+    log "Startup: killing orphaned qm process PID $_orphan_pid"
+    kill -KILL "$_orphan_pid" 2>/dev/null && (( _orphan_killed++ )) || true
+done < <(ps aux 2>/dev/null | awk '/[q]m (clone|list)/{print $2}' || true)
+(( _orphan_killed > 0 )) && { log "Startup: killed $_orphan_killed orphaned qm process(es); waiting for Proxmox to release locks"; sleep 3; }
+# Flock is released when the old agent dies (fd closed), but the file may still exist.
+rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
+unset _orphan_killed _orphan_pid
 if [[ -z "$API_KEY" ]]; then
     register_and_wait_for_key
 fi
