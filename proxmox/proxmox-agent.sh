@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.42"
+AGENT_VERSION="1.43"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3503,6 +3503,10 @@ execute_vm_command() {
         stop_vms)   for vid in $(qm list | awk 'NR>1{print $1}'); do timeout 60 qm stop  "$vid" || true; done ;;
         update_agent|update-agent|proxmox_agent_update|proxmox-agent-update)
             self_update_agent "$_branch" "$_repo_raw"
+            ;;
+        restart_agent)
+            log "restart_agent: scheduling immediate agent service restart"
+            schedule_agent_restart
             ;;
         update_spoke|update-spoke)
             # Ask the spoke to self-update by calling its HTTP endpoint directly.

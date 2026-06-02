@@ -3343,6 +3343,12 @@ def _load_resource_cache() -> None:
             proxmox_state["agent_version"] = data["agent_version"]
         if data.get("pve_version"):
             proxmox_state["pve_version"] = data["pve_version"]
+        # Restore key proxmox_state fields so the hub sees last-known data immediately
+        # after a spoke server restart (before the agent posts fresh telemetry).
+        for field in ("vm_count", "usb_state", "present_usb", "provision_halt", "prov_run"):
+            cached = data.get(f"px_{field}")
+            if cached is not None:
+                proxmox_state[field] = cached
         logger.info(
             "Loaded resource cache: %d CPU samples, %d mem samples (started %.0fs ago)",
             len(_cpu_samples), len(_mem_samples),
@@ -3366,6 +3372,13 @@ def _save_resource_cache() -> None:
             "started": _resource_samples_started,
             "agent_version": proxmox_state.get("agent_version"),
             "pve_version": proxmox_state.get("pve_version"),
+            # Persist key proxmox_state fields so spoke server restarts don't blank
+            # the hub's last-known view before the agent posts fresh telemetry.
+            "px_vm_count": proxmox_state.get("vm_count"),
+            "px_usb_state": proxmox_state.get("usb_state"),
+            "px_present_usb": proxmox_state.get("present_usb"),
+            "px_provision_halt": proxmox_state.get("provision_halt"),
+            "px_prov_run": proxmox_state.get("prov_run"),
         })
     except Exception:
         logger.debug("Could not save resource cache to %s", RESOURCE_CACHE_FILE, exc_info=True)
@@ -9080,9 +9093,9 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             unassigned = _proxmox_unassigned_present_usb()
             if unassigned:
                 certified_set = {
-                    str(v).strip().lower()
+                    (str(v.get("vidpid", "")).strip().lower() if isinstance(v, dict) else str(v).strip().lower())
                     for v in _parse_json_list(settings.get("usb_vidpids", "[]"))
-                    if str(v).strip()
+                    if (str(v.get("vidpid", "") if isinstance(v, dict) else v)).strip()
                 }
                 certified_unassigned = [
                     u for u in unassigned
