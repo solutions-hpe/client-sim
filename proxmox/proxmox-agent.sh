@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.44"
+AGENT_VERSION="1.45"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -873,6 +873,7 @@ PY
     USE_ALL_DONGLES="false"
     CPU_PROVISION_THRESHOLD=80
     MEM_PROVISION_THRESHOLD=80
+    CPU_RAMP_CEILING=90
 
     while IFS=$'\t' read -r kind a b c d e f g h i j k l; do
         [[ -z "$kind" ]] && continue
@@ -925,6 +926,7 @@ PY
                 # Resource-based provisioning thresholds
                 CPU_PROVISION_THRESHOLD="${a:-80}"
                 MEM_PROVISION_THRESHOLD="${b:-80}"
+                CPU_RAMP_CEILING="${c:-90}"
                 ;;
         esac
     done <<< "$parsed"
@@ -2330,8 +2332,40 @@ _usb_provision_loop_impl() {
             echo "$(date +%s)" > "${PROV_DIR}/${_prov_vmids[$_i]}"
             build_usb_state_json
             post_telemetry || true
-            # Stagger clone starts to avoid all VMs hammering storage at the same time
-            (( _i > 0 )) && sleep 15
+            # Stagger clone starts and re-check CPU between each clone (ramp-up pacing).
+            # The 1-second measurement slot replaces one second of the 15-second stagger.
+            if (( _i > 0 )); then
+                sleep 14
+                local _pace_s1 _pace_s2 _pace_cpu
+                _pace_s1=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+                sleep 1
+                _pace_s2=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+                _pace_cpu=$(awk -v s1="$_pace_s1" -v s2="$_pace_s2" 'BEGIN {
+                    n = split(s1, a); split(s2, b)
+                    t1 = 0; t2 = 0
+                    for (i = 2; i <= n; i++) { t1 += a[i]; t2 += b[i] }
+                    dt = t2 - t1; di = b[5] - a[5]
+                    printf "%.0f\n", (dt > 0) ? (1 - di/dt) * 100 : 0
+                }' 2>/dev/null) || _pace_cpu=0
+                if (( _pace_cpu >= CPU_RAMP_CEILING )); then
+                    log "Auto-provision pacing: CPU ${_pace_cpu}% >= ceiling ${CPU_RAMP_CEILING}% — stopping batch after ${_i} clone(s)"
+                    printf '{"halted":true,"reason":"pacing","cpu_pct":%s,"cpu_threshold":%s,"mem_pct":0,"mem_threshold":0,"ts":%s}\n' \
+                        "$_pace_cpu" "$CPU_RAMP_CEILING" "$(date +%s)" > "$PROVISION_HALT_CACHE"
+                    # Remove the sentinel just created for this VMID and revert state
+                    # for this and all remaining unstarted clones so they are re-evaluated
+                    # on the next provision cycle once CPU drops below the threshold.
+                    for _j in "${!_prov_buses[@]}"; do
+                        (( _j < _i )) && continue
+                        rm -f "${PROV_DIR}/${_prov_vmids[$_j]}" 2>/dev/null || true
+                        unset "STATE_VMID_TO_BUS[${_prov_vmids[$_j]}]"  2>/dev/null || true
+                        unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_j]}]" 2>/dev/null || true
+                        unset "STATE_BUS_TO_VMID[${_prov_buses[$_j]}]"   2>/dev/null || true
+                    done
+                    build_usb_state_json
+                    post_telemetry || true
+                    break
+                fi
+            fi
             (
                 if clone_vm_for_usb "${_prov_vmids[$_i]}" "${_prov_buses[$_i]}" \
                     "${_prov_products[$_i]}" "${_prov_images[$_i]}" "${_prov_types[$_i]}" false; then

@@ -9063,12 +9063,17 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             except (TypeError, ValueError):
                 return int(default)
 
-        cpu_prov_thr = _pct_setting("cpu_provision_threshold", "80")
-        cpu_del_thr  = _pct_setting("cpu_delete_threshold",  "90")
-        mem_prov_thr = _pct_setting("mem_provision_threshold", "80")
-        mem_del_thr  = _pct_setting("mem_delete_threshold",  "90")
+        cpu_prov_thr  = _pct_setting("cpu_provision_threshold", "80")
+        cpu_del_thr   = _pct_setting("cpu_delete_threshold",   "90")
+        cpu_prov_ceil = _pct_setting("cpu_provision_ceiling",  "90")
+        mem_prov_thr  = _pct_setting("mem_provision_threshold", "80")
+        mem_del_thr   = _pct_setting("mem_delete_threshold",   "90")
         cpu_avg = _resource_1h_average(_cpu_samples)
         mem_avg = _resource_1h_average(_mem_samples)
+        # Most-recent instantaneous CPU reading (updated every ~30 s by telemetry).
+        # Used as a hard ceiling to block provisioning during ramp-up before the
+        # 1-hour average catches up.
+        cpu_instant = _cpu_samples[-1][1] if _cpu_samples else None
 
         # Delete gate: if either metric exceeds its delete threshold and no delete is
         # already in flight, remove the newest sim VM (highest VMID) to shed load.
@@ -9108,8 +9113,17 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
 
         # Provision gate: skip new provisioning when either resource exceeds its threshold.
         # Also skip for this cycle if we just queued a delete, to avoid churn.
+        # cpu_prov_ceil is a hard ceiling on the *instantaneous* CPU reading so that
+        # provisioning is suppressed during ramp-up before the 1-hour average catches up.
+        _ceil_hit = cpu_instant is not None and cpu_instant >= cpu_prov_ceil
+        if _ceil_hit:
+            logger.info(
+                "Auto-provision ceiling: instantaneous CPU %.1f%% >= ceiling %d%% — suppressing provision_unassigned",
+                cpu_instant, cpu_prov_ceil,
+            )
         resource_ok = (
             not delete_queued
+            and not _ceil_hit
             and (cpu_avg is None or cpu_avg < cpu_prov_thr)
             and (mem_avg is None or mem_avg < mem_prov_thr)
         )
