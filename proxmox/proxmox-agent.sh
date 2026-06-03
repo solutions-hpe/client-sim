@@ -43,6 +43,7 @@ HUB_SERVER_URL_FILE="${HUB_STATE_DIR}/hub-server-url"
 HUB_REDETECT_LOCK_FILE="${HUB_STATE_DIR}/hub-redetect.lock"
 USB_PROVISION_LOCK_FILE="${HUB_STATE_DIR}/usb-provision.lock"
 PROVISION_HALT_CACHE="${HUB_STATE_DIR}/provision_halt.json"
+PROVISION_COOLDOWN_RESET_FILE="${HUB_STATE_DIR}/cooldown-reset.signal"
 
 # ── Driver Blacklist ───────────────────────────────────────────────────────────
 DONGLE_BLACKLIST_CONF="/etc/modprobe.d/cs-dongle-blacklist.conf"
@@ -3632,6 +3633,9 @@ execute_vm_command() {
             # Remove the flock file so the next usb_provision_loop call succeeds
             rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
             rm -f "$PROVISION_HALT_CACHE"    2>/dev/null || true
+            # Signal the main loop to reset the fail-streak cooldown on its next iteration.
+            # The main loop cannot be modified directly from this subshell context.
+            touch "$PROVISION_COOLDOWN_RESET_FILE" 2>/dev/null || true
             log "Provision lock cleared; provision loop will resume on next main loop iteration"
             ;;
         update_spoke|update-spoke)
@@ -3757,6 +3761,8 @@ done < <(ps aux 2>/dev/null | awk '/[q]m (clone|list)/{print $2}' || true)
 (( _orphan_killed > 0 )) && { log "Startup: killed $_orphan_killed orphaned qm process(es); waiting for Proxmox to release locks"; sleep 3; }
 # Flock is released when the old agent dies (fd closed), but the file may still exist.
 rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
+# Clear any stale cooldown-reset sentinel from a previous run (cooldown resets to 0 on startup anyway).
+rm -f "$PROVISION_COOLDOWN_RESET_FILE" 2>/dev/null || true
 unset _orphan_killed _orphan_pid
 
 # Startup: clean up stale provision sentinel files left by a previous agent run.
@@ -4469,6 +4475,15 @@ fi
 while true; do
     refresh_runtime_server_url
     maybe_redetect_hub_url || true
+    # Reset provision cooldown if clear_provision_lock wrote the sentinel file.
+    # The sentinel is written from a subshell (inbox poller / WS handler) which cannot
+    # directly modify _PROV_COOLDOWN_UNTIL in this parent process.
+    if [[ -f "$PROVISION_COOLDOWN_RESET_FILE" ]]; then
+        rm -f "$PROVISION_COOLDOWN_RESET_FILE"
+        _PROV_COOLDOWN_UNTIL=0
+        _PROV_FAIL_STREAK=0
+        log "Provision cooldown reset via clear_provision_lock signal"
+    fi
     if [[ "$AUTO_PROVISION" == "on" ]] && [[ -f "$RESEED_LOCK_FILE" ]]; then
         log "Reseed in progress — skipping auto-provisioning cycle"
         sleep 5
@@ -4481,6 +4496,10 @@ while true; do
         if (( _prov_now < _PROV_COOLDOWN_UNTIL )); then
             _remaining=$(( _PROV_COOLDOWN_UNTIL - _prov_now ))
             log "Provision cooldown active (${_remaining}s remaining) — skipping provision cycle"
+            # Update the halt cache so the stale 'pacing' reason from the last real run
+            # does not persist for the duration of the cooldown.
+            printf '{"halted":true,"reason":"cooldown","cooldown_remaining_s":%s,"ts":%s}\n' \
+                "$_remaining" "$(date +%s)" > "$PROVISION_HALT_CACHE"
             refresh_usb_telemetry_only || true
         else
             _prov_rc=0
