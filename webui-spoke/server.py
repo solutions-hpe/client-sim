@@ -9083,15 +9083,15 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
 
         # Delete gate: if either metric exceeds its delete threshold and no delete is
         # already in flight, remove the newest sim VM (highest VMID) to shed load.
-        delete_queued = any(
-            c.get("action") == "delete_vm"
-            and c.get("status") not in {"completed", "failed", "expired"}
-            for c in commands
-        )
-        if not delete_queued and (
+        #
+        # The check and enqueue are performed atomically under state_lock to prevent
+        # a TOCTOU race where multiple concurrent telemetry calls each see
+        # delete_queued=False and each independently queue a delete for the same VM.
+        _threshold_exceeded = (
             (cpu_avg is not None and cpu_avg >= cpu_del_thr) or
             (mem_avg is not None and mem_avg >= mem_del_thr)
-        ):
+        )
+        if _threshold_exceeded:
             usb_vmids_int: set[int] = set()
             _usb_prov_status: dict[int, str] = {}
             for _e in normalized_usb_state:
@@ -9122,13 +9122,27 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             if candidates:
                 target_vmid = max(candidates)  # newest = highest VMID
                 _del_args = _prepare_delete_vm_args({"vmid": target_vmid})
-                await _queue_proxmox_command("delete_vm", _del_args, target=_resolve_proxmox_vm_target(target_vmid))
-                _pending_delete_vmids.add(target_vmid)
-                logger.info(
-                    "Auto-provision resource gate: delete threshold exceeded "
-                    "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
-                    cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
-                )
+                # Re-check and enqueue atomically under state_lock to close the TOCTOU
+                # window between the threshold check above and the actual queue operation.
+                async with state_lock:
+                    delete_queued = any(
+                        c.get("action") == "delete_vm"
+                        and c.get("status") not in {"completed", "failed", "expired"}
+                        for c in commands
+                    )
+                    if not delete_queued:
+                        _enqueue_command_locked(
+                            _resolve_proxmox_vm_target(target_vmid),
+                            "delete_vm",
+                            _del_args,
+                            command_type="auto-provision",
+                        )
+                        _pending_delete_vmids.add(target_vmid)
+                        logger.info(
+                            "Auto-provision resource gate: delete threshold exceeded "
+                            "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
+                            cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                        )
             else:
                 logger.info(
                     "Auto-provision resource gate: delete threshold exceeded "

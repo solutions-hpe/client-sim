@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.47"
+AGENT_VERSION="1.00"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -2395,11 +2395,24 @@ _usb_provision_loop_impl() {
                     log "WARNING: Clone timeout for VM ${_prov_vmids[$_i]} (PID $_cpid) — terminating stuck clone"
                     kill -TERM "$_cpid" 2>/dev/null || true
                     sleep 3; kill -KILL "$_cpid" 2>/dev/null || true
+                    sleep 2  # Give SIGKILL time to deliver before D-state check
                     break
                 fi
                 sleep 5
             done
-            if ! wait "$_cpid" 2>/dev/null; then
+            # Guard against processes stuck in kernel uninterruptible sleep (D state):
+            # SIGKILL cannot be delivered to D-state processes, so calling wait()
+            # would block the entire provision loop indefinitely.  If the process
+            # survived SIGKILL, treat it as a failure and move on; the orphaned
+            # qm clone sub-process will be reaped by init once the I/O completes.
+            if kill -0 "$_cpid" 2>/dev/null; then
+                log "WARNING: VM ${_prov_vmids[$_i]} clone PID $_cpid survived SIGKILL (D-state) — skipping wait, treating as failure"
+                unset "STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]"
+                unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]"
+                unset "STATE_BUS_TO_VMID[${_prov_buses[$_i]}]"
+                unset "STATE_MISSING_BY_BUS[${_prov_buses[$_i]}]"
+                (( _prov_fail++ )) || true
+            elif ! wait "$_cpid" 2>/dev/null; then
                 log "WARNING: A parallel provision job failed for VM ${_prov_vmids[$_i]}"
                 unset "STATE_VMID_TO_BUS[${_prov_vmids[$_i]}]"
                 unset "STATE_VMID_TO_IMAGE[${_prov_vmids[$_i]}]"
