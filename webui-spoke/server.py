@@ -9087,6 +9087,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         # The check and enqueue are performed atomically under state_lock to prevent
         # a TOCTOU race where multiple concurrent telemetry calls each see
         # delete_queued=False and each independently queue a delete for the same VM.
+        delete_queued = False  # initialise; set True inside the atomic lock section below
         _threshold_exceeded = (
             (cpu_avg is not None and cpu_avg >= cpu_del_thr) or
             (mem_avg is not None and mem_avg >= mem_del_thr)
