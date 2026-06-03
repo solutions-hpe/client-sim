@@ -2389,11 +2389,14 @@ _usb_provision_loop_impl() {
         local _clone_deadline=$(( $(date +%s) + ${CLONE_TIMEOUT_SECONDS:-1800} ))
         for _i in "${!_all_pids[@]}"; do
             local _cpid="${_all_pids[$_i]}"
-            local _dstate_since=0
-            # Poll until the job finishes, the deadline expires, or D-state is detected.
-            # D-state (uninterruptible kernel sleep) is detected early via /proc so we
-            # don't have to wait the full CLONE_TIMEOUT_SECONDS (default 30 min) before
-            # giving up on a permanently stuck clone.
+            local _pid_wait_start=$(date +%s)
+            # Poll until the job finishes or a per-PID deadline fires.
+            # The clone subshell (_cpid) is typically in S-state (waiting for a child
+            # such as "timeout → qm clone") rather than D-state itself, so checking
+            # /proc/$_cpid/status alone is insufficient.  Instead we enforce a hard
+            # per-PID wait ceiling: if we have been waiting for this PID for longer
+            # than DSTATE_TIMEOUT_SECONDS (default 120 s), assume a descendant is in
+            # uninterruptible sleep and give up on this clone.
             while kill -0 "$_cpid" 2>/dev/null; do
                 if (( $(date +%s) >= _clone_deadline )); then
                     log "WARNING: Clone timeout for VM ${_prov_vmids[$_i]} (PID $_cpid) — terminating stuck clone"
@@ -2402,25 +2405,16 @@ _usb_provision_loop_impl() {
                     sleep 2  # Give SIGKILL time to deliver before D-state check
                     break
                 fi
-                # Early D-state detection: if the clone's proc state is D
-                # (uninterruptible sleep) for longer than DSTATE_TIMEOUT_SECONDS,
-                # give up now rather than waiting for the full clone deadline.
-                if [[ -r "/proc/$_cpid/status" ]]; then
-                    local _pstate
-                    _pstate=$(awk '/^State:/{print $2}' "/proc/$_cpid/status" 2>/dev/null)
-                    if [[ "$_pstate" == "D" ]]; then
-                        if (( _dstate_since == 0 )); then
-                            _dstate_since=$(date +%s)
-                            log "INFO: Clone PID $_cpid for VM ${_prov_vmids[$_i]} entered D-state (uninterruptible sleep)"
-                        elif (( $(date +%s) - _dstate_since >= ${DSTATE_TIMEOUT_SECONDS:-120} )); then
-                            log "WARNING: Clone PID $_cpid for VM ${_prov_vmids[$_i]} stuck in D-state for ${DSTATE_TIMEOUT_SECONDS:-120}s — abandoning"
-                            kill -KILL "$_cpid" 2>/dev/null || true
-                            sleep 2
-                            break
-                        fi
-                    else
-                        _dstate_since=0  # process recovered from transient D-state
-                    fi
+                # Per-PID stuck-clone detection: if the clone subshell is still alive
+                # after DSTATE_TIMEOUT_SECONDS, its child chain likely contains a process
+                # in D-state (uninterruptible kernel sleep) that can never be killed.
+                # Kill the subshell now (its S-state makes it killable) and move on;
+                # orphaned D-state grandchildren will be reaped by init when I/O completes.
+                if (( $(date +%s) - _pid_wait_start >= ${DSTATE_TIMEOUT_SECONDS:-120} )); then
+                    log "WARNING: Clone PID $_cpid for VM ${_prov_vmids[$_i]} alive after ${DSTATE_TIMEOUT_SECONDS:-120}s — killing (likely D-state descendant)"
+                    kill -KILL "$_cpid" 2>/dev/null || true
+                    sleep 2
+                    break
                 fi
                 sleep 5
             done
