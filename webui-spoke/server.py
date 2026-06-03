@@ -9093,16 +9093,29 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             (mem_avg is not None and mem_avg >= mem_del_thr)
         ):
             usb_vmids_int: set[int] = set()
+            _usb_prov_status: dict[int, str] = {}
             for _e in normalized_usb_state:
                 try:
-                    usb_vmids_int.add(int(_e["vmid"]))
+                    _evmid = int(_e["vmid"])
+                    usb_vmids_int.add(_evmid)
+                    _usb_prov_status[_evmid] = str(_e.get("prov_status") or "active").strip().lower()
                 except (KeyError, TypeError, ValueError):
                     pass
+            # Exclude VMs that are mid-clone (provisioning) or already being torn down
+            # by the USB-missing timeout handler (tearing_down) — both are transient
+            # states where a second delete command causes wasted work or race conditions.
+            _skip_statuses = {"provisioning", "tearing_down"}
             candidates: list[int] = []
             for _vm in enriched_vms:
                 try:
                     _vid = int(_vm.get("vmid", 0) or 0)
-                    if _vm.get("type") == "qemu" and _vid in usb_vmids_int and _vid not in _pending_delete_vmids:
+                    if (
+                        _vm.get("type") == "qemu"
+                        and not _vm.get("is_template")
+                        and _vid in usb_vmids_int
+                        and _vid not in _pending_delete_vmids
+                        and _usb_prov_status.get(_vid, "active") not in _skip_statuses
+                    ):
                         candidates.append(_vid)
                 except (TypeError, ValueError):
                     pass
@@ -9115,6 +9128,13 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                     "Auto-provision resource gate: delete threshold exceeded "
                     "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
                     cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                )
+            else:
+                logger.info(
+                    "Auto-provision resource gate: delete threshold exceeded "
+                    "(cpu_avg=%.1f%% mem_avg=%.1f%%) — no eligible candidates "
+                    "(all USB VMs are provisioning, tearing_down, or pending delete)",
+                    cpu_avg or 0.0, mem_avg or 0.0,
                 )
 
         # Provision gate: skip new provisioning when either resource exceeds its threshold.
