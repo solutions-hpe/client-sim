@@ -9102,6 +9102,21 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                     _usb_prov_status[_evmid] = str(_e.get("prov_status") or "active").strip().lower()
                 except (KeyError, TypeError, ValueError):
                     pass
+            # Correct stale "provisioning" status: the bash agent's usb_state lags by
+            # one telemetry cycle after the spoke's prov_run finishes configuring a VM.
+            # Without this correction the newly-configured VMs (highest VMIDs) are
+            # incorrectly excluded from candidates, causing an older/lower-VMID VM to
+            # be deleted instead of the intended newest one.
+            _prov_run_snap = proxmox_state.get("prov_run") or {}
+            if not _prov_run_snap.get("running"):
+                for _pr_item in (_prov_run_snap.get("items") or []):
+                    if isinstance(_pr_item, dict) and str(_pr_item.get("status") or "").strip().lower() == "done":
+                        try:
+                            _pr_vid = int(_pr_item.get("vmid") or 0)
+                            if _pr_vid and _usb_prov_status.get(_pr_vid) == "provisioning":
+                                _usb_prov_status[_pr_vid] = "active"
+                        except (TypeError, ValueError):
+                            pass
             # Exclude VMs that are mid-clone (provisioning) or already being torn down
             # by the USB-missing timeout handler (tearing_down) — both are transient
             # states where a second delete command causes wasted work or race conditions.
