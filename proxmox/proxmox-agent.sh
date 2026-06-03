@@ -2389,7 +2389,11 @@ _usb_provision_loop_impl() {
         local _clone_deadline=$(( $(date +%s) + ${CLONE_TIMEOUT_SECONDS:-1800} ))
         for _i in "${!_all_pids[@]}"; do
             local _cpid="${_all_pids[$_i]}"
-            # Poll until the job finishes or the deadline expires
+            local _dstate_since=0
+            # Poll until the job finishes, the deadline expires, or D-state is detected.
+            # D-state (uninterruptible kernel sleep) is detected early via /proc so we
+            # don't have to wait the full CLONE_TIMEOUT_SECONDS (default 30 min) before
+            # giving up on a permanently stuck clone.
             while kill -0 "$_cpid" 2>/dev/null; do
                 if (( $(date +%s) >= _clone_deadline )); then
                     log "WARNING: Clone timeout for VM ${_prov_vmids[$_i]} (PID $_cpid) — terminating stuck clone"
@@ -2397,6 +2401,26 @@ _usb_provision_loop_impl() {
                     sleep 3; kill -KILL "$_cpid" 2>/dev/null || true
                     sleep 2  # Give SIGKILL time to deliver before D-state check
                     break
+                fi
+                # Early D-state detection: if the clone's proc state is D
+                # (uninterruptible sleep) for longer than DSTATE_TIMEOUT_SECONDS,
+                # give up now rather than waiting for the full clone deadline.
+                if [[ -r "/proc/$_cpid/status" ]]; then
+                    local _pstate
+                    _pstate=$(awk '/^State:/{print $2}' "/proc/$_cpid/status" 2>/dev/null)
+                    if [[ "$_pstate" == "D" ]]; then
+                        if (( _dstate_since == 0 )); then
+                            _dstate_since=$(date +%s)
+                            log "INFO: Clone PID $_cpid for VM ${_prov_vmids[$_i]} entered D-state (uninterruptible sleep)"
+                        elif (( $(date +%s) - _dstate_since >= ${DSTATE_TIMEOUT_SECONDS:-120} )); then
+                            log "WARNING: Clone PID $_cpid for VM ${_prov_vmids[$_i]} stuck in D-state for ${DSTATE_TIMEOUT_SECONDS:-120}s — abandoning"
+                            kill -KILL "$_cpid" 2>/dev/null || true
+                            sleep 2
+                            break
+                        fi
+                    else
+                        _dstate_since=0  # process recovered from transient D-state
+                    fi
                 fi
                 sleep 5
             done
