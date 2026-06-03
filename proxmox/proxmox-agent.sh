@@ -1300,12 +1300,12 @@ _wait_vm_stopped() {
     local elapsed=0
     while [[ $elapsed -lt $max_wait ]]; do
         local state
-        state=$(qm status "$vmid" 2>/dev/null | awk '{print $2}')
+        state=$(timeout 10 qm status "$vmid" 2>/dev/null | awk '{print $2}')
         [[ "$state" == "stopped" ]] && return 0
         sleep 3
         elapsed=$(( elapsed + 3 ))
     done
-    log "WARNING: VM $vmid did not stop within ${max_wait}s (state=$(qm status "$vmid" 2>/dev/null))"
+    log "WARNING: VM $vmid did not stop within ${max_wait}s (state=$(timeout 5 qm status "$vmid" 2>/dev/null))"
     return 1
 }
 
@@ -1314,7 +1314,7 @@ _wait_vmid_gone() {
     local vmid="$1" max_wait="${2:-90}"
     local elapsed=0
     while [[ $elapsed -lt $max_wait ]]; do
-        qm status "$vmid" 2>/dev/null || return 0
+        timeout 10 qm status "$vmid" 2>/dev/null || return 0
         sleep 3
         elapsed=$(( elapsed + 3 ))
     done
@@ -2324,14 +2324,32 @@ _usb_provision_loop_impl() {
 
     if [[ ${#_prov_buses[@]} -gt 0 ]]; then
         local _active_pids=() _all_pids=()
+        local _slot_deadline=0
         for _i in "${!_prov_buses[@]}"; do
+            # Wait for a concurrency slot, but enforce a D-state timeout so a hung
+            # qm clone descendant cannot hold the provision flock indefinitely.
+            _slot_deadline=0
             while [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]]; do
                 local _live_pids=()
                 for _p in "${_active_pids[@]}"; do
                     kill -0 "$_p" 2>/dev/null && _live_pids+=("$_p")
                 done
                 _active_pids=("${_live_pids[@]}")
-                [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]] && sleep 3
+                if [[ ${#_active_pids[@]} -ge ${RECLONE_CONCURRENCY:-1} ]]; then
+                    local _now_slot=$(date +%s)
+                    if (( _slot_deadline == 0 )); then
+                        _slot_deadline=$(( _now_slot + ${DSTATE_TIMEOUT_SECONDS:-120} ))
+                    fi
+                    if (( _now_slot >= _slot_deadline )); then
+                        log "WARNING: Clone slot occupied for >${DSTATE_TIMEOUT_SECONDS:-120}s (likely D-state descendant) — killing ${#_active_pids[@]} stuck clone(s)"
+                        for _p in "${_active_pids[@]}"; do
+                            kill -KILL "$_p" 2>/dev/null || true
+                        done
+                        _active_pids=()
+                        break
+                    fi
+                    sleep 3
+                fi
             done
             # Create sentinel in the PARENT right before forking — this means only
             # RECLONE_CONCURRENCY sentinels exist at once, so the UI shows exactly
