@@ -5380,6 +5380,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "t3_pci_devices": list(proxmox_state.get("t3_pci_devices") or []),
             "t3_pci_count": len(proxmox_state.get("t3_pci_devices") or []),
             "blacklisted_drivers": list(proxmox_state.get("blacklisted_drivers") or []),
+            "usb_quarantine": list(proxmox_state.get("usb_quarantine") or []),
         },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
