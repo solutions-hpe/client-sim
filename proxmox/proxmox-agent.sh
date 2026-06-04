@@ -38,6 +38,9 @@ USB_QUARANTINE_THRESHOLD=3
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
 PROGRESS_EVENT_QUEUE_DIR="/var/lib/client-sim/progress-events"
+ORPHAN_VMS_FILE="/var/lib/client-sim/orphan_vms.json"
+ORPHAN_VMS_CACHE="/tmp/client-sim-orphan-vms.cache"
+DESTROY_MAX_FAILS=3
 SERVER_URL_AUTO_DETECTED=0
 HUB_CONTACT_LOSS_REDETECT_SECS=300
 HUB_STATE_DIR="/var/lib/client-sim"
@@ -1157,6 +1160,65 @@ clear_usb_quarantine_state() {
     return 0
 }
 
+# ── VM orphan tracking helpers ─────────────────────────────────────────────────
+# When destroy_vm fails repeatedly (DESTROY_MAX_FAILS times) the VM is declared
+# an orphan: the USB bus is force-released for re-provisioning and the VMID is
+# written to the orphan registry so operators can inspect/clean up manually.
+
+_destroy_fail_count_file() { echo "${PROV_DIR}/${1}.destroy_fails"; }
+
+increment_destroy_fail_count() {
+    local _vmid="$1" _bus="$2"
+    local _f; _f="$(_destroy_fail_count_file "$_vmid")"
+    local _fc=$(( $(cat "$_f" 2>/dev/null || echo 0) + 1 ))
+    echo "$_fc" > "$_f"
+    if (( _fc >= DESTROY_MAX_FAILS )); then
+        log "ERROR: VM $_vmid destroy failed $_fc times — declaring orphan; releasing bus $_bus for re-provisioning"
+        # Force-release state so the bus can be re-provisioned
+        unset "STATE_BUS_TO_VMID[$_bus]"
+        unset "STATE_MISSING_BY_BUS[$_bus]"
+        unset "STATE_VIDPID_BY_BUS[$_bus]"
+        unset "STATE_VMID_TO_BUS[$_vmid]"
+        unset "STATE_VMID_TO_IMAGE[$_vmid]"
+        rm -f "$_f" "${PROV_DIR}/${_vmid}" "${PROV_DIR}/${_vmid}.tearing_down"
+        # Append to orphan registry (create/merge JSON array)
+        local _ts; _ts="$(date +%s)"
+        local _entry="{\"vmid\":${_vmid},\"bus\":\"${_bus}\",\"ts\":${_ts}}"
+        local _current_json; _current_json="$(cat "$ORPHAN_VMS_FILE" 2>/dev/null || echo '[]')"
+        echo "$_current_json" | python3 -c "
+import sys, json
+arr = json.load(sys.stdin)
+arr = [e for e in arr if e.get('vmid') != ${_vmid}]
+arr.append(json.loads('${_entry}'))
+print(json.dumps(arr))
+" > "$ORPHAN_VMS_FILE" 2>/dev/null || echo "[${_entry}]" > "$ORPHAN_VMS_FILE"
+        cp "$ORPHAN_VMS_FILE" "$ORPHAN_VMS_CACHE" 2>/dev/null || true
+        _state_changed=1
+    else
+        log "VM $_vmid destroy failed (attempt $_fc / $DESTROY_MAX_FAILS); will retry next cycle"
+    fi
+}
+
+reset_destroy_fail_count() {
+    local _vmid="$1"
+    rm -f "$(_destroy_fail_count_file "$_vmid")"
+}
+
+remove_orphan_vm_entry() {
+    local _vmid="$1"
+    [[ -f "$ORPHAN_VMS_FILE" ]] || return 0
+    python3 -c "
+import sys, json
+try:
+    arr = json.load(open('$ORPHAN_VMS_FILE'))
+    arr = [e for e in arr if e.get('vmid') != ${_vmid}]
+    json.dump(arr, open('$ORPHAN_VMS_FILE','w'))
+except Exception:
+    pass
+" 2>/dev/null || true
+    cp "$ORPHAN_VMS_FILE" "$ORPHAN_VMS_CACHE" 2>/dev/null || true
+}
+
 scan_usb_devices() {
     USB_NAME_BY_BUS=()
     USB_VIDPID_BY_BUS=()
@@ -1313,6 +1375,8 @@ reconcile_present_usb_state() {
                 unset "STATE_MISSING_BY_BUS[$_current_bus]"
                 _changed=1
                 log "USB $_current_bus present again, clearing missing state for VM $vmid"
+                # Clear any accumulated destroy-fail counter now that the dongle returned
+                reset_destroy_fail_count "$vmid"
             fi
             continue
         fi
@@ -2349,8 +2413,14 @@ _usb_provision_loop_impl() {
                 log "USB dongle missing for ${missing_age}s — tearing down VM $vmid"
                 [[ -n "$_state_vidpid" && -n "$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)" ]] && _reconnected_vidpids["$_state_vidpid"]=1
                 if destroy_vm "$vmid" "$_guest_type"; then
+                    reset_destroy_fail_count "$vmid"
                     record_usb_failure "$_current_bus"
                     _state_changed=1
+                else
+                    # destroy_vm returned non-zero: timed out or failed.  Track consecutive
+                    # failures; after DESTROY_MAX_FAILS give up and force-release the bus so
+                    # a fresh VM can be provisioned on this dongle.
+                    increment_destroy_fail_count "$vmid" "$_current_bus"
                 fi
             fi
         fi
@@ -3157,6 +3227,7 @@ print(json.dumps(out))
   "unknown_usb": $(read_json_cache_or_default "$USB_UNKNOWN_CACHE" "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
   "usb_quarantine": $(read_json_cache_or_default "$USB_QUARANTINE_CACHE" "[]"),
+  "orphan_vms": $(read_json_cache_or_default "$ORPHAN_VMS_CACHE" "[]"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
   "provision_halt": $(read_json_cache_or_default "$PROVISION_HALT_CACHE" 'null'),
   "blacklisted_drivers": ${BLACKLISTED_DRIVERS_JSON},

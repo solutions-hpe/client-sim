@@ -260,6 +260,19 @@ HUB_RELAY_KEYS = {
     "hub_isolation_timeout",  # Allow the isolation timeout through the relay settings gate because operators configure this safeguard from the Hub setup card.
 }
 HUB_LOCAL_ALLOWED_KEYS = HUB_RELAY_KEYS | {"relay_tenant_hint"}
+# Keys that the hub UI owns and may clear by omitting them from a config_update push.
+# When a key is absent from the hub's config payload but was previously set, the spoke
+# should reset it to default so stale values don't persist after an operator clears a field.
+# Mirrors HUB_CONFIG_FIELDS in the hub's dashboard.js.
+HUB_CONFIG_OWNED_KEYS: frozenset[str] = frozenset({
+    "repo_branch", "reclone_schedule_enabled", "reclone_schedule_cron", "reclone_concurrency",
+    "vm_image_1_template_id", "vm_image_2_template_id", "vm_image_1_pct",
+    "usb_auto_provision", "usb_missing_timeout", "usb_max_slots", "vm_silent_timeout",
+    "l1_vlan_start", "l1_vlan_end", "usb_vidpids", "usb_ignored_vidpids", "ignored_hostnames",
+    "guest_agent_watchdog_enabled", "guest_agent_grace_minutes",
+    "guest_agent_check_interval_minutes", "guest_agent_reboot_after_minutes",
+    "guest_agent_reclone_after_minutes",
+})
 HUB_NOTIFICATION_KEY_MAP = {
     "teams_webhook_url": "teams_webhook_url",
     "smtp_host": "smtp_host",
@@ -3284,6 +3297,10 @@ _prev_usb_by_vmid: dict[str, str] = {}
 # VMIDs for which a delete command has been queued but not yet confirmed by telemetry.
 # Kept as a set so the UI can show "deleting…" immediately instead of the row vanishing.
 _pending_delete_vmids: set[int] = set()
+# Cooldown: earliest time a new auto-delete may be queued (updated after each
+# confirmed deletion so the fleet has time to stabilise before the next one).
+_delete_gate_cooldown_until: float = 0.0
+DELETE_GATE_COOLDOWN_S: int = 300  # 5 minutes between consecutive auto-deletes
 # Maps vmid → approved hostname of the agent that last reported that VM.
 # Used to route delete_vm / reclone_vm commands to the correct node in multi-agent setups.
 _proxmox_agent_vm_map: dict[int, str] = {}
@@ -5381,6 +5398,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "t3_pci_count": len(proxmox_state.get("t3_pci_devices") or []),
             "blacklisted_drivers": list(proxmox_state.get("blacklisted_drivers") or []),
             "usb_quarantine": list(proxmox_state.get("usb_quarantine") or []),
+            "orphan_vms": list(proxmox_state.get("orphan_vms") or []),
         },
             "proxmox_vms": proxmox_vms,
             "usb_devices": usb_state,
@@ -6448,7 +6466,21 @@ async def _apply_hub_config(payload: dict[str, Any]) -> dict[str, Any]:
             settings[key] = value
         changed.append(key)
 
-    # ── Hub-managed .conf overrides ───────────────────────────────────────────
+    # ── Remove hub-owned keys that were absent from this config push ──────────
+    # The hub always sends its full config snapshot; if an owned key is absent,
+    # the operator has cleared it and the spoke should reset it to a blank value.
+    # Only applies when the spoke is hub-managed to avoid clobbering local config.
+    if settings.get("hub_managed"):
+        for key in HUB_CONFIG_OWNED_KEYS:
+            if key in config_payload:
+                continue  # was present — already handled above
+            # Skip special keys handled by other paths
+            if key in {"usb_vidpids", "usb_ignored_vidpids"}:
+                continue  # handled above with explicit hub_managed guard
+            if key in settings and settings[key] not in (None, "", [], {}):
+                settings[key] = ""
+                changed.append(f"{key}:cleared-by-absence")
+                logger.debug("Hub config: cleared spoke setting '%s' (absent from hub payload)", key)
     # The hub pushes optional INI text for simulation.conf and user-overrides.conf.
     # None = no override (spoke uses its GitHub-pulled files as-is).
     # Non-None string = write to hub-*-overrides.conf so the spoke merges it on top.
@@ -8978,6 +9010,14 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         _pending_delete_vmids.intersection_update(telemetry_vmids)
         # Cancel any pending auto-recovery reclone commands for confirmed-deleted VMIDs
         if confirmed_deleted:
+            global _delete_gate_cooldown_until
+            # Start the post-delete cooldown now that the VM is actually gone so the
+            # fleet has time to stabilise before the gate may fire again.
+            _delete_gate_cooldown_until = time.time() + DELETE_GATE_COOLDOWN_S
+            logger.info(
+                "Auto-delete gate: %d VM(s) confirmed deleted — cooldown active for %ds",
+                len(confirmed_deleted), DELETE_GATE_COOLDOWN_S,
+            )
             for cmd in commands:
                 if (cmd.get("action") == "reclone_vm"
                         and cmd.get("type") == "auto-recovery"
@@ -9142,24 +9182,34 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                 # Re-check and enqueue atomically under state_lock to close the TOCTOU
                 # window between the threshold check above and the actual queue operation.
                 async with state_lock:
-                    delete_queued = any(
-                        c.get("action") == "delete_vm"
-                        and c.get("status") not in {"completed", "failed", "expired"}
-                        for c in commands
-                    )
-                    if not delete_queued:
-                        _enqueue_command_locked(
-                            _resolve_proxmox_vm_target(target_vmid),
-                            "delete_vm",
-                            _del_args,
-                            command_type="auto-provision",
-                        )
-                        _pending_delete_vmids.add(target_vmid)
+                    # Respect the post-delete cooldown so consecutive auto-deletes are
+                    # separated by at least DELETE_GATE_COOLDOWN_S (set after the prior
+                    # delete is confirmed, not at enqueue time — see confirmed_deleted block).
+                    if time.time() < _delete_gate_cooldown_until:
+                        _remaining_cd = int(_delete_gate_cooldown_until - time.time())
                         logger.info(
-                            "Auto-provision resource gate: delete threshold exceeded "
-                            "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
-                            cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                            "Auto-delete gate: cooldown active (%ds remaining) — skipping delete of VMID %d",
+                            _remaining_cd, target_vmid,
                         )
+                    else:
+                        delete_queued = any(
+                            c.get("action") == "delete_vm"
+                            and c.get("status") not in {"completed", "failed", "expired"}
+                            for c in commands
+                        )
+                        if not delete_queued:
+                            _enqueue_command_locked(
+                                _resolve_proxmox_vm_target(target_vmid),
+                                "delete_vm",
+                                _del_args,
+                                command_type="auto-provision",
+                            )
+                            _pending_delete_vmids.add(target_vmid)
+                            logger.info(
+                                "Auto-provision resource gate: delete threshold exceeded "
+                                "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
+                                cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                            )
             else:
                 logger.info(
                     "Auto-provision resource gate: delete threshold exceeded "
