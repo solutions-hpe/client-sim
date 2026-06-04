@@ -73,6 +73,8 @@ GUEST_AGENT_GRACE_MINUTES="${CLIENT_SIM_GUEST_AGENT_GRACE_MINUTES:-20}"
 GUEST_AGENT_CHECK_INTERVAL_MINUTES="${CLIENT_SIM_GUEST_AGENT_CHECK_INTERVAL_MINUTES:-10}"
 GUEST_AGENT_REBOOT_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_REBOOT_AFTER_MINUTES:-10}"
 GUEST_AGENT_RECLONE_AFTER_MINUTES="${CLIENT_SIM_GUEST_AGENT_RECLONE_AFTER_MINUTES:-30}"
+# When "off", watchdog errors are logged/reported but no automatic reboots are issued.
+WATCHDOG_REBOOT_ENABLED="${CLIENT_SIM_WATCHDOG_REBOOT_ENABLED:-on}"
 _LAST_AGENT_WATCHDOG_CHECK=0
 
 # Worker subprocesses dispatched by the main agent's Python WS client must NOT be
@@ -859,7 +861,8 @@ agnt_grace     = int(data.get("guest_agent_grace_minutes", 20) or 20)
 agnt_interval  = int(data.get("guest_agent_check_interval_minutes", 10) or 10)
 agnt_reboot    = int(data.get("guest_agent_reboot_after_minutes", 10) or 10)
 agnt_reclone   = int(data.get("guest_agent_reclone_after_minutes", 30) or 30)
-print(f"AGNT\t{agnt_enabled}\t{agnt_grace}\t{agnt_interval}\t{agnt_reboot}\t{agnt_reclone}")
+agnt_reboot_en = str(data.get("watchdog_reboot_enabled", "on")).lower()
+print(f"AGNT\t{agnt_enabled}\t{agnt_grace}\t{agnt_interval}\t{agnt_reboot}\t{agnt_reclone}\t{agnt_reboot_en}")
 # Resource provision thresholds (RSRC line — older agents silently ignore unknown line types)
 cpu_thr = max(0, min(100, int(data.get("cpu_provision_threshold", 80) or 80)))
 mem_thr = max(0, min(100, int(data.get("mem_provision_threshold", 80) or 80)))
@@ -931,6 +934,7 @@ PY
                 GUEST_AGENT_CHECK_INTERVAL_MINUTES="${c:-10}"
                 GUEST_AGENT_REBOOT_AFTER_MINUTES="${d:-10}"
                 GUEST_AGENT_RECLONE_AFTER_MINUTES="${e:-30}"
+                WATCHDOG_REBOOT_ENABLED="${f:-on}"
                 ;;
             RSRC)
                 # Resource-based provisioning thresholds
@@ -2211,10 +2215,14 @@ _run_vm_agent_watchdog() {
         echo "${_first_fail}|${_now}|${_rebooted_at}" > "$_unresp_file"
 
         if [[ "${_rebooted_at:-0}" == "0" ]] && (( _unresponsive_s >= _reboot_s )); then
-            log "VM AGENT WATCHDOG: VM $vmid unresponsive ${_unresponsive_s}s — issuing soft reboot"
-            qm reboot "$vmid" --timeout 30 2>/dev/null || qm reset "$vmid" 2>/dev/null || true
-            echo "${_first_fail}|${_now}|${_now}" > "$_unresp_file"
-            log "VM AGENT WATCHDOG: VM $vmid soft reboot issued — will reclone if still unresponsive after ${GUEST_AGENT_RECLONE_AFTER_MINUTES}m"
+            if [[ "${WATCHDOG_REBOOT_ENABLED:-on}" == "on" ]]; then
+                log "VM AGENT WATCHDOG: VM $vmid unresponsive ${_unresponsive_s}s — issuing soft reboot"
+                qm reboot "$vmid" --timeout 30 2>/dev/null || qm reset "$vmid" 2>/dev/null || true
+                echo "${_first_fail}|${_now}|${_now}" > "$_unresp_file"
+                log "VM AGENT WATCHDOG: VM $vmid soft reboot issued — will reclone if still unresponsive after ${GUEST_AGENT_RECLONE_AFTER_MINUTES}m"
+            else
+                log "VM AGENT WATCHDOG: VM $vmid unresponsive ${_unresponsive_s}s — auto-reboot disabled, reporting only"
+            fi
             _state_mutated=1
         fi
     done
@@ -3540,7 +3548,11 @@ hw_watchdog_check() {
     if [[ -n "$t1_matched" ]]; then
         if _hw_reboot_cooled_down; then
             post_telemetry 2>/dev/null || true
-            hard_reset "Tier-1 hardware fault: ${t1_matched}"
+            if [[ "${WATCHDOG_REBOOT_ENABLED:-on}" == "on" ]]; then
+                hard_reset "Tier-1 hardware fault: ${t1_matched}"
+            else
+                log "WATCHDOG: Tier-1 fault detected — auto-reboot disabled, reporting only"
+            fi
         else
             log "WATCHDOG: Tier-1 fault detected but reboot cooldown active — skipping reset"
         fi
@@ -3564,7 +3576,11 @@ hw_watchdog_check() {
         log "WATCHDOG: Tier-2 fault threshold reached — ${t2_count} hits: ${t2_reasons[*]}"
         if _hw_reboot_cooled_down; then
             post_telemetry 2>/dev/null || true
-            hard_reset "Tier-2 hardware faults (${t2_count} hits): ${t2_reasons[*]}"
+            if [[ "${WATCHDOG_REBOOT_ENABLED:-on}" == "on" ]]; then
+                hard_reset "Tier-2 hardware faults (${t2_count} hits): ${t2_reasons[*]}"
+            else
+                log "WATCHDOG: Tier-2 threshold reached — auto-reboot disabled, reporting only"
+            fi
         else
             log "WATCHDOG: Tier-2 threshold reached but cooldown active — skipping reset"
         fi

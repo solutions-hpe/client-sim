@@ -272,6 +272,7 @@ HUB_CONFIG_OWNED_KEYS: frozenset[str] = frozenset({
     "guest_agent_watchdog_enabled", "guest_agent_grace_minutes",
     "guest_agent_check_interval_minutes", "guest_agent_reboot_after_minutes",
     "guest_agent_reclone_after_minutes",
+    "watchdog_reboot_enabled",
 })
 HUB_NOTIFICATION_KEY_MAP = {
     "teams_webhook_url": "teams_webhook_url",
@@ -994,6 +995,7 @@ settings: dict[str, Any] = {
     "guest_agent_check_interval_minutes": str(_persisted.get("guest_agent_check_interval_minutes", "10")),
     "guest_agent_reboot_after_minutes": str(_persisted.get("guest_agent_reboot_after_minutes", "10")),
     "guest_agent_reclone_after_minutes": str(_persisted.get("guest_agent_reclone_after_minutes", "30")),
+    "watchdog_reboot_enabled": _normalize_relay_enabled(_persisted.get("watchdog_reboot_enabled", "on")),
     "client_api_key": _persisted.get("client_api_key", ""),
     "admin_ws_token": _persisted.get("admin_ws_token", ""),
     "admin_password": _persisted.get("admin_password", os.getenv("ADMIN_PASSWORD", "")),
@@ -3568,6 +3570,7 @@ class SettingsUpdate(BaseModel):
     guest_agent_check_interval_minutes: str | None = None
     guest_agent_reboot_after_minutes: str | None = None
     guest_agent_reclone_after_minutes: str | None = None
+    watchdog_reboot_enabled: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -4075,6 +4078,7 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         "guest_agent_check_interval_minutes": max(1, int(str(settings.get("guest_agent_check_interval_minutes", "10")).strip() or "10")),
         "guest_agent_reboot_after_minutes": max(1, int(str(settings.get("guest_agent_reboot_after_minutes", "10")).strip() or "10")),
         "guest_agent_reclone_after_minutes": max(1, int(str(settings.get("guest_agent_reclone_after_minutes", "30")).strip() or "30")),
+        "watchdog_reboot_enabled": _normalize_toggle(settings.get("watchdog_reboot_enabled", "on")),
         "cpu_provision_threshold": max(0, min(100, int(str(settings.get("cpu_provision_threshold", "80")).strip() or "80"))),
         "mem_provision_threshold": max(0, min(100, int(str(settings.get("mem_provision_threshold", "80")).strip() or "80"))),
     }
@@ -5120,6 +5124,7 @@ def _build_registration_config() -> dict[str, Any]:
         "guest_agent_check_interval_minutes": settings.get("guest_agent_check_interval_minutes", "10"),
         "guest_agent_reboot_after_minutes": settings.get("guest_agent_reboot_after_minutes", "10"),
         "guest_agent_reclone_after_minutes": settings.get("guest_agent_reclone_after_minutes", "30"),
+        "watchdog_reboot_enabled": settings.get("watchdog_reboot_enabled", "on"),
     }
 
 
@@ -8530,6 +8535,8 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["guest_agent_reboot_after_minutes"] = str(max(1, int(update.guest_agent_reboot_after_minutes.strip() or "10")))
     if update.guest_agent_reclone_after_minutes is not None:
         settings["guest_agent_reclone_after_minutes"] = str(max(1, int(update.guest_agent_reclone_after_minutes.strip() or "30")))
+    if update.watchdog_reboot_enabled is not None:
+        settings["watchdog_reboot_enabled"] = _normalize_toggle(update.watchdog_reboot_enabled)
 
     if update.spoke_tls is not None:
         settings["spoke_tls"] = _normalize_toggle(update.spoke_tls)
