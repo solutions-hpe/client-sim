@@ -9205,10 +9205,18 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                                 command_type="auto-provision",
                             )
                             _pending_delete_vmids.add(target_vmid)
+                            # Also start the cooldown at enqueue time so the gate cannot
+                            # fire a second time during the window between "delete command
+                            # executed by agent" and "telemetry confirms VM gone".
+                            # The confirmed_deleted block will refresh the cooldown once
+                            # the deletion is confirmed, giving the full window from that
+                            # later point.
+                            _delete_gate_cooldown_until = time.time() + DELETE_GATE_COOLDOWN_S
                             logger.info(
                                 "Auto-provision resource gate: delete threshold exceeded "
-                                "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d",
-                                cpu_avg or 0.0, mem_avg or 0.0, target_vmid,
+                                "(cpu_avg=%.1f%% mem_avg=%.1f%%) — queued delete_vm for VMID %d; "
+                                "cooldown active for %ds",
+                                cpu_avg or 0.0, mem_avg or 0.0, target_vmid, DELETE_GATE_COOLDOWN_S,
                             )
             else:
                 logger.info(
