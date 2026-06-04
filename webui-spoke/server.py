@@ -5505,6 +5505,8 @@ async def _relay_proxmox_progress_to_hub(message: dict[str, Any]) -> None:
 # ── VNC relay ─────────────────────────────────────────────────────────────────
 
 _vnc_sessions: dict[str, asyncio.Queue] = {}
+_direct_console_sessions: dict[str, dict[str, Any]] = {}
+_DIRECT_CONSOLE_TTL = 60  # seconds until session token expires
 
 
 async def _relay_vnc_to_hub(message: dict[str, Any]) -> None:
@@ -9467,7 +9469,120 @@ async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
 
 
-@app.post("/api/proxmox/update-agent")
+@app.post("/api/proxmox/console/{vmid}")
+async def api_create_console_session(
+    vmid: int,
+    vmtype: str = Query("qemu"),
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    """Create a direct Proxmox VNC console session for the spoke's own VM Server view."""
+    proxmox_host = str(proxmox_ws_hostname or "").strip()
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    if not proxmox_host:
+        raise HTTPException(status_code=503, detail="Proxmox host unknown — no agent connected")
+    if not api_token:
+        raise HTTPException(status_code=503, detail="Proxmox API token not configured on spoke")
+    normalized_vmtype = str(vmtype or "qemu").strip().lower()
+    if normalized_vmtype not in {"qemu", "lxc"}:
+        raise HTTPException(status_code=400, detail="vmtype must be qemu or lxc")
+    node = proxmox_host.split(".")[0]
+    vncproxy_url = f"https://{proxmox_host}:8006/api2/json/nodes/{node}/{normalized_vmtype}/{vmid}/vncproxy"
+    auth_header = {"Authorization": f"PVEAPIToken={api_token}"}
+    if httpx is None:
+        raise HTTPException(status_code=503, detail="httpx not installed")
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            resp = await client.post(vncproxy_url, headers=auth_header, json={"websocket": 1}, timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Proxmox vncproxy returned {resp.status_code}: {resp.text[:200]}")
+        body = resp.json()
+        ticket = body["data"]["ticket"]
+        port = int(body["data"]["port"])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Proxmox vncproxy call failed: {exc}") from exc
+    session_id = str(uuid.uuid4())
+    _direct_console_sessions[session_id] = {
+        "proxmox_host": proxmox_host,
+        "node": node,
+        "vmid": vmid,
+        "vmtype": normalized_vmtype,
+        "ticket": ticket,
+        "port": port,
+        "expires": time.time() + _DIRECT_CONSOLE_TTL,
+    }
+    return {"session_id": session_id, "expires_in": _DIRECT_CONSOLE_TTL}
+
+
+@app.websocket("/ws/console/{session_id}")
+async def ws_console_direct(websocket: WebSocket, session_id: str) -> None:
+    """Relay raw VNC bytes between the browser (noVNC) and Proxmox vncwebsocket."""
+    session = _direct_console_sessions.pop(session_id, None)
+    if not session or session.get("expires", 0) < time.time():
+        await websocket.close(code=4404, reason="Invalid or expired console session")
+        return
+
+    await websocket.accept()
+    proxmox_host = session["proxmox_host"]
+    node = session["node"]
+    vmid = session["vmid"]
+    vmtype = session["vmtype"]
+    ticket = session["ticket"]
+    port = session["port"]
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+
+    import urllib.parse as _urlparse_console
+    params = _urlparse_console.urlencode({"port": port, "vncticket": ticket})
+    ws_url = f"wss://{proxmox_host}:8006/api2/json/nodes/{node}/{vmtype}/{vmid}/vncwebsocket?{params}"
+    auth_header = {"Authorization": f"PVEAPIToken={api_token}"}
+
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    if websockets is None:
+        await websocket.close(code=1011, reason="websockets library not installed")
+        return
+
+    try:
+        import inspect as _inspect_console
+        connect_kwargs: dict[str, Any] = {"ssl": ssl_ctx, "open_timeout": 20, "max_size": None}
+        hdr_key = (
+            "additional_headers"
+            if "additional_headers" in _inspect_console.signature(websockets.connect).parameters
+            else "extra_headers"
+        )
+        connect_kwargs[hdr_key] = auth_header
+
+        async with websockets.connect(ws_url, **connect_kwargs) as px_ws:
+            async def _browser_to_proxmox() -> None:
+                while True:
+                    msg = await websocket.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        raise WebSocketDisconnect(code=int(msg.get("code") or 1000))
+                    raw = msg.get("bytes") or (msg.get("text") or "").encode()
+                    if raw:
+                        await px_ws.send(raw)
+
+            async def _proxmox_to_browser() -> None:
+                async for raw in px_ws:
+                    data = raw if isinstance(raw, bytes) else raw.encode()
+                    await websocket.send_bytes(data)
+
+            t1 = asyncio.create_task(_browser_to_proxmox())
+            t2 = asyncio.create_task(_proxmox_to_browser())
+            _, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(t1, t2, return_exceptions=True)
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    except Exception as exc:
+        logger.warning("Direct VNC relay error for session %s: %s", session_id, exc)
+
+
+
 async def api_proxmox_update_agent() -> dict[str, Any]:
     cmd = await _queue_proxmox_agent_update()
     return {
@@ -12326,6 +12441,75 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         with contextlib.suppress(ValueError):
             ws_connections.remove(websocket)
+
+
+_SPOKE_CONSOLE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VM Console</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #1a1a2e; overflow: hidden; }
+    #toolbar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 12px; background: #16213e; border-bottom: 1px solid #333;
+      color: #ccc; font-family: sans-serif; font-size: 13px;
+    }
+    #toolbar button {
+      padding: 4px 12px; border: 1px solid #555; border-radius: 4px;
+      background: #0f3460; color: #eee; cursor: pointer; font-size: 12px;
+    }
+    #toolbar button:hover { background: #1a5276; }
+    #status { margin-left: auto; font-size: 12px; }
+    #status.connected { color: #2ecc71; }
+    #status.disconnected { color: #e74c3c; }
+    #status.connecting { color: #f39c12; }
+    #screen { width: 100%; height: calc(100vh - 38px); }
+    #screen canvas { width: 100% !important; height: 100% !important; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <strong>VM Console</strong>
+    <button onclick="sendCtrlAltDel()">Ctrl+Alt+Del</button>
+    <button onclick="toggleFullscreen()">Fullscreen</button>
+    <span id="status" class="connecting">Connecting\u2026</span>
+  </div>
+  <div id="screen"></div>
+  <script type="module">
+    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js';
+    const sessionId = '__SESSION_ID__';
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = proto + '//' + location.host + '/ws/console/' + sessionId;
+    const statusEl = document.getElementById('status');
+    let rfb;
+    function setStatus(msg, cls) { statusEl.textContent = msg; statusEl.className = cls; }
+    try {
+      rfb = new RFB(document.getElementById('screen'), wsUrl, { credentials: { password: '' } });
+      rfb.scaleViewport = true;
+      rfb.resizeSession = false;
+      rfb.addEventListener('connect', () => setStatus('Connected', 'connected'));
+      rfb.addEventListener('disconnect', (e) => setStatus('Disconnected: ' + (e.detail?.reason || 'closed'), 'disconnected'));
+      rfb.addEventListener('credentialsrequired', () => { const p = prompt('VNC Password:') || ''; rfb.sendCredentials({ password: p }); });
+      rfb.addEventListener('securityfailure', (e) => setStatus('Security failure: ' + (e.detail?.reason || 'unknown'), 'disconnected'));
+    } catch (err) { setStatus('Error: ' + err.message, 'disconnected'); }
+    window.rfb = rfb;
+    window.sendCtrlAltDel = () => rfb && rfb.sendCtrlAltDel();
+    window.toggleFullscreen = () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.getElementById('screen').requestFullscreen().catch(() => {});
+    };
+  </script>
+</body>
+</html>"""
+
+
+@app.get("/console", response_class=HTMLResponse)
+async def console_page(session_id: str = Query(...)) -> HTMLResponse:
+    """Serve the noVNC console page for a direct Proxmox VM console session."""
+    return HTMLResponse(content=_SPOKE_CONSOLE_HTML.replace("__SESSION_ID__", session_id))
 
 
 @app.get("/", response_class=HTMLResponse)
