@@ -1144,6 +1144,7 @@ def _get_cached_settings() -> dict[str, Any]:
         "auth_tacacs_secret_configured": bool(settings.get("auth_tacacs_secret")),
         "auth_tacacs_admin_priv": int(settings.get("auth_tacacs_admin_priv", 15)),
         "spoke_tls": settings.get("spoke_tls", "off"),
+        "proxmox_api_token_configured": bool(settings.get("proxmox_api_token", "").strip()),
     }
     _settings_cache_time = now
     return copy.deepcopy(_settings_cache)
@@ -3571,6 +3572,7 @@ class SettingsUpdate(BaseModel):
     guest_agent_reboot_after_minutes: str | None = None
     guest_agent_reclone_after_minutes: str | None = None
     watchdog_reboot_enabled: str | None = None
+    proxmox_api_token: str | None = None
 
 
 class SimulationConfigUpdate(BaseModel):
@@ -4225,6 +4227,8 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "mem_est_avg": _resource_estimated_average(_mem_samples),
         "resource_samples_started": _resource_samples_started or None,
         "resource_sample_count": len(_cpu_samples),
+        "pending_command_count": len([c for c in commands if c.get("status") in ("queued", "delivered")]),
+        "spoke_version": APP_VERSION,
     }
 
 
@@ -8539,6 +8543,11 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["guest_agent_reclone_after_minutes"] = str(max(1, int(update.guest_agent_reclone_after_minutes.strip() or "30")))
     if update.watchdog_reboot_enabled is not None:
         settings["watchdog_reboot_enabled"] = _normalize_toggle(update.watchdog_reboot_enabled)
+
+    if update.proxmox_api_token is not None:
+        token = update.proxmox_api_token.strip()
+        settings["proxmox_api_token"] = token
+        _persisted["proxmox_api_token"] = token
 
     if update.spoke_tls is not None:
         settings["spoke_tls"] = _normalize_toggle(update.spoke_tls)
