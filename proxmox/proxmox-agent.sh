@@ -32,6 +32,9 @@ HEALTH_FILE="/var/lib/client-sim/agent-health.json"
 USB_STATE_CACHE="/tmp/client-sim-usb-state.cache"
 USB_PRESENT_CACHE="/tmp/client-sim-usb-present.cache"
 USB_UNKNOWN_CACHE="/tmp/client-sim-usb-unknown.cache"
+USB_QUARANTINE_CACHE="/tmp/client-sim-usb-quarantine.cache"
+USB_QUARANTINE_FILE="/etc/client-sim-usb-quarantine.json"
+USB_QUARANTINE_THRESHOLD=3
 RECLONE_STATE_CACHE="/var/lib/client-sim/reclone-state.json"
 RESEED_LOCK_FILE="/tmp/.proxmox_reseed_lock"
 PROGRESS_EVENT_QUEUE_DIR="/var/lib/client-sim/progress-events"
@@ -130,6 +133,7 @@ declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
 declare -A STATE_VMID_TO_IMAGE
 declare -A STATE_BUS_TO_VMID STATE_VMID_TO_BUS STATE_MISSING_BY_BUS STATE_VIDPID_BY_BUS STATE_EXCLUDED_BUS
+declare -A USB_FAIL_COUNT USB_QUARANTINED
 declare -A _RECLONE_CMD_IDS=()   # vmid -> cmd_id, used for parallel reclone ACKs
 
 declare -a UNKNOWN_USB_LINES USB_STATE_LINES
@@ -745,7 +749,7 @@ for raw in sys.argv[2:]:
         bus_path, vidpid, name = (parts + ["", "", ""])[:3]
         items.append({"bus_path": bus_path, "vidpid": vidpid, "name": name})
     else:
-        vmid, bus_path, missing_since, name, vidpid, prov_status = (parts + ["", "", "", "", "", ""])[:6]
+        vmid, bus_path, missing_since, name, vidpid, prov_status, fail_count, quarantined_at = (parts + ["", "", "", "", "", "", "", ""])[:8]
         items.append({
             "vmid": int(vmid) if vmid else None,
             "bus_path": bus_path,
@@ -753,6 +757,8 @@ for raw in sys.argv[2:]:
             "name": name,
             "vidpid": vidpid,
             "prov_status": prov_status or "active",
+            "fail_count": int(fail_count) if fail_count else 0,
+            "quarantined_at": int(quarantined_at) if quarantined_at else None,
         })
 print(json.dumps(items))
 PY
@@ -1041,6 +1047,116 @@ save_excluded_buses() {
     } > "$EXCLUDED_BUS_FILE"
 }
 
+# ── USB quarantine: track buses with repeated dongle-missing failures ──────────
+# A bus is quarantined after USB_QUARANTINE_THRESHOLD consecutive missing-timeout
+# teardowns (dongle absent for the full MISSING_TIMEOUT window). Quarantined buses
+# are skipped during provisioning. Quarantine auto-clears when the bus has been
+# physically absent for 2× MISSING_TIMEOUT since quarantine (dongle replaced).
+# Manual clear via hub command: clear_usb_quarantine [bus_path].
+
+load_usb_quarantine() {
+    USB_FAIL_COUNT=()
+    USB_QUARANTINED=()
+    [[ -f "$USB_QUARANTINE_FILE" ]] || return 0
+    local _bus _fc _qa _changed=0
+    while IFS=$'\t' read -r _bus _fc _qa; do
+        [[ -z "$_bus" ]] && continue
+        USB_FAIL_COUNT["$_bus"]="${_fc:-0}"
+        [[ -n "$_qa" ]] && USB_QUARANTINED["$_bus"]="$_qa"
+    done < <(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$USB_QUARANTINE_FILE'))
+    for bus, info in d.items():
+        fc = info.get('fail_count', 0)
+        qa = info.get('quarantined_at', '') or ''
+        print(f'{bus}\t{fc}\t{qa}')
+except Exception:
+    pass
+" 2>/dev/null)
+    # Auto-clear quarantined buses physically absent for > 2× MISSING_TIMEOUT
+    # (indicates dongle was replaced; allow the new dongle to provision)
+    local _now _auto_clear_secs _qa
+    _now=$(date +%s)
+    _auto_clear_secs=$(( MISSING_TIMEOUT * 60 * 2 ))
+    for _bus in "${!USB_QUARANTINED[@]}"; do
+        _qa="${USB_QUARANTINED[$_bus]}"
+        if [[ -z "${PRESENT_BUSES[$_bus]:-}" ]] && (( _now - _qa > _auto_clear_secs )); then
+            log "USB bus $_bus quarantine auto-cleared (absent > $((MISSING_TIMEOUT * 2)) min since quarantine — dongle assumed replaced)"
+            unset "USB_QUARANTINED[$_bus]"
+            USB_FAIL_COUNT["$_bus"]=0
+            _changed=1
+        fi
+    done
+    (( _changed )) && save_usb_quarantine
+}
+
+save_usb_quarantine() {
+    local _tmp_data="" _bus
+    for _bus in "${!USB_FAIL_COUNT[@]}"; do
+        local _fc="${USB_FAIL_COUNT[$_bus]:-0}"
+        local _qa="${USB_QUARANTINED[$_bus]:-}"
+        _tmp_data+="${_bus}"$'\t'"${_fc}"$'\t'"${_qa}"$'\n'
+    done
+    local _payload
+    _payload=$(printf '%s' "$_tmp_data" | python3 -c "
+import json, sys
+data = {}
+for line in sys.stdin:
+    line = line.rstrip('\n')
+    if not line:
+        continue
+    parts = line.split('\t')
+    bus = parts[0] if len(parts) > 0 else ''
+    fc  = parts[1] if len(parts) > 1 else '0'
+    qa  = parts[2] if len(parts) > 2 else ''
+    if not bus:
+        continue
+    data[bus] = {
+        'fail_count': int(fc) if fc.isdigit() else 0,
+        'quarantined_at': int(qa) if qa and qa.isdigit() else None,
+    }
+print(json.dumps(data, indent=2))
+" 2>/dev/null || echo '{}')
+    mkdir -p "$(dirname "$USB_QUARANTINE_FILE")"
+    atomic_write_file "$USB_QUARANTINE_FILE" "$_payload"
+}
+
+record_usb_failure() {
+    local _bus="$1"
+    local _fc=$(( ${USB_FAIL_COUNT[$_bus]:-0} + 1 ))
+    USB_FAIL_COUNT["$_bus"]="$_fc"
+    if (( _fc >= USB_QUARANTINE_THRESHOLD )) && [[ -z "${USB_QUARANTINED[$_bus]:-}" ]]; then
+        USB_QUARANTINED["$_bus"]="$(date +%s)"
+        log "USB bus $_bus QUARANTINED after $_fc missing-timeout failures — skipping provisioning"
+    else
+        log "USB bus $_bus failure count: $_fc / $USB_QUARANTINE_THRESHOLD"
+    fi
+    save_usb_quarantine
+}
+
+clear_usb_quarantine_state() {
+    local _target_bus="${1:-}"  # empty = clear all
+    local _changed=0
+    if [[ -z "$_target_bus" ]]; then
+        for _bus in "${!USB_QUARANTINED[@]}"; do
+            log "clear_usb_quarantine: clearing quarantine for bus $_bus"
+            unset "USB_QUARANTINED[$_bus]"
+            USB_FAIL_COUNT["$_bus"]=0
+            _changed=1
+        done
+    elif [[ -n "${USB_QUARANTINED[$_target_bus]:-}" || -n "${USB_FAIL_COUNT[$_target_bus]:-}" ]]; then
+        log "clear_usb_quarantine: clearing quarantine for bus $_target_bus"
+        unset "USB_QUARANTINED[$_target_bus]"
+        USB_FAIL_COUNT["$_target_bus"]=0
+        _changed=1
+    else
+        log "clear_usb_quarantine: bus ${_target_bus} is not quarantined"
+    fi
+    (( _changed )) && save_usb_quarantine
+    return 0
+}
+
 scan_usb_devices() {
     USB_NAME_BY_BUS=()
     USB_VIDPID_BY_BUS=()
@@ -1264,7 +1380,7 @@ build_usb_state_json() {
         else
             prov_status="active"
         fi
-        USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}"$'\t'"${prov_status}")
+        USB_STATE_LINES+=("${vmid}"$'\t'"${bus_path}"$'\t'"${missing_since}"$'\t'"${name}"$'\t'"${vidpid}"$'\t'"${prov_status}"$'\t'"${USB_FAIL_COUNT[$bus_path]:-0}"$'\t'"${USB_QUARANTINED[$bus_path]:-}")
     done
     if (( ${#UNKNOWN_USB_LINES[@]} )); then
         UNKNOWN_USB_JSON=$(json_from_records unknown "${UNKNOWN_USB_LINES[@]}")
@@ -1292,6 +1408,41 @@ build_usb_state_json() {
     atomic_write_file "$USB_STATE_CACHE" "$USB_STATE_JSON"
     atomic_write_file "$USB_PRESENT_CACHE" "$PRESENT_USB_JSON"
     atomic_write_file "$USB_UNKNOWN_CACHE" "$UNKNOWN_USB_JSON"
+    # Build and persist quarantine list: quarantined buses that have no active VM
+    local _assigned_buses=()
+    for _qvmid in "${!STATE_VMID_TO_BUS[@]}"; do
+        _assigned_buses+=("${STATE_VMID_TO_BUS[$_qvmid]}")
+    done
+    local _quarantine_lines=()
+    for _qbus in "${!USB_QUARANTINED[@]}"; do
+        local _qbus_has_vm=0
+        for _ab in "${_assigned_buses[@]}"; do
+            [[ "$_ab" == "$_qbus" ]] && { _qbus_has_vm=1; break; }
+        done
+        if (( ! _qbus_has_vm )); then
+            _quarantine_lines+=("${_qbus}"$'\t'"${USB_FAIL_COUNT[$_qbus]:-0}"$'\t'"${USB_QUARANTINED[$_qbus]}")
+        fi
+    done
+    local USB_QUARANTINE_JSON
+    if (( ${#_quarantine_lines[@]} )); then
+        USB_QUARANTINE_JSON=$(printf '%s\n' "${_quarantine_lines[@]}" | python3 -c "
+import json, sys
+items = []
+for line in sys.stdin:
+    line = line.rstrip('\n')
+    if not line:
+        continue
+    parts = line.split('\t')
+    bp = parts[0] if len(parts) > 0 else ''
+    fc = parts[1] if len(parts) > 1 else '0'
+    qa = parts[2] if len(parts) > 2 else ''
+    items.append({'bus_path': bp, 'fail_count': int(fc) if fc.isdigit() else 0, 'quarantined_at': int(qa) if qa and qa.isdigit() else None})
+print(json.dumps(items))
+" 2>/dev/null || echo '[]')
+    else
+        USB_QUARANTINE_JSON="[]"
+    fi
+    atomic_write_file "$USB_QUARANTINE_CACHE" "$USB_QUARANTINE_JSON"
 }
 
 # Wait until a VM is fully stopped, with a timeout.
@@ -2122,8 +2273,7 @@ _usb_provision_loop_impl() {
     scan_usb_devices
     load_state_file
     load_excluded_buses
-
-    # ── Auto-clear exclusions for buses whose dongles have been unplugged ─────
+    load_usb_quarantine
     # Once a dongle is physically removed, its exclusion is cleared so that
     # re-plugging the dongle provisions a fresh VM as expected.
     local _excl_changed=0
@@ -2199,6 +2349,7 @@ _usb_provision_loop_impl() {
                 log "USB dongle missing for ${missing_age}s — tearing down VM $vmid"
                 [[ -n "$_state_vidpid" && -n "$(find_present_bus_for_vidpid "$_state_vidpid" 2>/dev/null || true)" ]] && _reconnected_vidpids["$_state_vidpid"]=1
                 if destroy_vm "$vmid" "$_guest_type"; then
+                    record_usb_failure "$_current_bus"
                     _state_changed=1
                 fi
             fi
@@ -2262,6 +2413,7 @@ _usb_provision_loop_impl() {
     for bus_path in "${!PRESENT_BUSES[@]}"; do
         [[ -n "${STATE_BUS_TO_VMID[$bus_path]:-}" ]] && continue
         [[ -n "${STATE_EXCLUDED_BUS[$bus_path]:-}" ]] && { log "Bus $bus_path is excluded from provisioning (hub-deleted); skipping"; continue; }
+        [[ -n "${USB_QUARANTINED[$bus_path]:-}" ]] && { log "Bus $bus_path is quarantined (${USB_FAIL_COUNT[$bus_path]:-0} failures); skipping provisioning"; continue; }
         vidpid="${PRESENT_BUSES[$bus_path]}"
         local _dtype="${CERTIFIED_TYPES[$vidpid]:-wireless}"
         if [[ "$SIM_PHY" == "any" || "$_dtype" == "$SIM_PHY" ]]; then
@@ -3004,6 +3156,7 @@ print(json.dumps(out))
   "reclone_state": $(read_json_cache_or_default "$RECLONE_STATE_CACHE" '{"status":"idle","active_vmids":[]}'),
   "unknown_usb": $(read_json_cache_or_default "$USB_UNKNOWN_CACHE" "${UNKNOWN_USB_JSON:-[]}"),
   "usb_state": $(read_json_cache_or_default "$USB_STATE_CACHE" "${USB_STATE_JSON:-[]}"),
+  "usb_quarantine": $(read_json_cache_or_default "$USB_QUARANTINE_CACHE" "[]"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
   "provision_halt": $(read_json_cache_or_default "$PROVISION_HALT_CACHE" 'null'),
   "blacklisted_drivers": ${BLACKLISTED_DRIVERS_JSON},
@@ -3541,7 +3694,7 @@ PY
 }
 
 execute_vm_command() {
-    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}"
+    local action="$1" vmid="${2:-}" _type="${3:-qemu}" _source_vmid="${4:-}" _branch="${5:-}" _repo_raw="${6:-}" args_bus_path="${7:-}"
     local guest_type="${_type:-qemu}"
     if [[ -n "$vmid" && "$guest_type" != "lxc" ]]; then
         if pct status "$vmid" >/dev/null 2>&1 && ! qm status "$vmid" >/dev/null 2>&1; then
@@ -3656,6 +3809,14 @@ execute_vm_command() {
             touch "$PROVISION_COOLDOWN_RESET_FILE" 2>/dev/null || true
             log "Provision lock cleared; provision loop will resume on next main loop iteration"
             ;;
+        clear_usb_quarantine|clear-usb-quarantine)
+            local _q_target_bus="${args_bus_path:-${args_bus:-}}"
+            refresh_usb_config
+            scan_usb_devices
+            load_usb_quarantine
+            clear_usb_quarantine_state "${_q_target_bus:-}"
+            build_usb_state_json
+            ;;
         update_spoke|update-spoke)
             # Ask the spoke to self-update by calling its HTTP endpoint directly.
             # SERVER_URL already points at the spoke (e.g. http://192.168.x.x:8080).
@@ -3700,11 +3861,12 @@ print(
     str(args.get('branch', '')).replace('\t', ' '),
     str(args.get('repo_raw', '')).replace('\t', ' '),
     str(cmd.get('type', '')).replace('\t', ' ').replace('-', '_'),
+    str(args.get('bus_path', '')).replace('\t', ' '),
     sep='\t'
 )
 PY
 )
-    IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type <<< "$parsed"
+    IFS=$'\t' read -r cmd_id action vmid guest_type source_vmid branch repo_raw cmd_type args_bus_path <<< "$parsed"
     if [[ -z "$cmd_id" || -z "$action" ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [CMD] SKIP: empty cmd_id or action — raw=${raw:0:200}" >> "$AGENT_LOG"
         return 0
@@ -3712,7 +3874,7 @@ PY
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [CMD] RECV: action=$action vmid=$vmid type=${guest_type:-$cmd_type} id=$cmd_id" >> "$AGENT_LOG"
     status="completed"
     message="${action} completed"
-    if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" 2>>"$AGENT_LOG"; then
+    if ! execute_vm_command "$action" "$vmid" "${guest_type:-$cmd_type}" "$source_vmid" "$branch" "$repo_raw" "$args_bus_path" 2>>"$AGENT_LOG"; then
         status="failed"
         message="${action} failed — check $AGENT_LOG"
     fi
