@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.10"
+AGENT_VERSION="1.11"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -15,7 +15,7 @@ AGENT_SHELL_PID=$$
 # Load persisted env (API key, etc.) before applying defaults
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" 2>/dev/null || true
 
-SERVER_URL=""  # Never cached — always use --server arg or auto-detect from LXC 1001
+SERVER_URL="${CLIENT_SIM_SERVER_URL:-}"  # Prefer persisted URL from env file; can be overridden by --server arg
 API_KEY="${CLIENT_SIM_API_KEY:-}"
 POLL_INTERVAL="${CLIENT_SIM_POLL_INTERVAL:-15}"
 TELEMETRY_INTERVAL="${CLIENT_SIM_TELEMETRY_INTERVAL:-3}"
@@ -312,14 +312,21 @@ JSON
 }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
+_server_arg_given=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version|-v) echo "client-sim-proxmox-agent v${AGENT_VERSION}"; exit 0 ;;
-        --server=*) SERVER_URL="${1#--server=}"; shift ;;
-        --server)   SERVER_URL="${2:-}"; shift 2 ;;
+        --server=*) SERVER_URL="${1#--server=}"; _server_arg_given=1; shift ;;
+        --server)   SERVER_URL="${2:-}"; _server_arg_given=1; shift 2 ;;
         *) shift ;;
     esac
 done
+
+# Persist --server to env file so systemd restarts don't need the arg each time
+if [[ "$_server_arg_given" -eq 1 ]] && [[ -n "$SERVER_URL" ]]; then
+    sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
+    echo "CLIENT_SIM_SERVER_URL=${SERVER_URL}" >> "$ENV_FILE"
+fi
 
 # ── Auto-detect hub SERVER_URL from LXC 1001 ──────────────────────────────────
 # Hub always runs in LXC container ID 1001. Read its IP from pct config.
