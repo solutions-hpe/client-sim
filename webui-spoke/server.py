@@ -4185,6 +4185,7 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "vm_count": int(state.get("vm_count", 0)),
             "usb_count": int(state.get("usb_count", 0)),
             "node": state.get("node", {}),
+            "provision_halt": state.get("provision_halt"),
         })
     return result
 
@@ -9024,6 +9025,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "vm_count": len(enriched_vms),
         "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
+        "provision_halt": body.get("provision_halt"),
         "vms": tagged_vms,
         "usb_state": tagged_usb_state,
         "present_usb": tagged_present_usb,
