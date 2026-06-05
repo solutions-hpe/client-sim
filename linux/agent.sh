@@ -1,5 +1,5 @@
 #!/bin/bash
-# agent.sh — Client websocket agent — v1.04
+# agent.sh — Client websocket agent — v1.05
 # Launches a background websocket client that streams status and receives commands.
 
 set -u
@@ -303,14 +303,21 @@ async def handle_command(ws, command):
         subprocess.Popen(["sudo", "reboot"])
 
 
-async def send_loop(ws):
+async def send_loop(ws, interval_ref):
+    import random
+    # Stagger the first send by a random fraction of the initial interval to
+    # prevent phase-lock when many clients all connect at the same time.
+    await asyncio.sleep(random.uniform(0, interval_ref["value"]))
     while True:
         await ws.send(json.dumps({"type": "status", "payload": load_status()}))
         write_health(last_status_sent=time.time(), last_heartbeat=time.time(), state="connected", connected=True)
-        await asyncio.sleep(15)
+        # Apply jitter ±15% to avoid synchronized bursts when throttle is active
+        jitter = interval_ref["value"] * random.uniform(0.85, 1.15)
+        await asyncio.sleep(jitter)
 
 
 async def main():
+    import random
     backoff = 1
     while True:
         try:
@@ -320,7 +327,9 @@ async def main():
                 write_health(state="connected", connected=True, last_connect=now, last_heartbeat=now, last_error="")
                 await ws.send(json.dumps({"type": "sync"}))
                 write_health(last_status_sent=time.time(), last_heartbeat=time.time(), state="connected", connected=True)
-                sender = asyncio.create_task(send_loop(ws))
+                # Mutable container so send_loop always reads the current value
+                interval_ref = {"value": 15}
+                sender = asyncio.create_task(send_loop(ws, interval_ref))
                 try:
                     async for message in ws:
                         now = time.time()
@@ -334,6 +343,12 @@ async def main():
                         if msg_type == "commands":
                             for command in payload.get("commands") or []:
                                 await handle_command(ws, command)
+                        elif msg_type == "throttle":
+                            new_interval = int(payload.get("interval") or 15)
+                            new_interval = max(5, min(300, new_interval))
+                            if new_interval != interval_ref["value"]:
+                                interval_ref["value"] = new_interval
+                                log_message(f"[INFO] Send interval updated to {new_interval}s (server throttle)")
                 finally:
                     sender.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

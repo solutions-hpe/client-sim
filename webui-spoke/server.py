@@ -2845,6 +2845,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["acme_renewal"] = asyncio.create_task(acme_renewal_loop())
     background_tasks["demo_expiry"] = asyncio.create_task(_demo_expiry_task())
     background_tasks["vm_sim_tag_sync"] = asyncio.create_task(_vm_sim_tag_sync_loop())
+    background_tasks["loop_lag_monitor"] = asyncio.create_task(_event_loop_lag_monitor())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -3455,8 +3456,115 @@ async def _vm_sim_tag_sync_loop() -> None:
             logger.warning("VM sim tag sync loop error: %s", exc)
 
 
+# ── Server backpressure ───────────────────────────────────────────────────────
+# Tracks current API/WebSocket load and signals sim clients to slow down when
+# the event loop is saturated so that the spoke stays responsive.
+# Throttle levels and their client reporting intervals (seconds):
+_BP_LEVELS = [
+    # (event_loop_lag_threshold_s, throttle_interval_s, level_name)
+    (0.0,   15, "normal"),
+    (0.30,  30, "medium"),
+    (1.00,  60, "high"),
+]
+# How long (s) to stay at a level before stepping back down one level.
+_BP_HOLD_SECONDS = {"high": 60, "medium": 30, "normal": 0}
 
-def _resource_1h_average(samples: list[tuple[float, float]]) -> float | None:
+_server_pressure: dict[str, Any] = {
+    "active": False,
+    "level": "normal",
+    "throttle_interval": 15,
+    "reason": "",
+    "since": 0.0,
+    "held_since": 0.0,   # when we last transitioned to the current level
+}
+# Rolling event-loop lag samples (epoch, lag_seconds)
+_loop_lag_samples: list[float] = []
+_LOOP_LAG_WINDOW = 10  # number of samples to keep
+
+
+async def _broadcast_server_pressure() -> None:
+    """Push current pressure state to browser WS clients and throttle to sim clients."""
+    msg = {
+        "type": "server_pressure",
+        "active": _server_pressure["active"],
+        "level": _server_pressure["level"],
+        "throttle_interval": _server_pressure["throttle_interval"],
+        "reason": _server_pressure["reason"],
+    }
+    # Broadcast to browser clients
+    await broadcast(msg)
+    # Push throttle directive to all connected sim-client WS sessions concurrently
+    throttle_msg = json.dumps({"type": "throttle", "interval": _server_pressure["throttle_interval"]})
+    async def _send_one(ws: WebSocket) -> None:
+        try:
+            await asyncio.wait_for(ws.send_text(throttle_msg), timeout=3.0)
+        except Exception:
+            pass
+    if client_ws_connections:
+        await asyncio.gather(*(_send_one(ws) for ws in list(client_ws_connections.values())))
+
+
+async def _event_loop_lag_monitor() -> None:
+    """Background task: measures asyncio event-loop lag and manages backpressure."""
+    import random
+    while True:
+        t0 = time.monotonic()
+        await asyncio.sleep(1.0)
+        lag = time.monotonic() - t0 - 1.0  # positive means loop was blocked
+
+        _loop_lag_samples.append(lag)
+        if len(_loop_lag_samples) > _LOOP_LAG_WINDOW:
+            _loop_lag_samples.pop(0)
+
+        if len(_loop_lag_samples) < 3:
+            continue  # not enough data yet
+
+        avg_lag = sum(_loop_lag_samples[-5:]) / min(5, len(_loop_lag_samples))
+        now = time.monotonic()
+
+        # Determine target level from current average lag
+        target_level = "normal"
+        for threshold, interval, level in reversed(_BP_LEVELS):
+            if avg_lag >= threshold:
+                target_level = level
+                break
+
+        current_level = _server_pressure["level"]
+
+        # Step up immediately if things get worse
+        level_order = ["normal", "medium", "high"]
+        curr_idx = level_order.index(current_level)
+        tgt_idx = level_order.index(target_level)
+
+        if tgt_idx > curr_idx:
+            # Escalate immediately
+            new_level = target_level
+        elif tgt_idx < curr_idx:
+            # Only step down one level at a time after hold period
+            hold = _BP_HOLD_SECONDS.get(current_level, 30)
+            if now - _server_pressure["held_since"] >= hold:
+                new_level = level_order[curr_idx - 1]
+            else:
+                new_level = current_level
+        else:
+            new_level = current_level
+
+        if new_level != current_level:
+            interval = next(i for _, i, l in _BP_LEVELS if l == new_level)
+            _server_pressure.update({
+                "active": new_level != "normal",
+                "level": new_level,
+                "throttle_interval": interval,
+                "reason": f"Event loop lag: {avg_lag * 1000:.0f}ms avg",
+                "since": time.time() if new_level != "normal" else 0.0,
+                "held_since": now,
+            })
+            logger.info("Server pressure: %s → %s (lag=%.0fms, interval=%ds)",
+                        current_level, new_level, avg_lag * 1000, interval)
+            await _broadcast_server_pressure()
+
+
+
     """Return the rolling mean of all samples within the last hour.
 
     Returns the average of whatever samples exist as soon as the first one
@@ -11456,7 +11564,7 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
     if watchdog_changed:
         await _broadcast_proxmox_state()
     asyncio.create_task(_sync_sim_tags_for_client(status.hostname))
-    return {"status": "ok", "client": payload}
+    return {"status": "ok", "client": payload, "throttle_interval": _server_pressure["throttle_interval"]}
 
 
 @app.get("/api/client/key")
@@ -12511,6 +12619,9 @@ async def ws_client_endpoint(
     try:
         await _push_pending_agent_commands(hostname, websocket)
         await websocket.send_json({"type": "hello", "hostname": hostname, "platform": platform})
+        # Send current throttle directive so client immediately uses the right interval
+        if _server_pressure["throttle_interval"] != 15:
+            await websocket.send_json({"type": "throttle", "interval": _server_pressure["throttle_interval"]})
         while True:
             data = await websocket.receive_json()
             msg_type = str(data.get("type") or "status").strip().lower()
@@ -12524,6 +12635,7 @@ async def ws_client_endpoint(
                     await broadcast({"type": "status_update", "client": client_payload})
                     if watchdog_changed:
                         await _broadcast_proxmox_state()
+                    asyncio.create_task(_sync_sim_tags_for_client(hostname))
                     await websocket.send_json({"type": "status_ack", "hostname": hostname})
             elif msg_type == "ack":
                 payload = data.get("payload") if isinstance(data.get("payload"), dict) else data

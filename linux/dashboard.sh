@@ -154,7 +154,8 @@ run_cache_worker() {
       local ssid_json="null"
       [[ -n "$connected_ssid" ]] && ssid_json="\"$connected_ssid\""
 
-      curl -s -X POST "${server_url%/}/api/status" \
+      local resp throttle_secs
+      resp=$(curl -s -X POST "${server_url%/}/api/status" \
         -H "Content-Type: application/json" \
         -d "{
           \"hostname\": \"$HOSTNAME\",
@@ -171,7 +172,14 @@ run_cache_worker() {
             \"wsite\": \"$wsite\"
           },
           \"errors\": []
-        }" >/dev/null 2>&1 || true
+        }" 2>/dev/null) || true
+      # Honor server throttle_interval so HTTP clients back off under load.
+      if [[ -n "$resp" ]]; then
+        throttle_secs=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('throttle_interval',''))" 2>/dev/null || true)
+        if [[ "$throttle_secs" =~ ^[0-9]+$ ]] && (( throttle_secs > 0 )); then
+          refresh_rate=$throttle_secs
+        fi
+      fi
     fi
 
     sleep "$refresh_rate"
