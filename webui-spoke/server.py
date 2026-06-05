@@ -4171,6 +4171,7 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "agent_version": state.get("agent_version"),
             "pve_version": state.get("pve_version"),
             "vm_count": int(state.get("vm_count", 0)),
+            "node": state.get("node", {}),
         })
     return result
 
@@ -9634,8 +9635,9 @@ async def ws_console_direct(websocket: WebSocket, session_id: str) -> None:
 
 
 
-async def api_proxmox_update_agent() -> dict[str, Any]:
-    cmd = await _queue_proxmox_agent_update()
+@app.post("/api/proxmox/update-agent")
+async def api_proxmox_update_agent(hostname: str | None = None) -> dict[str, Any]:
+    cmd = await _queue_proxmox_agent_update(target=hostname or None)
     return {
         "queued": 1,
         "id": cmd["id"],
