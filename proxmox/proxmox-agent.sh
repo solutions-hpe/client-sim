@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.11"
+AGENT_VERSION="1.12"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -385,9 +385,23 @@ else
         sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
     fi
     if ! auto_detect_hub_url; then
-        log "ERROR: Hub URL could not be determined."
-        log "Usage: $0 --server https://<hub-ip>:8443"
-        exit 1
+        # LXC 1001 unavailable — fall back to last-known URL written by a previous
+        # successful run.  This prevents crash-loops when the spoke container is
+        # temporarily stopped or the host doesn't have LXC 1001 at all but was
+        # previously pointed at a spoke via --server.
+        _cached_url=""
+        if [[ -f "$HUB_SERVER_URL_FILE" ]]; then
+            _cached_url=$(tr -d '[:space:]' < "$HUB_SERVER_URL_FILE" 2>/dev/null || true)
+        fi
+        if [[ -n "$_cached_url" ]]; then
+            log "WARNING: LXC 1001 unavailable — using last-known server URL: ${_cached_url}"
+            SERVER_URL="$_cached_url"
+            SERVER_URL_AUTO_DETECTED=1
+        else
+            log "ERROR: Hub URL could not be determined and no cached URL found."
+            log "Usage: $0 --server https://<hub-ip>:8443"
+            exit 1
+        fi
     fi
 fi
 
