@@ -3330,6 +3330,17 @@ _pending_delete_vmids: set[int] = set()
 # confirmed deletion so the fleet has time to stabilise before the next one).
 _delete_gate_cooldown_until: float = 0.0
 DELETE_GATE_COOLDOWN_S: int = 300  # 5 minutes between consecutive auto-deletes
+# Throttle auto-provision gate debug logging to at most once per 120s per reason key.
+_autoprov_gate_log_ts: dict[str, float] = {}
+_AUTOPROV_GATE_LOG_INTERVAL = 120.0
+
+
+def _autoprov_gate_log(reason_key: str, msg: str, *args: object) -> None:
+    """Log an auto-provision gate decision at most once per _AUTOPROV_GATE_LOG_INTERVAL seconds."""
+    now = time.time()
+    if now - _autoprov_gate_log_ts.get(reason_key, 0.0) >= _AUTOPROV_GATE_LOG_INTERVAL:
+        _autoprov_gate_log_ts[reason_key] = now
+        logger.info("Auto-prov gate [%s]: " + msg, reason_key, *args)
 # Maps vmid → approved hostname of the agent that last reported that VM.
 # Used to route delete_vm / reclone_vm commands to the correct node in multi-agent setups.
 _proxmox_agent_vm_map: dict[int, str] = {}
@@ -9466,7 +9477,13 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     # Auto-trigger provision_unassigned when usb_auto_provision is enabled and
     # certified unassigned dongles are physically present.  Resource (CPU/memory)
     # thresholds gate provisioning and can also trigger deletion of the newest sim VM.
-    if settings.get("usb_auto_provision") == "on" and reclone_state.get("status") != "running":
+    _autoprov_enabled = settings.get("usb_auto_provision") == "on"
+    _reclone_running = reclone_state.get("status") == "running"
+    if not _autoprov_enabled:
+        _autoprov_gate_log("disabled", "usb_auto_provision=off — skipping all provision/delete checks")
+    elif _reclone_running:
+        _autoprov_gate_log("reclone_running", "reclone job is running (status=%s) — skipping provision checks", reclone_state.get("status"))
+    if _autoprov_enabled and not _reclone_running:
         def _pct_setting(key: str, default: str) -> int:
             try:
                 return max(0, min(100, int(str(settings.get(key, default)).strip() or default)))
@@ -9605,9 +9622,36 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             and (cpu_avg is None or cpu_avg < cpu_prov_thr)
             and (mem_avg is None or mem_avg < mem_prov_thr)
         )
+        # Log resource state periodically so the journal shows what the gate sees
+        _autoprov_gate_log(
+            "resource_state",
+            "cpu_avg=%.1f%% (thr=%d%%) mem_avg=%.1f%% (thr=%d%%) cpu_instant=%.1f%% (ceil=%d%%) "
+            "delete_queued=%s ceil_hit=%s resource_ok=%s",
+            cpu_avg or 0.0, cpu_prov_thr,
+            mem_avg or 0.0, mem_prov_thr,
+            cpu_instant or 0.0, cpu_prov_ceil,
+            delete_queued, _ceil_hit, resource_ok,
+        )
+        if not resource_ok and not _ceil_hit:
+            if delete_queued:
+                _autoprov_gate_log("delete_queued", "delete_vm already in queue — suppressing provision_unassigned")
+            elif cpu_avg is not None and cpu_avg >= cpu_prov_thr:
+                _autoprov_gate_log("cpu_threshold", "cpu_avg=%.1f%% >= threshold=%d%% — suppressing provision_unassigned", cpu_avg, cpu_prov_thr)
+            elif mem_avg is not None and mem_avg >= mem_prov_thr:
+                _autoprov_gate_log("mem_threshold", "mem_avg=%.1f%% >= threshold=%d%% — suppressing provision_unassigned", mem_avg, mem_prov_thr)
         prov_run = proxmox_state.get("prov_run") or {}
+        if resource_ok and prov_run.get("running"):
+            _autoprov_gate_log(
+                "prov_run_active",
+                "prov_run.running=True — provision loop already active, skipping trigger "
+                "(vmids=%s status=%s)",
+                [i.get("vmid") for i in (prov_run.get("items") or [])],
+                [i.get("status") for i in (prov_run.get("items") or [])],
+            )
         if resource_ok and not prov_run.get("running"):
             unassigned = _proxmox_unassigned_present_usb()
+            if not unassigned:
+                _autoprov_gate_log("no_unassigned", "no unassigned USB dongles present — nothing to provision")
             if unassigned:
                 certified_set = {
                     (str(v.get("vidpid", "")).strip().lower() if isinstance(v, dict) else str(v).strip().lower())
@@ -9618,12 +9662,31 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                     u for u in unassigned
                     if str(u.get("vidpid", "")).strip().lower() in certified_set
                 ]
+                if not certified_unassigned:
+                    _autoprov_gate_log(
+                        "not_certified",
+                        "unassigned dongles present but none match certified VIDPIDs — "
+                        "unassigned=%s certified_vidpids=%s",
+                        [u.get("vidpid") for u in unassigned],
+                        sorted(certified_set),
+                    )
                 if certified_unassigned:
                     has_pending = any(
                         c.get("action") == "provision_unassigned"
                         and c.get("status") not in {"completed", "failed", "expired"}
                         for c in commands
                     )
+                    if has_pending:
+                        pending_cmd = next(
+                            (c for c in commands if c.get("action") == "provision_unassigned"
+                             and c.get("status") not in {"completed", "failed", "expired"}), None
+                        )
+                        _autoprov_gate_log(
+                            "already_pending",
+                            "provision_unassigned already pending (id=%s status=%s) — not queuing again",
+                            pending_cmd.get("id") if pending_cmd else "?",
+                            pending_cmd.get("status") if pending_cmd else "?",
+                        )
                     if not has_pending:
                         await _queue_proxmox_command("provision_unassigned", {}, command_type="auto-provision")
                         logger.info(
