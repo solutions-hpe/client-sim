@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.12"
+AGENT_VERSION="1.13"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -378,6 +378,9 @@ auto_detect_hub_url() {
 
 if [[ -n "$SERVER_URL" ]]; then
     log "Using server: ${SERVER_URL}"
+    # Write the cache file so future restarts can fall back to this URL
+    # even when LXC 1001 is unavailable (covers both --server and env-file cases).
+    persist_runtime_server_url
 else
     log "No --server specified — auto-detecting from LXC 1001..."
     # Remove any stale cached URL from env file (IP may have changed via DHCP)
