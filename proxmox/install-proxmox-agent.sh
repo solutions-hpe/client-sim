@@ -3,7 +3,7 @@
 # Usage: curl -sSL <raw_url> | bash -s -- --server http://172.16.1.59:8000 [--hub-url https://cs-hub.example.com:8443] [--tenant-id <uuid>] [--installer-key <key>] [--key apikey] [--interval 60]
 # Or run directly: bash install-proxmox-agent.sh --server http://... --hub-url https://... --tenant-id ... --installer-key ...
 
-SCRIPT_VERSION="1.06"
+SCRIPT_VERSION="1.07"
 
 set -euo pipefail
 
@@ -461,8 +461,9 @@ if [[ -f "$ENV_FILE" ]]; then
     existing_branch=$(grep -oP '(?<=CLIENT_SIM_REPO_BRANCH=).*' "$ENV_FILE" || true)
     existing_agent_port=$(grep -oP '(?<=CLIENT_SIM_AGENT_PORT=).*' "$ENV_FILE" || true)
 
-    # SERVER_URL is intentionally NOT loaded from env — DHCP IPs change.
-    # Only --server or auto-detection from LXC 1001 sets it.
+    # If --server was explicitly provided it takes priority and is written to the env file.
+    # The existing CLIENT_SIM_SERVER_URL is NOT loaded here — it is written at the end
+    # after all flags are resolved, so --server always wins on reinstall.
     [[ $KEY_SET -eq 1 ]] || API_KEY="$existing_key"
     [[ $INTERVAL_SET -eq 1 ]] || [[ -z "$existing_interval" ]] || POLL_INTERVAL="$existing_interval"
     [[ $BRANCH_SET -eq 1 ]] || [[ -z "$existing_branch" ]] || REPO_BRANCH="$existing_branch"
@@ -537,9 +538,8 @@ CLIENT_SIM_REPO_BRANCH=${REPO_BRANCH}
 CLIENT_SIM_REPO_RAW=${REPO_RAW%/${REPO_BRANCH}}
 CLIENT_SIM_AGENT_PORT=${AGENT_PORT}
 ENV
-# Persist --server URL so systemd restarts don't require LXC 1001.
-# Only written when explicitly provided; auto-detected IPs are not persisted
-# since DHCP addresses can change between boots.
+# Persist the server URL so systemd restarts don't require --server each time.
+# When --server is given the agent will never attempt LXC 1001 auto-detection.
 if [[ "$SERVER_SET" -eq 1 ]] && [[ -n "$SERVER_URL" ]]; then
     echo "CLIENT_SIM_SERVER_URL=${SERVER_URL}" >> "$ENV_FILE"
 fi
@@ -614,13 +614,17 @@ else
     _restore_template_from_azure
 fi
 
-echo "[INFO] Checking for spoke VM (ID 1001)..."
-if qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$' || \
-   pct list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
-    echo "[INFO] Spoke VM 1001 already exists — skipping restore."
+if [[ "$SERVER_SET" -eq 1 ]]; then
+    echo "[INFO] --server provided — spoke is managed externally, skipping spoke VM 1001 check."
 else
-    echo "[INFO] VM 1001 not found — checking Azure for spoke backup..."
-    _restore_spoke_from_azure
+    echo "[INFO] Checking for spoke VM (ID 1001)..."
+    if qm list 2>/dev/null | awk '{print $1}' | grep -q '^1001$' || \
+       pct list 2>/dev/null | awk '{print $1}' | grep -q '^1001$'; then
+        echo "[INFO] Spoke VM 1001 already exists — skipping restore."
+    else
+        echo "[INFO] VM 1001 not found — checking Azure for spoke backup..."
+        _restore_spoke_from_azure
+    fi
 fi
 
 echo
