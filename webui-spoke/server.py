@@ -585,6 +585,7 @@ def _save_state_cache(force: bool = False) -> None:
     try:
         cache = {
             "proxmox_state": dict(proxmox_state),
+            "proxmox_states": {k: {ek: ev for ek, ev in v.items() if ek != "vms"} for k, v in proxmox_states.items()},
             "central_status": central_status,
             "central_wireless_clients": dict(central_wireless_clients),
             "repo_state": dict(repo_state),
@@ -651,6 +652,17 @@ def _load_state_cache() -> None:
                 proxmox_state["connected"] = False
         central_status.update(cache.get("central_status", {}))
         central_wireless_clients.update(cache.get("central_wireless_clients", {}))
+        # Restore per-agent states (without VMs — those re-populate on first telemetry push).
+        # Mark connected=False if the agent hasn't been seen within OFFLINE_TIMEOUT.
+        cached_px_states = cache.get("proxmox_states", {})
+        for hn, st in cached_px_states.items():
+            if not isinstance(st, dict):
+                continue
+            last_seen_ts = st.get("last_seen")
+            connected = bool(st.get("connected", False)) and bool(
+                last_seen_ts and (time.time() - last_seen_ts) <= OFFLINE_TIMEOUT
+            )
+            proxmox_states[hn] = {**st, "connected": connected, "vms": []}
         cached_repo = cache.get("repo_state", {})
         if cached_repo:
             # Restore last_sync timestamp and last error for display, but mark
@@ -4171,6 +4183,7 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "agent_version": state.get("agent_version"),
             "pve_version": state.get("pve_version"),
             "vm_count": int(state.get("vm_count", 0)),
+            "usb_count": int(state.get("usb_count", 0)),
             "node": state.get("node", {}),
         })
     return result
@@ -9004,6 +9017,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "agent_version": str(body.get("agent_version", "")).strip() or None,
         "pve_version": str(body.get("pve_version", "")).strip() or None,
         "vm_count": len(enriched_vms),
+        "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
         "vms": tagged_vms,
     }
