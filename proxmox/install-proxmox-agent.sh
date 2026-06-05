@@ -530,10 +530,6 @@ echo "  OK: ${SYSTEMD_DIR}/proxmox-watchdog.service"
 echo "  OK: ${SYSTEMD_DIR}/proxmox-watchdog.timer"
 
 echo "[3/6] Writing environment file..."
-# CLIENT_SIM_SERVER_URL is intentionally never written — the spoke IP can change
-# (DHCP), and custom --server users must pass it on every install by design.
-# Remove any stale URL left by a previous install.
-sed -i '/^CLIENT_SIM_SERVER_URL=/d' "$ENV_FILE" 2>/dev/null || true
 cat > "$ENV_FILE" <<ENV
 CLIENT_SIM_API_KEY=${API_KEY}
 CLIENT_SIM_POLL_INTERVAL=${POLL_INTERVAL}
@@ -541,6 +537,12 @@ CLIENT_SIM_REPO_BRANCH=${REPO_BRANCH}
 CLIENT_SIM_REPO_RAW=${REPO_RAW%/${REPO_BRANCH}}
 CLIENT_SIM_AGENT_PORT=${AGENT_PORT}
 ENV
+# Persist --server URL so systemd restarts don't require LXC 1001.
+# Only written when explicitly provided; auto-detected IPs are not persisted
+# since DHCP addresses can change between boots.
+if [[ "$SERVER_SET" -eq 1 ]] && [[ -n "$SERVER_URL" ]]; then
+    echo "CLIENT_SIM_SERVER_URL=${SERVER_URL}" >> "$ENV_FILE"
+fi
 chmod 600 "$ENV_FILE"
 echo "  OK: $ENV_FILE"
 
