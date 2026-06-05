@@ -4186,6 +4186,8 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "usb_count": int(state.get("usb_count", 0)),
             "node": state.get("node", {}),
             "provision_halt": state.get("provision_halt"),
+            "cpu_1h_avg": state.get("cpu_1h_avg"),
+            "mem_1h_avg": state.get("mem_1h_avg"),
         })
     return result
 
@@ -9016,6 +9018,29 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     tagged_present_usb = [{**e, "_agent_hostname": hostname} for e in normalized_present_usb]
     tagged_unknown_usb = [{**e, "_agent_hostname": hostname} for e in proxmox_state.get("unknown_usb", [])]
 
+    # Maintain per-agent rolling resource samples (1-hour window) so the detail
+    # card can show per-server CPU/mem averages in a multi-Proxmox setup.
+    _prev_agent = proxmox_states.get(hostname, {})
+    _agent_cpu_samples: list[tuple[float, float]] = _prev_agent.get("_cpu_samples", [])
+    _agent_mem_samples: list[tuple[float, float]] = _prev_agent.get("_mem_samples", [])
+    _sample_cutoff = now - _RESOURCE_SAMPLE_WINDOW
+    _anode = body.get("node", {}) or {}
+    _cpu_pct = _anode.get("cpu_percent")
+    if _cpu_pct is not None:
+        _agent_cpu_samples = [(ts, v) for ts, v in _agent_cpu_samples if ts >= _sample_cutoff]
+        _agent_cpu_samples.append((now, float(_cpu_pct)))
+    _mem_used  = _anode.get("mem_used_kb")
+    _mem_total = _anode.get("mem_total_kb")
+    if _mem_used is not None and _mem_total:
+        try:
+            _mem_pct = float(_mem_used) / float(_mem_total) * 100.0
+            _agent_mem_samples = [(ts, v) for ts, v in _agent_mem_samples if ts >= _sample_cutoff]
+            _agent_mem_samples.append((now, _mem_pct))
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+    _agent_cpu_avg = (sum(v for _, v in _agent_cpu_samples) / len(_agent_cpu_samples)) if _agent_cpu_samples else None
+    _agent_mem_avg = (sum(v for _, v in _agent_mem_samples) / len(_agent_mem_samples)) if _agent_mem_samples else None
+
     # Update per-agent state for multi-server list UI.
     proxmox_states[hostname] = {
         "connected": True,
@@ -9026,6 +9051,10 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
         "provision_halt": body.get("provision_halt"),
+        "_cpu_samples": _agent_cpu_samples,
+        "_mem_samples": _agent_mem_samples,
+        "cpu_1h_avg": _agent_cpu_avg,
+        "mem_1h_avg": _agent_mem_avg,
         "vms": tagged_vms,
         "usb_state": tagged_usb_state,
         "present_usb": tagged_present_usb,
