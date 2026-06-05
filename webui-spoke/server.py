@@ -2844,6 +2844,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     background_tasks["sim_client_sampler"] = asyncio.create_task(sim_client_count_sampler())
     background_tasks["acme_renewal"] = asyncio.create_task(acme_renewal_loop())
     background_tasks["demo_expiry"] = asyncio.create_task(_demo_expiry_task())
+    background_tasks["vm_sim_tag_sync"] = asyncio.create_task(_vm_sim_tag_sync_loop())
     yield
     # Flush client history to disk on shutdown
     await asyncio.to_thread(_save_client_history)
@@ -3337,6 +3338,122 @@ _cpu_samples: list[tuple[float, float]] = []
 _mem_samples: list[tuple[float, float]] = []
 _resource_samples_started: float = 0.0  # epoch when first sample was recorded
 _RESOURCE_SAMPLE_WINDOW = 3600  # seconds (1 hour)
+
+# ── Proxmox VM simulation tags ────────────────────────────────────────────────
+# Tracks which sim tags we last applied per (agent_hostname, vmid) to avoid
+# redundant API calls.  Keyed this way because VMIDs can collide across nodes.
+_vm_applied_sim_tags: dict[tuple[str, int], frozenset[str]] = {}
+_SIM_TAG_PREFIX = "sim-"
+
+
+def _sanitize_proxmox_tag(name: str) -> str:
+    """Normalize a simulation name to a Proxmox-safe tag with sim- prefix."""
+    name = re.sub(r'[^a-z0-9]+', '-', str(name).strip().lower()).strip('-')
+    tag = f"{_SIM_TAG_PREFIX}{name}" if not name.startswith(_SIM_TAG_PREFIX) else name
+    return tag[:64] if name else ""
+
+
+def _merge_sim_tags(current_tags_str: str, desired_sim_tags: list[str]) -> str:
+    """Replace only sim-prefixed tags while preserving any manual Proxmox tags."""
+    existing = [t.strip() for t in current_tags_str.split(';') if t.strip()]
+    non_sim = [t for t in existing if not t.lower().startswith(_SIM_TAG_PREFIX)]
+    merged = non_sim + sorted(set(t for t in desired_sim_tags if t))
+    return ';'.join(merged)
+
+
+async def _apply_sim_tags_for_vm(vmid: int, agent_hostname: str, desired_sim_tags: list[str], current_tags_str: str = "") -> None:
+    """Call Proxmox REST API to update simulation tags on a single VM."""
+    global _vm_applied_sim_tags
+    desired_set = frozenset(t for t in desired_sim_tags if t)
+    cache_key = (agent_hostname, vmid)
+    if _vm_applied_sim_tags.get(cache_key) == desired_set:
+        return  # no change since last apply
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    if not api_token or not agent_hostname:
+        return
+    node_data = proxmox_states.get(agent_hostname, {}).get("node") or {}
+    node = str(node_data.get("hostname") or agent_hostname).split(".")[0]
+    url = f"https://{agent_hostname}:8006/api2/json/nodes/{node}/qemu/{vmid}/config"
+    headers = {"Authorization": f"PVEAPIToken={api_token}"}
+    merged = _merge_sim_tags(current_tags_str, list(desired_set))
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=8) as hc:
+            resp = await hc.put(url, headers=headers, data={"tags": merged})
+        if resp.status_code == 200:
+            _vm_applied_sim_tags[cache_key] = desired_set
+            logger.debug("VM %s tags updated: %s", vmid, merged or "(cleared)")
+        else:
+            logger.debug("VM %s tag update failed: HTTP %s", vmid, resp.status_code)
+    except Exception as exc:
+        logger.debug("VM %s tag update error: %s", vmid, exc)
+
+
+async def _sync_sim_tags_for_client(client_hostname: str) -> None:
+    """Immediately sync simulation tags for the VM matching this client hostname."""
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    if not api_token:
+        return
+    norm = client_hostname.strip().lower()
+    async with state_lock:
+        client_data = clients.get(client_hostname) or clients.get(norm)
+        if not client_data:
+            return
+        online = compute_online(client_data.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
+        sim_tags = [_sanitize_proxmox_tag(s) for s in client_data.get("active_simulations", []) if str(s).strip()] if online else []
+        found_vmid: int | None = None
+        found_agent: str | None = None
+        current_tags = ""
+        for agent_hn, st in proxmox_states.items():
+            for vm in (st.get("vms") or []):
+                if str(vm.get("name") or "").strip().lower() == norm and not vm.get("is_template") and vm.get("type") != "lxc":
+                    found_vmid = int(vm["vmid"])
+                    found_agent = agent_hn
+                    current_tags = str(vm.get("tags") or "")
+                    break
+            if found_vmid:
+                break
+    if found_vmid and found_agent:
+        await _apply_sim_tags_for_vm(found_vmid, found_agent, sim_tags, current_tags)
+
+
+async def _sync_all_vm_sim_tags() -> None:
+    """Sweep all known VMs and reconcile their simulation tags against live client data."""
+    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    if not api_token:
+        return
+    async with state_lock:
+        now_dt = utcnow()
+        client_sim_map: dict[str, tuple[list[str], str]] = {}  # norm_hostname → (sim_tags, current_tags)
+        for hn, c in clients.items():
+            online = compute_online(c.get("last_seen", datetime.min.replace(tzinfo=timezone.utc)))
+            tags = [_sanitize_proxmox_tag(s) for s in c.get("active_simulations", []) if str(s).strip()] if online else []
+            client_sim_map[hn.strip().lower()] = tags
+        agent_vms: list[tuple[str, dict]] = [
+            (hn, vm)
+            for hn, st in proxmox_states.items()
+            for vm in (st.get("vms") or [])
+        ]
+    for agent_hn, vm in agent_vms:
+        vmid = vm.get("vmid")
+        vm_name = str(vm.get("name") or "").strip().lower()
+        if not vmid or not vm_name or vm.get("is_template") or vm.get("type") == "lxc":
+            continue
+        desired_sim_tags = client_sim_map.get(vm_name)
+        if desired_sim_tags is None:
+            continue  # not a managed client VM — don't touch tags
+        current_tags = str(vm.get("tags") or "")
+        await _apply_sim_tags_for_vm(int(vmid), agent_hn, desired_sim_tags, current_tags)
+
+
+async def _vm_sim_tag_sync_loop() -> None:
+    """Background loop: sync simulation tags every 60 seconds."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await _sync_all_vm_sim_tags()
+        except Exception as exc:
+            logger.warning("VM sim tag sync loop error: %s", exc)
+
 
 
 def _resource_1h_average(samples: list[tuple[float, float]]) -> float | None:
@@ -11338,6 +11455,7 @@ async def api_status(status: ClientStatus) -> dict[str, Any]:
     await broadcast({"type": "status_update", "client": payload})
     if watchdog_changed:
         await _broadcast_proxmox_state()
+    asyncio.create_task(_sync_sim_tags_for_client(status.hostname))
     return {"status": "ok", "client": payload}
 
 

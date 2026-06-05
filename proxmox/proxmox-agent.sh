@@ -2578,7 +2578,7 @@ _usb_provision_loop_impl() {
 
     if [[ ${#_prov_buses[@]} -gt 0 ]]; then
         local _active_pids=() _all_pids=()
-        local _slot_deadline=0
+        local _slot_deadline=0 _last_cfg_refresh=0
         for _i in "${!_prov_buses[@]}"; do
             # Wait for a concurrency slot, but enforce a D-state timeout so a hung
             # qm clone descendant cannot hold the provision flock indefinitely.
@@ -2601,6 +2601,12 @@ _usb_provision_loop_impl() {
                         done
                         _active_pids=()
                         break
+                    fi
+                    # Refresh config every 30s while waiting so a change to
+                    # RECLONE_CONCURRENCY takes effect mid-cycle.
+                    if (( _now_slot - _last_cfg_refresh >= 30 )); then
+                        refresh_usb_config 2>/dev/null || true
+                        _last_cfg_refresh=$_now_slot
                     fi
                     sleep 3
                 fi
@@ -3177,6 +3183,7 @@ for v in qemu:
         'reclone_source_vmid': source_vmid,
         'reclone_supported':   supported,
         'reclone_reason':      reason,
+        'tags':                str(v.get('tags') or ''),
     })
 for v in lxc:
     vmid = v.get('vmid')
