@@ -62,23 +62,29 @@ if [[ -z "$staged_non_conf" ]]; then
     exit 0
 fi
 
-# On main: only bump linux/VERSION when linux/ scripts are staged.
-# The post-merge hook handles installer/agent version bumps on merges.
+# On main: bump installer VERSION on every non-conf commit; also bump linux/VERSION
+# when linux/ scripts are staged.
 if [[ "$_current_branch" == "main" ]]; then
+    # Always bump install-lxc.sh VERSION (shown as "GitHub Repo" in the UI)
+    inst_current=$(grep -m1 '^VERSION=' "$INSTALLER" | sed 's/VERSION=//;s/"//g' | tr -d '[:space:]')
+    if [[ -n "$inst_current" ]]; then
+        inst_new=$(awk -v v="$inst_current" 'BEGIN { printf "%.2f", v + 0.01 }')
+        echo "[pre-commit] Bumping $INSTALLER VERSION $inst_current → $inst_new"
+        sed -i '' "s/^VERSION=\"[^\"]*\"/VERSION=\"${inst_new}\"/" "$INSTALLER"
+        git add "$INSTALLER"
+    fi
+
+    # Also bump linux/VERSION when linux/ scripts are staged
     staged_linux=$(git diff --cached --name-only --diff-filter=ACM | grep '^linux/' | grep -v '\.conf$' || true)
-    if [[ -z "$staged_linux" ]]; then
-        echo "[pre-commit] On main — no linux/ script changes, skipping version bump"
-        exit 0
+    if [[ -n "$staged_linux" ]]; then
+        lv_current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
+        if [[ -n "$lv_current" ]]; then
+            lv_new=$(awk -v v="$lv_current" 'BEGIN { printf "%.2f", v + 0.01 }')
+            echo "[pre-commit] Bumping linux/VERSION $lv_current → $lv_new"
+            echo "$lv_new" > "$LINUX_VER_FILE"
+            git add "$LINUX_VER_FILE"
+        fi
     fi
-    current=$(cat "$LINUX_VER_FILE" 2>/dev/null | tr -d '[:space:]')
-    if [[ -z "$current" ]]; then
-        echo "[pre-commit] WARNING: $LINUX_VER_FILE not found — skipping version bump"
-        exit 0
-    fi
-    new=$(awk -v v="$current" 'BEGIN { printf "%.2f", v + 0.01 }')
-    echo "[pre-commit] Bumping linux/VERSION $current → $new (direct commit to main)"
-    echo "$new" > "$LINUX_VER_FILE"
-    git add "$LINUX_VER_FILE"
     exit 0
 fi
 
