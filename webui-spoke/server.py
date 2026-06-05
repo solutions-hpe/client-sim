@@ -3564,7 +3564,7 @@ async def _event_loop_lag_monitor() -> None:
             await _broadcast_server_pressure()
 
 
-
+def _resource_1h_average(samples: list[tuple[float, float]]) -> float | None:
     """Return the rolling mean of all samples within the last hour.
 
     Returns the average of whatever samples exist as soon as the first one
