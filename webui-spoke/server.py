@@ -764,6 +764,11 @@ def _load_update_state() -> None:
         if not isinstance(raw, dict):
             raise ValueError("update state must be an object")
         for key in update_state:
+            # Never restore current_version from disk — it must always reflect
+            # the INSTALLER_VERSION file so that a self-update restart shows the
+            # new version rather than the stale pre-update value.
+            if key == "current_version":
+                continue
             if key in raw:
                 update_state[key] = raw[key]
         if update_state.get("update_in_progress"):
