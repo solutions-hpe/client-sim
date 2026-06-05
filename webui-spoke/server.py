@@ -9010,6 +9010,11 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     # Tag each VM with the reporting agent hostname for client-side per-agent filtering.
     tagged_vms = [{**vm, "_agent_hostname": hostname} for vm in enriched_vms]
 
+    # Tag each USB entry with the reporting agent hostname for client-side per-agent filtering.
+    tagged_usb_state   = [{**e, "_agent_hostname": hostname} for e in normalized_usb_state]
+    tagged_present_usb = [{**e, "_agent_hostname": hostname} for e in normalized_present_usb]
+    tagged_unknown_usb = [{**e, "_agent_hostname": hostname} for e in proxmox_state.get("unknown_usb", [])]
+
     # Update per-agent state for multi-server list UI.
     proxmox_states[hostname] = {
         "connected": True,
@@ -9020,13 +9025,22 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
         "vms": tagged_vms,
+        "usb_state": tagged_usb_state,
+        "present_usb": tagged_present_usb,
+        "unknown_usb": tagged_unknown_usb,
     }
 
     # Rebuild merged VM list from all approved agents so the VMs tab shows
     # all agents' VMs (not just the most recently reporting one).
     all_vms: list[dict[str, Any]] = []
+    all_usb_state: list[dict[str, Any]] = []
+    all_present_usb: list[dict[str, Any]] = []
+    all_unknown_usb: list[dict[str, Any]] = []
     for st in proxmox_states.values():
         all_vms.extend(st.get("vms", []))
+        all_usb_state.extend(st.get("usb_state", []))
+        all_present_usb.extend(st.get("present_usb", []))
+        all_unknown_usb.extend(st.get("unknown_usb", []))
     proxmox_state["vms"] = all_vms
 
     # Update the vmid→hostname routing map so delete/reclone commands target the right node.
@@ -9040,8 +9054,9 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         _proxmox_agent_vm_map[vmid] = hostname
 
     proxmox_state["reseed_in_progress"] = _proxmox_reseed_in_progress
-    proxmox_state["usb_state"] = normalized_usb_state
-    proxmox_state["present_usb"] = normalized_present_usb
+    proxmox_state["usb_state"] = all_usb_state
+    proxmox_state["present_usb"] = all_present_usb
+    proxmox_state["unknown_usb"] = all_unknown_usb
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
@@ -9132,7 +9147,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             await _async_save_vm_watchdog()
         elif torn_down:
             proxmox_state["prov_summary"] = {"action": "deleted", "count": len(torn_down), "at": now}
-    _update_provision_run_state(enriched_vms, new_usb, now)
+    _update_provision_run_state(proxmox_state["vms"], new_usb, now)
     _prev_usb_by_vmid = new_by_vmid
 
     # Auto-reset a stale reclone run to idle when:
