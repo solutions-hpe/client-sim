@@ -496,7 +496,7 @@ curl_api() {
     response=$(curl "${args[@]}" -w $'\n%{http_code}') || curl_exit=$?
     http_code="${response##*$'\n'}"
     body="${response%$'\n'*}"
-    record_hub_contact_result "$http_code" "$curl_exit"
+    record_hub_contact_result "$http_code" "$curl_exit" >&2
     if (( curl_exit != 0 )); then
         log "curl_api ERROR: ${method} ${path} curl exited ${curl_exit} (HTTP ${http_code})"
         return 1
@@ -582,7 +582,7 @@ curl_api_status() {
     [[ -n "$data" ]] && args+=(-d "$data")
     response=$(curl "${args[@]}") || curl_exit=$?
     http_code="${response##*$'\n'}"
-    record_hub_contact_result "$http_code" "$curl_exit"
+    record_hub_contact_result "$http_code" "$curl_exit" >&2
     printf '%s' "$response"
     (( curl_exit == 0 ))
 }
