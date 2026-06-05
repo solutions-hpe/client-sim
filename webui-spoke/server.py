@@ -4143,9 +4143,24 @@ def _pending_proxmox_payload() -> list[dict[str, Any]]:
     ]
 
 
+# Per-agent state tracking — hostname → state snapshot updated on each telemetry push.
+# This is separate from the single proxmox_state which maintains backward compatibility.
+proxmox_states: dict[str, dict[str, Any]] = {}
+
+
 def _approved_proxmox_payload() -> list[dict[str, Any]]:
-    ver = proxmox_state.get("agent_version")
-    return [{"hostname": hostname, "agent_version": ver} for hostname in approved_proxmox_agents]
+    result = []
+    for hostname in approved_proxmox_agents:
+        state = proxmox_states.get(hostname, {})
+        result.append({
+            "hostname": hostname,
+            "connected": bool(state.get("connected", False)),
+            "last_seen": state.get("last_seen"),
+            "agent_version": state.get("agent_version"),
+            "pve_version": state.get("pve_version"),
+            "vm_count": int(state.get("vm_count", 0)),
+        })
+    return result
 
 
 def _client_os_counts() -> dict[str, int]:
@@ -7953,6 +7968,11 @@ async def heartbeat_check() -> None:
                 if age > OFFLINE_TIMEOUT:
                     proxmox_state["connected"] = False
                     await _broadcast_proxmox_state()
+            # Also mark per-agent states stale so the multi-server list stays accurate.
+            for _hn, _st in proxmox_states.items():
+                if _st.get("connected") and _st.get("last_seen"):
+                    if time.time() - float(_st["last_seen"]) > OFFLINE_TIMEOUT:
+                        _st["connected"] = False
 
             # Auto-reset reclone state after 8 hours on successful completion
             if reclone_state.get("status") == "completed":
@@ -8961,6 +8981,16 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     _proxmox_reseed_in_progress = bool(body.get("reseed_in_progress", False))
     proxmox_state["node"] = body.get("node", {}) or {}
     proxmox_state["vms"] = enriched_vms
+
+    # Update per-agent state for multi-server list UI.
+    proxmox_states[hostname] = {
+        "connected": True,
+        "last_seen": now,
+        "agent_version": str(body.get("agent_version", "")).strip() or None,
+        "pve_version": str(body.get("pve_version", "")).strip() or None,
+        "vm_count": len(enriched_vms),
+        "node": body.get("node", {}) or {},
+    }
 
     # Update the vmid→hostname routing map so delete/reclone commands target the right node.
     reported_vmids = {int(vm["vmid"]) for vm in enriched_vms if vm.get("vmid") is not None}
