@@ -4865,7 +4865,14 @@ async def _queue_command(target: str, action: str, args: dict[str, Any] | None =
 
 
 async def _queue_proxmox_command(action: str, args: dict[str, Any] | None = None, command_type: str | None = None, target: str = "proxmox") -> dict[str, Any]:
-    return await _queue_command(target, action, args, command_type=command_type)
+    # In multi-agent setups, resolve the generic "proxmox" target to the currently
+    # WS-connected (primary) agent so the command is delivered to exactly one agent.
+    # Commands remain generic "proxmox" if no agent is currently connected via WS
+    # (they'll be picked up by whichever agent polls next).
+    resolved = target
+    if target == "proxmox" and proxmox_ws_hostname:
+        resolved = proxmox_ws_hostname
+    return await _queue_command(resolved, action, args, command_type=command_type)
 
 
 def _resolve_proxmox_vm_target(vmid: int | None) -> str:
@@ -9627,6 +9634,9 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
     if new_lines:
+        # Prefix log lines with the agent hostname so multi-agent logs are distinguishable
+        if len(approved_proxmox_agents) > 1:
+            new_lines = [f"[{hostname}] {ln}" if not ln.startswith(f"[{hostname}]") else ln for ln in new_lines]
         proxmox_log_buffer.extend(new_lines)
         if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
             del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
@@ -9697,8 +9707,11 @@ async def proxmox_log_push(request: Request, body: dict = Body(...)) -> dict[str
     _approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, client_ip, time.time())
     if response is not None:
         return response
+    canonical_hn = _approved_hostname or hostname
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]
     if new_lines:
+        if len(approved_proxmox_agents) > 1:
+            new_lines = [f"[{canonical_hn}] {ln}" if not ln.startswith(f"[{canonical_hn}]") else ln for ln in new_lines]
         proxmox_log_buffer.extend(new_lines)
         if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
             del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
