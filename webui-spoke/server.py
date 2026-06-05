@@ -9380,8 +9380,11 @@ async def proxmox_telemetry(request: Request, body: dict = Body(...)) -> dict[st
     _approved_hostname, response = await _authorize_proxmox_agent(hostname, api_key, client_ip, now)
     if response is not None:
         return response
+    # Use the canonical key from approved_proxmox_agents so proxmox_states entries
+    # are keyed consistently regardless of case or minor hostname format differences.
+    canonical_hostname = _approved_hostname or hostname
     try:
-        return await _apply_proxmox_telemetry_state(body, hostname, now)
+        return await _apply_proxmox_telemetry_state(body, canonical_hostname, now)
     except Exception:
         tb = traceback.format_exc()
         logger.error("TELEMETRY HANDLER CRASH for %s:\n%s", hostname, tb)
