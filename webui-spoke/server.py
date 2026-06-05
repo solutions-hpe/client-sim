@@ -8993,7 +8993,9 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         _debug_event("proxmox_reconnected", f"agent={hostname} gap={gap:.0f}s")
     _proxmox_reseed_in_progress = bool(body.get("reseed_in_progress", False))
     proxmox_state["node"] = body.get("node", {}) or {}
-    proxmox_state["vms"] = enriched_vms
+
+    # Tag each VM with the reporting agent hostname for client-side per-agent filtering.
+    tagged_vms = [{**vm, "_agent_hostname": hostname} for vm in enriched_vms]
 
     # Update per-agent state for multi-server list UI.
     proxmox_states[hostname] = {
@@ -9003,7 +9005,15 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "pve_version": str(body.get("pve_version", "")).strip() or None,
         "vm_count": len(enriched_vms),
         "node": body.get("node", {}) or {},
+        "vms": tagged_vms,
     }
+
+    # Rebuild merged VM list from all approved agents so the VMs tab shows
+    # all agents' VMs (not just the most recently reporting one).
+    all_vms: list[dict[str, Any]] = []
+    for st in proxmox_states.values():
+        all_vms.extend(st.get("vms", []))
+    proxmox_state["vms"] = all_vms
 
     # Update the vmid→hostname routing map so delete/reclone commands target the right node.
     reported_vmids = {int(vm["vmid"]) for vm in enriched_vms if vm.get("vmid") is not None}
