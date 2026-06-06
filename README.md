@@ -20,9 +20,12 @@ This repo is the local execution plane. It can run standalone, or relay telemetr
 At an operational level, this repo gives you:
 
 - a FastAPI spoke dashboard/API inside a Proxmox LXC
-- a Proxmox host agent for VM, USB, reclone, post-provision retry, and guest-agent watchdog operations
+- a Proxmox host agent for VM, USB, USB quarantine, reclone, post-provision retry, and guest-agent watchdog operations
 - Linux VM scripts that fetch config, run simulations, and report status
-- accurate Proxmox host CPU/memory telemetry with 1-hour rolling averages, warmup estimates, and hub relay support
+- multi-Proxmox spoke support, with each connected host tracked independently by canonical hostname
+- direct Proxmox VNC console workflows exposed through the spoke VM Server
+- accurate per-agent Proxmox CPU/memory telemetry with 1-hour rolling averages, warmup estimates, provision-halt state, and hub relay support
+- backpressure throttling so sim clients slow down under heavy API/WebSocket load instead of overwhelming the spoke
 - watchdogs for both the spoke service and Proxmox agent
 - configuration-driven simulation behavior using INI files
 - shared hub-style spoke config editors for `simulation.conf` and `user-overrides.conf`
@@ -171,7 +174,7 @@ curl http://169.253.1.1:8000/api/proxmox/status
 
 | Flag | Meaning |
 |---|---|
-| `--server <url>` | Required spoke URL used by the Proxmox agent for local API access |
+| `--server <url>` | Required spoke URL used by the Proxmox agent for local API access; supplying it skips the legacy LXC `1001` lookup during install |
 | `--hub-url <url>` | Optional Hub URL used for one-time spoke bootstrap and installer SAS requests |
 | `--tenant-id <id>` | Optional tenant identifier passed to the spoke bootstrap flow |
 | `--installer-key <key>` | Optional shared secret sent as `X-Installer-Key` when requesting the installer SAS token from Hub |
@@ -198,15 +201,19 @@ On production `main`, `installer-override.conf` is intentionally **not** shipped
 
 ### Proxmox telemetry, warmup, and recovery
 
-Recent Proxmox-side changes add five operator-visible behaviors:
+Recent Proxmox-side changes add these operator-visible behaviors:
 
-- **Accurate host CPU** — `proxmox-agent.sh` now samples `/proc/stat` twice, 1 second apart, and reports `(1 − Δidle / Δtotal) × 100`. This captures total host CPU load (user, nice, system, iowait, irq, softirq), not just top's user-space `%us` value.
-- **1-hour CPU and memory averages** — `webui-spoke/server.py` records rolling CPU and memory samples from node telemetry and exposes both confirmed 1-hour averages and warmup estimates.
-- **Three warmup UI states** — the spoke Details tab and hub Details view now show: `📊 warming up… <N> min remaining` when no samples exist yet, `📊 CPU avg: ~3.2% (<N> min remaining)` / `Mem avg: ~…` while the 1-hour window is still filling, and `📊 CPU avg: 3.2%` / `Mem avg: 41.7%` once the full 60-minute window is available.
+- **Multi-Proxmox host tracking** — multiple agents can connect to one spoke at the same time, and `webui-spoke/server.py` keeps each host in `proxmox_states` keyed by canonical hostname so cards, drill-down pages, and commands stay scoped to the correct node.
+- **Accurate host CPU** — `proxmox-agent.sh` samples `/proc/stat` twice, 1 second apart, and reports `(1 − Δidle / Δtotal) × 100`. This captures total host CPU load (user, nice, system, iowait, irq, softirq), not just top's user-space `%us` value.
+- **Per-agent 1-hour CPU and memory averages** — `webui-spoke/server.py` records rolling CPU and memory samples per host and exposes both confirmed 1-hour averages and warmup estimates.
+- **Three warmup UI states** — the spoke Details tab and hub Details view show: `📊 warming up… <N> min remaining` when no samples exist yet, `📊 CPU avg: ~3.2% (<N> min remaining)` / `Mem avg: ~…` while the 1-hour window is still filling, and `📊 CPU avg: 3.2%` / `Mem avg: 41.7%` once the full 60-minute window is available.
 - **Persisted warmup cache** — `webui-spoke/resource_cache.json` stores `cpu_samples`, `mem_samples`, `started`, `agent_version`, and `pve_version` so a spoke restart does not reset the warmup countdown or blank the Details version rows.
+- **Provision halt telemetry + dual CPU gate** — `check_resource_halt()` runs on every main-loop pass, writes a cache entry with `{halted, reason, cpu_pct, cpu_threshold, mem_pct, mem_threshold, ts}`, and feeds the UI halt/throttle badges. Provision pacing now uses both an instantaneous ramp ceiling and an inter-clone pacing ceiling.
+- **Delete gate hardening (v1.26–v1.28)** — automatic deletes tear down only the highest VMID when the 1-hour average CPU is at or above the delete threshold (default `90%`), require warmed CPU/memory telemetry before any allow/deny decision, and enforce a 5-minute cooldown after any delete that blocks both further deletes and re-provisioning. Done/failed `prov_run` items also clear stale `provisioning` state automatically.
+- **VMID gap audit (v1.28)** — every 5 minutes per host, the agent checks the reported `vmid_range` for gaps in sequential VMID assignment and queues deletion of the highest VMID above the gap to restore order. This repair path intentionally bypasses the normal delete cooldown.
 - **Recovery queues and watchdogs** — if a VM misses the post-reboot `update.sh` step because the guest agent is still unavailable, the agent retries every 10 minutes and destroys/reclones the VM after 1 hour. Separately, the VM guest-agent watchdog monitors `qm guest ping`, soft-reboots unresponsive guests, and reclones them if they stay down beyond the configured escalation thresholds.
 
-When relay is enabled, Hub receives `agent_version`, `pve_version`, `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, `resource_samples_started`, and per-VM `cpu` / `mem` / `maxmem` fields through `_build_relay_telemetry_payload()`. The raw sample history itself stays local on the spoke in `resource_cache.json`.
+When relay is enabled, Hub receives per-host `agent_version`, `pve_version`, `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, `resource_samples_started`, `vmid_range`, `provision_halt`, and per-VM `cpu` / `mem` / `maxmem` fields through `_build_relay_telemetry_payload()`. The raw sample history itself stays local on the spoke in `resource_cache.json`.
 
 ### USB allocation policies
 
@@ -215,6 +222,8 @@ Spoke USB auto-provisioning is configured in **Setup → Proxmox**.
 - `sim_phy` now accepts `wireless`, `ethernet`, or `any`.
 - `sim_phy=any` allows any certified dongle type to be provisioned, and the Proxmox workflow writes the VM's effective `sim_phy` to match the actual dongle type attached.
 - **Use All Available Dongles** lets the spoke or hub overflow to the other certified dongle type when the preferred type is exhausted.
+- `protected_vmids` accepts comma-separated VMIDs and inclusive ranges such as `100-90000`; those guests are excluded from UI-driven delete/reclone/start/stop actions, including **Delete All Sim VMs**.
+- USB bus quarantine state is carried through spoke and hub telemetry so the bash agent can suppress unstable or unwanted buses without losing visibility.
 - The hub tenant setting lives in **Setup → Tenant Setup** and the local spoke override lives in **Setup → Proxmox**.
 
 ### VirtualHere auto-use sync
@@ -461,7 +470,10 @@ curl http://localhost:8000/api/proxmox/pending
 curl http://localhost:8000/api/proxmox/approved
 curl http://localhost:8000/api/proxmox/reclone-status
 curl http://localhost:8000/api/proxmox/usb-config
+curl -X POST http://localhost:8000/api/proxmox/console/<vmid>
 ```
+
+`POST /api/proxmox/console/{vmid}` creates a direct Proxmox VNC console session for the spoke VM Server view; the browser then opens `/console?session_id=<id>` and bridges over `WS /ws/console/{session_id}`.
 
 #### Relay and repo views
 
@@ -564,7 +576,7 @@ The FastAPI lifespan boot starts these tasks:
 #### Main in-memory state families
 
 - `clients`
-- `proxmox_state`
+- `proxmox_states` (one entry per connected Proxmox host, keyed by canonical hostname)
 - `central_status`
 - `central_wireless_clients`
 - `relay_state`
@@ -579,11 +591,12 @@ The FastAPI lifespan boot starts these tasks:
 `proxmox/proxmox-agent.sh` runs on the Proxmox host and owns:
 
 - host registration and API key persistence
-- USB certification and assignment tracking
-- VM inventory, node telemetry collection, and host `agent_version` / `pve_version` reporting
+- USB certification, quarantine, and assignment tracking
+- VM inventory, node telemetry collection, and host `agent_version` / `pve_version` / `vmid_range` reporting
 - VM provisioning, recloning, deletion, post-provision retry handling, and updates
+- provision-halt caching, delete-gate enforcement, and VMID gap-audit repair logic
 - VM guest-agent watchdog health / reboot / reclone escalation
-- command polling/ACK handling
+- command polling/ACK handling, including non-blocking `delete_vm` ACKs
 - self-update scheduling
 
 #### State file format
@@ -601,7 +614,9 @@ That file is reloaded on every agent restart to reconstruct USB-to-VM mappings.
 - background telemetry sender every `TELEMETRY_INTERVAL`
 - background inbox processor every `INBOX_INTERVAL`
 - USB scan/provision loop in the main process
+- unconditional `check_resource_halt()` evaluation on every loop iteration
 - post-provision retry queue sweep for VMs that missed the post-reboot step
+- VMID gap audit every 5 minutes per host
 - VM guest-agent watchdog sweep using the configured grace/check/reboot/reclone timers
 - periodic self-update check
 

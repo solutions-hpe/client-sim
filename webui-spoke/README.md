@@ -6,6 +6,8 @@ It runs close to the simulation environment — typically in a **Proxmox LXC con
 
 - monitors client VM heartbeats, errors, and simulation state
 - serves config and scripts to simulation clients
+- tracks multiple connected Proxmox agents independently by canonical hostname
+- exposes direct Proxmox VNC console sessions for the local VM Server view
 - connects to **Aruba Central** for site, alert, and telemetry context
 - relays telemetry and receives commands from **webui-hub** using the hub registration + inbox/ack workflow
 
@@ -31,7 +33,7 @@ Aruba Central (AP/switch telemetry)
 
 - Host the browser UI and local API for the site/lab
 - Track simulation client health, overrides, logs, and command state
-- Track Proxmox node telemetry, 1-hour warmup samples, retry-queue state, and guest-agent watchdog recovery for the VM Server UI
+- Track Proxmox node telemetry, per-agent 1-hour warmup samples, `provision_halt` state, and guest-agent watchdog recovery for the VM Server UI
 - Manage `simulation.conf` and `user-overrides.conf` locally when running standalone
 - Poll Aruba Central and correlate Central status with local client/site mappings
 - Act as the tenant-approved relay endpoint consumer for hub-issued commands
@@ -119,24 +121,30 @@ If Hub is connected, tenant pushes still win and are written locally as `hub-sim
 
 The spoke VM Server view now stays aligned with the shared frontend used by Hub:
 
-- **VMs**, **USB (T2)**, **IoT (T3)**, **Other**, **VirtualHere**, **Command Queue**, and **Details**
+- a two-level **server list → agent detail** navigation model when more than one Proxmox host is connected
+- **VMs**, **USB (T2)**, **IoT (T3)**, **Other**, **VirtualHere**, **Command Queue**, and **Details** sub-tabs per selected host
+- per-server CPU/memory average pills plus throttle / `provision_halt` badges on cards and in the detail breadcrumb
+- direct VNC launch from the spoke-side VM Server for supported guests
 - **IoT (T3)** shows VMs with T3 PCI passthrough rather than raw PCI devices
 - **Other** shows non-sim, non-IoT VMs plus containers
 
 ### Resource metrics and warmup states
 
-- Host CPU now uses a two-sample `/proc/stat` diff taken 1 second apart, so the reported percentage reflects total host load instead of only top's user-space `%us`.
+- Host CPU uses a two-sample `/proc/stat` diff taken 1 second apart, so the reported percentage reflects total host load instead of only top's user-space `%us`.
 - Memory usage is calculated from `MemTotal` and `MemAvailable` on the Proxmox host.
-- The Details view exposes `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, and `resource_samples_started`.
+- The Details view exposes `cpu_1h_avg`, `mem_1h_avg`, `cpu_est_avg`, `mem_est_avg`, `resource_samples_started`, `vmid_range`, and `provision_halt` per agent.
 - The shared UI shows three states for the 1-hour averages:
   1. `📊 warming up… <N> min remaining` — the 60-minute sample window has started but no confirmed average exists yet
   2. `📊 CPU avg: ~3.2% (<N> min remaining)` / `Mem avg: ~…` — estimated average from samples collected so far
   3. `📊 CPU avg: 3.2%` / `Mem avg: 41.7%` — confirmed 1-hour rolling average once the full window is available
 - `resource_cache.json` persists `cpu_samples`, `mem_samples`, `started`, `agent_version`, and `pve_version` so a restart does not reset the warmup countdown or blank version metadata.
+- `check_resource_halt()` runs every loop iteration and caches `{halted, reason, cpu_pct, cpu_threshold, mem_pct, mem_threshold, ts}` so the UI can show current throttle/halt status even between telemetry refreshes.
 
 ### Recovery flows
 
 - If a VM misses the post-reboot `update.sh` step because the guest agent is still unavailable, the Proxmox agent puts it into a post-provision retry queue, retries every 10 minutes, and deletes/reclones it after 1 hour if the guest agent never responds.
+- Automatic delete decisions require warmed CPU/memory telemetry, remove only the highest VMID when the 1-hour average CPU reaches the delete threshold (default `90%`), and enforce a 5-minute delete cooldown that blocks both further deletes and re-provisioning.
+- Every 5 minutes per host, the VMID gap audit checks sequential VMID allocation and queues deletion of the highest VMID above a gap to restore order; this repair path bypasses the normal delete cooldown.
 - The VM guest-agent watchdog tracks `qm guest ping` health per VM, marks guests as `agent down`, soft-reboots them after the configured threshold, and reclones them if they remain unresponsive.
 - Watchdog state, command queue state, and reclone state are persisted asynchronously to disk so a spoke restart does not lose in-flight recovery context.
 
@@ -282,6 +290,10 @@ Standalone config-file editing is separate from `settings.json`: `simulation.con
 | `relay_poll_interval` | Relay polling interval in seconds |
 | `relay_onboarding_psk` | Optional tenant PSK used for hub auto-approval |
 | `use_all_dongles` | Allow overflow to the other certified dongle type when the preferred type is exhausted |
+| `cpu_provision_threshold` / `mem_provision_threshold` | 1-hour average thresholds that block new provisioning while a host is too busy |
+| `cpu_delete_threshold` / `mem_delete_threshold` | 1-hour average thresholds used by the delete gate before the highest VMID is torn down |
+| `protected_vmids` | Comma-separated VMIDs or ranges (for example `101, 200-90000`) excluded from destructive VM actions |
+| `watchdog_reboot_enabled` | `on` or `off`; when `off`, watchdog faults are reported but automatic reboot actions are skipped |
 | `site_mappings` | Local `wsite` to Aruba Central site name mapping |
 | `monitored_checks` | Central checks to watch per site |
 | `hardware_checks` | Hardware alert checks to watch |
@@ -367,7 +379,8 @@ These are the main local endpoints exposed by `webui-spoke`.
 | `GET` | `/api/clients` | Current client inventory/state. Each client includes `has_usb: bool` for T1/T2 classification |
 | `GET` | `/api/simulations` | Grouped simulation view |
 | `GET` | `/api/simulations/{sim_id}/clients` | Client list for one simulation/site bucket |
-| `GET` | `/api/proxmox/status` | Current Proxmox node/VM/USB state, including live CPU/RAM, 1-hour avg warmup fields, agent/pve versions, and VM recovery status |
+| `GET` | `/api/proxmox/status` | Current multi-host Proxmox state, including live CPU/RAM, per-agent 1-hour avg warmup fields, `vmid_range`, `provision_halt`, agent/pve versions, and VM recovery status |
+| `POST` | `/api/proxmox/console/{vmid}` | Create a direct Proxmox VNC console session for the local VM Server UI |
 | `GET` | `/api/hardware-alerts` | Current hardware alert summary |
 | `POST` | `/api/status` | Client heartbeat/beacon endpoint |
 | `GET` | `/api/config?hostname=<h>` | Render effective `simulation.conf` |
@@ -384,6 +397,7 @@ These are the main local endpoints exposed by `webui-spoke`.
 |---|---|---|
 | `POST` | `/api/commands` | Queue a command for one client, all clients, or the Proxmox agent |
 | `GET` | `/api/commands` | Full local command history |
+| `POST` | `/api/commands/cancel-all` | Clear the pending/delivered local command queue used by the Troubleshooting page's **Clear Message Queue** action |
 | `GET` | `/api/inbox?hostname=<h>` | Device/agent poll endpoint for pending commands |
 | `POST` | `/api/inbox/ack` | Device/agent ack endpoint for command results |
 | `POST` | `/api/relay/trigger` | Trigger immediate spoke↔hub relay sync |
@@ -539,7 +553,7 @@ After Central connectivity works:
 
 1. load local `wsite` values from `simulation.conf`
 2. load Central sites
-3. map local `wsite` values to Central site names
+3. map local `wsite` values to Central site names (the UI now auto-adds rows for unmapped local `wsite` values right after **Load Sites**)
 4. select monitored checks and hardware checks
 5. save the configuration so the spoke can poll and display results locally
 
@@ -559,6 +573,8 @@ Useful Central endpoints:
 ## Notification Setup
 
 Notifications are configured in **Setup** and stored under `notifications` in `settings.json`.
+
+The Troubleshooting page also includes a **Message Statistics** card with a **Clear Message Queue** action, and the agent / journal / install logs render newest-first so recent failures stay at the top.
 
 ### Microsoft Teams
 
