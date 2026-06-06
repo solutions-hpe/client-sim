@@ -2361,6 +2361,49 @@ reclone_vm_instance() {
     log "Recloned VM $vmid for USB $bus_path ($vidpid) type=$device_type image=$saved_image"
 }
 
+# ── Continuous resource gate check ──────────────────────────────────────────
+# Called every telemetry cycle to keep PROVISION_HALT_CACHE current regardless
+# of whether a provisioning event is in progress. Without this, the cache is
+# only written during active provision attempts, so the UI shows no throttle
+# indicator when "Idle" even though CPU/memory are above threshold.
+check_resource_halt() {
+    [[ "$AUTO_PROVISION" != "on" ]] && return 0
+    local _cpu _s1 _s2 _mem_total _mem_avail _mem_pct
+    _s1=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    sleep 1
+    _s2=$(grep '^cpu ' /proc/stat 2>/dev/null || echo "cpu 0 0 0 1 0 0 0 0")
+    _cpu=$(awk -v s1="$_s1" -v s2="$_s2" 'BEGIN {
+        n = split(s1, a); split(s2, b)
+        t1 = 0; t2 = 0
+        for (i = 2; i <= n; i++) { t1 += a[i]; t2 += b[i] }
+        dt = t2 - t1; di = b[5] - a[5]
+        printf "%.0f\n", (dt > 0) ? (1 - di/dt) * 100 : 0
+    }' 2>/dev/null) || _cpu=0
+    _mem_total=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+    _mem_avail=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}')
+    if [[ -n "$_mem_total" && "$_mem_total" -gt 0 ]]; then
+        _mem_pct=$(awk -v t="$_mem_total" -v a="$_mem_avail" \
+            'BEGIN { printf "%.0f\n", (1 - a/t) * 100 }' 2>/dev/null) || _mem_pct=0
+    else
+        _mem_pct=0
+    fi
+    if (( _cpu >= CPU_PROVISION_THRESHOLD )); then
+        printf '{"halted":true,"reason":"cpu","cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+            "$_cpu" "$CPU_PROVISION_THRESHOLD" "$_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+            > "$PROVISION_HALT_CACHE"
+        return 0
+    fi
+    if (( _mem_pct >= MEM_PROVISION_THRESHOLD )); then
+        printf '{"halted":true,"reason":"mem","cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+            "$_cpu" "$CPU_PROVISION_THRESHOLD" "$_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+            > "$PROVISION_HALT_CACHE"
+        return 0
+    fi
+    printf '{"halted":false,"reason":null,"cpu_pct":%s,"cpu_threshold":%s,"mem_pct":%s,"mem_threshold":%s,"ts":%s}\n' \
+        "$_cpu" "$CPU_PROVISION_THRESHOLD" "$_mem_pct" "$MEM_PROVISION_THRESHOLD" "$(date +%s)" \
+        > "$PROVISION_HALT_CACHE"
+}
+
 _usb_provision_loop_impl() {
     local now bus_path vidpid product_name vmid missing_since
     local timeout_seconds missing_age _current_bus _state_vidpid _guest_type
@@ -4823,6 +4866,7 @@ fi
 while true; do
     refresh_runtime_server_url
     maybe_redetect_hub_url || true
+    check_resource_halt || true
     # Reset provision cooldown if clear_provision_lock wrote the sentinel file.
     # The sentinel is written from a subshell (inbox poller / WS handler) which cannot
     # directly modify _PROV_COOLDOWN_UNTIL in this parent process.

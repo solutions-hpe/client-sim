@@ -9583,12 +9583,12 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         cpu_prov_ceil = _pct_setting("cpu_provision_ceiling",  "90")
         mem_prov_thr  = _pct_setting("mem_provision_threshold", "80")
         mem_del_thr   = _pct_setting("mem_delete_threshold",   "90")
-        cpu_avg = _resource_1h_average(_cpu_samples)
-        mem_avg = _resource_1h_average(_mem_samples)
+        cpu_avg = _resource_1h_average(_agent_cpu_samples)
+        mem_avg = _resource_1h_average(_agent_mem_samples)
         # Most-recent instantaneous CPU reading (updated every ~30 s by telemetry).
         # Used as a hard ceiling to block provisioning during ramp-up before the
         # 1-hour average catches up.
-        cpu_instant = _cpu_samples[-1][1] if _cpu_samples else None
+        cpu_instant = _agent_cpu_samples[-1][1] if _agent_cpu_samples else None
 
         # Delete gate: if either metric exceeds its delete threshold and no delete is
         # already in flight, remove the newest sim VM (highest VMID) to shed load.
