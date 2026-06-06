@@ -7860,6 +7860,13 @@ def _cs_webui_branch() -> str:
     return branch or REPO_BRANCH
 
 
+def _webui_fetch_bytes(url: str, timeout: int) -> bytes:
+    """Blocking HTTP GET — must be called via asyncio.to_thread."""
+    import urllib.request as _urllib_req
+    with _urllib_req.urlopen(url, timeout=timeout) as resp:
+        return resp.read()
+
+
 async def refresh_webui_frontend() -> None:
     """On startup: compare the deployed cs-webui VERSION to the repo and
     download fresh frontend files (app.js, style.css, index.html) if stale.
@@ -7867,7 +7874,11 @@ async def refresh_webui_frontend() -> None:
     This self-heals spoke installs that were created before a cs-webui fix
     was committed — e.g. a broken app.js with a SyntaxError would cause all
     JavaScript to fail, breaking the entire UI.  Running the full installer
-    is not required; we only need to swap the three static files."""
+    is not required; we only need to swap the three static files.
+
+    All network I/O is offloaded to a thread pool via asyncio.to_thread so
+    the event loop is never blocked — a slow/unresponsive GitHub would
+    otherwise stall all HTTP request processing on the spoke."""
     branch = _cs_webui_branch()
     raw_base = f"{CS_WEBUI_REPO_RAW}/{branch}"
 
@@ -7878,12 +7889,11 @@ async def refresh_webui_frontend() -> None:
     except Exception:
         pass
 
-    # Fetch remote version (lightweight — just a few bytes)
+    # Fetch remote version (lightweight — just a few bytes); offload to thread
     remote_ver: str | None = None
     try:
-        import urllib.request as _urllib_req
-        with _urllib_req.urlopen(f"{raw_base}/VERSION", timeout=10) as resp:
-            remote_ver = resp.read().decode(errors="replace").strip()
+        raw = await asyncio.to_thread(_webui_fetch_bytes, f"{raw_base}/VERSION", 10)
+        remote_ver = raw.decode(errors="replace").strip()
     except Exception as exc:
         logger.warning("webui refresh: could not fetch remote VERSION: %s", exc)
         return
@@ -7921,8 +7931,8 @@ async def refresh_webui_frontend() -> None:
         dest = STATIC_DIR / rel_to_static
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with _urllib_req.urlopen(url, timeout=30) as resp:
-                dest.write_bytes(resp.read())
+            data = await asyncio.to_thread(_webui_fetch_bytes, url, 30)
+            await asyncio.to_thread(dest.write_bytes, data)
             logger.info("webui refresh: updated %s", rel_to_static)
         except Exception as exc:
             logger.error("webui refresh: failed to download %s: %s", rel_path, exc)
@@ -7930,10 +7940,9 @@ async def refresh_webui_frontend() -> None:
 
     # Download index.html template and inject WEBUI_MODE=spoke
     try:
-        with _urllib_req.urlopen(f"{raw_base}/templates/index.html", timeout=30) as resp:
-            html = resp.read().decode(errors="replace")
-        html = html.replace("{{WEBUI_MODE}}", "spoke")
-        (STATIC_DIR / "index.html").write_text(html, encoding="utf-8")
+        raw_html = await asyncio.to_thread(_webui_fetch_bytes, f"{raw_base}/templates/index.html", 30)
+        html = raw_html.decode(errors="replace").replace("{{WEBUI_MODE}}", "spoke")
+        await asyncio.to_thread((STATIC_DIR / "index.html").write_text, html, "utf-8")
         logger.info("webui refresh: updated index.html (WEBUI_MODE=spoke injected)")
     except Exception as exc:
         logger.error("webui refresh: failed to download index.html: %s", exc)
@@ -7941,7 +7950,7 @@ async def refresh_webui_frontend() -> None:
 
     # Write updated VERSION so next restart is a no-op
     try:
-        (STATIC_DIR / "VERSION").write_text(remote_ver + "\n", encoding="utf-8")
+        await asyncio.to_thread((STATIC_DIR / "VERSION").write_text, remote_ver + "\n", "utf-8")
     except Exception:
         pass
 
@@ -8441,17 +8450,25 @@ async def test_auth_provider(payload: dict, request: Request):
         try:
             from ldap3 import ALL, Connection, Server
 
-            srv = Server(settings["auth_ldap_url"], get_info=ALL)
-            with Connection(srv, user=settings["auth_ldap_bind_dn"], password=settings["auth_ldap_bind_password"], auto_bind=True):
-                return {"ok": True, "detail": f"Connected to {settings['auth_ldap_url']}"}
+            def _ldap_probe() -> None:
+                srv = Server(settings["auth_ldap_url"], get_info=ALL)
+                with Connection(srv, user=settings["auth_ldap_bind_dn"], password=settings["auth_ldap_bind_password"], auto_bind=True):
+                    pass
+            await asyncio.to_thread(_ldap_probe)
+            return {"ok": True, "detail": f"Connected to {settings['auth_ldap_url']}"}
         except Exception as exc:
             return {"ok": False, "detail": str(exc)}
     if provider == "radius":
         return {"ok": True, "detail": "RADIUS: send a test login to verify"}
     if provider == "tacacs":
         try:
-            sock = socket.create_connection((settings["auth_tacacs_host"], int(settings.get("auth_tacacs_port", 49))), timeout=5)
-            sock.close()
+            def _tacacs_probe() -> None:
+                s = socket.create_connection(
+                    (settings["auth_tacacs_host"], int(settings.get("auth_tacacs_port", 49))),
+                    timeout=5,
+                )
+                s.close()
+            await asyncio.to_thread(_tacacs_probe)
             return {"ok": True, "detail": f"TCP connection to {settings['auth_tacacs_host']}:{settings.get('auth_tacacs_port', 49)} OK"}
         except Exception as exc:
             return {"ok": False, "detail": str(exc)}
