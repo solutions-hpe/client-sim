@@ -3374,6 +3374,10 @@ _pending_delete_vmids: set[int] = set()
 # confirmed deletion so the fleet has time to stabilise before the next one).
 _delete_gate_cooldown_until: float = 0.0
 DELETE_GATE_COOLDOWN_S: int = 300  # 5 minutes between consecutive auto-deletes
+# VMID gap audit: detect and repair out-of-order VMID assignments.
+# Runs at most once per host per interval (even if multiple telemetry cycles occur).
+_vmid_gap_audit_last_run: dict[str, float] = {}
+VMID_AUDIT_INTERVAL_S: int = 300  # 5 minutes between gap audit checks per host
 # Throttle auto-provision gate debug logging to at most once per 120s per reason key.
 _autoprov_gate_log_ts: dict[str, float] = {}
 _AUTOPROV_GATE_LOG_INTERVAL = 120.0
@@ -9372,6 +9376,20 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     reported_provision_halt = body.get("provision_halt") if _autoprov_enabled() else None
 
     # Update per-agent state for multi-server list UI.
+    # Preserve vmid_range from this telemetry cycle (or from prior state if not yet sent).
+    _vmid_range_raw = body.get("vmid_range") or {}
+    _vmid_range: dict[str, int] | None = None
+    try:
+        _vr_start = int(_vmid_range_raw.get("start", 0) or 0)
+        _vr_end   = int(_vmid_range_raw.get("end",   0) or 0)
+        if _vr_start > 0 and _vr_end >= _vr_start:
+            _vmid_range = {"start": _vr_start, "end": _vr_end}
+    except (TypeError, ValueError):
+        pass
+    if _vmid_range is None:
+        # Fall back to previously stored range if the agent hasn't sent it yet
+        _vmid_range = (_prev_agent or {}).get("vmid_range")
+
     proxmox_states[hostname] = {
         "connected": True,
         "last_seen": now,
@@ -9385,6 +9403,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "_mem_samples": _agent_mem_samples,
         "cpu_1h_avg": _agent_cpu_avg,
         "mem_1h_avg": _agent_mem_avg,
+        "vmid_range": _vmid_range,
         "vms": tagged_vms,
         "usb_state": tagged_usb_state,
         "present_usb": tagged_present_usb,
@@ -9797,6 +9816,99 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                             "Auto-provisioning: detected %d unassigned certified dongle(s) — queued provision_unassigned",
                             len(certified_unassigned),
                         )
+
+    # ── VMID gap audit ────────────────────────────────────────────────────────
+    # If the auto-provision loop previously deleted/re-provisioned VMs out of
+    # order, VMIDs can develop gaps (e.g. …90030, 90032 with 90031 missing).
+    # This audit detects such gaps and queues a delete for the highest VMID
+    # above the lowest gap so the provision loop can fill the hole on the next
+    # cycle.  It bypasses the normal delete-gate cooldown because it is a
+    # corrective bookkeeping action, not a resource-pressure shedding action.
+    # It does respect its own per-host interval to avoid hammering the queue.
+    if _ap_enabled and not _reclone_running and _vmid_range:
+        _audit_due = (now - _vmid_gap_audit_last_run.get(hostname, 0.0)) >= VMID_AUDIT_INTERVAL_S
+        if _audit_due:
+            _vmid_gap_audit_last_run[hostname] = now
+            _gap_start: int = _vmid_range["start"]
+            _gap_end:   int = _vmid_range["end"]
+
+            # Build map of VMID → prov_status for VMs in this host's range.
+            _gap_prov_status: dict[int, str] = {}
+            for _ge in normalized_usb_state:
+                try:
+                    _gvid = int(_ge["vmid"])
+                    if _gap_start <= _gvid <= _gap_end:
+                        _gap_prov_status[_gvid] = str(_ge.get("prov_status") or "active").strip().lower()
+                except (KeyError, TypeError, ValueError):
+                    pass
+            # Apply the same stale-provisioning correction used by the delete gate.
+            _gap_prov_snap = proxmox_state.get("prov_run") or {}
+            for _gpr in (_gap_prov_snap.get("items") or []):
+                if isinstance(_gpr, dict) and str(_gpr.get("status") or "").strip().lower() in {"done", "failed"}:
+                    try:
+                        _gpvid = int(_gpr.get("vmid") or 0)
+                        if _gap_prov_status.get(_gpvid) == "provisioning":
+                            _gap_prov_status[_gpvid] = "active"
+                    except (TypeError, ValueError):
+                        pass
+
+            # Active (stable) VMIDs only — skip anything in-flight.
+            _gap_skip = {"provisioning", "tearing_down"}
+            _gap_active = sorted(
+                vid for vid, st in _gap_prov_status.items()
+                if st not in _gap_skip and vid not in _pending_delete_vmids
+            )
+
+            if len(_gap_active) >= 2:
+                _gap_max = _gap_active[-1]
+                _gap_active_set = set(_gap_active)
+                _lowest_gap: int | None = None
+                for _chk in range(_gap_start, _gap_max):
+                    if _chk not in _gap_active_set:
+                        _lowest_gap = _chk
+                        break
+
+                if _lowest_gap is not None:
+                    # Find highest active VMID above the gap.
+                    _above_gap = [v for v in _gap_active if v > _lowest_gap]
+                    if _above_gap:
+                        _gap_target = max(_above_gap)
+                        _gap_del_args = _prepare_delete_vm_args({"vmid": _gap_target})
+                        async with state_lock:
+                            _gap_already_pending = any(
+                                c.get("action") == "delete_vm"
+                                and c.get("status") not in {"completed", "failed", "expired"}
+                                for c in commands
+                            )
+                            if not _gap_already_pending:
+                                _enqueue_command_locked(
+                                    _resolve_proxmox_vm_target(_gap_target),
+                                    "delete_vm",
+                                    _gap_del_args,
+                                    command_type="auto-provision",
+                                )
+                                _pending_delete_vmids.add(_gap_target)
+                                _gap_msg = (
+                                    f"VMID gap audit [{hostname}]: gap detected at {_lowest_gap} "
+                                    f"(range {_gap_start}-{_gap_end}, active={_gap_active}) — "
+                                    f"queued delete_vm for VMID {_gap_target} to restore sequential order"
+                                )
+                                logger.info(_gap_msg)
+                                proxmox_log_buffer.append(_gap_msg)
+                                if len(proxmox_log_buffer) > PROXMOX_LOG_MAX:
+                                    del proxmox_log_buffer[:len(proxmox_log_buffer) - PROXMOX_LOG_MAX]
+                                await broadcast({"type": "proxmox_log_update", "lines": [_gap_msg]})
+                            else:
+                                logger.info(
+                                    "VMID gap audit [%s]: gap at %d would target VMID %d "
+                                    "but a delete_vm is already pending — skipping",
+                                    hostname, _lowest_gap, _gap_target,
+                                )
+                else:
+                    logger.debug(
+                        "VMID gap audit [%s]: no gaps in active VMIDs %s (range %d-%d)",
+                        hostname, _gap_active, _gap_start, _gap_end,
+                    )
 
     # Append new log lines to ring buffer and broadcast if any arrived
     new_lines = [str(ln) for ln in (body.get("log_lines") or []) if ln]

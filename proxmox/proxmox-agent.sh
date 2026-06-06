@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.13"
+AGENT_VERSION="1.14"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -3306,6 +3306,7 @@ print(json.dumps(out))
     "storage": ${storage_json:-[]}
   },
   "agent_version": "${AGENT_VERSION}",
+  "vmid_range": {"start": ${start_vmid}, "end": ${end_vmid}},
   "reseed_in_progress": $([ -f "$RESEED_LOCK_FILE" ] && echo true || echo false),
   "pve_version": "${pve_version}",
   "template_lock": ${template_lock_json},
