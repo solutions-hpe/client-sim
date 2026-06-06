@@ -3023,8 +3023,8 @@ def _validate_spoke_session(token: str) -> SpokeUser | None:
     return user
 
 
-async def _ldap_authenticate(username: str, password: str) -> SpokeUser | None:
-    """Authenticate against LDAP/AD. Returns SpokeUser or None."""
+def _ldap_authenticate_sync(username: str, password: str) -> "SpokeUser | None":
+    """Blocking LDAP auth — call via asyncio.to_thread."""
     try:
         from ldap3 import ALL, Connection, Server
 
@@ -3073,7 +3073,13 @@ async def _ldap_authenticate(username: str, password: str) -> SpokeUser | None:
         return None
 
 
-async def _radius_authenticate(username: str, password: str) -> SpokeUser | None:
+async def _ldap_authenticate(username: str, password: str) -> "SpokeUser | None":
+    """Authenticate against LDAP/AD. Returns SpokeUser or None."""
+    return await asyncio.to_thread(_ldap_authenticate_sync, username, password)
+
+
+def _radius_authenticate_sync(username: str, password: str) -> "SpokeUser | None":
+    """Blocking RADIUS auth — call via asyncio.to_thread."""
     try:
         import io
 
@@ -3130,7 +3136,12 @@ ATTRIBUTE Class          25 string
         return None
 
 
-async def _tacacs_authenticate(username: str, password: str) -> SpokeUser | None:
+async def _radius_authenticate(username: str, password: str) -> "SpokeUser | None":
+    return await asyncio.to_thread(_radius_authenticate_sync, username, password)
+
+
+def _tacacs_authenticate_sync(username: str, password: str) -> "SpokeUser | None":
+    """Blocking TACACS+ auth — call via asyncio.to_thread."""
     try:
         import tacacs_plus.client as tacacs
 
@@ -3167,6 +3178,10 @@ async def _tacacs_authenticate(username: str, password: str) -> SpokeUser | None
     except Exception as exc:
         logger.warning(f"TACACS+ auth error for {username}: {exc}")
         return None
+
+
+async def _tacacs_authenticate(username: str, password: str) -> "SpokeUser | None":
+    return await asyncio.to_thread(_tacacs_authenticate_sync, username, password)
 
 
 app = FastAPI(title="Client Simulator", lifespan=lifespan)
