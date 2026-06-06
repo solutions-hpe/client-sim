@@ -3359,16 +3359,60 @@ self_update_agent() {
             return 0
         fi
         log "Agent is already up to date (v${AGENT_VERSION})"
+        sync_pve_scripts "$repo_raw" "$branch"
         return 0
     fi
     install -m 0755 "$tmp_file" "$agent_script"
     rm -f "$tmp_file"
     save_repo_branch "$branch"
     log "Agent updated v${AGENT_VERSION} → v${new_version} from ${repo_raw} — scheduling restart..."
+    # Also sync /etc/pve/scripts/ so clone.sh, ini-parser.sh, client-setup.conf etc stay current
+    sync_pve_scripts "$repo_raw" "$branch"
     if ! schedule_agent_restart; then
         log "ERROR: Failed to schedule agent restart"
         return 1
     fi
+}
+
+# ── PVE scripts sync ───────────────────────────────────────────────────────────
+# Deploys proxmox helper scripts (clone.sh, ini-parser.sh, check_guest.sh,
+# client-setup.conf, sync-scripts.sh) from GitHub to /etc/pve/scripts/.
+# Called on install and whenever self_update_agent() applies an update so the
+# pve scripts always match the running agent version.
+sync_pve_scripts() {
+    local repo_raw="${1:-}" branch="${2:-main}"
+    local pve_dir="/etc/pve/scripts"
+    local -a pve_files=("clone.sh" "ini-parser.sh" "check_guest.sh" "client-setup.conf" "sync-scripts.sh")
+
+    [[ -d /etc/pve ]] || { log "sync_pve_scripts: /etc/pve not found — skipping"; return 0; }
+    mkdir -p "$pve_dir" || { log "sync_pve_scripts: cannot create ${pve_dir} — skipping"; return 0; }
+
+    # Fall back to the canonical raw URL if not supplied
+    if [[ -z "$repo_raw" ]]; then
+        repo_raw=$(grep -oP '(?<=CLIENT_SIM_REPO_RAW=).*' "$ENV_FILE" 2>/dev/null | tr -d '[:space:]')
+        repo_raw="${repo_raw:-https://raw.githubusercontent.com/solutions-hpe/client-sim}"
+        repo_raw=$(normalize_repo_raw_for_branch "$repo_raw" "$branch" 2>/dev/null || echo "${repo_raw}/${branch}")
+    fi
+
+    local _ok=0 _skip=0 _fail=0
+    for _f in "${pve_files[@]}"; do
+        local _dest="${pve_dir}/${_f}" _tmp="${pve_dir}/.${_f}.tmp"
+        if curl -fsSL --connect-timeout 15 --max-time 60 "${repo_raw}/proxmox/${_f}" -o "$_tmp" 2>/dev/null; then
+            if ! cmp -s "$_tmp" "$_dest" 2>/dev/null; then
+                mv "$_tmp" "$_dest"
+                log "sync_pve_scripts: updated ${_dest}"
+                (( _ok++ )) || true
+            else
+                rm -f "$_tmp"
+                (( _skip++ )) || true
+            fi
+        else
+            rm -f "$_tmp"
+            log "sync_pve_scripts: WARNING — failed to download ${_f}"
+            (( _fail++ )) || true
+        fi
+    done
+    log "sync_pve_scripts: ${_ok} updated, ${_skip} unchanged, ${_fail} failed in ${pve_dir}"
 }
 
 # ── Hardware Watchdog ──────────────────────────────────────────────────────────

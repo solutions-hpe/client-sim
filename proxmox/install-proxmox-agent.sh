@@ -521,6 +521,46 @@ echo "  OK: $AGENT_BIN${AGENT_VERSION:+ (agent v${AGENT_VERSION})}"
 echo "  OK: $WATCHDOG_BIN"
 echo "  OK: $INSTALLER_SCRIPT"
 
+echo "[1b/6] Deploying Proxmox helper scripts to /etc/pve/scripts/..."
+# clone.sh, ini-parser.sh, check_guest.sh, client-setup.conf, and sync-scripts.sh
+# live in /etc/pve/scripts/ (Proxmox cluster FS — chmod not supported here).
+# Without these files clone operations cannot run.
+PVE_SCRIPTS_DIR="/etc/pve/scripts"
+PVE_SCRIPT_FILES=(
+    "clone.sh"
+    "ini-parser.sh"
+    "check_guest.sh"
+    "client-setup.conf"
+    "sync-scripts.sh"
+)
+if [[ -d /etc/pve ]]; then
+    mkdir -p "$PVE_SCRIPTS_DIR"
+    _pve_ok=0
+    _pve_fail=0
+    for _pve_file in "${PVE_SCRIPT_FILES[@]}"; do
+        _pve_dest="${PVE_SCRIPTS_DIR}/${_pve_file}"
+        _pve_tmp="${PVE_SCRIPTS_DIR}/.${_pve_file}.tmp"
+        if curl -fsSL --connect-timeout 15 --max-time 60 "${REPO_RAW}/proxmox/${_pve_file}" -o "$_pve_tmp" 2>/dev/null; then
+            # Only write if content changed (avoids touching cluster FS unnecessarily)
+            if ! cmp -s "$_pve_tmp" "$_pve_dest" 2>/dev/null; then
+                mv "$_pve_tmp" "$_pve_dest"
+                echo "  OK: ${_pve_dest} (updated)"
+            else
+                rm -f "$_pve_tmp"
+                echo "  OK: ${_pve_dest} (unchanged)"
+            fi
+            (( _pve_ok++ )) || true
+        else
+            rm -f "$_pve_tmp"
+            echo "  WARNING: failed to download ${_pve_file} — skipping"
+            (( _pve_fail++ )) || true
+        fi
+    done
+    echo "  Deployed ${_pve_ok} file(s)${_pve_fail:+, ${_pve_fail} skipped} to ${PVE_SCRIPTS_DIR}"
+else
+    echo "  SKIP: /etc/pve not found — not a Proxmox host or pmxcfs not mounted"
+fi
+
 echo "[2/6] Downloading systemd units..."
 curl -sSL "${REPO_RAW}/proxmox/client-sim-proxmox-agent.service" -o "${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 curl -sSL "${REPO_RAW}/proxmox/proxmox-watchdog.service" -o "${SYSTEMD_DIR}/proxmox-watchdog.service"
