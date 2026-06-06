@@ -3572,8 +3572,8 @@ proxmox_state: dict[str, Any] = {
     "agent_version": None,
     "pve_version": None,
     "template_lock": "",
-    "bucket_override": 0,
-    "effective_bucket": 1,
+    "vm_set_override": 0,
+    "effective_vm_set": 1,
     "prov_summary": None,   # {"action": "provisioned"|"deleted", "count": N, "at": <unix ts>}
     "prov_run": _default_provision_run_state(),
 }
@@ -3642,7 +3642,7 @@ def _get_proxmox_token_for_host(hostname: str | None) -> str:
     return str(settings.get("proxmox_api_token", "") or "").strip()
 
 
-def _sanitize_bucket_override(value: Any) -> int:
+def _sanitize_vm_set_override(value: Any) -> int:
     try:
         bucket = int(value or 0)
     except (TypeError, ValueError):
@@ -3650,7 +3650,7 @@ def _sanitize_bucket_override(value: Any) -> int:
     return bucket if 1 <= bucket <= 99 else 0
 
 
-def _hostname_bucket_number(hostname: Any) -> int:
+def _hostname_vm_set_number(hostname: Any) -> int:
     match = re.search(r"(\d+)$", _normalize_proxmox_hostname(hostname))
     if not match:
         return 1
@@ -3680,12 +3680,12 @@ def _save_proxmox_host_config(hostname: str, updates: dict[str, Any]) -> dict[st
     if not isinstance(current, dict):
         current = {}
     entry = dict(current)
-    if "bucket_override" in updates:
-        bucket_override = _sanitize_bucket_override(updates.get("bucket_override"))
-        if bucket_override:
-            entry["bucket_override"] = bucket_override
+    if "vm_set_override" in updates:
+        vm_set_override = _sanitize_vm_set_override(updates.get("vm_set_override"))
+        if vm_set_override:
+            entry["vm_set_override"] = vm_set_override
         else:
-            entry.pop("bucket_override", None)
+            entry.pop("vm_set_override", None)
     if entry:
         proxmox_config[hostname] = entry
         persisted_config[hostname] = dict(entry)
@@ -4661,7 +4661,7 @@ def _proxmox_usb_config_payload(hostname: str | None = None) -> dict[str, Any]:
     image1_template_spec = _resolved_template_spec(settings, 1)
     image2_template_spec = _resolved_template_spec(settings, 2)
     host_config = _get_proxmox_host_config(hostname) if hostname else {}
-    bucket_override = _sanitize_bucket_override(host_config.get("bucket_override", 0))
+    vm_set_override = _sanitize_vm_set_override(host_config.get("vm_set_override", 0))
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
@@ -4675,7 +4675,7 @@ def _proxmox_usb_config_payload(hostname: str | None = None) -> dict[str, Any]:
         "use_all_dongles": _setting_bool("use_all_dongles", False),
         "max_slots": max(1, min(256, int(str(settings.get("usb_max_slots", "24")).strip() or "24"))),
         "vmid_start": int(settings.get("vmid_start", 0) or 0),
-        "bucket_override": bucket_override,
+        "vm_set_override": vm_set_override,
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
@@ -4778,7 +4778,7 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
     for hostname in approved_proxmox_agents:
         state = proxmox_states.get(hostname, {})
         host_config = _get_proxmox_host_config(hostname)
-        bucket_override = _sanitize_bucket_override(state.get("bucket_override", host_config.get("bucket_override", 0)))
+        vm_set_override = _sanitize_vm_set_override(state.get("vm_set_override", host_config.get("vm_set_override", 0)))
         result.append({
             "hostname": hostname,
             "connected": bool(state.get("connected", False)),
@@ -4792,8 +4792,8 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "cpu_1h_avg": state.get("cpu_1h_avg"),
             "mem_1h_avg": state.get("mem_1h_avg"),
             "vmid_range": state.get("vmid_range"),
-            "bucket_override": bucket_override,
-            "effective_bucket": int(state.get("effective_bucket", bucket_override or _hostname_bucket_number(hostname))),
+            "vm_set_override": vm_set_override,
+            "effective_vm_set": int(state.get("effective_vm_set", vm_set_override or _hostname_vm_set_number(hostname))),
         })
     return result
 
@@ -9751,8 +9751,8 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "cpu_1h_avg": _agent_cpu_avg,
         "mem_1h_avg": _agent_mem_avg,
         "vmid_range": _vmid_range,
-        "bucket_override": _sanitize_bucket_override(body.get("bucket_override", 0)),
-        "effective_bucket": max(1, int(body.get("effective_bucket", _hostname_bucket_number(hostname)) or _hostname_bucket_number(hostname))),
+        "vm_set_override": _sanitize_vm_set_override(body.get("vm_set_override", 0)),
+        "effective_vm_set": max(1, int(body.get("effective_vm_set", _hostname_vm_set_number(hostname)) or _hostname_vm_set_number(hostname))),
         "vms": tagged_vms,
         "usb_state": tagged_usb_state,
         "present_usb": tagged_present_usb,
@@ -9787,8 +9787,8 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["present_usb"] = all_present_usb
     proxmox_state["unknown_usb"] = all_unknown_usb
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
-    proxmox_state["bucket_override"] = _sanitize_bucket_override(body.get("bucket_override", 0))
-    proxmox_state["effective_bucket"] = max(1, int(body.get("effective_bucket", _hostname_bucket_number(hostname)) or _hostname_bucket_number(hostname)))
+    proxmox_state["vm_set_override"] = _sanitize_vm_set_override(body.get("vm_set_override", 0))
+    proxmox_state["effective_vm_set"] = max(1, int(body.get("effective_vm_set", _hostname_vm_set_number(hostname)) or _hostname_vm_set_number(hostname)))
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
     proxmox_state["template_lock"] = str(body.get("template_lock", "") or "").strip()
@@ -10473,7 +10473,7 @@ async def get_proxmox_host_config(
     host_config = _get_proxmox_host_config(resolved_hostname)
     return {
         "hostname": resolved_hostname,
-        "bucket_override": _sanitize_bucket_override(host_config.get("bucket_override", 0)),
+        "vm_set_override": _sanitize_vm_set_override(host_config.get("vm_set_override", 0)),
     }
 
 
@@ -10487,19 +10487,19 @@ async def save_proxmox_host_config(
     if not resolved_hostname:
         raise HTTPException(status_code=400, detail="hostname is required")
     try:
-        bucket_override = int(body.get("bucket_override", 0) or 0)
+        vm_set_override = int(body.get("vm_set_override", 0) or 0)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="bucket_override must be an integer") from exc
-    if bucket_override < 0 or bucket_override > 99:
-        raise HTTPException(status_code=422, detail="bucket_override must be between 0 and 99")
-    config_entry = _save_proxmox_host_config(resolved_hostname, {"bucket_override": bucket_override})
-    logger.info("Proxmox bucket override saved for host %s: %s", resolved_hostname, config_entry.get("bucket_override", 0) or 0)
+        raise HTTPException(status_code=422, detail="vm_set_override must be an integer") from exc
+    if vm_set_override < 0 or vm_set_override > 99:
+        raise HTTPException(status_code=422, detail="vm_set_override must be between 0 and 99")
+    config_entry = _save_proxmox_host_config(resolved_hostname, {"vm_set_override": vm_set_override})
+    logger.info("Proxmox VM set override saved for host %s: %s", resolved_hostname, config_entry.get("vm_set_override", 0) or 0)
     settings_payload = _public_settings()
     await broadcast({"type": "settings_update", "settings": settings_payload})
     return {
         "ok": True,
         "hostname": resolved_hostname,
-        "bucket_override": _sanitize_bucket_override(config_entry.get("bucket_override", 0)),
+        "vm_set_override": _sanitize_vm_set_override(config_entry.get("vm_set_override", 0)),
     }
 
 

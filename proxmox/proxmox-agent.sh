@@ -108,7 +108,7 @@ IMAGE2_TEMPLATE_ID=200
 IMAGE2_TEMPLATE_SPEC=""
 IMAGE2_TEMPLATE_SPEC_SEEN=0
 IMAGE1_PCT=50
-BUCKET_OVERRIDE=0
+VM_SET_OVERRIDE=0
 SIM_PHY="wireless"
 USE_ALL_DONGLES="false"
 RECLONE_CONCURRENCY=1
@@ -146,11 +146,11 @@ recompute_vmid_range() {
     id_num=$HOSTNAME_ID_NUM
     host_id=$(printf '%03d' "$id_num")
 
-    if [[ -n "$BUCKET_OVERRIDE" && "$BUCKET_OVERRIDE" =~ ^[0-9]+$ ]] && (( BUCKET_OVERRIDE >= 1 && BUCKET_OVERRIDE <= 99 )); then
-        if (( BUCKET_OVERRIDE != HOSTNAME_ID_NUM )); then
-            log "Bucket override: using id_num=$BUCKET_OVERRIDE instead of hostname-derived id_num=$HOSTNAME_ID_NUM"
+    if [[ -n "$VM_SET_OVERRIDE" && "$VM_SET_OVERRIDE" =~ ^[0-9]+$ ]] && (( VM_SET_OVERRIDE >= 1 && VM_SET_OVERRIDE <= 99 )); then
+        if (( VM_SET_OVERRIDE != HOSTNAME_ID_NUM )); then
+            log "VM set override: using id_num=$VM_SET_OVERRIDE instead of hostname-derived id_num=$HOSTNAME_ID_NUM"
         fi
-        id_num=$BUCKET_OVERRIDE
+        id_num=$VM_SET_OVERRIDE
         host_id=$(printf '%03d' "$id_num")
     fi
 
@@ -973,7 +973,7 @@ print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     max(1, min(256, int(data.get("max_slots", 24) or 24))),
     use_all_dongles,
     max(0, int(data.get("vmid_start", 0) or 0)),
-    max(0, min(99, int(data.get("bucket_override", 0) or 0))),
+    max(0, min(99, int(data.get("vm_set_override", 0) or 0))),
 ))
 for idx, key in ((1, "image1_template_spec"), (2, "image2_template_spec")):
     spec = str(data.get(key, "") or "").replace("\t", " ").replace("\n", " ").strip()
@@ -1018,7 +1018,7 @@ PY
     IMAGE2_TEMPLATE_SPEC=""
     IMAGE2_TEMPLATE_SPEC_SEEN=0
     IMAGE1_PCT=50
-    BUCKET_OVERRIDE=0
+    VM_SET_OVERRIDE=0
     SIM_PHY="wireless"
     RECLONE_CONCURRENCY=1
     L1_VLAN_START=100
@@ -1045,7 +1045,7 @@ PY
                 MAX_USB_SLOTS="${j:-24}"
                 USE_ALL_DONGLES="${k:-false}"
                 local _vmid_start_cfg="${l:-0}"
-                BUCKET_OVERRIDE="${m:-0}"
+                VM_SET_OVERRIDE="${m:-0}"
                 recompute_vmid_range "$_vmid_start_cfg"
                 ;;
             SPEC)
@@ -3430,8 +3430,8 @@ print(json.dumps(out))
   },
   "agent_version": "${AGENT_VERSION}",
   "vmid_range": {"start": ${start_vmid}, "end": ${end_vmid}},
-  "bucket_override": ${BUCKET_OVERRIDE:-0},
-  "effective_bucket": ${id_num},
+  "vm_set_override": ${VM_SET_OVERRIDE:-0},
+  "effective_vm_set": ${id_num},
   "reseed_in_progress": $([ -f "$RESEED_LOCK_FILE" ] && echo true || echo false),
   "pve_version": "${pve_version}",
   "template_lock": ${template_lock_json},
@@ -5021,6 +5021,30 @@ while true; do
             refresh_usb_telemetry_only || true
         else
             _prov_rc=0
+            # Watchdog: auto-clear stale provision lock so a D-state hung qm clone
+            # does not block all future provision cycles indefinitely.
+            if [[ -f "$USB_PROVISION_LOCK_FILE" ]]; then
+                _lock_mtime=$(stat -c %Y "$USB_PROVISION_LOCK_FILE" 2>/dev/null || echo 0)
+                _lock_age=$(( $(date +%s) - _lock_mtime ))
+                _prov_lock_max_age=$(( ${CLONE_TIMEOUT_SECONDS:-1800} + 300 ))
+                if (( _lock_age > _prov_lock_max_age )); then
+                    log "WARNING: Provision lock stale (held ${_lock_age}s, max ${_prov_lock_max_age}s) — auto-clearing"
+                    while IFS= read -r _qpid; do
+                        [[ -n "$_qpid" ]] || continue
+                        kill -TERM "$_qpid" 2>/dev/null || true
+                    done < <(pgrep -f '^qm (clone|list)' 2>/dev/null || true)
+                    sleep 2
+                    while IFS= read -r _qpid; do
+                        [[ -n "$_qpid" ]] || continue
+                        kill -KILL "$_qpid" 2>/dev/null || true
+                    done < <(pgrep -f '^qm (clone|list)' 2>/dev/null || true)
+                    rm -f "$USB_PROVISION_LOCK_FILE" 2>/dev/null || true
+                    rm -f "$PROVISION_HALT_CACHE" 2>/dev/null || true
+                    _PROV_COOLDOWN_UNTIL=0
+                    _PROV_FAIL_STREAK=0
+                    log "Stale provision lock cleared; resuming provision loop"
+                fi
+            fi
             usb_provision_loop || _prov_rc=$?
             if (( _prov_rc == 2 )); then
                 (( _PROV_FAIL_STREAK++ )) || true
