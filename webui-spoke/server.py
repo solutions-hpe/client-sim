@@ -9613,19 +9613,20 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                     pass
             # Correct stale "provisioning" status: the bash agent's usb_state lags by
             # one telemetry cycle after the spoke's prov_run finishes configuring a VM.
-            # Without this correction the newly-configured VMs (highest VMIDs) are
-            # incorrectly excluded from candidates, causing an older/lower-VMID VM to
-            # be deleted instead of the intended newest one.
+            # Without this correction newly-configured or failed VMs remain stuck in
+            # "provisioning" and are excluded from delete candidates.
+            # NOTE: do NOT guard on `not running` — if a parallel clone was killed mid-run
+            # (stuck >120s), the overall run stays running=True indefinitely but individual
+            # items already have status="done" or "failed". We must correct those too.
             _prov_run_snap = proxmox_state.get("prov_run") or {}
-            if not _prov_run_snap.get("running"):
-                for _pr_item in (_prov_run_snap.get("items") or []):
-                    if isinstance(_pr_item, dict) and str(_pr_item.get("status") or "").strip().lower() == "done":
-                        try:
-                            _pr_vid = int(_pr_item.get("vmid") or 0)
-                            if _pr_vid and _usb_prov_status.get(_pr_vid) == "provisioning":
-                                _usb_prov_status[_pr_vid] = "active"
-                        except (TypeError, ValueError):
-                            pass
+            for _pr_item in (_prov_run_snap.get("items") or []):
+                if isinstance(_pr_item, dict) and str(_pr_item.get("status") or "").strip().lower() in {"done", "failed"}:
+                    try:
+                        _pr_vid = int(_pr_item.get("vmid") or 0)
+                        if _pr_vid and _usb_prov_status.get(_pr_vid) == "provisioning":
+                            _usb_prov_status[_pr_vid] = "active"
+                    except (TypeError, ValueError):
+                        pass
             # Exclude VMs that are mid-clone (provisioning) or already being torn down
             # by the USB-missing timeout handler (tearing_down) — both are transient
             # states where a second delete command causes wasted work or race conditions.
@@ -9696,8 +9697,18 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
 
         # Provision gate: skip new provisioning when either resource exceeds its threshold.
         # Also skip for this cycle if we just queued a delete, to avoid churn.
+        # Also skip for the full delete-gate cooldown window — prevents the dongle that
+        # was just freed by a resource-triggered delete from being immediately re-provisioned
+        # (which would otherwise create a delete→reprovision→delete loop).
         # cpu_prov_ceil is a hard ceiling on the *instantaneous* CPU reading so that
         # provisioning is suppressed during ramp-up before the 1-hour average catches up.
+        _in_delete_cooldown = time.time() < _delete_gate_cooldown_until
+        if _in_delete_cooldown:
+            _remaining_prov_cd = int(_delete_gate_cooldown_until - time.time())
+            logger.info(
+                "Auto-provision gate: delete cooldown active (%ds remaining) — suppressing provision_unassigned",
+                _remaining_prov_cd,
+            )
         _ceil_hit = cpu_instant is not None and cpu_instant >= cpu_prov_ceil
         if _ceil_hit:
             logger.info(
@@ -9706,6 +9717,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             )
         resource_ok = (
             not delete_queued
+            and not _in_delete_cooldown
             and not _ceil_hit
             and (cpu_avg is None or cpu_avg < cpu_prov_thr)
             and (mem_avg is None or mem_avg < mem_prov_thr)
@@ -9714,15 +9726,17 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         _autoprov_gate_log(
             "resource_state",
             "cpu_avg=%.1f%% (thr=%d%%) mem_avg=%.1f%% (thr=%d%%) cpu_instant=%.1f%% (ceil=%d%%) "
-            "delete_queued=%s ceil_hit=%s resource_ok=%s",
+            "delete_queued=%s in_delete_cooldown=%s ceil_hit=%s resource_ok=%s",
             cpu_avg or 0.0, cpu_prov_thr,
             mem_avg or 0.0, mem_prov_thr,
             cpu_instant or 0.0, cpu_prov_ceil,
-            delete_queued, _ceil_hit, resource_ok,
+            delete_queued, _in_delete_cooldown, _ceil_hit, resource_ok,
         )
         if not resource_ok and not _ceil_hit:
             if delete_queued:
                 _autoprov_gate_log("delete_queued", "delete_vm already in queue — suppressing provision_unassigned")
+            elif _in_delete_cooldown:
+                pass  # already logged above
             elif cpu_avg is not None and cpu_avg >= cpu_prov_thr:
                 _autoprov_gate_log("cpu_threshold", "cpu_avg=%.1f%% >= threshold=%d%% — suppressing provision_unassigned", cpu_avg, cpu_prov_thr)
             elif mem_avg is not None and mem_avg >= mem_prov_thr:
