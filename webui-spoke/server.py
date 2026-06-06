@@ -1314,6 +1314,11 @@ central_browse_alerts: list[dict[str, Any]] = []
 central_browse_insights: list[dict[str, Any]] = []
 central_browse_devices_by_site: dict[str, list[dict[str, Any]]] = {}
 central_browse_clients_by_site: dict[str, dict[str, Any]] = {}
+# Server-side cache for /api/central/browse — avoids hammering Central API on every tab open.
+_central_browse_response_cache: dict[str, Any] = {}
+_central_browse_response_cached_at: float = 0.0
+_central_browse_fetching: bool = False  # lock to prevent concurrent on-demand fetches
+NC_BROWSE_SERVER_CACHE_TTL_S: int = 300  # 5 minutes — same as hub
 # Serialise all git operations (fetch, reset, add, commit, push) on REPO_DIR.
 # Running two git commands concurrently on the same repo creates .git/index.lock
 # conflicts that cause the sync background task to hang indefinitely.
@@ -2137,6 +2142,11 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
     central_browse_insights = new_insights
     central_browse_devices_by_site = new_devices_by_site
     central_browse_clients_by_site = new_clients_by_site
+    # Invalidate the server-side browse response cache so the next API call
+    # returns fresh data assembled from these updated globals.
+    global _central_browse_response_cache, _central_browse_response_cached_at
+    _central_browse_response_cache = {}
+    _central_browse_response_cached_at = 0.0
     logger.info("NC browse fetch complete: %d alerts, %d insights, %d sites with devices, %d sites with clients",
                 len(new_alerts), len(new_insights), len(new_devices_by_site), len(new_clients_by_site))
 
@@ -10984,19 +10994,33 @@ async def api_central_sites() -> dict[str, Any]:
 
 
 @app.get("/api/central/browse")
-async def api_central_browse() -> dict[str, Any]:
+async def api_central_browse(force: bool = False) -> dict[str, Any]:
     """Return aggregated Central browse data for the spoke Central Monitoring tab.
 
+    Serves a 5-minute server-side cache (same TTL as the hub) to avoid hammering
+    the Central API on every tab open.  Pass ?force=true to bypass the cache.
     If the background browse cache is empty (first load before any poll cycle),
-    trigger a live fetch so the caller always gets fresh data.
+    trigger a live on-demand fetch so the caller always gets fresh data.
     """
+    global _central_browse_response_cache, _central_browse_response_cached_at, _central_browse_fetching
+
+    now = time.time()
+    # Serve the cached response if it's still within TTL and not a forced refresh.
+    if not force and _central_browse_response_cache and (now - _central_browse_response_cached_at) < NC_BROWSE_SERVER_CACHE_TTL_S:
+        return _central_browse_response_cache
+
     # If the background loop hasn't populated browse data yet, do an on-demand fetch.
+    # Guard with a flag so concurrent requests don't each spawn their own fetch.
     if not central_browse_alerts and not central_browse_insights and not central_browse_clients_by_site and _central_ready():
-        try:
-            async with httpx.AsyncClient() as _browse_client:
-                await _fetch_nc_browse_for_spoke(_browse_client)
-        except Exception as exc:
-            logger.warning("api_central_browse: on-demand fetch failed: %s", exc)
+        if not _central_browse_fetching:
+            _central_browse_fetching = True
+            try:
+                async with httpx.AsyncClient() as _browse_client:
+                    await _fetch_nc_browse_for_spoke(_browse_client)
+            except Exception as exc:
+                logger.warning("api_central_browse: on-demand fetch failed: %s", exc)
+            finally:
+                _central_browse_fetching = False
 
     sites_resp = await api_central_sites()
     site_names = list(sites_resp.get("sites") or [])
@@ -11023,9 +11047,9 @@ async def api_central_browse() -> dict[str, Any]:
             "central_site": site_name,
         })
 
-    return {
+    result: dict[str, Any] = {
         "mode": settings.get("central_api", {}).get("mode") or ("central" if _is_new_central_api() else "classic"),
-        "cached_at": time.time(),
+        "cached_at": now,
         "sites": sites_with_health,
         "alerts": list(central_browse_alerts),
         "insights": list(central_browse_insights),
@@ -11034,6 +11058,9 @@ async def api_central_browse() -> dict[str, Any]:
         "devices_by_site": dict(central_browse_devices_by_site),
         "warning": sites_resp.get("warning"),
     }
+    _central_browse_response_cache = result
+    _central_browse_response_cached_at = now
+    return result
 
 
 @app.post("/api/central/monitor-site")
