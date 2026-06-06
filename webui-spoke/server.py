@@ -1662,6 +1662,33 @@ async def _apply_central_feed(feed: dict) -> None:
         central_token["access_token"] = None
         central_token["expires_at"] = 0.0
 
+    # Apply browse data pushed by the hub (centralized mode only).
+    # The hub filters the browse cache to only this spoke's assigned sites before pushing.
+    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site
+    browse_alerts = feed.get("central_browse_alerts")
+    browse_insights = feed.get("central_browse_insights")
+    browse_clients = feed.get("central_browse_clients_by_site")
+    browse_devices = feed.get("central_browse_devices_by_site")
+    browse_changed = False
+    if isinstance(browse_alerts, list):
+        central_browse_alerts = browse_alerts
+        browse_changed = True
+    if isinstance(browse_insights, list):
+        central_browse_insights = browse_insights
+        browse_changed = True
+    if isinstance(browse_clients, dict):
+        central_browse_clients_by_site = browse_clients
+        browse_changed = True
+    if isinstance(browse_devices, dict):
+        central_browse_devices_by_site = browse_devices
+        browse_changed = True
+    if browse_changed:
+        # Invalidate the server-side browse response cache so the next API call
+        # assembles fresh data from the hub-pushed browse globals.
+        global _central_browse_response_cache, _central_browse_response_cached_at
+        _central_browse_response_cache = {}
+        _central_browse_response_cached_at = 0.0
+
     await broadcast({
         "type": "central_update",
         "status": _central_status_payload(),
@@ -5724,6 +5751,30 @@ def _relay_ws_url(server_url: str, tenant_id: str, spoke_id: str, api_key: str) 
     return f"{hub_base}/api/{tenant_id}/spokes/{spoke_id}/ws?api_key={api_key}"
 
 
+def _telemetry_filtered_browse_list(items: list[dict[str, Any]], site_field: str) -> list[dict[str, Any]]:
+    """Return browse list items filtered to only this spoke's assigned Central sites.
+
+    Prevents unassigned-site data (fetched for the local browse tab) from being
+    sent to the hub and polluting its distributed-mode aggregation.
+    """
+    assigned: set[str] = {
+        str(v).strip().lower() for v in settings.get("site_mappings", {}).values() if v
+    }
+    if not assigned:
+        return list(items)
+    return [i for i in items if str(i.get(site_field) or "").strip().lower() in assigned]
+
+
+def _telemetry_filtered_browse_dict(by_site: dict[str, Any]) -> dict[str, Any]:
+    """Return a by-site browse dict filtered to only this spoke's assigned Central sites."""
+    assigned: set[str] = {
+        str(v).strip().lower() for v in settings.get("site_mappings", {}).values() if v
+    }
+    if not assigned:
+        return dict(by_site)
+    return {k: v for k, v in by_site.items() if str(k).strip().lower() in assigned}
+
+
 async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
     async with state_lock:
         proxmox_vms = list(proxmox_state.get("vms") or [])
@@ -5859,10 +5910,15 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                 "site_mappings": dict(settings.get("site_mappings", {})),
                 "monitored_checks": list(settings.get("monitored_checks", [])),
                 "hardware_checks": list(settings.get("hardware_checks", [])),
-                "central_alerts": list(central_browse_alerts),
-                "central_insights": list(central_browse_insights),
-                "central_devices_by_site": dict(central_browse_devices_by_site),
-                "central_clients_by_site": dict(central_browse_clients_by_site),
+                # Filter browse data to only the sites this spoke is responsible for.
+                # We now fetch ALL Central sites locally (for the browse tab), but the
+                # hub should only see data for sites assigned to this spoke — otherwise
+                # the hub's distributed aggregation gets duplicate entries for sites
+                # shared between spokes or orphan alerts for unassigned sites.
+                "central_alerts": _telemetry_filtered_browse_list(central_browse_alerts, "site"),
+                "central_insights": _telemetry_filtered_browse_list(central_browse_insights, "site"),
+                "central_devices_by_site": _telemetry_filtered_browse_dict(central_browse_devices_by_site),
+                "central_clients_by_site": _telemetry_filtered_browse_dict(central_browse_clients_by_site),
             },
             "reclone_state": {
                 k: v for k, v in reclone_state.items() if k != "auto_recovery_log"
