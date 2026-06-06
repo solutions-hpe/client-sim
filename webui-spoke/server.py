@@ -980,6 +980,7 @@ settings: dict[str, Any] = {
     "central_config": _build_runtime_central_config(_persisted_central_api, _persisted.get("central_config", {})),
     # {wsite_value: central_site_name}
     "site_mappings": _persisted.get("site_mappings", {}),
+    "spoke_monitored_items": _persisted.get("spoke_monitored_items", []),
     # [{type: "alert"|"insight", id: "...", name: "..."}]  — sim check monitors
     "monitored_checks": _persisted.get("monitored_checks", []),
     # [{id: "AP_DOWN", name: "AP Down", device_type: "ap"|"gateway"|"switch"}]
@@ -1137,6 +1138,7 @@ def _get_cached_settings() -> dict[str, Any]:
         "central_api": _public_central_api_settings(),
         "central_config": cfg,
         "site_mappings": settings["site_mappings"],
+        "spoke_monitored_items": settings.get("spoke_monitored_items", []),
         "monitored_checks": settings["monitored_checks"],
         "hardware_checks": settings.get("hardware_checks", []),
         "usb_vidpids": settings.get("usb_vidpids", "[]"),
@@ -10945,6 +10947,122 @@ async def api_central_sites() -> dict[str, Any]:
                 warning = f"No sites found — tried {', '.join(tried)} (last HTTP {last_status}). Your cluster may not expose a sites list API."
 
     return {"sites": sorted(set(sites)), "warning": warning}
+
+
+@app.get("/api/central/browse")
+async def api_central_browse() -> dict[str, Any]:
+    """Return aggregated Central browse data for the spoke Central Monitoring tab."""
+    sites_resp = await api_central_sites()
+    site_names = list(sites_resp.get("sites") or [])
+    sites_with_health: list[dict[str, Any]] = []
+
+    for site_name in site_names:
+        site_alerts = [a for a in central_browse_alerts if str(a.get("site") or "").strip().lower() == str(site_name).strip().lower()]
+        severities = {str(a.get("severity") or "").strip().lower() for a in site_alerts}
+        critical = bool(severities & {"critical", "major", "poor", "red", "orange", "error"})
+        fair = bool(severities & {"minor", "warning", "yellow"})
+        health_label = "Poor" if critical else ("Fair" if fair else "Healthy")
+        health_score = 30 if critical else (60 if fair else 90)
+        clients_info = central_browse_clients_by_site.get(site_name, {}) or {}
+        wireless_count = clients_info.get("wireless_clients")
+        if wireless_count is None:
+            wireless_count = clients_info.get("wireless")
+        if wireless_count is None:
+            wireless_count = clients_info.get("count")
+        sites_with_health.append({
+            "name": site_name,
+            "health_label": health_label,
+            "health_score": health_score,
+            "wireless_clients": wireless_count,
+            "central_site": site_name,
+        })
+
+    return {
+        "mode": settings.get("central_api", {}).get("mode") or ("central" if _is_new_central_api() else "classic"),
+        "cached_at": time.time(),
+        "sites": sites_with_health,
+        "alerts": list(central_browse_alerts),
+        "insights": list(central_browse_insights),
+        "clients": [],
+        "clients_by_site": dict(central_browse_clients_by_site),
+        "devices_by_site": dict(central_browse_devices_by_site),
+        "warning": sites_resp.get("warning"),
+    }
+
+
+@app.post("/api/central/monitor-site")
+async def api_central_monitor_site(body: dict[str, Any] = Body(...), _user: SpokeUser = Depends(require_auth)) -> dict[str, Any]:
+    """Add or remove a Central site from the spoke site mappings."""
+    action = str(body.get("action") or "add").strip().lower()
+    central_site = str(body.get("central_site") or "").strip()
+    if not central_site:
+        raise HTTPException(status_code=422, detail="central_site required")
+
+    mappings = dict(settings.get("site_mappings") or {})
+    if action == "add":
+        wsite = str(body.get("wsite") or central_site).strip() or central_site
+        mappings[wsite] = central_site
+    elif action == "remove":
+        target = central_site.lower()
+        to_remove = [k for k, v in mappings.items() if str(v or "").strip().lower() == target or str(k or "").strip().lower() == target]
+        for key in to_remove:
+            mappings.pop(key, None)
+    else:
+        raise HTTPException(status_code=422, detail="action must be add or remove")
+
+    settings["site_mappings"] = mappings
+    _persisted["site_mappings"] = mappings
+    _save_settings()
+    await broadcast({"type": "settings_update", "settings": _get_cached_settings()})
+    return {"ok": True, "action": action, "central_site": central_site, "site_mappings": mappings}
+
+
+@app.post("/api/central/monitored-items")
+async def api_central_add_monitored_item(body: dict[str, Any] = Body(...), _user: SpokeUser = Depends(require_auth)) -> dict[str, Any]:
+    """Add an item to the spoke's local Central monitored-items list."""
+    item_type = str(body.get("type") or "").strip()
+    name = str(body.get("name") or "").strip()
+    identifier = str(body.get("identifier") or body.get("name") or "").strip()
+    if not item_type or not identifier:
+        raise HTTPException(status_code=422, detail="type and identifier required")
+
+    items = list(settings.get("spoke_monitored_items") or [])
+    site = str(body.get("site") or "").strip()
+    for existing in items:
+        if str(existing.get("type") or "") != item_type:
+            continue
+        if str(existing.get("identifier") or existing.get("name") or "").strip().lower() != identifier.lower():
+            continue
+        if str(existing.get("site") or "").strip().lower() != site.lower():
+            continue
+        return {"ok": True, "item": existing}
+
+    item = {
+        "id": str(uuid.uuid4()),
+        "type": item_type,
+        "name": name,
+        "site": site,
+        "identifier": identifier,
+        "ts": time.time(),
+    }
+    items.append(item)
+    settings["spoke_monitored_items"] = items
+    _persisted["spoke_monitored_items"] = items
+    _save_settings()
+    await broadcast({"type": "settings_update", "settings": _get_cached_settings()})
+    return {"ok": True, "item": item}
+
+
+@app.delete("/api/central/monitored-items/{item_id}")
+async def api_central_remove_monitored_item(item_id: str, _user: SpokeUser = Depends(require_auth)) -> dict[str, Any]:
+    """Remove an item from the spoke's local Central monitored-items list."""
+    items = list(settings.get("spoke_monitored_items") or [])
+    items = [item for item in items if str(item.get("id") or "") != item_id]
+    settings["spoke_monitored_items"] = items
+    _persisted["spoke_monitored_items"] = items
+    _save_settings()
+    await broadcast({"type": "settings_update", "settings": _get_cached_settings()})
+    return {"ok": True}
 
 
 @app.get("/api/central/devices")
