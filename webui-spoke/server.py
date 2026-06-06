@@ -9719,8 +9719,8 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             not delete_queued
             and not _in_delete_cooldown
             and not _ceil_hit
-            and (cpu_avg is None or cpu_avg < cpu_prov_thr)
-            and (mem_avg is None or mem_avg < mem_prov_thr)
+            and cpu_avg is not None and cpu_avg < cpu_prov_thr
+            and mem_avg is not None and mem_avg < mem_prov_thr
         )
         # Log resource state periodically so the journal shows what the gate sees
         _autoprov_gate_log(
@@ -9737,9 +9737,11 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
                 _autoprov_gate_log("delete_queued", "delete_vm already in queue — suppressing provision_unassigned")
             elif _in_delete_cooldown:
                 pass  # already logged above
-            elif cpu_avg is not None and cpu_avg >= cpu_prov_thr:
+            elif cpu_avg is None or mem_avg is None:
+                _autoprov_gate_log("no_telemetry", "waiting for CPU/mem telemetry (cpu_avg=%s mem_avg=%s) — suppressing provision_unassigned", cpu_avg, mem_avg)
+            elif cpu_avg >= cpu_prov_thr:
                 _autoprov_gate_log("cpu_threshold", "cpu_avg=%.1f%% >= threshold=%d%% — suppressing provision_unassigned", cpu_avg, cpu_prov_thr)
-            elif mem_avg is not None and mem_avg >= mem_prov_thr:
+            elif mem_avg >= mem_prov_thr:
                 _autoprov_gate_log("mem_threshold", "mem_avg=%.1f%% >= threshold=%d%% — suppressing provision_unassigned", mem_avg, mem_prov_thr)
         prov_run = proxmox_state.get("prov_run") or {}
         if resource_ok and prov_run.get("running"):
