@@ -104,6 +104,34 @@ WEBUI_VMID: int | None = _detect_own_vmid()
 _HARDCODED_PROTECTED_VMIDS: frozenset[int] = frozenset({1001})
 
 
+def _parse_protected_vmids(raw: str) -> list[int | tuple[int, int]]:
+    """Parse a protected VMIDs string into a list of ints and (lo, hi) range tuples.
+
+    Accepts comma-separated entries where each entry is either a single VMID
+    (e.g. ``101``) or an inclusive range (e.g. ``100-90000``).
+    """
+    result: list[int | tuple[int, int]] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            # Could be a range like "100-90000"
+            lo_s, _, hi_s = part.partition("-")
+            try:
+                lo, hi = int(lo_s.strip()), int(hi_s.strip())
+                if lo <= hi:
+                    result.append((lo, hi))
+            except ValueError:
+                pass
+        else:
+            try:
+                result.append(int(part))
+            except ValueError:
+                pass
+    return result
+
+
 def _is_protected_vmid(vmid: int | str | None) -> bool:
     """Return True if this VMID must never be touched by any UI action."""
     if vmid is None:
@@ -116,16 +144,15 @@ def _is_protected_vmid(vmid: int | str | None) -> bool:
         return True
     if WEBUI_VMID is not None and v == WEBUI_VMID:
         return True
-    # Check user-configured protected VMIDs from settings (comma-separated)
+    # Check user-configured protected VMIDs (individual IDs or ranges)
     raw = str(settings.get("protected_vmids", "") or "")
-    for part in raw.split(","):
-        part = part.strip()
-        if part:
-            try:
-                if int(part) == v:
-                    return True
-            except ValueError:
-                pass
+    for entry in _parse_protected_vmids(raw):
+        if isinstance(entry, tuple):
+            lo, hi = entry
+            if lo <= v <= hi:
+                return True
+        elif entry == v:
+            return True
     return False
 
 # ── Credential encryption ─────────────────────────────────────────────────────
@@ -8837,17 +8864,16 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
         settings["reclone_concurrency"] = str(max(1, int(update.reclone_concurrency.strip() or "1")))
 
     if update.protected_vmids is not None:
-        # Normalize to a clean comma-separated list of integers, drop non-numeric entries
+        # Normalize to a clean comma-separated list of ints and ranges (e.g. "101, 100-90000")
         raw = str(update.protected_vmids or "")
-        parsed = []
-        for part in raw.split(","):
-            part = part.strip()
-            if part:
-                try:
-                    parsed.append(str(int(part)))
-                except ValueError:
-                    pass
-        settings["protected_vmids"] = ", ".join(parsed)
+        parsed_strs = []
+        for entry in _parse_protected_vmids(raw):
+            if isinstance(entry, tuple):
+                lo, hi = entry
+                parsed_strs.append(f"{lo}-{hi}")
+            else:
+                parsed_strs.append(str(entry))
+        settings["protected_vmids"] = ", ".join(parsed_strs)
 
     if update.l1_vlan_start is not None:
         settings["l1_vlan_start"] = str(max(1, min(4094, int(update.l1_vlan_start.strip() or "100"))))
