@@ -940,12 +940,14 @@
             <div class="settings-section-title">VM Templates</div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label" for="vm-image-1-template-id">VM Image 1 Template VMID</label>
-                <input id="vm-image-1-template-id" class="form-input" type="number" value="100" min="1">
+                <label class="form-label" for="vm-image-1-template-id">VM Image 1 Template VMIDs</label>
+                <input id="vm-image-1-template-id" class="form-input" type="text" value="100" placeholder="e.g. 9000 or 9000, 9005-9010">
+                <span class="form-hint">Individual VMIDs or ranges. The lowest valid template match is used first.</span>
               </div>
               <div class="form-group">
-                <label class="form-label" for="vm-image-2-template-id">VM Image 2 Template VMID</label>
-                <input id="vm-image-2-template-id" class="form-input" type="number" value="200" min="1">
+                <label class="form-label" for="vm-image-2-template-id">VM Image 2 Template VMIDs <span class="form-hint" style="font-weight:400;">(optional)</span></label>
+                <input id="vm-image-2-template-id" class="form-input" type="text" value="200" placeholder="e.g. 9100-9200">
+                <span class="form-hint">Must not overlap with VM Image 1.</span>
               </div>
               <div class="form-group">
                 <label class="form-label" for="vm-image-1-pct">VM Image 1 % target</label>
@@ -953,6 +955,7 @@
                 <span class="form-hint">Image 2 gets the remainder.</span>
               </div>
             </div>
+            <div id="template-vmid-spec-error" class="settings-message hidden" role="alert"></div>
           </div>
 
           <!-- Certified devices table -->

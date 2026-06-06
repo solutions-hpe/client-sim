@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.14"
+AGENT_VERSION="1.15"
 AGENT_LOG="/var/log/client-sim-proxmox-agent.log"
 AGENT_LOG_OFFSET_FILE="/var/lib/client-sim/agent-log-offset"
 PIDFILE="/var/run/client-sim-proxmox-agent.pid"
@@ -102,8 +102,13 @@ PROV_DIR=/tmp/client-sim-prov
 mkdir -p "$PROV_DIR"
 TEMPLATE_LOCK_STATUS_FILE="${PROV_DIR}/template_lock_status"
 IMAGE1_TEMPLATE_ID=100
+IMAGE1_TEMPLATE_SPEC=""
+IMAGE1_TEMPLATE_SPEC_SEEN=0
 IMAGE2_TEMPLATE_ID=200
+IMAGE2_TEMPLATE_SPEC=""
+IMAGE2_TEMPLATE_SPEC_SEEN=0
 IMAGE1_PCT=50
+BUCKET_OVERRIDE=0
 SIM_PHY="wireless"
 USE_ALL_DONGLES="false"
 RECLONE_CONCURRENCY=1
@@ -123,6 +128,7 @@ if [[ -n "$num_suffix" && "$num_suffix" =~ ^[0-9]+$ ]]; then
 else
     id_num=1
 fi
+HOSTNAME_ID_NUM=$id_num
 host_id=$(printf '%03d' $id_num)
 # VMID_BLOCK_STRIDE is the fixed per-host block size used for VMID range calculation.
 # Set to 24 to match the existing deployed layout (svr-001→90001, svr-002→90025, svr-003→90049).
@@ -133,6 +139,37 @@ VMID_BLOCK_STRIDE=24
 MAX_USB_SLOTS=24
 start_vmid=$((90000 + (id_num - 1) * VMID_BLOCK_STRIDE + 1))
 end_vmid=$((start_vmid + MAX_USB_SLOTS - 1))
+
+recompute_vmid_range() {
+    local manual_vmid_start="${1:-0}"
+
+    id_num=$HOSTNAME_ID_NUM
+    host_id=$(printf '%03d' "$id_num")
+
+    if [[ -n "$BUCKET_OVERRIDE" && "$BUCKET_OVERRIDE" =~ ^[0-9]+$ ]] && (( BUCKET_OVERRIDE >= 1 && BUCKET_OVERRIDE <= 99 )); then
+        if (( BUCKET_OVERRIDE != HOSTNAME_ID_NUM )); then
+            log "Bucket override: using id_num=$BUCKET_OVERRIDE instead of hostname-derived id_num=$HOSTNAME_ID_NUM"
+        fi
+        id_num=$BUCKET_OVERRIDE
+        host_id=$(printf '%03d' "$id_num")
+    fi
+
+    start_vmid=$((90000 + (id_num - 1) * VMID_BLOCK_STRIDE + 1))
+
+    if (( MAX_USB_SLOTS > 25 )); then
+        if [[ "$manual_vmid_start" =~ ^[0-9]+$ ]] && (( manual_vmid_start > 0 )); then
+            start_vmid="$manual_vmid_start"
+            log "VMID range: manual override — start_vmid=$start_vmid (usb_max_slots=$MAX_USB_SLOTS)"
+        else
+            log "ERROR: usb_max_slots=$MAX_USB_SLOTS exceeds 25 but no vmid_start is configured for this host."
+            log "ERROR: Set vmid_start in the hub spoke config to use more than 25 slots."
+            log "WARNING: Capping MAX_USB_SLOTS at 25 to prevent VM range overlap."
+            MAX_USB_SLOTS=25
+        fi
+    fi
+
+    end_vmid=$((start_vmid + MAX_USB_SLOTS - 1))
+}
 
 declare -A CERTIFIED_TYPES CERTIFIED_LABELS IGNORED_VIDPIDS
 declare -A USB_NAME_BY_BUS USB_VIDPID_BY_BUS PRESENT_BUSES
@@ -835,9 +872,80 @@ device_name_from_sysfs() {
     printf '%s' "$name"
 }
 
+expand_vmid_spec() {
+    local spec="${1:-}" part start end vmid
+    local -a entries=()
+    [[ -n "$spec" ]] || return 0
+    IFS=',' read -ra parts <<< "$spec"
+    for part in "${parts[@]}"; do
+        part="${part//[[:space:]]/}"
+        [[ -n "$part" ]] || continue
+        if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            start=$((10#${BASH_REMATCH[1]}))
+            end=$((10#${BASH_REMATCH[2]}))
+            (( start <= end )) || continue
+            if (( end - start > 1000 )); then
+                end=$((start + 1000))
+            fi
+            for ((vmid=start; vmid<=end; vmid++)); do
+                entries+=("$vmid")
+            done
+        elif [[ "$part" =~ ^[0-9]+$ ]]; then
+            entries+=("$((10#$part))")
+        fi
+    done
+    [[ ${#entries[@]} -gt 0 ]] || return 0
+    printf '%s\n' "${entries[@]}" | sort -nu
+}
+
+vmid_is_runnable_template() {
+    local vmid="$1"
+    qm status "$vmid" >/dev/null 2>&1 && qm config "$vmid" 2>/dev/null | grep -q '^template: 1'
+}
+
+find_template_vmid_from_spec() {
+    local spec="${1:-}" candidate
+    [[ -n "$spec" ]] || return 1
+    while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
+        if vmid_is_runnable_template "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done < <(expand_vmid_spec "$spec")
+    return 1
+}
+
+find_lowest_available_template_vmid() {
+    local conf vmid
+    while IFS= read -r conf; do
+        [[ -n "$conf" ]] || continue
+        vmid="$(basename "$conf" .conf)"
+        [[ "$vmid" =~ ^[0-9]+$ ]] || continue
+        if vmid_is_runnable_template "$vmid"; then
+            printf '%s' "$vmid"
+            return 0
+        fi
+    done < <(compgen -G '/etc/pve/qemu-server/*.conf' | sort -V)
+    return 1
+}
+
+resolve_template_vmid() {
+    local spec="${1:-}" spec_seen="${2:-0}" fallback_id="${3:-}" resolved=""
+    if [[ -n "$spec" ]]; then
+        resolved=$(find_template_vmid_from_spec "$spec" || true)
+    elif [[ "$spec_seen" != "1" && "$fallback_id" =~ ^[0-9]+$ ]] && vmid_is_runnable_template "$fallback_id"; then
+        resolved="$fallback_id"
+    fi
+    if [[ -z "$resolved" ]]; then
+        resolved=$(find_lowest_available_template_vmid || true)
+    fi
+    [[ -n "$resolved" ]] && printf '%s' "$resolved"
+}
+
 refresh_usb_config() {
     local response parsed kind a b c
-    response=$(curl_api GET /api/proxmox/usb-config "" 2>/dev/null || echo '{}')
+    response=$(curl_api GET "/api/proxmox/usb-config?hostname=$(hostname)" "" 2>/dev/null || echo '{}')
     parsed=$(python3 - "$response" <<'PY' 2>/dev/null || true
 import json
 import sys
@@ -852,7 +960,7 @@ sim_phy = str(data.get("sim_phy", "wireless")).strip().lower() or "wireless"
 if sim_phy not in {"wireless", "ethernet", "any"}:
     sim_phy = "wireless"
 use_all_dongles = str(data.get("use_all_dongles", False)).strip().lower()
-print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     str(data.get("auto_provision", "off")).lower(),
     int(data.get("missing_timeout", 60) or 60),
     int(data.get("image1_template_id", data.get("template_id", 100)) or 100),
@@ -865,7 +973,11 @@ print("CFG\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
     max(1, min(256, int(data.get("max_slots", 24) or 24))),
     use_all_dongles,
     max(0, int(data.get("vmid_start", 0) or 0)),
+    max(0, min(99, int(data.get("bucket_override", 0) or 0))),
 ))
+for idx, key in ((1, "image1_template_spec"), (2, "image2_template_spec")):
+    spec = str(data.get(key, "") or "").replace("\t", " ").replace("\n", " ").strip()
+    print(f"SPEC\t{idx}\t{spec}")
 for item in data.get("vidpids", []) or []:
     if not isinstance(item, dict):
         continue
@@ -900,8 +1012,13 @@ PY
     AUTO_PROVISION="off"
     MISSING_TIMEOUT=60
     IMAGE1_TEMPLATE_ID=100
+    IMAGE1_TEMPLATE_SPEC=""
+    IMAGE1_TEMPLATE_SPEC_SEEN=0
     IMAGE2_TEMPLATE_ID=200
+    IMAGE2_TEMPLATE_SPEC=""
+    IMAGE2_TEMPLATE_SPEC_SEEN=0
     IMAGE1_PCT=50
+    BUCKET_OVERRIDE=0
     SIM_PHY="wireless"
     RECLONE_CONCURRENCY=1
     L1_VLAN_START=100
@@ -912,7 +1029,7 @@ PY
     MEM_PROVISION_THRESHOLD=80
     CPU_RAMP_CEILING=90
 
-    while IFS=$'\t' read -r kind a b c d e f g h i j k l; do
+    while IFS=$'\t' read -r kind a b c d e f g h i j k l m; do
         [[ -z "$kind" ]] && continue
         case "$kind" in
             CFG)
@@ -928,21 +1045,17 @@ PY
                 MAX_USB_SLOTS="${j:-24}"
                 USE_ALL_DONGLES="${k:-false}"
                 local _vmid_start_cfg="${l:-0}"
-                # If usb_max_slots > 25 and a manual vmid_start is configured, use it.
-                # If usb_max_slots > 25 with no manual override, log an error and cap at 25
-                # so we don't silently produce overlapping VM ranges across hosts.
-                if (( MAX_USB_SLOTS > 25 )); then
-                    if [[ "$_vmid_start_cfg" =~ ^[0-9]+$ ]] && (( _vmid_start_cfg > 0 )); then
-                        start_vmid="$_vmid_start_cfg"
-                        log "VMID range: manual override — start_vmid=$start_vmid (usb_max_slots=$MAX_USB_SLOTS)"
-                    else
-                        log "ERROR: usb_max_slots=$MAX_USB_SLOTS exceeds 25 but no vmid_start is configured for this host."
-                        log "ERROR: Set vmid_start in the hub spoke config to use more than 25 slots."
-                        log "WARNING: Capping MAX_USB_SLOTS at 25 to prevent VM range overlap."
-                        MAX_USB_SLOTS=25
-                    fi
+                BUCKET_OVERRIDE="${m:-0}"
+                recompute_vmid_range "$_vmid_start_cfg"
+                ;;
+            SPEC)
+                if [[ "$a" == "1" ]]; then
+                    IMAGE1_TEMPLATE_SPEC="$b"
+                    IMAGE1_TEMPLATE_SPEC_SEEN=1
+                elif [[ "$a" == "2" ]]; then
+                    IMAGE2_TEMPLATE_SPEC="$b"
+                    IMAGE2_TEMPLATE_SPEC_SEEN=1
                 fi
-                end_vmid=$(( start_vmid + MAX_USB_SLOTS - 1 ))
                 ;;
             CERT)
                 CERTIFIED_TYPES["$a"]="$b"
@@ -968,6 +1081,16 @@ PY
                 ;;
         esac
     done <<< "$parsed"
+
+    local _resolved_template
+    _resolved_template=$(resolve_template_vmid "$IMAGE1_TEMPLATE_SPEC" "$IMAGE1_TEMPLATE_SPEC_SEEN" "$IMAGE1_TEMPLATE_ID" || true)
+    if [[ -n "$_resolved_template" ]]; then
+        IMAGE1_TEMPLATE_ID="$_resolved_template"
+    fi
+    _resolved_template=$(resolve_template_vmid "$IMAGE2_TEMPLATE_SPEC" "$IMAGE2_TEMPLATE_SPEC_SEEN" "$IMAGE2_TEMPLATE_ID" || true)
+    if [[ -n "$_resolved_template" ]]; then
+        IMAGE2_TEMPLATE_ID="$_resolved_template"
+    fi
 
 }
 
@@ -3307,6 +3430,8 @@ print(json.dumps(out))
   },
   "agent_version": "${AGENT_VERSION}",
   "vmid_range": {"start": ${start_vmid}, "end": ${end_vmid}},
+  "bucket_override": ${BUCKET_OVERRIDE:-0},
+  "effective_bucket": ${id_num},
   "reseed_in_progress": $([ -f "$RESEED_LOCK_FILE" ] && echo true || echo false),
   "pve_version": "${pve_version}",
   "template_lock": ${template_lock_json},

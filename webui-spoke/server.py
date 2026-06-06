@@ -31,7 +31,7 @@ import acme as spoke_acme
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 try:
     import httpx
@@ -130,6 +130,95 @@ def _parse_protected_vmids(raw: str) -> list[int | tuple[int, int]]:
             except ValueError:
                 pass
     return result
+
+
+_TEMPLATE_VMID_RANGE_CAP = 1000
+
+
+def _normalize_vmid_spec(raw: Any, *, field_name: str = "template VMID spec") -> str:
+    parts: list[str] = []
+    for part in str(raw or "").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        m = re.fullmatch(r"(\d+)-(\d+)", token)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo > hi:
+                raise ValueError(f"{field_name}: range start must be <= end ({token})")
+            if (hi - lo) > _TEMPLATE_VMID_RANGE_CAP:
+                raise ValueError(f"{field_name}: range too large ({token}); max span is {_TEMPLATE_VMID_RANGE_CAP + 1} VMIDs")
+            parts.append(f"{lo}-{hi}")
+            continue
+        if re.fullmatch(r"\d+", token):
+            parts.append(str(int(token)))
+            continue
+        raise ValueError(f"{field_name}: invalid token '{token}'")
+    return ", ".join(parts)
+
+
+def _parse_vmid_spec(raw: Any, *, field_name: str = "template VMID spec") -> list[int]:
+    normalized = _normalize_vmid_spec(raw, field_name=field_name)
+    vmids: set[int] = set()
+    for token in normalized.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        m = re.fullmatch(r"(\d+)-(\d+)", token)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            vmids.update(range(lo, hi + 1))
+        else:
+            vmids.add(int(token))
+    return sorted(vmids)
+
+
+def _template_spec_key(slot: int) -> str:
+    return f"vm_image_{slot}_template_spec"
+
+
+def _template_id_key(slot: int) -> str:
+    return f"vm_image_{slot}_template_id"
+
+
+def _legacy_template_id(source: Mapping[str, Any], slot: int) -> str:
+    if slot == 1:
+        keys = ("vm_image_1_template_id", "usb_linux_template_id", "usb_template_id")
+        default = "100"
+    else:
+        keys = ("vm_image_2_template_id", "usb_windows_template_id")
+        default = "200"
+    for key in keys:
+        raw = str(source.get(key, "") or "").strip()
+        if re.fullmatch(r"\d+", raw):
+            return str(max(1, int(raw)))
+    return default
+
+
+def _resolved_template_spec(source: Mapping[str, Any], slot: int) -> str:
+    spec_key = _template_spec_key(slot)
+    if spec_key in source:
+        raw = str(source.get(spec_key, "") or "").strip()
+        if not raw:
+            return ""
+        try:
+            return _normalize_vmid_spec(raw, field_name=spec_key)
+        except ValueError:
+            return _legacy_template_id(source, slot)
+    return _legacy_template_id(source, slot)
+
+
+def _primary_template_id(spec: str, fallback: str) -> str:
+    vmids = _parse_vmid_spec(spec) if str(spec or "").strip() else []
+    return str(vmids[0]) if vmids else fallback
+
+
+def _validate_template_specs(spec1: str, spec2: str) -> None:
+    overlap = sorted(set(_parse_vmid_spec(spec1, field_name="vm_image_1_template_spec")) & set(_parse_vmid_spec(spec2, field_name="vm_image_2_template_spec")))
+    if overlap:
+        preview = ", ".join(str(vmid) for vmid in overlap[:5])
+        suffix = "…" if len(overlap) > 5 else ""
+        raise HTTPException(status_code=422, detail=f"VM Image 1 and VM Image 2 template VMID specs overlap: {preview}{suffix}")
 
 
 def _is_protected_vmid(vmid: int | str | None) -> bool:
@@ -293,7 +382,7 @@ HUB_LOCAL_ALLOWED_KEYS = HUB_RELAY_KEYS | {"relay_tenant_hint"}
 # Mirrors HUB_CONFIG_FIELDS in the hub's dashboard.js.
 HUB_CONFIG_OWNED_KEYS: frozenset[str] = frozenset({
     "repo_branch", "reclone_schedule_enabled", "reclone_schedule_cron", "reclone_concurrency",
-    "vm_image_1_template_id", "vm_image_2_template_id", "vm_image_1_pct",
+    "vm_image_1_template_id", "vm_image_1_template_spec", "vm_image_2_template_id", "vm_image_2_template_spec", "vm_image_1_pct",
     "usb_auto_provision", "usb_missing_timeout", "usb_max_slots", "vm_silent_timeout",
     "l1_vlan_start", "l1_vlan_end", "usb_vidpids", "usb_ignored_vidpids", "ignored_hostnames",
     "guest_agent_watchdog_enabled", "guest_agent_grace_minutes",
@@ -1013,6 +1102,7 @@ settings: dict[str, Any] = {
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "proxmox_api_token": _persisted.get("proxmox_api_token", ""),
     "proxmox_tokens": _persisted.get("proxmox_tokens", {}),
+    "proxmox_config": _persisted.get("proxmox_config", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
     "vm_image_1_template_id": str(_persisted.get("vm_image_1_template_id", _persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100")))),
@@ -1066,6 +1156,10 @@ settings: dict[str, Any] = {
     "auth_tacacs_secret": _persisted.get("auth_tacacs_secret", ""),
     "auth_tacacs_admin_priv": _persisted.get("auth_tacacs_admin_priv", 15),
 }
+settings["vm_image_1_template_spec"] = _resolved_template_spec(settings, 1)
+settings["vm_image_2_template_spec"] = _resolved_template_spec(settings, 2)
+settings["vm_image_1_template_id"] = _primary_template_id(settings["vm_image_1_template_spec"], _legacy_template_id(settings, 1))
+settings["vm_image_2_template_id"] = _primary_template_id(settings["vm_image_2_template_spec"], _legacy_template_id(settings, 2))
 _ensure_relay_spoke_id(_persisted)
 
 
@@ -1144,7 +1238,9 @@ def _get_cached_settings() -> dict[str, Any]:
         "usb_vidpids": settings.get("usb_vidpids", "[]"),
         "usb_missing_timeout": settings.get("usb_missing_timeout", "60"),
         "vm_image_1_template_id": settings.get("vm_image_1_template_id", settings.get("usb_linux_template_id", settings.get("usb_template_id", "100"))),
+        "vm_image_1_template_spec": settings.get("vm_image_1_template_spec", _resolved_template_spec(settings, 1)),
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", settings.get("usb_windows_template_id", "200")),
+        "vm_image_2_template_spec": settings.get("vm_image_2_template_spec", _resolved_template_spec(settings, 2)),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "use_all_dongles": _setting_bool("use_all_dongles", False),
@@ -1203,10 +1299,24 @@ def _get_cached_settings() -> dict[str, Any]:
             hn: bool(str(tok or "").strip())
             for hn, tok in (settings.get("proxmox_tokens") or {}).items()
         },
+        "proxmox_config": copy.deepcopy(settings.get("proxmox_config") or {}),
     }
     _settings_cache_time = now
     return copy.deepcopy(_settings_cache)
 
+
+
+def _public_settings() -> dict[str, Any]:
+    payload = _get_cached_settings()
+    payload["central_config"]["access_token_configured"] = bool(
+        settings["central_config"].get("access_token") or central_token.get("access_token")
+    )
+    payload["central_config"]["refresh_token_configured"] = bool(
+        settings["central_config"].get("refresh_token") or central_token.get("refresh_token")
+    )
+    payload["admin_password_configured"] = bool(_admin_password())
+    payload["proxmox_config"] = copy.deepcopy(settings.get("proxmox_config") or {})
+    return payload
 
 
 def _public_central_api_settings() -> dict[str, Any]:
@@ -3462,6 +3572,8 @@ proxmox_state: dict[str, Any] = {
     "agent_version": None,
     "pve_version": None,
     "template_lock": "",
+    "bucket_override": 0,
+    "effective_bucket": 1,
     "prov_summary": None,   # {"action": "provisioned"|"deleted", "count": N, "at": <unix ts>}
     "prov_run": _default_provision_run_state(),
 }
@@ -3528,6 +3640,60 @@ def _get_proxmox_token_for_host(hostname: str | None) -> str:
         if per_host:
             return per_host
     return str(settings.get("proxmox_api_token", "") or "").strip()
+
+
+def _sanitize_bucket_override(value: Any) -> int:
+    try:
+        bucket = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return bucket if 1 <= bucket <= 99 else 0
+
+
+def _hostname_bucket_number(hostname: Any) -> int:
+    match = re.search(r"(\d+)$", _normalize_proxmox_hostname(hostname))
+    if not match:
+        return 1
+    try:
+        bucket = int(match.group(1))
+    except (TypeError, ValueError):
+        return 1
+    return max(1, bucket)
+
+
+def _get_proxmox_host_config(hostname: Any) -> dict[str, Any]:
+    proxmox_config = settings.get("proxmox_config") or {}
+    if not isinstance(proxmox_config, dict):
+        return {}
+    normalized = _normalize_proxmox_hostname(hostname)
+    if not normalized:
+        return {}
+    resolved = _resolve_proxmox_agent_hostname(normalized, proxmox_config) or normalized
+    data = proxmox_config.get(resolved, {})
+    return dict(data) if isinstance(data, dict) else {}
+
+
+def _save_proxmox_host_config(hostname: str, updates: dict[str, Any]) -> dict[str, Any]:
+    proxmox_config = settings.setdefault("proxmox_config", {})
+    persisted_config = _persisted.setdefault("proxmox_config", {})
+    current = proxmox_config.get(hostname, {})
+    if not isinstance(current, dict):
+        current = {}
+    entry = dict(current)
+    if "bucket_override" in updates:
+        bucket_override = _sanitize_bucket_override(updates.get("bucket_override"))
+        if bucket_override:
+            entry["bucket_override"] = bucket_override
+        else:
+            entry.pop("bucket_override", None)
+    if entry:
+        proxmox_config[hostname] = entry
+        persisted_config[hostname] = dict(entry)
+    else:
+        proxmox_config.pop(hostname, None)
+        persisted_config.pop(hostname, None)
+    _save_settings()
+    return dict(entry)
 
 
 def _has_any_proxmox_token() -> bool:
@@ -3932,6 +4098,7 @@ class ClientControlResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
+    proxmox_config: dict[str, Any] | None = None
     repo_branch: str | None = None
     github_token: str | None = None
     central_api: dict[str, Any] | None = None
@@ -3975,7 +4142,9 @@ class SettingsUpdate(BaseModel):
     usb_missing_timeout: str | None = None
     usb_template_id: str | None = None
     vm_image_1_template_id: str | None = None
+    vm_image_1_template_spec: str | None = None
     vm_image_2_template_id: str | None = None
+    vm_image_2_template_spec: str | None = None
     vm_image_1_pct: str | None = None
     usb_auto_provision: str | None = None
     use_all_dongles: bool | None = None
@@ -4474,7 +4643,7 @@ def _vm_pending_checkin(vm: dict[str, Any], client_seen: dict[str, Any] | None =
     return not _vm_has_checked_in(hostname, clone_completed_at, client_seen)
 
 
-def _proxmox_usb_config_payload() -> dict[str, Any]:
+def _proxmox_usb_config_payload(hostname: str | None = None) -> dict[str, Any]:
     # Read sim_phy from the repo's simulation.conf so the agent knows which
     # USB device type (wired/wireless/any) to provision and assign.
     sim_phy = "wireless"
@@ -4489,16 +4658,24 @@ def _proxmox_usb_config_payload() -> dict[str, Any]:
         pass
     if sim_phy not in {"wireless", "ethernet", "any"}:
         sim_phy = "wireless"
+    image1_template_spec = _resolved_template_spec(settings, 1)
+    image2_template_spec = _resolved_template_spec(settings, 2)
+    host_config = _get_proxmox_host_config(hostname) if hostname else {}
+    bucket_override = _sanitize_bucket_override(host_config.get("bucket_override", 0))
     return {
         "vidpids": _parse_json_list(settings.get("usb_vidpids", "[]")),
         "missing_timeout": _setting_int("usb_missing_timeout", 60, 1),
-        "image1_template_id": _setting_int("vm_image_1_template_id", _setting_int("usb_linux_template_id", _setting_int("usb_template_id", 100, 1), 1), 1),
-        "image2_template_id": _setting_int("vm_image_2_template_id", _setting_int("usb_windows_template_id", 200, 1), 1),
+        "image1_template_id": int(_primary_template_id(image1_template_spec, _legacy_template_id(settings, 1)) or 100),
+        "image1_template_spec": image1_template_spec,
+        "image2_template_id": int(_primary_template_id(image2_template_spec, _legacy_template_id(settings, 2)) or 200),
+        "image2_template_spec": image2_template_spec,
+        "template_vmid_specs": [image1_template_spec, image2_template_spec],
         "image1_pct": max(0, min(100, int(str(settings.get("vm_image_1_pct", "50")).strip() or "50"))),
         "auto_provision": _normalize_toggle(settings.get("usb_auto_provision", "off")),
         "use_all_dongles": _setting_bool("use_all_dongles", False),
         "max_slots": max(1, min(256, int(str(settings.get("usb_max_slots", "24")).strip() or "24"))),
         "vmid_start": int(settings.get("vmid_start", 0) or 0),
+        "bucket_override": bucket_override,
         "ignored_vidpids": _parse_json_list(settings.get("usb_ignored_vidpids", "[]")),
         "sim_phy": sim_phy,
         "reclone_concurrency": max(1, int(str(settings.get("reclone_concurrency", "1")).strip() or "1")),
@@ -4600,6 +4777,8 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
     result = []
     for hostname in approved_proxmox_agents:
         state = proxmox_states.get(hostname, {})
+        host_config = _get_proxmox_host_config(hostname)
+        bucket_override = _sanitize_bucket_override(state.get("bucket_override", host_config.get("bucket_override", 0)))
         result.append({
             "hostname": hostname,
             "connected": bool(state.get("connected", False)),
@@ -4612,6 +4791,9 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "provision_halt": _current_provision_halt(state),
             "cpu_1h_avg": state.get("cpu_1h_avg"),
             "mem_1h_avg": state.get("mem_1h_avg"),
+            "vmid_range": state.get("vmid_range"),
+            "bucket_override": bucket_override,
+            "effective_bucket": int(state.get("effective_bucket", bucket_override or _hostname_bucket_number(hostname))),
         })
     return result
 
@@ -5584,7 +5766,9 @@ def _build_registration_config() -> dict[str, Any]:
         "reclone_concurrency": settings.get("reclone_concurrency", "1"),
         "protected_vmids": settings.get("protected_vmids", ""),
         "vm_image_1_template_id": settings.get("vm_image_1_template_id", "100"),
+        "vm_image_1_template_spec": settings.get("vm_image_1_template_spec", _resolved_template_spec(settings, 1)),
         "vm_image_2_template_id": settings.get("vm_image_2_template_id", "200"),
+        "vm_image_2_template_spec": settings.get("vm_image_2_template_spec", _resolved_template_spec(settings, 2)),
         "vm_image_1_pct": settings.get("vm_image_1_pct", "50"),
         "usb_auto_provision": settings.get("usb_auto_provision", "off"),
         "usb_max_slots": settings.get("usb_max_slots", "24"),
@@ -8696,15 +8880,7 @@ async def test_auth_provider(payload: dict, request: Request):
 
 @app.get("/api/settings")
 async def api_settings_get() -> dict[str, Any]:
-    payload = _get_cached_settings()
-    payload["central_config"]["access_token_configured"] = bool(
-        settings["central_config"].get("access_token") or central_token.get("access_token")
-    )
-    payload["central_config"]["refresh_token_configured"] = bool(
-        settings["central_config"].get("refresh_token") or central_token.get("refresh_token")
-    )
-    payload["admin_password_configured"] = bool(_admin_password())
-    return payload
+    return _public_settings()
 
 
 @app.post("/api/bootstrap")
@@ -8984,14 +9160,33 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     if update.usb_missing_timeout is not None:
         settings["usb_missing_timeout"] = str(max(1, int(update.usb_missing_timeout.strip() or "60")))
 
-    if update.usb_template_id is not None:
-        settings["vm_image_1_template_id"] = str(max(1, int(update.usb_template_id.strip() or "100")))
+    if any(value is not None for value in (
+        update.usb_template_id,
+        update.vm_image_1_template_id,
+        update.vm_image_1_template_spec,
+        update.vm_image_2_template_id,
+        update.vm_image_2_template_spec,
+    )):
+        spec1_raw = update.vm_image_1_template_spec
+        if spec1_raw is None:
+            spec1_raw = update.vm_image_1_template_id
+        if spec1_raw is None:
+            spec1_raw = update.usb_template_id
+        spec2_raw = update.vm_image_2_template_spec
+        if spec2_raw is None:
+            spec2_raw = update.vm_image_2_template_id
 
-    if update.vm_image_1_template_id is not None:
-        settings["vm_image_1_template_id"] = str(max(1, int(update.vm_image_1_template_id.strip() or "100")))
+        try:
+            spec1 = _resolved_template_spec(settings, 1) if spec1_raw is None else _normalize_vmid_spec(spec1_raw, field_name="vm_image_1_template_spec")
+            spec2 = _resolved_template_spec(settings, 2) if spec2_raw is None else _normalize_vmid_spec(spec2_raw, field_name="vm_image_2_template_spec")
+            _validate_template_specs(spec1, spec2)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    if update.vm_image_2_template_id is not None:
-        settings["vm_image_2_template_id"] = str(max(1, int(update.vm_image_2_template_id.strip() or "200")))
+        settings["vm_image_1_template_spec"] = spec1
+        settings["vm_image_2_template_spec"] = spec2
+        settings["vm_image_1_template_id"] = _primary_template_id(spec1, _legacy_template_id(settings, 1))
+        settings["vm_image_2_template_id"] = _primary_template_id(spec2, _legacy_template_id(settings, 2))
 
     if update.vm_image_1_pct is not None:
         settings["vm_image_1_pct"] = str(max(0, min(100, int(update.vm_image_1_pct.strip() or "50"))))
@@ -9378,8 +9573,8 @@ def api_service_logs(lines: int = Query(default=50, ge=1, le=500)) -> dict[str, 
 
 
 @app.get("/api/proxmox/usb-config")
-async def get_proxmox_usb_config() -> dict[str, Any]:
-    return _proxmox_usb_config_payload()
+async def get_proxmox_usb_config(hostname: str | None = Query(default=None)) -> dict[str, Any]:
+    return _proxmox_usb_config_payload(hostname)
 
 
 @app.post("/api/proxmox/reclone-all")
@@ -9556,6 +9751,8 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "cpu_1h_avg": _agent_cpu_avg,
         "mem_1h_avg": _agent_mem_avg,
         "vmid_range": _vmid_range,
+        "bucket_override": _sanitize_bucket_override(body.get("bucket_override", 0)),
+        "effective_bucket": max(1, int(body.get("effective_bucket", _hostname_bucket_number(hostname)) or _hostname_bucket_number(hostname))),
         "vms": tagged_vms,
         "usb_state": tagged_usb_state,
         "present_usb": tagged_present_usb,
@@ -9590,6 +9787,8 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     proxmox_state["present_usb"] = all_present_usb
     proxmox_state["unknown_usb"] = all_unknown_usb
     proxmox_state["missing_timeout_mins"] = int(body.get("missing_timeout_mins", 60) or 60)
+    proxmox_state["bucket_override"] = _sanitize_bucket_override(body.get("bucket_override", 0))
+    proxmox_state["effective_bucket"] = max(1, int(body.get("effective_bucket", _hostname_bucket_number(hostname)) or _hostname_bucket_number(hostname)))
     proxmox_state["agent_version"] = str(body.get("agent_version", "")).strip() or None
     proxmox_state["pve_version"] = str(body.get("pve_version", "")).strip() or None
     proxmox_state["template_lock"] = str(body.get("template_lock", "") or "").strip()
@@ -10261,6 +10460,47 @@ async def proxmox_hw_reset_event(body: dict = Body(...)) -> dict[str, bool]:
 @app.get("/api/proxmox/status")
 async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
+
+
+@app.get("/api/proxmox/config/{hostname}")
+async def get_proxmox_host_config(
+    hostname: str,
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname.strip(), approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        raise HTTPException(status_code=400, detail="hostname is required")
+    host_config = _get_proxmox_host_config(resolved_hostname)
+    return {
+        "hostname": resolved_hostname,
+        "bucket_override": _sanitize_bucket_override(host_config.get("bucket_override", 0)),
+    }
+
+
+@app.put("/api/proxmox/config/{hostname}")
+async def save_proxmox_host_config(
+    hostname: str,
+    body: dict[str, Any] = Body(...),
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname.strip(), approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        raise HTTPException(status_code=400, detail="hostname is required")
+    try:
+        bucket_override = int(body.get("bucket_override", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="bucket_override must be an integer") from exc
+    if bucket_override < 0 or bucket_override > 99:
+        raise HTTPException(status_code=422, detail="bucket_override must be between 0 and 99")
+    config_entry = _save_proxmox_host_config(resolved_hostname, {"bucket_override": bucket_override})
+    logger.info("Proxmox bucket override saved for host %s: %s", resolved_hostname, config_entry.get("bucket_override", 0) or 0)
+    settings_payload = _public_settings()
+    await broadcast({"type": "settings_update", "settings": settings_payload})
+    return {
+        "ok": True,
+        "hostname": resolved_hostname,
+        "bucket_override": _sanitize_bucket_override(config_entry.get("bucket_override", 0)),
+    }
 
 
 @app.get("/api/proxmox/token/{hostname}")
@@ -12677,6 +12917,7 @@ async def api_init() -> dict[str, Any]:
             "hub_tls_verify": settings.get("hub_tls_verify", "off"),
             "hub_managed": bool(settings.get("hub_managed", False)),
             "hub_isolation_timeout": int(settings.get("hub_isolation_timeout", 3600)),  # Include the timeout in init settings so the setup form has the correct safeguard value before a separate settings fetch finishes.
+            "proxmox_config": copy.deepcopy(settings.get("proxmox_config") or {}),
         },
         "reclone": dict(reclone_state),
         "update_all": dict(update_all_state),
