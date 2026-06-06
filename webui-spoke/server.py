@@ -1942,18 +1942,52 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
     central_browse_* variables so they can be included in the telemetry sent to hub."""
     global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site
 
-    site_mappings: dict[str, str] = settings.get("site_mappings", {})
-    if not site_mappings:
-        return
-
-    # Collect the Central site names this spoke is responsible for
-    central_sites: list[str] = [s for s in site_mappings.values() if s]
-    if not central_sites:
-        return
-
     cfg = _central_cfg()
     base_url = cfg["cluster_url"].rstrip("/")
     headers = _central_headers()
+
+    # Fetch ALL Central sites for browse data (not limited to site_mappings so
+    # the browse tab can show Monitor buttons for sites not yet configured).
+    central_sites: list[str] = []
+    try:
+        if _is_new_central_api():
+            resp = await client.get(
+                f"{base_url}/network-monitoring/v1alpha1/sites-health",
+                headers=headers,
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                central_sites = [
+                    item.get("siteName") or item.get("site_name") or item.get("name", "")
+                    for item in resp.json().get("items", [])
+                    if (item.get("siteName") or item.get("site_name") or item.get("name"))
+                ]
+        else:
+            for path, params in [
+                ("/monitoring/v2/sites", {"limit": 1000, "offset": 0}),
+                ("/monitoring/v1/sites", {"limit": 1000, "offset": 0}),
+                ("/central/v2/sites", {"limit": 1000, "offset": 0}),
+            ]:
+                resp = await client.get(f"{base_url}{path}", headers=headers, params=params, timeout=20)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data.get("sites") or data.get("items") or (data if isinstance(data, list) else [])
+                    central_sites = [
+                        (s if isinstance(s, str) else (s.get("site_name") or s.get("siteName") or s.get("name", "")))
+                        for s in raw if s
+                    ]
+                    central_sites = [s for s in central_sites if s]
+                    break
+    except Exception as exc:
+        logger.warning("NC browse: could not fetch all Central sites list: %s", exc)
+
+    # Fall back to site_mappings if the API sites fetch failed
+    if not central_sites:
+        site_mappings: dict[str, str] = settings.get("site_mappings", {})
+        central_sites = [s for s in site_mappings.values() if s]
+
+    if not central_sites:
+        return
 
     def _sev_map(s: str) -> str:
         s = (s or "").lower()
@@ -10951,7 +10985,19 @@ async def api_central_sites() -> dict[str, Any]:
 
 @app.get("/api/central/browse")
 async def api_central_browse() -> dict[str, Any]:
-    """Return aggregated Central browse data for the spoke Central Monitoring tab."""
+    """Return aggregated Central browse data for the spoke Central Monitoring tab.
+
+    If the background browse cache is empty (first load before any poll cycle),
+    trigger a live fetch so the caller always gets fresh data.
+    """
+    # If the background loop hasn't populated browse data yet, do an on-demand fetch.
+    if not central_browse_alerts and not central_browse_insights and not central_browse_clients_by_site and _central_ready():
+        try:
+            async with httpx.AsyncClient() as _browse_client:
+                await _fetch_nc_browse_for_spoke(_browse_client)
+        except Exception as exc:
+            logger.warning("api_central_browse: on-demand fetch failed: %s", exc)
+
     sites_resp = await api_central_sites()
     site_names = list(sites_resp.get("sites") or [])
     sites_with_health: list[dict[str, Any]] = []
