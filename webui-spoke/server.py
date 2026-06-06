@@ -9565,13 +9565,13 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
     # Auto-trigger provision_unassigned when usb_auto_provision is enabled and
     # certified unassigned dongles are physically present.  Resource (CPU/memory)
     # thresholds gate provisioning and can also trigger deletion of the newest sim VM.
-    _autoprov_enabled = settings.get("usb_auto_provision") == "on"
+    _ap_enabled = settings.get("usb_auto_provision") == "on"
     _reclone_running = reclone_state.get("status") == "running"
-    if not _autoprov_enabled:
+    if not _ap_enabled:
         _autoprov_gate_log("disabled", "usb_auto_provision=off — skipping all provision/delete checks")
     elif _reclone_running:
         _autoprov_gate_log("reclone_running", "reclone job is running (status=%s) — skipping provision checks", reclone_state.get("status"))
-    if _autoprov_enabled and not _reclone_running:
+    if _ap_enabled and not _reclone_running:
         def _pct_setting(key: str, default: str) -> int:
             try:
                 return max(0, min(100, int(str(settings.get(key, default)).strip() or default)))
