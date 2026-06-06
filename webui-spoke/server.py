@@ -1314,6 +1314,7 @@ central_browse_alerts: list[dict[str, Any]] = []
 central_browse_insights: list[dict[str, Any]] = []
 central_browse_devices_by_site: dict[str, list[dict[str, Any]]] = {}
 central_browse_clients_by_site: dict[str, dict[str, Any]] = {}
+central_browse_clients: list[dict[str, Any]] = []  # individual client records
 # Server-side cache for /api/central/browse — avoids hammering Central API on every tab open.
 _central_browse_response_cache: dict[str, Any] = {}
 _central_browse_response_cached_at: float = 0.0
@@ -1664,10 +1665,11 @@ async def _apply_central_feed(feed: dict) -> None:
 
     # Apply browse data pushed by the hub (centralized mode only).
     # The hub filters the browse cache to only this spoke's assigned sites before pushing.
-    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site
+    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site, central_browse_clients
     browse_alerts = feed.get("central_browse_alerts")
     browse_insights = feed.get("central_browse_insights")
-    browse_clients = feed.get("central_browse_clients_by_site")
+    browse_clients_by_site = feed.get("central_browse_clients_by_site")
+    browse_clients = feed.get("central_browse_clients")  # individual records
     browse_devices = feed.get("central_browse_devices_by_site")
     browse_changed = False
     if isinstance(browse_alerts, list):
@@ -1676,8 +1678,11 @@ async def _apply_central_feed(feed: dict) -> None:
     if isinstance(browse_insights, list):
         central_browse_insights = browse_insights
         browse_changed = True
-    if isinstance(browse_clients, dict):
-        central_browse_clients_by_site = browse_clients
+    if isinstance(browse_clients_by_site, dict):
+        central_browse_clients_by_site = browse_clients_by_site
+        browse_changed = True
+    if isinstance(browse_clients, list):
+        central_browse_clients = browse_clients
         browse_changed = True
     if isinstance(browse_devices, dict):
         central_browse_devices_by_site = browse_devices
@@ -1972,7 +1977,7 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
     """Fetch new_central browse data (alerts, insights, devices, clients) filtered to
     this spoke's assigned sites.  Results are stored in the module-level
     central_browse_* variables so they can be included in the telemetry sent to hub."""
-    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site
+    global central_browse_alerts, central_browse_insights, central_browse_devices_by_site, central_browse_clients_by_site, central_browse_clients
 
     cfg = _central_cfg()
     base_url = cfg["cluster_url"].rstrip("/")
@@ -2029,6 +2034,7 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
     new_insights: list[dict[str, Any]] = []
     new_devices_by_site: dict[str, list[dict[str, Any]]] = {}
     new_clients_by_site: dict[str, dict[str, Any]] = {}
+    new_clients: list[dict[str, Any]] = []
 
     for central_site in central_sites:
         # ── Alerts for this site ──────────────────────────────────────────────
@@ -2158,6 +2164,21 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
                         wired += 1
                     else:
                         wireless += 1
+                    # Capture individual client record for the browse tab
+                    mac = (c.get("macAddress") or c.get("mac") or "").upper()
+                    new_clients.append({
+                        "mac": mac,
+                        "hostname": c.get("hostname") or c.get("name") or "—",
+                        "username": c.get("username") or "",
+                        "ip": c.get("ipAddress") or c.get("ip") or "",
+                        "ap": c.get("apName") or c.get("ap") or "",
+                        "ssid": c.get("ssid") or "",
+                        "vlan": str(c.get("vlan") or ""),
+                        "status": c.get("status") or "Connected",
+                        "os": c.get("operatingSystem") or c.get("os") or "",
+                        "site": central_site,
+                        "connection_type": conn or "wireless",
+                    })
                 cursor = body.get("next")
                 if not cursor:
                     break
@@ -2169,13 +2190,14 @@ async def _fetch_nc_browse_for_spoke(client: httpx.AsyncClient) -> None:
     central_browse_insights = new_insights
     central_browse_devices_by_site = new_devices_by_site
     central_browse_clients_by_site = new_clients_by_site
+    central_browse_clients = new_clients
     # Invalidate the server-side browse response cache so the next API call
     # returns fresh data assembled from these updated globals.
     global _central_browse_response_cache, _central_browse_response_cached_at
     _central_browse_response_cache = {}
     _central_browse_response_cached_at = 0.0
-    logger.info("NC browse fetch complete: %d alerts, %d insights, %d sites with devices, %d sites with clients",
-                len(new_alerts), len(new_insights), len(new_devices_by_site), len(new_clients_by_site))
+    logger.info("NC browse fetch complete: %d alerts, %d insights, %d sites with devices, %d sites with clients (%d individual)",
+                len(new_alerts), len(new_insights), len(new_devices_by_site), len(new_clients_by_site), len(new_clients))
 
 
 async def _poll_central_once(client: httpx.AsyncClient) -> None:
@@ -5919,6 +5941,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
                 "central_insights": _telemetry_filtered_browse_list(central_browse_insights, "site"),
                 "central_devices_by_site": _telemetry_filtered_browse_dict(central_browse_devices_by_site),
                 "central_clients_by_site": _telemetry_filtered_browse_dict(central_browse_clients_by_site),
+                # Individual client records (filtered to assigned sites) for hub distributed aggregation
+                "central_clients": _telemetry_filtered_browse_list(central_browse_clients, "site"),
             },
             "reclone_state": {
                 k: v for k, v in reclone_state.items() if k != "auto_recovery_log"
@@ -11067,7 +11091,7 @@ async def api_central_browse(force: bool = False) -> dict[str, Any]:
 
     # If the background loop hasn't populated browse data yet, do an on-demand fetch.
     # Guard with a flag so concurrent requests don't each spawn their own fetch.
-    if not central_browse_alerts and not central_browse_insights and not central_browse_clients_by_site and _central_ready():
+    if not central_browse_alerts and not central_browse_insights and not central_browse_clients and not central_browse_clients_by_site and _central_ready():
         if not _central_browse_fetching:
             _central_browse_fetching = True
             try:
@@ -11109,7 +11133,7 @@ async def api_central_browse(force: bool = False) -> dict[str, Any]:
         "sites": sites_with_health,
         "alerts": list(central_browse_alerts),
         "insights": list(central_browse_insights),
-        "clients": [],
+        "clients": list(central_browse_clients),
         "clients_by_site": dict(central_browse_clients_by_site),
         "devices_by_site": dict(central_browse_devices_by_site),
         "warning": sites_resp.get("warning"),
