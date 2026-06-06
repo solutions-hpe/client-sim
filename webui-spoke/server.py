@@ -1011,6 +1011,7 @@ settings: dict[str, Any] = {
     "relay_onboarding_psk": _persisted.get("relay_onboarding_psk", ""),
     "proxmox_approved_agents": _persisted.get("proxmox_approved_agents", {}),
     "proxmox_api_token": _persisted.get("proxmox_api_token", ""),
+    "proxmox_tokens": _persisted.get("proxmox_tokens", {}),
     "usb_vidpids": _persisted.get("usb_vidpids", "[]"),
     "usb_missing_timeout": str(_persisted.get("usb_missing_timeout", "60")),
     "vm_image_1_template_id": str(_persisted.get("vm_image_1_template_id", _persisted.get("usb_linux_template_id", _persisted.get("usb_template_id", "100")))),
@@ -1196,6 +1197,10 @@ def _get_cached_settings() -> dict[str, Any]:
         "auth_tacacs_admin_priv": int(settings.get("auth_tacacs_admin_priv", 15)),
         "spoke_tls": settings.get("spoke_tls", "off"),
         "proxmox_api_token_configured": bool(settings.get("proxmox_api_token", "").strip()),
+        "proxmox_tokens_configured": {
+            hn: bool(str(tok or "").strip())
+            for hn, tok in (settings.get("proxmox_tokens") or {}).items()
+        },
     }
     _settings_cache_time = now
     return copy.deepcopy(_settings_cache)
@@ -3421,6 +3426,29 @@ def _merge_sim_tags(current_tags_str: str, desired_sim_tags: list[str]) -> str:
     return ';'.join(merged)
 
 
+def _get_proxmox_token_for_host(hostname: str | None) -> str:
+    """Return per-host token if set, falling back to the legacy global token."""
+    if hostname:
+        per_host = str((settings.get("proxmox_tokens") or {}).get(hostname, "") or "").strip()
+        if per_host:
+            return per_host
+    return str(settings.get("proxmox_api_token", "") or "").strip()
+
+
+def _has_any_proxmox_token() -> bool:
+    if _get_proxmox_token_for_host(None):
+        return True
+    return any(str(tok or "").strip() for tok in (settings.get("proxmox_tokens") or {}).values())
+
+
+def _save_proxmox_token_for_host(hostname: str, token: str) -> None:
+    tokens = settings.setdefault("proxmox_tokens", {})
+    persisted_tokens = _persisted.setdefault("proxmox_tokens", {})
+    tokens[hostname] = token
+    persisted_tokens[hostname] = token
+    _save_settings()
+
+
 async def _apply_sim_tags_for_vm(vmid: int, agent_hostname: str, desired_sim_tags: list[str], current_tags_str: str = "") -> None:
     """Call Proxmox REST API to update simulation tags on a single VM."""
     global _vm_applied_sim_tags
@@ -3428,7 +3456,7 @@ async def _apply_sim_tags_for_vm(vmid: int, agent_hostname: str, desired_sim_tag
     cache_key = (agent_hostname, vmid)
     if _vm_applied_sim_tags.get(cache_key) == desired_set:
         return  # no change since last apply
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    api_token = _get_proxmox_token_for_host(agent_hostname)
     if not api_token or not agent_hostname:
         return
     node_data = proxmox_states.get(agent_hostname, {}).get("node") or {}
@@ -3450,8 +3478,7 @@ async def _apply_sim_tags_for_vm(vmid: int, agent_hostname: str, desired_sim_tag
 
 async def _sync_sim_tags_for_client(client_hostname: str) -> None:
     """Immediately sync simulation tags for the VM matching this client hostname."""
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
-    if not api_token:
+    if not _has_any_proxmox_token():
         return
     norm = client_hostname.strip().lower()
     async with state_lock:
@@ -3478,8 +3505,7 @@ async def _sync_sim_tags_for_client(client_hostname: str) -> None:
 
 async def _sync_all_vm_sim_tags() -> None:
     """Sweep all known VMs and reconcile their simulation tags against live client data."""
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
-    if not api_token:
+    if not _has_any_proxmox_token():
         return
     async with state_lock:
         now_dt = utcnow()
@@ -5887,8 +5913,8 @@ async def _handle_vnc_proxy_request(message: dict[str, Any]) -> None:
         await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "Missing request_id or vmid"})
         return
 
-    proxmox_host = str(proxmox_ws_hostname or "").strip()
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    proxmox_host = str(_proxmox_agent_vm_map.get(vmid) or proxmox_ws_hostname or "").strip()
+    api_token = _get_proxmox_token_for_host(proxmox_host)
 
     if not proxmox_host:
         await _relay_vnc_to_hub({"type": "vnc_proxy_error", "request_id": request_id, "error": "Proxmox host unknown — no agent connected"})
@@ -10111,6 +10137,126 @@ async def get_proxmox_status() -> dict[str, Any]:
     return _proxmox_status_payload()
 
 
+@app.get("/api/proxmox/token/{hostname}")
+async def get_proxmox_host_token_status(
+    hostname: str,
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname.strip(), approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    per_host = str((settings.get("proxmox_tokens") or {}).get(resolved_hostname, "") or "").strip()
+    global_tok = _get_proxmox_token_for_host(None)
+    return {
+        "hostname": resolved_hostname,
+        "configured": bool(per_host),
+        "global_configured": bool(global_tok),
+    }
+
+
+@app.put("/api/proxmox/token/{hostname}")
+async def save_proxmox_host_token(
+    hostname: str,
+    body: dict[str, Any] = Body(...),
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    token = str(body.get("proxmox_token") or body.get("proxmox_api_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="proxmox_token is required")
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname.strip(), approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        raise HTTPException(status_code=400, detail="hostname is required")
+    _save_proxmox_token_for_host(resolved_hostname, token)
+    logger.info("Proxmox API token saved for host %s", resolved_hostname)
+    return {"ok": True, "hostname": resolved_hostname, "configured": True}
+
+
+@app.post("/api/proxmox/token/{hostname}/auto-provision")
+async def auto_provision_proxmox_host_token(
+    hostname: str,
+    _user: SpokeUser = Depends(require_auth),
+) -> dict[str, Any]:
+    resolved_hostname = _resolve_proxmox_agent_hostname(hostname.strip(), approved_proxmox_agents) or _normalize_proxmox_hostname(hostname)
+    if not resolved_hostname:
+        raise HTTPException(status_code=400, detail="hostname is required")
+    TOKEN_ID = "cs-hub"
+    USER = "root@pam"
+    request_id = str(uuid.uuid4())
+
+    pvesh_candidates = [
+        shutil.which("pvesh"),
+        "/usr/bin/pvesh",
+        "/usr/sbin/pvesh",
+        "/usr/local/bin/pvesh",
+        "/usr/share/pve-manager/bin/pvesh",
+        "/opt/proxmox/bin/pvesh",
+    ]
+    pvesh_path = next((c for c in pvesh_candidates if c and os.path.isfile(c)), None)
+    local_candidates = [socket.gethostname(), socket.getfqdn(), os.environ.get("HOSTNAME", "")]
+    use_local_pvesh = bool(
+        pvesh_path and any(_proxmox_hostnames_match(resolved_hostname, candidate) for candidate in local_candidates if candidate)
+    )
+
+    if not use_local_pvesh:
+        if resolved_hostname not in approved_proxmox_agents:
+            raise HTTPException(status_code=404, detail="Proxmox agent not approved")
+        q: asyncio.Queue = asyncio.Queue(maxsize=1)
+        _proxmox_token_provision_queues[request_id] = q
+        try:
+            await _queue_proxmox_command(
+                "create_proxmox_token",
+                {"request_id": request_id},
+                command_type="token-provision",
+                target=resolved_hostname,
+            )
+            result = await asyncio.wait_for(q.get(), timeout=30.0)
+            if result.get("ok"):
+                token = str(result.get("token") or "").strip()
+                if not token:
+                    raise HTTPException(status_code=500, detail="Agent returned an empty token")
+                _save_proxmox_token_for_host(resolved_hostname, token)
+                logger.info("Proxmox API token auto-provisioned via agent for host %s", resolved_hostname)
+                return {"ok": True, "hostname": resolved_hostname, "token_id": f"{USER}!{TOKEN_ID}"}
+            raise HTTPException(status_code=500, detail=str(result.get("error") or "Agent failed to provision token"))
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Proxmox agent did not respond within 30 seconds") from exc
+        finally:
+            _proxmox_token_provision_queues.pop(request_id, None)
+
+    try:
+        del_proc = await asyncio.create_subprocess_exec(
+            pvesh_path, "delete", f"/access/users/{USER}/token/{TOKEN_ID}",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(del_proc.wait(), timeout=10.0)
+    except Exception:
+        pass
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            pvesh_path, "create", f"/access/users/{USER}/token/{TOKEN_ID}",
+            "--privsep", "0", "--output-format", "json",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="pvesh timed out after 15 seconds") from exc
+
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"pvesh failed: {stderr.decode().strip()[:200]}")
+
+    try:
+        data = json.loads(stdout.decode().strip())
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not parse pvesh output: {exc}") from exc
+    secret = str(data.get("value") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=500, detail="pvesh returned no token value")
+
+    full_token = f"{USER}!{TOKEN_ID}={secret}"
+    _save_proxmox_token_for_host(resolved_hostname, full_token)
+    logger.info("Proxmox API token auto-provisioned locally for host %s", resolved_hostname)
+    return {"ok": True, "hostname": resolved_hostname, "token_id": f"{USER}!{TOKEN_ID}"}
+
+
 @app.post("/api/proxmox/console/{vmid}")
 async def api_create_console_session(
     vmid: int,
@@ -10118,8 +10264,8 @@ async def api_create_console_session(
     _user: SpokeUser = Depends(require_auth),
 ) -> dict[str, Any]:
     """Create a direct Proxmox VNC console session for the spoke's own VM Server view."""
-    proxmox_host = str(proxmox_ws_hostname or "").strip()
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    proxmox_host = str(_proxmox_agent_vm_map.get(vmid) or proxmox_ws_hostname or "").strip()
+    api_token = _get_proxmox_token_for_host(proxmox_host)
     if not proxmox_host:
         raise HTTPException(status_code=503, detail="Proxmox host unknown — no agent connected")
     if not api_token:
@@ -10150,6 +10296,7 @@ async def api_create_console_session(
         "node": node,
         "vmid": vmid,
         "vmtype": normalized_vmtype,
+        "api_token": api_token,
         "ticket": ticket,
         "port": port,
         "expires": time.time() + _DIRECT_CONSOLE_TTL,
@@ -10172,7 +10319,10 @@ async def ws_console_direct(websocket: WebSocket, session_id: str) -> None:
     vmtype = session["vmtype"]
     ticket = session["ticket"]
     port = session["port"]
-    api_token = str(settings.get("proxmox_api_token") or "").strip()
+    api_token = str(session.get("api_token") or _get_proxmox_token_for_host(proxmox_host)).strip()
+    if not api_token:
+        await websocket.close(code=1011, reason="Proxmox API token not configured on spoke")
+        return
 
     import urllib.parse as _urlparse_console
     params = _urlparse_console.urlencode({"port": port, "vncticket": ticket})
