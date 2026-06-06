@@ -3693,9 +3693,9 @@ def _load_resource_cache() -> None:
         # Restore key proxmox_state fields so the hub sees last-known data immediately
         # after a spoke server restart (before the agent posts fresh telemetry).
         for field in ("vm_count", "usb_state", "present_usb", "provision_halt", "prov_run"):
-            cached = data.get(f"px_{field}")
-            if cached is not None:
-                proxmox_state[field] = cached
+            cache_key = f"px_{field}"
+            if cache_key in data:
+                proxmox_state[field] = data.get(cache_key)
         logger.info(
             "Loaded resource cache: %d CPU samples, %d mem samples (started %.0fs ago)",
             len(_cpu_samples), len(_mem_samples),
@@ -3705,11 +3705,11 @@ def _load_resource_cache() -> None:
         logger.debug("Could not load resource cache from %s", RESOURCE_CACHE_FILE, exc_info=True)
 
 
-def _save_resource_cache() -> None:
+def _save_resource_cache(force: bool = False) -> None:
     """Persist resource samples so the 1-hour window survives service restarts."""
     global _resource_cache_last_saved
     now = time.time()
-    if now - _resource_cache_last_saved < _RESOURCE_CACHE_SAVE_INTERVAL:
+    if not force and (now - _resource_cache_last_saved) < _RESOURCE_CACHE_SAVE_INTERVAL:
         return
     _resource_cache_last_saved = now
     try:
@@ -4450,6 +4450,25 @@ def _pending_proxmox_payload() -> list[dict[str, Any]]:
 proxmox_states: dict[str, dict[str, Any]] = {}
 
 
+def _autoprov_enabled() -> bool:
+    return _normalize_toggle(settings.get("usb_auto_provision", "off")) == "on"
+
+
+def _current_provision_halt(state: dict[str, Any] | None = None) -> Any:
+    if not _autoprov_enabled():
+        return None
+    source = proxmox_state if state is None else state
+    return source.get("provision_halt")
+
+
+def _clear_provision_halt_state() -> None:
+    proxmox_state["provision_halt"] = None
+    for state in proxmox_states.values():
+        state["provision_halt"] = None
+    _save_state_cache(force=True)
+    _save_resource_cache(force=True)
+
+
 def _approved_proxmox_payload() -> list[dict[str, Any]]:
     result = []
     for hostname in approved_proxmox_agents:
@@ -4463,7 +4482,7 @@ def _approved_proxmox_payload() -> list[dict[str, Any]]:
             "vm_count": int(state.get("vm_count", 0)),
             "usb_count": int(state.get("usb_count", 0)),
             "node": state.get("node", {}),
-            "provision_halt": state.get("provision_halt"),
+            "provision_halt": _current_provision_halt(state),
             "cpu_1h_avg": state.get("cpu_1h_avg"),
             "mem_1h_avg": state.get("mem_1h_avg"),
         })
@@ -4544,7 +4563,7 @@ def _proxmox_status_payload() -> dict[str, Any]:
         "reseed_in_progress": bool(_proxmox_reseed_in_progress),
         "cpu_1h_avg": _resource_1h_average(_cpu_samples),
         "mem_1h_avg": _resource_1h_average(_mem_samples),
-        "provision_halt": proxmox_state.get("provision_halt"),
+        "provision_halt": _current_provision_halt(),
         "cpu_est_avg": _resource_estimated_average(_cpu_samples),
         "mem_est_avg": _resource_estimated_average(_mem_samples),
         "resource_samples_started": _resource_samples_started or None,
@@ -5693,8 +5712,8 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "connected": bool(proxmox_state.get("connected", False)),
             "last_seen": proxmox_state.get("last_seen"),
             "node": dict(proxmox_state.get("node") or {}),
-            "vm_count": len(enriched_vms),
-            "running_count": sum(1 for vm in enriched_vms if vm.get("status") == "running"),
+            "vm_count": sum(1 for vm in enriched_vms if not vm.get("is_template")),
+            "running_count": sum(1 for vm in enriched_vms if vm.get("status") == "running" and not vm.get("is_template")),
             "vms": [
                 {
                     "vmid": vm.get("vmid"),
@@ -5720,7 +5739,7 @@ async def _build_relay_telemetry_payload(spoke_id: str) -> dict[str, Any]:
             "pve_version": proxmox_state.get("pve_version"),
             "cpu_1h_avg": _resource_1h_average(_cpu_samples),
             "mem_1h_avg": _resource_1h_average(_mem_samples),
-            "provision_halt": proxmox_state.get("provision_halt"),
+            "provision_halt": _current_provision_halt(),
             "prov_run": dict(proxmox_state.get("prov_run") or {}),
             "cpu_est_avg": _resource_estimated_average(_cpu_samples),
             "mem_est_avg": _resource_estimated_average(_mem_samples),
@@ -8589,6 +8608,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
     changed_branch = False
     relay_config_changed = False
     auth_provider_changed = False
+    autoprov_disabled = False
     update_data = update.model_dump(exclude_none=True)
 
     if settings.get("hub_managed"):
@@ -8820,6 +8840,7 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     if update.usb_auto_provision is not None:
         settings["usb_auto_provision"] = _normalize_toggle(update.usb_auto_provision)
+        autoprov_disabled = settings["usb_auto_provision"] != "on"
 
     if update.use_all_dongles is not None:
         settings["use_all_dongles"] = bool(update.use_all_dongles)  # validated: always boolean
@@ -8933,6 +8954,8 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     payload = await api_settings_get()
     await broadcast({"type": "settings_update", "settings": payload})
+    if autoprov_disabled:
+        await _broadcast_proxmox_state()
     if relay_config_changed:
         await _broadcast_relay_state()
     return {"status": "ok", "settings": payload}
@@ -9341,6 +9364,7 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             pass
     _agent_cpu_avg = (sum(v for _, v in _agent_cpu_samples) / len(_agent_cpu_samples)) if _agent_cpu_samples else None
     _agent_mem_avg = (sum(v for _, v in _agent_mem_samples) / len(_agent_mem_samples)) if _agent_mem_samples else None
+    reported_provision_halt = body.get("provision_halt") if _autoprov_enabled() else None
 
     # Update per-agent state for multi-server list UI.
     proxmox_states[hostname] = {
@@ -9348,12 +9372,10 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "last_seen": now,
         "agent_version": str(body.get("agent_version", "")).strip() or None,
         "pve_version": str(body.get("pve_version", "")).strip() or None,
-        "vm_count": len(enriched_vms),
-        "usb_count": len(normalized_usb_state),
+        "vm_count": sum(1 for vm in enriched_vms if not vm.get("is_template")),        "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
         "provision_halt": body.get("provision_halt"),
-        "_cpu_samples": _agent_cpu_samples,
-        "_mem_samples": _agent_mem_samples,
+        "_cpu_samples": _agent_cpu_samples,        "_mem_samples": _agent_mem_samples,
         "cpu_1h_avg": _agent_cpu_avg,
         "mem_1h_avg": _agent_mem_avg,
         "vms": tagged_vms,
@@ -9429,9 +9451,10 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
             })
 
     # Persist provision_halt from the agent's telemetry so the hub can display it.
-    # The agent writes a local cache file and reports it here; the spoke just stores it.
-    if "provision_halt" in body:
-        proxmox_state["provision_halt"] = body.get("provision_halt")
+    # When auto-provisioning is disabled, force the state clear even if the agent
+    # has not yet refreshed its local cache.
+    if "provision_halt" in body or not _autoprov_enabled():
+        proxmox_state["provision_halt"] = reported_provision_halt
 
     # Clear pending-delete VMIDs that the agent has confirmed are gone.
     # intersection_update keeps only IDs still in the telemetry report;
