@@ -2848,6 +2848,8 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     _load_update_state()
     _load_vm_watchdog()
     _load_resource_cache()
+    if not _autoprov_enabled():
+        _clear_provision_halt_state()
     # Refresh cs-webui frontend files before accepting requests (non-blocking,
     # awaited once so the fix is in place before the first page load).
     await asyncio.wait_for(refresh_webui_frontend(), timeout=60)
@@ -3724,7 +3726,7 @@ def _save_resource_cache(force: bool = False) -> None:
             "px_vm_count": proxmox_state.get("vm_count"),
             "px_usb_state": proxmox_state.get("usb_state"),
             "px_present_usb": proxmox_state.get("present_usb"),
-            "px_provision_halt": proxmox_state.get("provision_halt"),
+            "px_provision_halt": _current_provision_halt(),
             "px_prov_run": proxmox_state.get("prov_run"),
         })
     except Exception:
@@ -8925,6 +8927,9 @@ async def api_settings_update(update: SettingsUpdate) -> dict[str, Any]:
 
     _save_settings()
 
+    if autoprov_disabled:
+        _clear_provision_halt_state()
+
     if changed_branch:
         if "sync_repo" in background_tasks:
             background_tasks["sync_repo"].cancel()
@@ -9372,10 +9377,12 @@ async def _apply_proxmox_telemetry_state(body: dict[str, Any], hostname: str, no
         "last_seen": now,
         "agent_version": str(body.get("agent_version", "")).strip() or None,
         "pve_version": str(body.get("pve_version", "")).strip() or None,
-        "vm_count": sum(1 for vm in enriched_vms if not vm.get("is_template")),        "usb_count": len(normalized_usb_state),
+        "vm_count": sum(1 for vm in enriched_vms if not vm.get("is_template")),
+        "usb_count": len(normalized_usb_state),
         "node": body.get("node", {}) or {},
-        "provision_halt": body.get("provision_halt"),
-        "_cpu_samples": _agent_cpu_samples,        "_mem_samples": _agent_mem_samples,
+        "provision_halt": reported_provision_halt,
+        "_cpu_samples": _agent_cpu_samples,
+        "_mem_samples": _agent_mem_samples,
         "cpu_1h_avg": _agent_cpu_avg,
         "mem_1h_avg": _agent_mem_avg,
         "vms": tagged_vms,

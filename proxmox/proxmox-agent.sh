@@ -3028,7 +3028,7 @@ PY
 }
 
 collect_telemetry() {
-    local cpu_line mem_total mem_free mem_used storage_json vms_json template_lock template_lock_json
+    local cpu_line mem_total mem_free mem_used storage_json vms_json template_lock template_lock_json provision_halt_json
     # Two-sample /proc/stat diff: captures user+nice+system+iowait+irq+softirq (total - idle).
     # More accurate than top's "us" field which only shows user-space CPU.
     # Also snapshot per-VM QEMU process ticks before the sleep so we can compute
@@ -3246,6 +3246,12 @@ print(json.dumps(out))
 
     template_lock=$(probe_template_lock_status 2>/dev/null || true)
     template_lock_json=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$template_lock" 2>/dev/null || printf '""')
+    provision_halt_json='null'
+    if [[ "$AUTO_PROVISION" == "on" ]]; then
+        provision_halt_json=$(read_json_cache_or_default "$PROVISION_HALT_CACHE" 'null')
+    elif [[ -f "$PROVISION_HALT_CACHE" ]]; then
+        rm -f "$PROVISION_HALT_CACHE" 2>/dev/null || true
+    fi
 
     cat <<JSON
 {
@@ -3268,7 +3274,7 @@ print(json.dumps(out))
   "usb_quarantine": $(read_json_cache_or_default "$USB_QUARANTINE_CACHE" "[]"),
   "orphan_vms": $(read_json_cache_or_default "$ORPHAN_VMS_CACHE" "[]"),
   "present_usb": $(read_json_cache_or_default "$USB_PRESENT_CACHE" "${PRESENT_USB_JSON:-[]}"),
-  "provision_halt": $(read_json_cache_or_default "$PROVISION_HALT_CACHE" 'null'),
+  "provision_halt": ${provision_halt_json},
   "blacklisted_drivers": ${BLACKLISTED_DRIVERS_JSON},
   "vh_devices": $(collect_vh_devices 2>/dev/null || echo '{"vh_connected":false,"vh_service_active":false,"count":0,"devices":[]}'),
   "t3_pci_devices": $(collect_t3_pci_devices 2>/dev/null || echo '[]'),
